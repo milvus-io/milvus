@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2503,6 +2504,241 @@ func TestAssembleCopySegmentRequest_UnknownMarkerFallsBackToManifestRead(t *test
 	assert.Equal(t, 1, manifestReads)
 	require.Len(t, req.GetSources()[0].GetIndexFiles(), 1)
 	assert.Equal(t, int64(3001), req.GetSources()[0].GetIndexFiles()[0].GetBuildID())
+}
+
+func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64) (*copySegmentTask, *copySegmentJob) {
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "test_snapshot"},
+	}
+	mappings := make([]*datapb.CopySegmentIDMapping, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		snapshotData.Indexes = append(snapshotData.Indexes, &indexpb.IndexInfo{
+			IndexID: 1000 + segmentID,
+			FieldID: 100,
+		})
+		snapshotData.Segments = append(snapshotData.Segments, &datapb.SegmentDescription{
+			SegmentId:        segmentID,
+			PartitionId:      10,
+			StorageVersion:   storage.StorageV3,
+			ManifestPath:     packed.MarshalManifestPath("files/insert_log/100/10/"+strconv.FormatInt(segmentID, 10), 3),
+			ManifestHasIndex: proto.Bool(true),
+		})
+		mappings = append(mappings, &datapb.CopySegmentIDMapping{
+			SourceSegmentId: segmentID,
+			TargetSegmentId: 2000 + segmentID,
+			PartitionId:     10,
+		})
+	}
+
+	task := &copySegmentTask{
+		ctx:   ctx,
+		alloc: &embeddedAllocator{},
+		tr:    timerecord.NewTimeRecorder("test"),
+		times: taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings:   mappings,
+	})
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr:            timerecord.NewTimeRecorder("test_job"),
+		snapshotCache: &copySegmentSnapshotCache{data: snapshotData},
+	}
+	return task, job
+}
+
+func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing.T) {
+	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+
+	var active int32
+	var maximum int32
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	defer mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			current := atomic.AddInt32(&active, 1)
+			defer atomic.AddInt32(&active, -1)
+			for {
+				observed := atomic.LoadInt32(&maximum)
+				if current <= observed || atomic.CompareAndSwapInt32(&maximum, observed, current) {
+					break
+				}
+			}
+			started <- struct{}{}
+			<-release
+			return nil, nil
+		}).Build().UnPatch()
+
+	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2, 3)
+	result := make(chan error, 1)
+	go func() {
+		_, err := AssembleCopySegmentRequest(task, job)
+		result <- err
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for bounded manifest reads")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("a third manifest read exceeded the configured concurrency")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-result)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&maximum))
+	assert.Zero(t, atomic.LoadInt32(&active))
+}
+
+func TestAssembleCopySegmentRequest_ManifestFallbackPreservesMappingOrder(t *testing.T) {
+	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("3")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+
+	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2, 3)
+	manifestToSegment := make(map[string]int64)
+	for _, segment := range job.snapshotCache.data.Segments {
+		manifestToSegment[segment.GetManifestPath()] = segment.GetSegmentId()
+	}
+	started := make(chan int64, 3)
+	completed := make(chan int64, 3)
+	releases := map[int64]chan struct{}{1: make(chan struct{}), 2: make(chan struct{}), 3: make(chan struct{})}
+	defer mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			segmentID := manifestToSegment[manifestPath]
+			started <- segmentID
+			<-releases[segmentID]
+			completed <- segmentID
+			return []packed.ManifestIndexInfo{{
+				IndexID:               1000 + segmentID,
+				BuildID:               3000 + segmentID,
+				FieldID:               100,
+				IndexName:             "vec_idx",
+				IndexType:             "HNSW",
+				Path:                  "files/index/100/10/" + strconv.FormatInt(segmentID, 10),
+				IndexFileKeys:         []string{"index.bin"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			}}, nil
+		}).Build().UnPatch()
+
+	nextID := int64(9001)
+	defer mockey.Mock((*embeddedAllocator).AllocID).To(func(context.Context) (typeutil.UniqueID, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	}).Build().UnPatch()
+
+	type assembleResult struct {
+		request *datapb.CopySegmentRequest
+		err     error
+	}
+	result := make(chan assembleResult, 1)
+	go func() {
+		request, err := AssembleCopySegmentRequest(task, job)
+		result <- assembleResult{request: request, err: err}
+	}()
+	seen := make(map[int64]struct{})
+	for range 3 {
+		select {
+		case segmentID := <-started:
+			seen[segmentID] = struct{}{}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for parallel manifest reads")
+		}
+	}
+	require.Len(t, seen, 3)
+	for _, segmentID := range []int64{3, 2, 1} {
+		close(releases[segmentID])
+		assert.Equal(t, segmentID, <-completed)
+	}
+	assembled := <-result
+	require.NoError(t, assembled.err)
+	require.Len(t, assembled.request.GetSources(), 3)
+	require.Len(t, assembled.request.GetTargets(), 3)
+	for i, segmentID := range []int64{1, 2, 3} {
+		require.Equal(t, segmentID, assembled.request.GetSources()[i].GetSegmentId())
+		require.Len(t, assembled.request.GetSources()[i].GetIndexFiles(), 1)
+		assert.Equal(t, 3000+segmentID, assembled.request.GetSources()[i].GetIndexFiles()[0].GetBuildID())
+		assert.Equal(t, int64(9001+i), assembled.request.GetTargets()[i].GetNewBuildIds()[3000+segmentID])
+	}
+}
+
+func TestAssembleCopySegmentRequest_ManifestFallbackDrainsAfterError(t *testing.T) {
+	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+
+	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2)
+	manifestToSegment := make(map[string]int64)
+	for _, segment := range job.snapshotCache.data.Segments {
+		manifestToSegment[segment.GetManifestPath()] = segment.GetSegmentId()
+	}
+	sentinel := errors.New("manifest read failed")
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	var active int32
+	defer mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			atomic.AddInt32(&active, 1)
+			defer atomic.AddInt32(&active, -1)
+			if manifestToSegment[manifestPath] == 1 {
+				return nil, sentinel
+			}
+			close(blocked)
+			<-release
+			return nil, nil
+		}).Build().UnPatch()
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := AssembleCopySegmentRequest(task, job)
+		result <- err
+	}()
+	select {
+	case <-blocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the second manifest read")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("assembly returned before the started manifest read drained: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	err := <-result
+	require.ErrorIs(t, err, sentinel)
+	assert.Zero(t, atomic.LoadInt32(&active))
+}
+
+func TestAssembleCopySegmentRequest_ManifestFallbackPreCanceledSkipsRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	task, job := newManifestFallbackAssembleFixture(ctx, 1)
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+	var reads int32
+	defer mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			atomic.AddInt32(&reads, 1)
+			return nil, nil
+		}).Build().UnPatch()
+
+	request, err := AssembleCopySegmentRequest(task, job)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, request)
+	assert.Zero(t, atomic.LoadInt32(&reads))
 }
 
 // Strict exclusivity on the copy path: with manifest publication off, the

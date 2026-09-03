@@ -1057,6 +1057,7 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, seg
 		if errors.Is(err, errManifestIndexEntryInvalid) {
 			// Deterministic: re-reading the same manifest cannot clear it,
 			// and recycling anyway would leak whatever the entry names.
+			metrics.GarbageCollectorInvalidManifestCount.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			mlog.Error(ctx, "dropped segment manifest carries an invalid index entry; GC for this segment is blocked until the manifest is repaired",
 				mlog.FieldSegmentID(segmentID),
 				mlog.String("manifestPath", segment.GetManifestPath()),
@@ -1473,7 +1474,20 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 	}
 }
 
-// recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.
+type manifestIndexIdentity struct {
+	indexID int64
+	buildID int64
+}
+
+type segmentIndexGCItem struct {
+	segIdx *model.SegmentIndex
+	files  map[string]struct{}
+}
+
+// recycleUnusedSegIndexes removes segment indexes whose index definition or
+// segment is gone. Candidates are grouped by segment so one manifest read and
+// one manifest revision can retire every eligible entry in a transaction-sized
+// chunk, while record-only indexes keep the legacy path.
 func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
@@ -1482,10 +1496,32 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		log.Info(ctx, "recycleUnusedSegIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
-	for _, candidate := range segIndexes {
+	groups := make(map[int64][]*model.SegmentIndex)
+	segmentOrder := make([]int64, 0)
+	for _, candidate := range gc.meta.indexMeta.GetAllSegIndexes() {
+		if candidate == nil {
+			continue
+		}
+		if _, ok := groups[candidate.SegmentID]; !ok {
+			segmentOrder = append(segmentOrder, candidate.SegmentID)
+		}
+		groups[candidate.SegmentID] = append(groups[candidate.SegmentID], candidate)
+	}
+	for _, segmentID := range segmentOrder {
 		if ctx.Err() != nil {
-			// process canceled.
+			return
+		}
+		gc.recycleUnusedSegIndexesForSegment(ctx, segmentID, groups[segmentID], signal)
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, segmentID int64,
+	candidates []*model.SegmentIndex, signal <-chan gcCmd,
+) {
+	segment := gc.meta.GetSegment(ctx, segmentID)
+	items := make([]segmentIndexGCItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		if ctx.Err() != nil {
 			return
 		}
 		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
@@ -1502,153 +1538,168 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
-		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-			// Non-terminal tasks may still be writing index files or updating meta.
-			// Keep the SegmentIndex until the task reaches a terminal state.
-			if segIdx.IndexState == commonpb.IndexState_Unissued ||
-				segIdx.IndexState == commonpb.IndexState_InProgress ||
-				segIdx.IndexState == commonpb.IndexState_Retry {
-				log.Info(ctx, "skip GC segment index since index task is not terminal",
-					mlog.Int64("collectionID", segIdx.CollectionID),
-					mlog.Int64("partitionID", segIdx.PartitionID),
-					mlog.Int64("segmentID", segIdx.SegmentID),
-					mlog.Int64("indexID", segIdx.IndexID),
-					mlog.Int64("buildID", segIdx.BuildID),
-					mlog.String("state", segIdx.IndexState.String()))
-				continue
-			}
-			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
-			// Empty indexFiles is valid for fake-finished small/no-train indexes.
-			// removeObjectFiles is a no-op in that case; the stale meta still needs
-			// to be removed when its segment or field index is gone.
-			log := mlog.With(mlog.Int64("collectionID", segIdx.CollectionID),
+		if segment != nil && gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			continue
+		}
+		// Non-terminal tasks may still be writing index files or updating meta.
+		// Keep the SegmentIndex until the task reaches a terminal state.
+		if segIdx.IndexState == commonpb.IndexState_Unissued ||
+			segIdx.IndexState == commonpb.IndexState_InProgress ||
+			segIdx.IndexState == commonpb.IndexState_Retry {
+			mlog.Info(ctx, "skip GC segment index since index task is not terminal",
+				mlog.Int64("collectionID", segIdx.CollectionID),
 				mlog.Int64("partitionID", segIdx.PartitionID),
 				mlog.Int64("segmentID", segIdx.SegmentID),
 				mlog.Int64("indexID", segIdx.IndexID),
 				mlog.Int64("buildID", segIdx.BuildID),
-				mlog.Int64("nodeID", segIdx.NodeID),
-				mlog.Int("indexFiles", len(indexFiles)))
+				mlog.String("state", segIdx.IndexState.String()))
+			continue
+		}
+		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil &&
+			snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+			mlog.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
+				mlog.Int64("collectionID", segIdx.CollectionID),
+				mlog.Int64("buildID", segIdx.BuildID))
+			continue
+		}
+		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getAllIndexFilesOfIndex(segIdx)})
+	}
+	if len(items) == 0 {
+		return
+	}
 
-			// Skip buildIDs protected by snapshot references. IsBuildIDGCBlocked is O(1)
-			// and embeds the "RefIndex not loaded → fail-closed" check.
-			if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
-				if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
-					log.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
-						mlog.Int64("collectionID", segIdx.CollectionID),
-						mlog.Int64("buildID", segIdx.BuildID))
-					continue
-				}
+	// Only a healthy, marked StorageV3 segment can contain entries to retract.
+	// A false marker proves the section has always been empty and preserves the
+	// legacy path with zero manifest I/O. Dropped/missing segments publish no
+	// further revision and are likewise handled record-by-record below.
+	manifestEntries := make(map[manifestIndexIdentity]packed.ManifestIndexInfo)
+	if segment != nil && isSegmentHealthy(segment) && segment.GetStorageVersion() == storage.StorageV3 &&
+		segment.GetManifestPath() != "" && segment.GetManifestHasIndex() {
+		indexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
+		if err != nil {
+			mlog.Warn(ctx, "failed to read segment manifest index metadata, wait to retry",
+				mlog.Int64("segmentID", segmentID), mlog.Err(err))
+			return
+		}
+		for _, index := range indexes {
+			key := manifestIndexIdentity{indexID: index.IndexID, buildID: index.BuildID}
+			if _, exists := manifestEntries[key]; !exists {
+				manifestEntries[key] = index
 			}
+		}
+	}
 
-			// A StorageV3 segment also records the completed artifact in its
-			// manifest, so the full delete list is resolved from both meta and
-			// the manifest before anything is mutated.
-			manifestIndexFiles, retractable, err := gc.resolveManifestIndexRetraction(ctx, segIdx)
-			if err != nil {
-				log.Warn(ctx, "failed to resolve segment index manifest entry, wait to retry", mlog.Err(err))
-				continue
-			}
-			for file := range manifestIndexFiles {
-				indexFiles[file] = struct{}{}
-			}
+	manifestItems := make([]segmentIndexGCItem, 0, len(items))
+	legacyItems := make([]segmentIndexGCItem, 0, len(items))
+	for _, item := range items {
+		key := manifestIndexIdentity{indexID: item.segIdx.IndexID, buildID: item.segIdx.BuildID}
+		entry, matched := manifestEntries[key]
+		if !matched {
+			legacyItems = append(legacyItems, item)
+			continue
+		}
+		info, ok := manifestIndexFilePathInfo(item.segIdx.SegmentID, entry)
+		if !ok {
+			mlog.Warn(ctx, "invalid segment manifest index metadata, wait to retry",
+				mlog.Int64("segmentID", item.segIdx.SegmentID),
+				mlog.Int64("indexID", item.segIdx.IndexID),
+				mlog.Int64("buildID", item.segIdx.BuildID))
+			continue
+		}
+		for _, file := range info.GetIndexFilePaths() {
+			item.files[file] = struct{}{}
+		}
+		manifestItems = append(manifestItems, item)
+	}
 
+	for _, item := range legacyItems {
+		gc.recycleRecordOnlySegmentIndex(ctx, item)
+	}
+	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
+}
+
+func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, item segmentIndexGCItem) {
+	log := segmentIndexGCLog(item)
+	log.Info(ctx, "GC Segment Index file start...")
+	if err := gc.removeObjectFiles(ctx, item.files); err != nil {
+		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
+		return
+	}
+	if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
+		return
+	}
+	log.Info(ctx, "index meta recycle success")
+}
+
+func (gc *garbageCollector) recycleManifestSegmentIndexes(ctx context.Context, items []segmentIndexGCItem) {
+	if len(items) == 0 {
+		return
+	}
+	// One segment pointer PUT shares the atomic transaction with every
+	// defensive SegmentIndex DELETE. Keep each chunk within the configured
+	// etcd bound; stores with a larger native limit are conservatively split.
+	maxBatch := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt() - 1
+	if maxBatch < 1 {
+		mlog.Error(ctx, "cannot atomically retract manifest indexes with the configured transaction limit",
+			mlog.Int("maxEtcdTxnNum", paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()))
+		return
+	}
+	for start := 0; start < len(items); start += maxBatch {
+		end := min(start+maxBatch, len(items))
+		ready := make([]segmentIndexGCItem, 0, end-start)
+		for _, item := range items[start:end] {
+			log := segmentIndexGCLog(item)
 			log.Info(ctx, "GC Segment Index file start...")
-
-			// Files first, then the metadata naming them - for the manifest
-			// path as much as the legacy one.
-			//
-			// This branch runs only when the index definition is gone or the
-			// segment is gone, and only for a terminal task, so nothing
-			// consumes the artifact: a window where metadata still names
-			// deleted files harms no reader, and the next cycle repeats the
-			// whole step (deleting already-deleted files is a no-op). The
-			// reverse order is not equally safe. Once the SegmentIndex record
-			// is removed, a failed deletion leaks bytes that nothing can
-			// re-drive: recycleUnusedIndexFilesV1 is meta-driven, so a
-			// COLLECTION_ROOTED artifact leaks permanently. Only the
-			// BUILD_ROOTED layout would be reclaimed, by the V0 orphan sweep.
-			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			if err := gc.removeObjectFiles(ctx, item.files); err != nil {
 				log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 				continue
 			}
+			ready = append(ready, item)
+		}
+		if len(ready) == 0 {
+			continue
+		}
 
-			// The manifest entry and the SegmentIndex record still retire in
-			// ONE catalog transaction, so the two stores can never disagree
-			// about whether this index exists. Only their ordering relative to
-			// the bytes changed.
-			if retractable {
-				retracted, err := gc.commitManifestIndexRetraction(ctx, segIdx)
-				if err != nil {
-					log.Warn(ctx, "failed to retract segment index from manifest, wait to retry", mlog.Err(err))
-					continue
-				}
-				if retracted {
-					log.Info(ctx, "index meta recycle success")
-					continue
-				}
-				// Segment retired between resolution and the commit: no
-				// manifest is left to retract, but the record still is.
+		retracted, err := gc.commitManifestIndexRetractions(ctx, ready)
+		if err != nil {
+			mlog.Warn(ctx, "failed to retract segment indexes from manifest, wait to retry",
+				mlog.Int64("segmentID", ready[0].segIdx.SegmentID),
+				mlog.Int("indexCount", len(ready)), mlog.Err(err))
+			continue
+		}
+		if retracted {
+			for _, item := range ready {
+				segmentIndexGCLog(item).Info(ctx, "index meta recycle success")
 			}
-
-			// Remove meta from index meta.
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
-				log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
-				continue
+			continue
+		}
+		// The segment retired between resolution and commit. It will publish no
+		// further manifest revision; remove any surviving records via the legacy
+		// idempotent path so they do not strand the already-deleted files.
+		for _, item := range ready {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+				segmentIndexGCLog(item).Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 			}
-			log.Info(ctx, "index meta recycle success")
 		}
 	}
 }
 
-// resolveManifestIndexRetraction reads the segment's manifest and reports the
-// artifact files this index contributes, plus whether the manifest actually
-// carries an entry to retract. It performs no mutation: the bytes are deleted
-// before any metadata changes, so the file list has to be resolved while the
-// metadata naming it is still intact.
-func (gc *garbageCollector) resolveManifestIndexRetraction(ctx context.Context, segIdx *model.SegmentIndex) (map[string]struct{}, bool, error) {
-	segment := gc.meta.GetSegment(ctx, segIdx.SegmentID)
-	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
-		return nil, false, nil
-	}
-	// A dropped segment publishes no further manifest revision - its whole
-	// manifest is removed with the segment directory. Retracting is both
-	// impossible and pointless there, and treating the refusal as an error
-	// would block this index's files from ever being deleted.
-	if !isSegmentHealthy(segment) {
-		return nil, false, nil
-	}
-	manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
-	if err != nil {
-		return nil, false, merr.Wrap(err, "failed to read segment manifest index metadata")
-	}
-	var matched *packed.ManifestIndexInfo
-	for i := range manifestIndexes {
-		if manifestIndexes[i].IndexID == segIdx.IndexID && manifestIndexes[i].BuildID == segIdx.BuildID {
-			matched = &manifestIndexes[i]
-			break
-		}
-	}
-	if matched == nil {
-		return nil, false, nil
-	}
-	info, ok := manifestIndexFilePathInfo(segIdx.SegmentID, *matched)
-	if !ok {
-		return nil, false, merr.WrapErrServiceInternalMsg("invalid manifest index metadata for segment %d index %d",
-			segIdx.SegmentID, segIdx.IndexID)
-	}
-
-	files := make(map[string]struct{}, len(info.GetIndexFilePaths()))
-	for _, file := range info.GetIndexFilePaths() {
-		files[file] = struct{}{}
-	}
-	return files, true, nil
+func segmentIndexGCLog(item segmentIndexGCItem) *mlog.Logger {
+	return mlog.With(mlog.Int64("collectionID", item.segIdx.CollectionID),
+		mlog.Int64("partitionID", item.segIdx.PartitionID),
+		mlog.Int64("segmentID", item.segIdx.SegmentID),
+		mlog.Int64("indexID", item.segIdx.IndexID),
+		mlog.Int64("buildID", item.segIdx.BuildID),
+		mlog.Int64("nodeID", item.segIdx.NodeID),
+		mlog.Int("indexFiles", len(item.files)))
 }
 
-// commitManifestIndexRetraction publishes a manifest revision without this
-// index and removes its SegmentIndex record in one catalog transaction. It
-// reports whether the record was actually removed; false means the segment was
-// retired in the meantime, so the caller still has a record to remove on its
-// own.
+// commitManifestIndexRetractions publishes a manifest revision without these
+// indexes and removes their SegmentIndex records in one catalog transaction. It
+// reports whether the records were actually removed; false means the segment
+// was retired in the meantime, so the caller still has records to remove on
+// its own.
 //
 // ExpectedBuildID makes the drop reject a manifest that a rebuild has
 // meanwhile republished under the same index ID; the commit is resolved
@@ -1656,22 +1707,28 @@ func (gc *garbageCollector) resolveManifestIndexRetraction(ctx context.Context, 
 // from. The SegmentIndex removal rides in the same catalog transaction as the
 // resulting pointer, so the manifest and etcd can never disagree about whether
 // this index still exists. The etcd side needs no expectation of its own: the
-// record is keyed by buildID, and a rebuild allocates a new one.
-func (gc *garbageCollector) commitManifestIndexRetraction(ctx context.Context, segIdx *model.SegmentIndex) (bool, error) {
+// records are keyed by buildID, and rebuilds allocate new ones.
+func (gc *garbageCollector) commitManifestIndexRetractions(ctx context.Context, items []segmentIndexGCItem) (bool, error) {
+	if len(items) == 0 {
+		return true, nil
+	}
+	drops := make([]packed.DropIndexEntry, 0, len(items))
+	mutations := make([]SegmentIndexMutation, 0, len(items))
+	for _, item := range items {
+		drops = append(drops, packed.DropIndexEntry{IndexID: item.segIdx.IndexID, ExpectedBuildID: item.segIdx.BuildID})
+		mutations = append(mutations, SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: item.segIdx.BuildID})
+	}
 	if err := gc.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-		SegmentID:     segIdx.SegmentID,
+		SegmentID:     items[0].segIdx.SegmentID,
 		StorageConfig: createStorageConfig(),
 		Mutation: ManifestMutation{
 			Type: ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{
-				DropIndexes: []packed.DropIndexEntry{{IndexID: segIdx.IndexID, ExpectedBuildID: segIdx.BuildID}},
+				DropIndexes: drops,
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
-				Type:    SegmentIndexRemove,
-				BuildID: segIdx.BuildID,
-			},
+			SegmentIndexes: mutations,
 		},
 	}); err != nil {
 		// Retired between resolution and this commit: the whole manifest goes

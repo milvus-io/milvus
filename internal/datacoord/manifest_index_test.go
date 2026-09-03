@@ -534,10 +534,11 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 // through the manifest rather than through a fixture. Without that the "index
 // survives a restart" claim would only be testing the projection helper.
 type fakeManifestStore struct {
-	mu        sync.Mutex
-	revisions map[string][]packed.ManifestIndexInfo
-	failReads bool
-	readCount int
+	mu          sync.Mutex
+	revisions   map[string][]packed.ManifestIndexInfo
+	failReads   bool
+	readCount   int
+	commitCount int
 }
 
 // failReadsFrom makes every subsequent manifest read fail, modeling a
@@ -557,6 +558,7 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 		func(basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
+			s.commitCount++
 			// A revision is a full snapshot resolved onto the one it opens at.
 			current := s.revisions[packed.MarshalManifestPath(basePath, version)]
 			next := make([]packed.ManifestIndexInfo, 0, len(current)+len(updates.Indexes))
@@ -862,7 +864,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 				Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
 			},
 			CatalogMutation: SegmentCatalogMutation{
-				SegmentIndex: &SegmentIndexMutation{
+				SegmentIndexes: []SegmentIndexMutation{{
 					Type:    SegmentIndexUpsert,
 					BuildID: restartBuildID,
 					FinishedTask: &workerpb.IndexTaskInfo{
@@ -870,7 +872,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 						State:         commonpb.IndexState_Finished,
 						IndexFileKeys: []string{"0", "1"},
 					},
-				},
+				}},
 			},
 		})
 	}()
@@ -941,8 +943,8 @@ func TestReloadRecoversDroppedIndexEntriesSoGCCanRetract(t *testing.T) {
 // SegmentIndex record, and that record's file keys reach removeObjectFiles
 // through BuildFilePath, whose path.Join normalizes "..". An entry that could
 // aim a delete outside its own buildID prefix must never become a record, and
-// boot is where it has to be caught: resolveManifestIndexRetraction rejects the
-// same entry on every GC cycle forever while only logging a warning.
+// boot is where it has to be caught: the GC manifest-retraction path rejects
+// the same entry on every cycle forever while only logging a warning.
 func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)

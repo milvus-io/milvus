@@ -3169,7 +3169,7 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	require.Len(t, entries, 1)
 
@@ -3206,7 +3206,7 @@ func TestBuildTargetManifestIndexes_NoTargetDefinition(t *testing.T) {
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	assert.Empty(t, entries)
 }
@@ -3235,7 +3235,7 @@ func TestBuildTargetManifestIndexes_NoArtifactPathIsSkippedNotFatal(t *testing.T
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	// The empty one is dropped; the one with a real artifact still lands, so the
 	// skip cannot silently swallow a sibling index in the same segment.
@@ -3280,7 +3280,7 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 			return nil, nil
 		}).Build()
 	defer mock.UnPatch()
-	republished, publishedBuildIDs, err := republishCopiedManifestIndexes(manifestPath,
+	republished, publishedBuildIDs, err := republishCopiedManifestIndexes(context.TODO(), manifestPath,
 		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil, true)
 	assert.NoError(t, err)
 	assert.Equal(t, manifestPath, republished)
@@ -3318,7 +3318,7 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 	defer commit.UnPatch()
 
 	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
-		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got)
 	assert.Equal(t, 1, commitCalls)
@@ -3382,7 +3382,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			}
 
 			republished, publishedBuildIDs, err := republishCopiedManifestIndexes(
-				copiedManifest, target, 4096, cfg, indexInfos, false)
+				context.TODO(), copiedManifest, target, 4096, cfg, indexInfos, false)
 			require.NoError(t, err)
 			entries, err := packed.GetManifestIndexInfos(republished, cfg)
 			require.NoError(t, err)
@@ -3494,7 +3494,7 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 		}).Build().UnPatch()
 
 	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
-		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, true)
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, true)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 
@@ -3559,7 +3559,7 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 		}).Build().UnPatch()
 
 	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
-		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 

@@ -287,7 +287,7 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				//
 				// Rejecting at boot rather than skipping is the same trade the
 				// unreadable-manifest case makes above, and it also surfaces an
-				// entry that resolveManifestIndexRetraction would reject on
+				// entry that the GC manifest-retraction path would reject on
 				// every GC cycle forever while only logging a warning.
 				if _, ok := manifestIndexFilePathInfo(segment.GetID(), manifestIndex); !ok {
 					return nil, merr.WrapErrServiceInternalMsg(
