@@ -1005,10 +1005,6 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		// A deployment that drains and releases the collection itself after
-		// the drop may let a vector index go while loaded; natively the
-		// refusal below stands.
-		dropWhileLoadedAllowed := Params.DataCoordCfg.IndexAllowVectorIndexDropOnLoadedCollection.GetAsBool()
 		// check if there is any vector index to drop
 		for _, index := range indexes {
 			field := typeutil.GetField(schema, index.FieldID)
@@ -1021,7 +1017,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 					mlog.FieldFieldID(index.FieldID))
 				continue
 			}
-			if typeutil.IsVectorType(field.GetDataType()) && !dropWhileLoadedAllowed {
+			if typeutil.IsVectorType(field.GetDataType()) {
 				mlog.Warn(context.TODO(), "vector index cannot be dropped on loaded collection", mlog.String("indexName", req.IndexName), mlog.Int64("collectionID", req.GetCollectionID()), mlog.Int64("fieldID", index.FieldID))
 				return merr.Status(merr.WrapErrParameterInvalidMsg("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID())), nil
 			}

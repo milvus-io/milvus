@@ -128,7 +128,6 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
 	segmentsToUpdate := make(map[int64]*meta.Segment)
-	reloadOnIndexDrop := paramtable.Get().QueryCoordCfg.ReloadSegmentOnIndexDrop.GetAsBool()
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -144,15 +143,9 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			idSegmentsStats[segment.GetID()] = segment
 		}
 
-		// A dropped index is redundant on the segments that still hold it.
-		// Reopening them tears the index out from under the queries in
-		// flight; a deployment that releases the collection itself after a
-		// drop turns that off (queryCoord.reloadSegmentOnIndexDrop).
-		if reloadOnIndexDrop {
-			redundantIndices := c.checkRedundantIndices(segment, indexInfos)
-			if len(redundantIndices) > 0 {
-				segmentsToUpdate[segment.GetID()] = segment
-			}
+		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
+		if len(redundantIndices) > 0 {
+			segmentsToUpdate[segment.GetID()] = segment
 		}
 	}
 
