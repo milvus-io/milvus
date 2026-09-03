@@ -283,7 +283,6 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
-	RequireAPIKey         ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -980,19 +979,6 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
-
-	p.RequireAPIKey = ParamItem{
-		Key:     "common.security.requireAPIKey",
-		Version: "3.0.0",
-		Doc: `Refuse username and password authentication on the external listener, so only an API key is accepted there.
-A deployment whose users authenticate through keys issued elsewhere sets this, and a milvus credential can then no longer
-be used to bypass that key system. It does not disable credentials themselves: internal listeners and the RBAC the control
-plane seeds are untouched, and with authorizationEnabled off nothing authenticates at all and this has no effect.
-Verification of the key itself is the hook's (proxy.soPath, or a hook compiled into the binary).`,
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.RequireAPIKey.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
