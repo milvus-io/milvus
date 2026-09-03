@@ -19,6 +19,7 @@ CMakeUserPresets.json
 .cache
 coverage_report/
 
+internal/core/output
 internal/core/output/*
 internal/core/build/*
 **/.idea/*
