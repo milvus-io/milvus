@@ -293,7 +293,7 @@ func buildCompactionTargetPath(targetID int64) string {
 func buildSplitShardTaskKV(task *datapb.SplitShardTask) (string, string, error) {
 	valueBytes, err := proto.Marshal(task)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal SplitShardTask: %d/%d, err: %w", task.GetCollectionId(), task.GetTaskId(), err)
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal split shard task: %d/%d", task.GetCollectionId(), task.GetTaskId())
 	}
 	key := buildSplitShardTaskPath(task)
 	return key, string(valueBytes), nil

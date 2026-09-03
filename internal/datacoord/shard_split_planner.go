@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -89,7 +90,7 @@ func brokerNamespaceResolver(b broker.Broker) namespaceResolver {
 		}
 		ids, names := resp.GetPartitionIDs(), resp.GetPartitionNames()
 		if len(ids) != len(names) {
-			return nil, errors.Errorf("ShowPartitions returned %d ids but %d names for collection %d",
+			return nil, merr.WrapErrServiceInternalMsg("ShowPartitions returned %d ids but %d names for collection %d",
 				len(ids), len(names), collectionID)
 		}
 		out := make(map[int64]string, len(ids))
@@ -174,8 +175,13 @@ func newResidueSplitPlanner(meta *meta, resolver namespaceResolver) *residueSpli
 // construction.
 func (p *residueSplitPlanner) PlanTargets(ctx context.Context, collection *collectionInfo, sourceVChannel string, targetVChannels []string) ([]*datapb.SplitShardTaskTarget, uint64, error) {
 	if len(targetVChannels) != 2 {
-		return nil, 0, errors.Errorf("a shard split expects exactly two target vchannels, got %d", len(targetVChannels))
+		return nil, 0, merr.WrapErrServiceInternalMsg("a shard split expects exactly two target vchannels, got %d", len(targetVChannels))
 	}
+	// Copied into a fixed pair right after the length check, so the two uses
+	// below index an array whose length the compiler knows -- not a slice whose
+	// length only the check forty lines up does.
+	var pair [2]string
+	copy(pair[:], targetVChannels)
 	residues, err := residuesOf(collection)
 	if err != nil {
 		return nil, 0, err
@@ -213,8 +219,8 @@ func (p *residueSplitPlanner) PlanTargets(ctx context.Context, collection *colle
 		right = append(right, w.residue)
 	}
 	return []*datapb.SplitShardTaskTarget{
-		{Vchannel: targetVChannels[0], Buckets: left},
-		{Vchannel: targetVChannels[1], Buckets: right},
+		{Vchannel: pair[0], Buckets: left},
+		{Vchannel: pair[1], Buckets: right},
 	}, residues.modulus, nil
 }
 

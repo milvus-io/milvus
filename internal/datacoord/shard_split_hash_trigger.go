@@ -147,7 +147,7 @@ func isHashRouted(collection *collectionInfo) bool {
 //
 // The cluster switch decides whether the trigger runs at all; this decides
 // which collections it runs FOR, so one collection can be sized by hand while
-// its neighbours stay managed (§15 decision 10).
+// its neighbors stay managed (§15 decision 10).
 func isHashSplittable(collection *collectionInfo) bool {
 	if !isHashRouted(collection) {
 		return false
