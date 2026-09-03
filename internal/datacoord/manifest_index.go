@@ -322,6 +322,7 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				continue
 			}
 			m.indexMeta.updateSegmentIndex(segIdx)
+			m.indexMeta.segmentIndexCatalogAbsent.Upsert(segIdx.BuildID)
 			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
 			installed++
 		}
