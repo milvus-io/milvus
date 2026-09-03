@@ -38,19 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// setAllowVectorIndexDropOnLoaded sets the datacoord admission switch for the
-// test and restores the default afterwards.
-func setAllowVectorIndexDropOnLoaded(t *testing.T, allow bool) {
-	t.Helper()
-	key := Params.DataCoordCfg.IndexAllowVectorIndexDropOnLoadedCollection.Key
-	if allow {
-		Params.Save(key, "true")
-	} else {
-		Params.Save(key, "false")
-	}
-	t.Cleanup(func() { Params.Reset(key) })
-}
-
 // newLoadedVectorIndexServer builds a datacoord whose one collection is loaded
 // and carries one vector index, and the request that drops that index.
 func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexRequest) {
@@ -110,9 +97,8 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 	return s, &indexpb.DropIndexRequest{CollectionID: collID, IndexName: indexName}
 }
 
-func TestDropVectorIndexOnLoadedIsRefusedByDefault(t *testing.T) {
+func TestDropVectorIndexOnLoadedIsRefused(t *testing.T) {
 	initStreamingSystem(t)
-	assert.False(t, Params.DataCoordCfg.IndexAllowVectorIndexDropOnLoadedCollection.GetAsBool())
 	s, req := newLoadedVectorIndexServer(t)
 	status, err := s.DropIndex(context.Background(), req)
 	require.NoError(t, err)
@@ -120,25 +106,4 @@ func TestDropVectorIndexOnLoadedIsRefusedByDefault(t *testing.T) {
 	assert.Contains(t, status.GetReason(), "vector index cannot be dropped on loaded collection")
 	assert.NotEmpty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
 		"a refused drop must leave the index in place")
-}
-
-func TestDropVectorIndexOnLoadedIsRefusedWhenConfiguredOff(t *testing.T) {
-	initStreamingSystem(t)
-	setAllowVectorIndexDropOnLoaded(t, false)
-	s, req := newLoadedVectorIndexServer(t)
-	status, err := s.DropIndex(context.Background(), req)
-	require.NoError(t, err)
-	assert.False(t, merr.Ok(status))
-	assert.NotEmpty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()))
-}
-
-func TestDropVectorIndexOnLoadedProceedsWhenConfiguredOn(t *testing.T) {
-	initStreamingSystem(t)
-	setAllowVectorIndexDropOnLoaded(t, true)
-	s, req := newLoadedVectorIndexServer(t)
-	status, err := s.DropIndex(context.Background(), req)
-	require.NoError(t, err)
-	assert.True(t, merr.Ok(status), "with the switch on the drop must not be refused")
-	assert.Empty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
-		"an allowed drop must actually remove the index, not just skip the refusal")
 }
