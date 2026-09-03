@@ -59,7 +59,7 @@ func NewColumnStructArrayFromSchema(name string, schema *entity.StructSchema) (C
 		if field == nil {
 			return nil, errors.New("struct schema contains a nil child")
 		}
-		child, err := NewStructArrayChildColumn(field)
+		child, err := newStructArrayChildColumn(field)
 		if err != nil {
 			return nil, err
 		}
@@ -68,9 +68,7 @@ func NewColumnStructArrayFromSchema(name string, schema *entity.StructSchema) (C
 	return NewColumnStructArray(name, fields), nil
 }
 
-// NewStructArrayChildColumn creates the array-shaped physical column for one
-// logical StructArray child schema.
-func NewStructArrayChildColumn(field *entity.Field) (Column, error) {
+func newStructArrayChildColumn(field *entity.Field) (Column, error) {
 	if field == nil {
 		return nil, errors.New("struct child field is required")
 	}

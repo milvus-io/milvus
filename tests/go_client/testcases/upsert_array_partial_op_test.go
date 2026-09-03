@@ -18,6 +18,7 @@ package testcases
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"testing"
@@ -199,28 +200,283 @@ func TestArrayPartialOpRemove(t *testing.T) {
 	require.True(t, equalAsMultiset(got[1], []int64{10, 20, 30}), "row 1 got=%v", got[1])
 }
 
-func TestArrayPartialOpPathReplacePreservesOrder(t *testing.T) {
+func TestArrayPartialOpPathReplacePositionsAndDifferentLengths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		seeds    [][]int64
+		pks      []int64
+		operands [][]int64
+		want     map[int64][]int64
+	}{
+		{
+			name:     "first",
+			path:     "[0]",
+			seeds:    [][]int64{{1, 2}, {10, 20, 30}},
+			pks:      []int64{1, 0},
+			operands: [][]int64{{99}, {88}},
+			want: map[int64][]int64{
+				0: {88, 2},
+				1: {99, 20, 30},
+			},
+		},
+		{
+			name:     "middle",
+			path:     "[1]",
+			seeds:    [][]int64{{1, 2, 3}, {10, 20, 30, 40}},
+			pks:      []int64{1, 0},
+			operands: [][]int64{{99}, {88}},
+			want: map[int64][]int64{
+				0: {1, 88, 3},
+				1: {10, 99, 30, 40},
+			},
+		},
+		{
+			name:     "last",
+			path:     "[2]",
+			seeds:    [][]int64{{1, 2, 3}, {10, 20, 30}},
+			pks:      []int64{1, 0},
+			operands: [][]int64{{99}, {88}},
+			want: map[int64][]int64{
+				0: {1, 2, 88},
+				1: {10, 20, 99},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+			collName := common.GenRandomString("array_partial_op_path_"+test.name+"_", 6)
+			_ = setupArrayPartialOpCollection(ctx, t, mc, collName, test.seeds)
+
+			// Request order intentionally differs from primary-key order.
+			_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+				WithColumns(
+					column.NewColumnInt64(common.DefaultInt64FieldName, test.pks),
+					column.NewColumnInt64Array(arrayPartialOpTagsFld, test.operands),
+				).
+				WithPathReplace(arrayPartialOpTagsFld, test.path))
+			common.CheckErr(t, err, true)
+
+			got := queryTagsByPK(ctx, t, mc, collName)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestArrayPathReplaceMultipleParentsAndDynamicLiteralKey(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	collName := common.GenRandomString("array_partial_op_path_", 6)
-	_ = setupArrayPartialOpCollection(ctx, t, mc,
-		collName, [][]int64{{1, 2, 3}, {10, 20, 30}})
+	const scoresField = "scores"
+	literalKey := scoresField + "[1]"
+	collName := common.GenRandomString("array_path_multi_parent_", 6)
+	schema := entity.NewSchema().WithName(collName).WithDynamicFieldEnabled(true).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).
+			WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).
+			WithDataType(entity.FieldTypeFloatVector).WithDim(arrayPartialOpDim)).
+		WithField(entity.NewField().WithName(arrayPartialOpTagsFld).
+			WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64).
+			WithMaxCapacity(arrayPartialOpCapacity)).
+		WithField(entity.NewField().WithName(scoresField).
+			WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64).
+			WithMaxCapacity(arrayPartialOpCapacity))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
 
-	// Request order intentionally differs from primary-key order. Each
-	// singleton operand must still be applied to index 1 of the same PK.
-	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
-		WithColumns(
-			column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 0}),
-			column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{99}, {88}}),
-		).
-		WithPathReplace(arrayPartialOpTagsFld, "[1]"))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0}),
+		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, arrayPartialOpDim,
+			[][]float32{{0.1, 0.2, 0.3, 0.4}}),
+		column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{1, 2}}),
+		column.NewColumnInt64Array(scoresField, [][]int64{{10, 20, 30}}),
+		column.NewColumnVarChar(literalKey, []string{"literal-before"}),
+	))
 	common.CheckErr(t, err, true)
 
-	got := queryTagsByPK(ctx, t, mc, collName)
-	require.Equal(t, []int64{1, 88, 3}, got[0])
-	require.Equal(t, []int64{10, 99, 30}, got[1])
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(
+		collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, indexTask.Await(ctx), true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0}),
+		column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{9}}),
+		column.NewColumnInt64Array(scoresField, [][]int64{{99}}),
+		column.NewColumnVarChar(literalKey, []string{"literal-after"}),
+	).
+		WithPathReplace(arrayPartialOpTagsFld, "[0]").
+		WithPathReplace(scoresField, "[2]"))
+	common.CheckErr(t, err, true)
+
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s == 0", common.DefaultInt64FieldName)).
+		WithOutputFields(arrayPartialOpTagsFld, scoresField, common.DefaultDynamicFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, []int64{9, 2}, result.GetColumn(arrayPartialOpTagsFld).(*column.ColumnInt64Array).Data()[0])
+	require.Equal(t, []int64{10, 20, 99}, result.GetColumn(scoresField).(*column.ColumnInt64Array).Data()[0])
+
+	metaValue, err := result.GetColumn(common.DefaultDynamicFieldName).Get(0)
+	require.NoError(t, err)
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(metaValue.([]byte), &meta))
+	require.Equal(t, "literal-after", meta[literalKey])
+}
+
+func TestArrayPathReplaceRejectsInvalidRequestsWithoutMutation(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("array_path_reject_", 6)
+	want := map[int64][]int64{0: {1, 2, 3}}
+	_ = setupArrayPartialOpCollection(ctx, t, mc, collName, [][]int64{want[0]})
+
+	tests := []struct {
+		name     string
+		pk       int64
+		operand  []int64
+		path     string
+		contains string
+	}{
+		{name: "invalid path", pk: 0, operand: []int64{9}, path: "tags[1]", contains: "invalid PATH_REPLACE path"},
+		{name: "out of range", pk: 0, operand: []int64{9}, path: "[3]", contains: "out of range"},
+		{name: "multiple operand elements", pk: 0, operand: []int64{9, 8}, path: "[1]", contains: "exactly one element"},
+		{name: "child on scalar array", pk: 0, operand: []int64{9}, path: "[1][age]", contains: "only supported for ArrayOfStruct"},
+		{name: "missing primary key", pk: 404, operand: []int64{9}, path: "[1]", contains: "every primary key in the request to exist"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+				column.NewColumnInt64(common.DefaultInt64FieldName, []int64{test.pk}),
+				column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{test.operand}),
+			).WithPathReplace(arrayPartialOpTagsFld, test.path))
+			require.Error(t, err)
+			require.ErrorContains(t, err, test.contains)
+			require.Equal(t, want, queryTagsByPK(ctx, t, mc, collName))
+		})
+	}
+}
+
+func TestArrayPathReplaceRejectsNullParentAndOperand(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("array_path_null_", 6)
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).
+			WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).
+			WithDataType(entity.FieldTypeFloatVector).WithDim(arrayPartialOpDim)).
+		WithField(entity.NewField().WithName(arrayPartialOpTagsFld).
+			WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64).
+			WithMaxCapacity(arrayPartialOpCapacity).WithNullable(true))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+	seedTags, err := column.NewNullableColumnInt64Array(arrayPartialOpTagsFld,
+		[][]int64{{10, 20, 30}}, []bool{false, true})
+	require.NoError(t, err)
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0, 1}),
+		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, arrayPartialOpDim,
+			[][]float32{{0.1, 0.2, 0.3, 0.4}, {0.4, 0.3, 0.2, 0.1}}),
+		seedTags,
+	))
+	common.CheckErr(t, err, true)
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(
+		collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, indexTask.Await(ctx), true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0}),
+		column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{9}}),
+	).WithPathReplace(arrayPartialOpTagsFld, "[0]"))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "null parent")
+
+	nullOperand, err := column.NewNullableColumnInt64Array(arrayPartialOpTagsFld, nil, []bool{false})
+	require.NoError(t, err)
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1}),
+		nullOperand,
+	).WithPathReplace(arrayPartialOpTagsFld, "[0]"))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "operand row 0 must not be null")
+
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)).
+		WithOutputFields(common.DefaultInt64FieldName, arrayPartialOpTagsFld).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 2, result.ResultCount)
+	values := make(map[int64]any, result.ResultCount)
+	for i := 0; i < result.ResultCount; i++ {
+		pk, err := result.GetColumn(common.DefaultInt64FieldName).GetAsInt64(i)
+		require.NoError(t, err)
+		value, err := result.GetColumn(arrayPartialOpTagsFld).Get(i)
+		require.NoError(t, err)
+		values[pk] = value
+	}
+	require.Nil(t, values[0])
+	require.Equal(t, []int64{10, 20, 30}, values[1])
+}
+
+func TestArrayPathReplaceSurvivesCompaction(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("array_path_compaction_", 6)
+	_ = setupArrayPartialOpCollection(ctx, t, mc, collName, [][]int64{{1, 2, 3}})
+	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0}),
+		column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{99}}),
+	).WithPathReplace(arrayPartialOpTagsFld, "[1]"))
+	common.CheckErr(t, err, true)
+
+	var flushTask *client.FlushTask
+	require.Eventually(t, func() bool {
+		flushTask, err = mc.Flush(ctx, client.NewFlushOption(collName))
+		return err == nil
+	}, 15*time.Second, time.Second, "second flush remained rate limited")
+	common.CheckErr(t, flushTask.Await(ctx), true)
+	compactID, err := mc.Compact(ctx, client.NewCompactOption(collName))
+	common.CheckErr(t, err, true)
+
+	completed := false
+	for i := 0; i < 120; i++ {
+		state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(compactID))
+		common.CheckErr(t, err, true)
+		if state == entity.CompactionStateCompleted {
+			completed = true
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	require.True(t, completed, "compaction %d did not complete", compactID)
+	require.Equal(t, map[int64][]int64{0: {1, 99, 3}}, queryTagsByPK(ctx, t, mc, collName))
 }
 
 func TestArrayPartialOpAppendExceedsCapacity(t *testing.T) {
