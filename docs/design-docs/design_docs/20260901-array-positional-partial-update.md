@@ -1,10 +1,10 @@
 # Positional Partial Update for Array and Array of Struct
 
 - **Feature DRI:** @weiliu1031
-- **Primary Approver:** TBD
-- **Independent Approver:** TBD
-- **Design Review:** TBD
-- **Status:** Draft
+- **Primary Approver:** @xiaofan-luan
+- **Independent Approver:** @congqixia
+- **Design Review:** 2026-09-03
+- **Status:** Under Review
 - **Issue:** [milvus-io/milvus issue 53016](https://github.com/milvus-io/milvus/issues/53016)
 
 ## Summary
@@ -23,8 +23,7 @@ field and has one of two forms:
 [index][child]
 ```
 
-REST exposure is limited to REST v2. REST v1 rejects `PATH_REPLACE` as an
-unsupported operation.
+REST exposure is limited to REST v2.
 
 The operation remains a Proxy-side read-modify-write. Proxy retrieves the old
 row, applies the positional replacement in memory, materializes complete
@@ -92,11 +91,11 @@ a nested mutation language into downstream storage protocols.
 - Support replacing a non-empty subset, or all, of the children under one
   `Array<Struct>[index]` base path.
 - Preserve the array length, element order, all non-target elements, and all
-  non-target Struct children.
+  non-target Struct children, including nested Array children.
 - Preserve the existing Milvus nullability boundary: target parent rows and
   replacement values must be non-null.
-- Use one path grammar and equivalent failure semantics across SDKs, REST v2,
-  and the server.
+- Define one path grammar and equivalent failure semantics for the server,
+  REST v2, and every SDK that exposes the feature.
 - Preserve compatibility with old clients and fail safely when a new client
   reaches an old Proxy.
 - Reuse the existing partial-upsert materialization and write path after Proxy
@@ -107,6 +106,7 @@ a nested mutation language into downstream storage protocols.
 - Inserting, deleting, moving, sorting, or otherwise reordering an array
   position.
 - Nested `ARRAY_APPEND` or `ARRAY_REMOVE`.
+- Directly replacing a nested Array child of an `Array<Struct>` element.
 - Multiple base paths for the same parent field in one request.
 - Wildcards, predicates, slices, negative indexes, or column-wide child paths
   such as `[age]`.
@@ -163,7 +163,7 @@ existing StructArray flattening and insert validation
     |
     | existing delete + insert DML
     v
-StreamingClient / legacy msgstream -> WAL -> downstream consumers
+Streaming WAL -> downstream consumers
 ```
 
 The path and operand are consumed before the request is converted to internal
@@ -191,7 +191,6 @@ Consequently, `PATH_REPLACE` has the following order contract:
 This guarantee concerns the logical order inside one field value. It does not
 promise physical segment row order. A separate user mutation, such as whole
 field replacement or `ARRAY_REMOVE`, may change later positional meaning.
-Concurrent changes to positional meaning are part of the separate CAS design.
 
 ## Public API
 
@@ -276,18 +275,9 @@ Rules:
 - Escaping, quoted child names, wildcards, predicates, and deeper nesting are
   not supported by this design.
 
-Proxy resolves the string once against the collection schema and converts it
-to an internal typed form:
-
-```go
-type resolvedPathReplace struct {
-    parentFieldID int64
-    index         int
-    childFieldID  *int64
-}
-```
-
-The raw string must not be reparsed after this validation boundary.
+Proxy resolves the string once against the collection schema into the
+request-local plan described in the Proxy implementation section. The raw
+string is not reparsed after this validation boundary.
 
 ### FieldData encoding
 
@@ -380,10 +370,11 @@ because it expresses intent more precisely.
 
 ### SDK and REST v2 shape
 
-All SDKs expose the same relative path string. SDK-specific typed builders may
-be added later, but they must serialize to the canonical string grammar.
+Every SDK that exposes this feature must serialize the same relative path
+string and the same protobuf-level dense singleton operand. Source-language
+data shapes may differ when required by an SDK's existing row or column API.
 
-Python:
+Planned Python API:
 
 ```python
 field_ops = {
@@ -398,6 +389,27 @@ Go:
 option.WithPathReplace("scores", "[1]")
 option.WithPathReplace("profile", "[1][age]")
 ```
+
+For the Go row-based API, an `Array<Struct>` operand is a map from child name
+to that child's singleton Array value:
+
+```go
+rows := []any{
+    map[string]any{
+        "id": int64(1),
+        "profile": map[string]any{
+            "age": []int64{18},
+        },
+    },
+}
+
+option := NewRowBasedInsertOption("users", rows...).
+    WithPathReplace("profile", "[1][age]")
+```
+
+This Go source shape and the Python/REST `profile: [{"age": 18}]` shape encode
+the same protobuf operand: one outer row containing one replacement value for
+the selected Struct child.
 
 REST v2:
 
@@ -428,8 +440,8 @@ SDK requirements:
 - leave grammar and schema validation authoritative on the server so all SDKs
   have identical acceptance rules.
 
-The Python helper does not accept a bare string alias such as
-`"path_replace"`, because the required path would be missing.
+The Python helper must not accept a bare string alias such as `"path_replace"`,
+because the required path would be missing.
 
 ## Semantics
 
@@ -590,13 +602,14 @@ Validation is split into three stages.
 
 Before querying old rows, Proxy validates:
 
-- `field_name` and `path` are present;
+- `field_name` is present;
 - `op` is supported;
-- `path` is empty for operations other than `PATH_REPLACE`;
+- `path` is present for `PATH_REPLACE` and empty for every other operation;
 - `path` matches the supported path grammar;
 - the parent field exists, is not the primary key, and has a supported type;
 - the child exists when a child segment is present;
-- one op and one top-level `FieldData` exist per parent;
+- at most one op exists per parent, top-level `FieldData` names are unique, and
+  every non-`REPLACE` op has exactly one matching `FieldData`;
 - the operand has the correct parent `FieldData` type;
 - the operand has one outer element per request row and one inner element per
   row;
@@ -613,7 +626,9 @@ After the query and before write dispatch, Proxy validates:
 - every requested primary key was returned exactly once;
 - every target parent row is non-null;
 - every target index is in range;
-- aligned Struct child arrays have consistent element counts; and
+- aligned Struct child arrays have consistent element counts;
+- omitted nested Array children participate in alignment validation and are
+  preserved unchanged; and
 - every immediate replacement value is concrete and non-null.
 
 ### Stage 3: post-merge validation
@@ -645,30 +660,29 @@ Representative failures:
 
 All deterministic validation for the full request must complete before Proxy
 starts dispatching its materialized DML. This avoids partial writes caused by a
-known-bad path in a later row, but it does not add a new cross-VChannel
-atomicity guarantee.
+known-bad path in a later row.
 
 ## Proxy Implementation
 
 ### Validation representation
 
-Extend the partial-op validator to return resolved operations rather than only
-a `fieldName -> enum` map. A suitable request-local representation is:
+The partial-op validator returns resolved operations rather than only a
+`fieldName -> enum` map. The request-local representation is:
 
 ```go
-type pathReplacePlan struct {
-    arrayParent    *schemapb.FieldSchema
-    structParent   *schemapb.StructArrayFieldSchema
-    index          int
-    explicitChild  *schemapb.FieldSchema
-    operandChildren []*schemapb.FieldSchema
+type fieldPartialUpdatePlan struct {
+    op               schemapb.FieldPartialUpdateOp_OpType
+    arrayParent      *schemapb.FieldSchema
+    structParent     *schemapb.StructArrayFieldSchema
+    index            int
+    explicitChild    *schemapb.FieldSchema
+    operandChildren  []*schemapb.FieldSchema
 }
 ```
 
-Exactly one of `arrayParent` and `structParent` is non-nil. The concrete type
-should follow existing schema helper conventions. The important invariants are
-that IDs, schema pointers, the parsed index, and the request-wide child mask are
-fixed before the old-row query.
+For `PATH_REPLACE`, exactly one of `arrayParent` and `structParent` is non-nil.
+The important invariants are that schema pointers, the parsed index, and the
+request-wide child mask are fixed before the old-row query.
 
 ### Merge algorithm
 
@@ -689,9 +703,10 @@ children use the operand value at `index`; omitted children use the old value.
 All child columns preserve the same outer row count, inner element count, and
 offsets.
 
-Helpers must return new protobuf values instead of modifying query results or
-request operands in place. This avoids aliasing across rows, retries, and test
-fixtures.
+Merge helpers may update a newly allocated request-local destination
+`FieldData`, but they must not modify the retrieved query result or the request
+operand. Targeted per-row Array values are cloned before replacement so rows,
+retries, and test fixtures do not share mutable protobuf data.
 
 ### Interaction with existing Struct flattening
 
@@ -728,9 +743,6 @@ through the existing partial-upsert function pipeline.
 The feature is considered available only after every request-serving Proxy in
 a cluster supports enum value 3. SDK release notes must call out the minimum
 server version.
-
-REST v1 is outside the feature's compatibility surface and rejects
-`PATH_REPLACE` before converting request data.
 
 Downstream components can be upgraded independently because they receive only
 the existing materialized DML representation. CDC observes the resulting full
@@ -773,19 +785,15 @@ No new storage format, index update mechanism, WAL record, or downstream
 memory state is introduced. Request limits, field max capacity, and existing
 message size limits continue to bound resource use.
 
-Potential future optimizations, such as storage-native leaf patches or
-copy-on-write array buffers, are outside this design and must preserve the same
-public semantics.
-
 ## Observability
 
-Add low-cardinality Proxy metrics for positional partial update:
+Reuse the existing Proxy Upsert request, result, and total-latency metrics. Add
+only the feature-specific measurements needed to understand positional merge
+usage and cost:
 
-- request count by parent category: `array` or `struct_array`;
-- result count by stable category: `success`, `invalid_path`, `missing_pk`,
-  `null_parent`, `out_of_range`, `invalid_operand`, or `internal_error`; and
-- merge latency and retrieved-row count using existing partial-upsert metrics
-  where possible.
+- parent-operation count emitted after field-op resolution succeeds, by
+  category: `array` or `struct_array`;
+- merge latency for materializing complete parent `FieldData`.
 
 Do not put raw paths, child names, primary keys, or user values in metric
 labels. Error messages may include the field name, canonical path, entity row
@@ -846,117 +854,94 @@ Struct-element validity bitmap.
 
 ## Test Plan
 
-### Proto and compatibility
+### Covered in this Milvus change
 
-- Verify `PATH_REPLACE = 3` and `path = 3` are generated for all supported
-  languages.
-- Verify existing op values and field numbers are unchanged.
-- Send a serialized `PATH_REPLACE` request to an old validation implementation
-  and verify it rejects the unknown enum instead of replacing the whole field.
-- Verify unknown `path` alone cannot activate positional behavior.
+- Proxy unit tests cover canonical path parsing, schema resolution, duplicate
+  detection, operand alignment, scalar and StructArray replacement, omitted
+  child preservation, null and bounds rejection, missing primary keys, shuffled
+  query results, malformed retrieved data, and the pre-dispatch validation
+  boundary.
+- REST v2 unit tests cover operation decoding, relative-path preservation,
+  operand schema adaptation, Struct child masks, and raw JSON null rejection.
+- Go SDK tests cover row-oriented and column-oriented builders, including the
+  distinct Go source shapes that serialize to the common protobuf operand.
+- End-to-end tests cover scalar Arrays with different lengths, StructArray
+  scalar/vector/subset/full replacement, independent parent fields, the
+  same-parent overlap matrix, dynamic JSON literal keys, and compaction.
 
-### Proxy unit tests
+These tests exercise the normal write path after Proxy materializes complete
+`FieldData`; no path-specific WAL test is required because the WAL message and
+routing code are unchanged.
 
-- Parse every valid canonical path and reject every grammar extension excluded
-  from this design.
-- Resolve scalar Array and StructArray paths against schema IDs.
-- Reject unknown fields, unknown children, wrong parent types, primary keys,
-  duplicate ops, duplicate `FieldData`, and missing operands.
-- Verify request-wide path and Struct child-mask alignment for multiple rows.
-- Replace first, middle, and last elements for all supported scalar Array
-  element types.
-- Replace scalar and vector Struct children.
-- Replace one child, multiple children, and every child through `[index]`.
-- Verify `[index][child]` rejects extra or missing children.
-- Verify non-target elements and children are byte-for-byte unchanged where
-  their protobuf representation permits that assertion.
-- Verify parent length and Struct child offsets never change.
-- Reject nullable parent rows, null operand parent rows, explicit null scalar
-  and vector operands, and immediate-element `valid_data`.
-- Reject missing PKs, including a mixed request where some PKs exist and some
-  do not.
-- Map shuffled query results back to original request order by primary key.
-- Treat malformed retrieved Struct alignment as a system error.
-- Ensure no write dispatch occurs after any pre-dispatch validation failure.
-- Exercise both legacy msgstream and StreamingNode-enabled routing after
-  materialization.
+### Pending Milvus release validation
 
-### REST v2 tests
+- Complete the REST v2 endpoint-level negative matrix for missing paths, paths
+  on other operations, unsupported operations, invalid payloads, and
+  heterogeneous Struct child masks.
+- Run generated-proto checks and the required Proxy, REST v2, Go SDK, and
+  end-to-end suites from the designated worktree.
 
-- Accept `PATH_REPLACE` plus `path` and preserve the relative string.
-- Reject missing path, path on another op, unsupported op, wrong payload shape,
-  and heterogeneous Struct child masks.
-- Verify a literal dynamic key containing brackets remains dynamic data.
+### Cross-repository SDK validation
 
-### SDK tests
+Before an SDK advertises support, it must test that it:
 
-For every SDK that exposes partial-update field operations:
+- serializes the canonical relative path and dense singleton operand;
+- preserves entity and Array element order;
+- rejects or surfaces heterogeneous Struct masks without reshaping values;
+- does not automatically split one API call; and
+- propagates server parameter errors consistently.
 
-- serialize the same relative path grammar;
-- preserve one singleton operand container per entity;
-- preserve array element order;
-- reject or surface heterogeneous Struct masks without silently reshaping
-  values;
-- avoid automatic request splitting; and
-- propagate server parameter errors consistently.
+Python and other SDK helpers and their tests are separate repository follow-ups.
 
-Python integration tests cover the row-oriented examples in this document. Go
-integration tests cover the column-oriented builder.
+## Delivery Status
 
-### End-to-end tests
+### Implemented in this PR
 
-- Scalar Array replacement on rows with different Array lengths.
-- StructArray scalar-child, vector-child, subset, and full-element replacement.
-- Multiple parent fields with independent paths in one request.
-- Dynamic JSON literal key coexistence.
-- Query after compaction still returns the same logical element order and
-  replacement result.
-- CDC receives the materialized full mutation with no path-specific protocol
-  dependency.
+- Proxy validation and materialization for scalar Array and StructArray
+  positional replacement.
+- REST v2 request decoding and strict null-operand validation.
+- Go row-based and column-based SDK request builders.
+- Unit and end-to-end test cases for the supported and rejected matrices.
+- The root, `client`, `pkg`, and Go end-to-end modules pin
+  `milvus-proto/go-api/v3` at the merge commit from
+  [milvus-proto PR 666](https://github.com/milvus-io/milvus-proto/pull/666).
 
-CAS-conflict and multi-VChannel partial-success tests belong to the separate
-concurrency design, not this test plan.
+The targeted unit and end-to-end suites were executed locally against a
+standalone built from the rebased branch. Repository CI remains a release
+prerequisite.
 
-## Implementation Plan
+A wire-level compatibility check using the previously pinned Go binding
+confirmed that enum value 3 remains an unknown numeric value after unmarshal
+and reaches the old validator's default rejection branch.
 
-1. **Public proto**
-   - Add `PATH_REPLACE` and `path` in `milvus-proto/proto/schema.proto`.
-   - Regenerate all language bindings.
-   - Release and consume the new proto revision.
-2. **Proxy validation and planning**
-   - Extend `internal/proxy/task_upsert_partial_op.go` with strict path parsing,
-     schema resolution, duplicate `FieldData` detection, and operand-shape
-     validation.
-   - Return resolved request-local plans instead of only enum values.
-3. **Proxy merge**
-   - Extend `internal/proxy/task_upsert.go` and focused helpers to reject missing
-     PKs, apply row-aligned positional replacements, and reconstruct complete
-     parent `FieldData`.
-   - Keep Struct subset operands ahead of normal Struct flattening.
-4. **REST v2**
-   - Add `path` and `PATH_REPLACE` handling in
-     `internal/distributed/proxy/httpserver/request_v2.go`.
-5. **Go SDK**
-   - Add `WithPathReplace(fieldName, path)` while preserving the existing
-     `WithFieldPartialOp` API.
-6. **Python and other SDKs**
-   - Add `FieldOp.path_replace(path)` or the idiomatic equivalent, all emitting
-     the same proto representation.
-7. **Documentation and examples**
-   - Update partial-upsert and StructArray user documentation.
-   - Update the linked issue to record the approved Struct subset refinement.
-8. **Validation**
-   - Run generated-proto checks, targeted Proxy/REST v2/SDK tests, full
-     affected package tests, and integration tests from the designated
-     worktree.
+### Cross-repository follow-ups
+
+- Add idiomatic Python and other SDK helpers with SDK-specific tests before
+  those SDKs advertise support.
+- Update user documentation and the issue text with the approved Struct subset
+  semantics and minimum supported server version.
+
+### Release prerequisites
+
+- Complete the pending Milvus release validation above, including old-Proxy
+  fail-closed coverage and the REST v2 endpoint negative matrix.
+- Run the required Proxy, REST v2, Go SDK, and end-to-end suites against the
+  final rebased Milvus commit.
+- Deploy all request-serving Proxies before an SDK advertises the feature.
+
+### Review and governance status
+
+The design is under review. It requires explicit approval stamps from
+@xiaofan-luan and @congqixia before merge.
 
 ## Rollout
 
-1. Merge and release the `milvus-proto` change.
-2. Upgrade Milvus and regenerate against the new proto revision.
+1. Pin Milvus to the merged `milvus-proto` revision.
+2. Complete Milvus validation and merge this implementation.
 3. Deploy all Proxies before advertising SDK support.
 4. Release SDK helpers with a documented minimum server version.
-5. Monitor stable error categories and merge latency during initial rollout.
+5. Monitor existing Upsert failures and positional merge latency during initial
+   rollout.
 
 No feature flag is required for correctness because an old Proxy fails closed
 on the unknown enum. A deployment may still gate SDK exposure until all Proxies
@@ -976,20 +961,17 @@ are upgraded.
 - Every replacement value is concrete and non-null; this feature does not add
   element-level nullability.
 - Literal bracketed dynamic JSON keys are never parsed as paths.
-- SDK, REST v2, and protobuf use the same relative path string and dense
-  singleton operand convention.
+- Every participating SDK and REST v2 serialize the same relative path string
+  and protobuf-level dense singleton operand convention.
 - Old Proxies reject the new enum and cannot silently perform whole-field
   replacement.
 - Proxy materializes complete `FieldData`; downstream DML and storage protocols
   remain unchanged.
-- All tests listed for the Milvus implementation and participating SDKs pass.
+- Each Milvus or SDK component completes its listed validation before that
+  component advertises support.
 
-## Remaining Review Actions
+## Review Gate
 
-- Select a Primary Approver and an Independent Approver from the repository
-  maintainer list.
-- Hold the required Design Review meeting and record its date.
+- Obtain explicit approval stamps from @xiaofan-luan and @congqixia.
 - Update the issue text after approval so its Struct subset semantics match
   this document.
-- Keep the CAS/VChannel design and ownership separate; link it here only after
-  that design has a stable artifact.

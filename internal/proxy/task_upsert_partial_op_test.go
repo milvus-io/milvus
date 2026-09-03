@@ -19,9 +19,11 @@ package proxy
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -32,8 +34,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -85,6 +89,141 @@ func arrayLongFieldData(name string, rows [][]int64) *schemapb.FieldData {
 			}},
 		}},
 	}
+}
+
+func pathReplaceScalarRow(data any) *schemapb.ScalarField {
+	row := &schemapb.ScalarField{}
+	switch values := data.(type) {
+	case []bool:
+		row.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: values}}
+	case []int32:
+		row.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}
+	case []int64:
+		row.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}
+	case []float32:
+		row.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: values}}
+	case []float64:
+		row.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: values}}
+	case []string:
+		row.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}}
+	default:
+		panic("unsupported test scalar row")
+	}
+	return row
+}
+
+func TestReplaceArrayRowElement(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		base        any
+		update      any
+		want        any
+	}{
+		{"bool", schemapb.DataType_Bool, []bool{false, false}, []bool{true}, []bool{false, true}},
+		{"int8", schemapb.DataType_Int8, []int32{1, 2}, []int32{9}, []int32{1, 9}},
+		{"int16", schemapb.DataType_Int16, []int32{1, 2}, []int32{9}, []int32{1, 9}},
+		{"int32", schemapb.DataType_Int32, []int32{1, 2}, []int32{9}, []int32{1, 9}},
+		{"int64", schemapb.DataType_Int64, []int64{1, 2}, []int64{9}, []int64{1, 9}},
+		{"float", schemapb.DataType_Float, []float32{1, 2}, []float32{9}, []float32{1, 9}},
+		{"double", schemapb.DataType_Double, []float64{1, 2}, []float64{9}, []float64{1, 9}},
+		{"varchar", schemapb.DataType_VarChar, []string{"a", "b"}, []string{"z"}, []string{"a", "z"}},
+		{"string", schemapb.DataType_String, []string{"a", "b"}, []string{"z"}, []string{"a", "z"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := pathReplaceScalarRow(test.base)
+			update := pathReplaceScalarRow(test.update)
+			got, err := replaceArrayRowElement(base, update, 1, test.elementType)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(pathReplaceScalarRow(test.want), got))
+			assert.True(t, proto.Equal(pathReplaceScalarRow(test.base), base))
+			assert.True(t, proto.Equal(pathReplaceScalarRow(test.update), update))
+		})
+	}
+
+	withValidity := pathReplaceScalarRow([]int64{1, 2})
+	withValidity.ValidData = []bool{true, true}
+	_, err := replaceArrayRowElement(withValidity, pathReplaceScalarRow([]int64{3}), 0, schemapb.DataType_Int64)
+	require.ErrorContains(t, err, "does not support Array element valid_data")
+	_, err = replaceArrayRowElement(pathReplaceScalarRow([]int64{1}), pathReplaceScalarRow([]int64{2, 3}), 0, schemapb.DataType_Int64)
+	require.ErrorContains(t, err, "exactly one Array element")
+	_, err = replaceArrayRowElement(pathReplaceScalarRow([]int64{1}), pathReplaceScalarRow([]int64{2}), 1, schemapb.DataType_Int64)
+	require.ErrorContains(t, err, "out of range")
+	_, err = replaceArrayRowElement(pathReplaceScalarRow([]bool{true}), pathReplaceScalarRow([]int64{2}), 0, schemapb.DataType_Bool)
+	require.ErrorContains(t, err, "does not match element type")
+}
+
+func TestReplaceVectorArrayRowElement(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int64
+		base        *schemapb.VectorField
+		update      *schemapb.VectorField
+		want        *schemapb.VectorField
+	}{
+		{
+			"float", schemapb.DataType_FloatVector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{9, 8}}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 9, 8}}}},
+		},
+		{
+			"binary", schemapb.DataType_BinaryVector, 8,
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{9}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 9}}},
+		},
+		{
+			"float16", schemapb.DataType_Float16Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{9, 10, 11, 12}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 9, 10, 11, 12}}},
+		},
+		{
+			"bfloat16", schemapb.DataType_BFloat16Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{9, 10, 11, 12}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 9, 10, 11, 12}}},
+		},
+		{
+			"int8", schemapb.DataType_Int8Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{9, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 9, 8}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := proto.Clone(test.base).(*schemapb.VectorField)
+			update := proto.Clone(test.update).(*schemapb.VectorField)
+			got, err := replaceVectorArrayRowElement(base, update, 1, test.elementType, test.dim)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(test.want, got))
+			assert.True(t, proto.Equal(test.base, base))
+			assert.True(t, proto.Equal(test.update, update))
+		})
+	}
+
+	withValidity := proto.Clone(tests[0].base).(*schemapb.VectorField)
+	withValidity.ValidData = []bool{true, true}
+	_, err := replaceVectorArrayRowElement(withValidity, tests[0].update, 0, schemapb.DataType_FloatVector, 2)
+	require.ErrorContains(t, err, "does not support ArrayOfVector element valid_data")
+	_, err = replaceVectorArrayRowElement(tests[0].base,
+		&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{9, 8}}},
+		1, schemapb.DataType_FloatVector, 2)
+	require.ErrorContains(t, err, "does not match element type")
+}
+
+func TestUpdateArrayFieldByColumnWithPathReplace(t *testing.T) {
+	base := arrayLongFieldData("scores", [][]int64{{1, 2, 3}, {4, 5, 6}})
+	update := arrayLongFieldData("scores", [][]int64{{10}, {20}})
+	err := updateArrayFieldByColumnWithPathReplace(base, update, []int64{1, 0}, []int64{0, 1}, 1)
+	require.NoError(t, err)
+	rows := base.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{1, 20, 3}, rows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{4, 10, 6}, rows[1].GetLongData().GetData())
 }
 
 func recursiveArrayLongFieldData(name string) *schemapb.FieldData {
@@ -428,27 +567,33 @@ func TestParsePathReplace(t *testing.T) {
 		assert.Equal(t, test.hasChild, hasChild)
 	}
 
-	for _, path := range []string{"", "profile[1]", "[-1]", "[01]", "[ 1]", "[1] ", "[1][]", "[1][age][x]", "[*]"} {
+	overflowingIndex := "[" + strconv.FormatUint(uint64(^uint(0)>>1)+1, 10) + "]"
+	for _, path := range []string{"", "profile[1]", "[-1]", "[01]", "[ 1]", "[1] ", "[1][]", "[1][age][x]", "[*]", overflowingIndex} {
 		_, _, _, err := parsePathReplace(path)
 		assert.Error(t, err, path)
 	}
 }
 
-func TestPathReplaceMetricCategories(t *testing.T) {
-	request := &milvuspb.UpsertRequest{FieldOps: []*schemapb.FieldPartialUpdateOp{
-		pathOp("scores", "[0]"),
-		pathOp("profile", "[0][age]"),
-	}}
-	schema := &schemapb.CollectionSchema{
-		Fields:            []*schemapb.FieldSchema{arrayIntFieldSchema("scores", false, 8)},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{pathReplaceStructSchema()},
+func TestObservePathReplaceParentOperations(t *testing.T) {
+	req := &milvuspb.UpsertRequest{
+		DbName:         t.Name(),
+		CollectionName: t.Name(),
 	}
-	assert.True(t, hasPathReplaceOp(request))
-	assert.Equal(t, []string{pathReplaceParentArray, pathReplaceParentStructArray}, pathReplaceParentCategories(request, schema))
-	assert.Equal(t, pathReplaceResultSuccess, pathReplaceResultCategory(nil))
-	assert.Equal(t, pathReplaceResultInvalidPath, pathReplaceResultCategory(
-		categorizePathReplaceError(pathReplaceResultInvalidPath, merr.WrapErrParameterInvalidMsg("bad path"))))
-	assert.Equal(t, pathReplaceResultInternalError, pathReplaceResultCategory(merr.WrapErrServiceInternalMsg("bad data")))
+	labels := []string{paramtable.GetStringNodeID(), req.GetDbName(), req.GetCollectionName()}
+	arrayOps := metrics.ProxyPathReplaceParentOperations.WithLabelValues(append(labels, pathReplaceParentArray)...)
+	structOps := metrics.ProxyPathReplaceParentOperations.WithLabelValues(append(labels, pathReplaceParentStructArray)...)
+
+	arrayOpsBefore := testutil.ToFloat64(arrayOps)
+	structOpsBefore := testutil.ToFloat64(structOps)
+
+	observePathReplaceParentOperations(req, map[string]*fieldPartialUpdatePlan{
+		"scores":  {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, arrayParent: arrayIntFieldSchema("scores", false, 8)},
+		"profile": {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, structParent: pathReplaceStructSchema()},
+		"replace": {op: schemapb.FieldPartialUpdateOp_REPLACE},
+	})
+
+	assert.Equal(t, arrayOpsBefore+1, testutil.ToFloat64(arrayOps))
+	assert.Equal(t, structOpsBefore+1, testutil.ToFloat64(structOps))
 }
 
 func TestResolveFieldPartialUpdateOps_ArrayPathReplace(t *testing.T) {
@@ -771,7 +916,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 
 		err := task.queryPreExecute(context.Background())
 		require.Error(t, err)
-		assert.Equal(t, pathReplaceResultMissingPK, pathReplaceResultCategory(err))
+		assert.Contains(t, err.Error(), "requires every primary key")
 	})
 }
 
@@ -782,13 +927,12 @@ func TestValidateExistingPathRowsRejectsInvalidTargets(t *testing.T) {
 	err := validateExistingArrayPathRows(arrayData, []int64{0}, []int64{0}, arrayPlan)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
-	assert.Equal(t, pathReplaceResultOutOfRange, pathReplaceResultCategory(err))
 
 	arrayPlan.index = 0
 	typeutil.SetFieldDataValidData(arrayData, []bool{false})
 	err = validateExistingArrayPathRows(arrayData, []int64{0}, []int64{0}, arrayPlan)
 	require.Error(t, err)
-	assert.Equal(t, pathReplaceResultNullParent, pathReplaceResultCategory(err))
+	assert.Contains(t, err.Error(), "null parent")
 	typeutil.SetFieldDataValidData(arrayData, nil)
 
 	arrayData.GetScalars().GetArrayData().GetData()[0] = &schemapb.ScalarField{
@@ -826,6 +970,64 @@ func TestValidateExistingStructPathRowsRejectsMalformedAlignment(t *testing.T) {
 	err = validateExistingStructPathRows(old, plan, []int64{0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "children, expected")
+}
+
+func TestValidateExistingStructPathRowsAllowsNestedArraySibling(t *testing.T) {
+	nestedSchema := &schemapb.FieldSchema{
+		FieldID:     101,
+		Name:        "profile[nested]",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+				ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{
+					LeafType: schemapb.DataType_Int32,
+				}},
+			}},
+		}},
+	}
+	scalarSchema := &schemapb.FieldSchema{
+		FieldID:     102,
+		Name:        "profile[score]",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int32,
+	}
+	structSchema := &schemapb.StructArrayFieldSchema{
+		FieldID: 100,
+		Name:    "profile",
+		Fields:  []*schemapb.FieldSchema{nestedSchema, scalarSchema},
+	}
+	nested := structElementCountTestNestedIntArray("nested", [][]int32{{1, 2}, {3}})
+	scalar := structElementCountTestScalarArray("score", []int32{10, 20})
+	scalar.GetScalars().GetArrayData().ElementType = schemapb.DataType_Int32
+	old := &schemapb.FieldData{
+		FieldName: "profile",
+		Type:      schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{nested, scalar},
+		}},
+	}
+	operandScalar := structElementCountTestScalarArray("score", []int32{99})
+	operandScalar.GetScalars().GetArrayData().ElementType = schemapb.DataType_Int32
+	operand := &schemapb.FieldData{
+		FieldName: "profile",
+		Type:      schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{operandScalar},
+		}},
+	}
+	plan := &fieldPartialUpdatePlan{
+		op:              schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		structParent:    structSchema,
+		index:           1,
+		operandChildren: []*schemapb.FieldSchema{scalarSchema},
+	}
+	originalNested := proto.Clone(nested).(*schemapb.FieldData)
+
+	require.NoError(t, validateExistingStructPathRows(old, plan, []int64{0}))
+	require.NoError(t, applyStructPathReplace(old, operand, plan, []int64{0}, []int64{0}))
+	assert.True(t, proto.Equal(originalNested, nested))
+	assert.Equal(t, []int32{10, 99}, scalar.GetScalars().GetArrayData().GetData()[0].GetIntData().GetData())
 }
 
 func TestPerRowArrayLen(t *testing.T) {

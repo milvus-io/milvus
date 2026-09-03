@@ -68,21 +68,13 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
-	ProxyPathReplaceRequests = prometheus.NewCounterVec(
+	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "path_replace_requests_total",
-			Help:      "number of positional partial-update requests by parent field category",
+			Name:      "path_replace_parent_operations_total",
+			Help:      "number of successfully resolved positional partial-update parent operations by category",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
-
-	ProxyPathReplaceResults = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "path_replace_results_total",
-			Help:      "number of positional partial-update results by stable result category",
-		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "result"})
 
 	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -91,15 +83,6 @@ var (
 			Name:      "path_replace_merge_latency",
 			Help:      "latency of materializing positional partial updates",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
-
-	ProxyPathReplaceRetrievedRows = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "path_replace_retrieved_rows",
-			Help:      "number of rows retrieved to materialize positional partial updates",
-			Buckets:   buckets,
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxySQLatency record the latency of search successfully.
@@ -525,10 +508,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
 	registry.MustRegister(ProxyDeleteVectors)
-	registry.MustRegister(ProxyPathReplaceRequests)
-	registry.MustRegister(ProxyPathReplaceResults)
+	registry.MustRegister(ProxyPathReplaceParentOperations)
 	registry.MustRegister(ProxyPathReplaceMergeLatency)
-	registry.MustRegister(ProxyPathReplaceRetrievedRows)
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
@@ -617,10 +598,8 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyInsertVectors,
 		ProxyUpsertVectors,
 		ProxyDeleteVectors,
-		ProxyPathReplaceRequests,
-		ProxyPathReplaceResults,
+		ProxyPathReplaceParentOperations,
 		ProxyPathReplaceMergeLatency,
-		ProxyPathReplaceRetrievedRows,
 		ProxySQLatency,
 		ProxyCollectionSQLatency,
 		ProxyMutationLatency,

@@ -2769,7 +2769,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Info(context.TODO(), "Failed to enqueue upsert task",
 			mlog.Err(err))
-		observePathReplaceResult(request, err)
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2793,8 +2792,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		for i := uint32(0); i < numRows; i++ {
 			errIndex[i] = i
 		}
-		observePathReplaceResult(request, err)
-
 		return &milvuspb.MutationResult{
 			Status:   merr.Status(err),
 			ErrIndex: errIndex,
@@ -2811,9 +2808,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			it.result.ErrIndex = errIndex
 		}
 		setErrorIndex()
-		observePathReplaceResult(request, merr.Error(it.result.GetStatus()))
-	} else {
-		observePathReplaceResult(request, nil)
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
