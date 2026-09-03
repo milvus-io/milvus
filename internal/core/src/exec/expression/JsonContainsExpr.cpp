@@ -129,9 +129,8 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyJsonContainsFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
-    span.GetSpan()->SetAttribute("json_filter_expr_type", "json_contains");
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("json_filter_expr_type", "json_contains");
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
