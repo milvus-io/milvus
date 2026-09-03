@@ -86,9 +86,9 @@ func initHook() error {
 				"hookutil: proxy.soPath is set to %q and a hook is also compiled in; "+
 					"both answer VerifyAPIKey and the request interception, and only one can", path)
 		}
-		// The compiled-in hook is initialised exactly as a plug-in is, with the
+		// The compiled-in hook is initialized exactly as a plug-in is, with the
 		// same configuration and the same consequence: a hook that cannot
-		// initialise is a proxy that does not start. It is also the one call
+		// initialize is a proxy that does not start. It is also the one call
 		// that tells the hook it lives in the proxy process.
 		if err := compiled.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 			return merr.Wrap(err, "fail to init configs for the compiled-in hook")
