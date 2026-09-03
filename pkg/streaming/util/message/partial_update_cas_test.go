@@ -79,6 +79,45 @@ func TestPartialUpdateCASBuilderEncryptsMetadataWithBody(t *testing.T) {
 	require.True(t, proto.Equal(meta, got))
 }
 
+func TestPartialUpdateCASBodyEncoderEncryptsMetadataWithBody(t *testing.T) {
+	oldCipher := cipher
+	cipher = partialUpdateCASTestCipher{}
+	t.Cleanup(func() { cipher = oldCipher })
+
+	meta := validPartialUpdateCAS()
+	template := &msgpb.InsertRequest{Base: &commonpb.MsgBase{}}
+	// CAS must be part of the template before the encoder plans its exact size.
+	require.NoError(t, EncodePartialUpdateCASIntoInsertTemplate(meta, template))
+	encodedBody, err := proto.Marshal(template)
+	require.NoError(t, err)
+	encoder := &partialUpdateCASTestBodyEncoder{payload: encodedBody}
+
+	builder := NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&InsertMessageHeader{CollectionId: 10}).
+		WithBodyEncoder(encoder)
+	require.NoError(t, builder.MarkPartialUpdateCASForBodyEncoder())
+	msg, err := builder.
+		WithCipher(&CipherConfig{EzID: 1, CollectionID: 10}).
+		BuildMutable()
+	require.NoError(t, err)
+	require.Equal(t, 1, encoder.encodedSizeCalls)
+	require.Equal(t, 1, encoder.marshalToCalls)
+
+	marker, ok := msg.Properties().Get(messagePartialUpdateCAS)
+	require.True(t, ok)
+	require.Empty(t, marker)
+	rawPayload := msg.IntoMessageProto().GetPayload()
+	require.NotEqual(t, encodedBody, rawPayload)
+	encodedMeta := template.GetBase().GetProperties()[messagePartialUpdateCAS]
+	require.NotEmpty(t, encodedMeta)
+	require.False(t, bytes.Contains(rawPayload, []byte(encodedMeta)))
+
+	got, err := ExtractPartialUpdateCAS(msg)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(meta, got))
+}
+
 func TestMarkPartialUpdateCASCommit(t *testing.T) {
 	commit := NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
@@ -111,6 +150,25 @@ func TestPartialUpdateCASDefensiveErrors(t *testing.T) {
 			WithHeader(&CommitTxnMessageHeader{}).
 			WithBody(&CommitTxnMessageBody{})
 		require.Error(t, builder.AddPartialUpdateCAS(validPartialUpdateCAS()))
+	})
+
+	t.Run("nil body encoder template", func(t *testing.T) {
+		require.Error(t, EncodePartialUpdateCASIntoInsertTemplate(validPartialUpdateCAS(), nil))
+	})
+
+	t.Run("body encoder marker without encoder", func(t *testing.T) {
+		builder := NewInsertMessageBuilderV1().
+			WithVChannel("v1").
+			WithHeader(&InsertMessageHeader{CollectionId: 10})
+		require.Error(t, builder.MarkPartialUpdateCASForBodyEncoder())
+	})
+
+	t.Run("body encoder marker on non insert", func(t *testing.T) {
+		builder := NewDeleteMessageBuilderV1().
+			WithVChannel("v1").
+			WithHeader(&DeleteMessageHeader{}).
+			WithBodyEncoder(partialUpdateCASTestDeleteBodyEncoder{})
+		require.Error(t, builder.MarkPartialUpdateCASForBodyEncoder())
 	})
 
 	t.Run("commit without property setter", func(t *testing.T) {
@@ -305,4 +363,38 @@ func partialUpdateCASTestXOR(input []byte) []byte {
 		output[i] = value ^ 0xff
 	}
 	return output
+}
+
+type partialUpdateCASTestBodyEncoder struct {
+	payload          []byte
+	encodedSizeCalls int
+	marshalToCalls   int
+}
+
+func (e *partialUpdateCASTestBodyEncoder) EncodedSize() (int, error) {
+	e.encodedSizeCalls++
+	return len(e.payload), nil
+}
+
+func (e *partialUpdateCASTestBodyEncoder) MarshalTo(dst []byte) (int, error) {
+	e.marshalToCalls++
+	return copy(dst, e.payload), nil
+}
+
+func (e *partialUpdateCASTestBodyEncoder) BodyType() *msgpb.InsertRequest {
+	return nil
+}
+
+type partialUpdateCASTestDeleteBodyEncoder struct{}
+
+func (partialUpdateCASTestDeleteBodyEncoder) EncodedSize() (int, error) {
+	return 0, nil
+}
+
+func (partialUpdateCASTestDeleteBodyEncoder) MarshalTo([]byte) (int, error) {
+	return 0, nil
+}
+
+func (partialUpdateCASTestDeleteBodyEncoder) BodyType() *msgpb.DeleteRequest {
+	return nil
 }

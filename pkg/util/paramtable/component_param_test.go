@@ -421,6 +421,13 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := &params.ProxyCfg
 
+		assert.Equal(t, "proxy.splitChunk", Params.SplitChunkProxy.Key)
+		assert.True(t, Params.SplitChunkProxy.GetAsBool())
+		params.Save(Params.SplitChunkProxy.Key, "false")
+		assert.False(t, Params.SplitChunkProxy.GetAsBool())
+		params.Reset(Params.SplitChunkProxy.Key)
+		assert.True(t, Params.SplitChunkProxy.GetAsBool())
+
 		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)
 
 		t.Logf("healthCheckTimeout: %v", &Params.HealthCheckTimeout)
@@ -1036,6 +1043,12 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test streamingConfig", func(t *testing.T) {
+		assert.Equal(t, "streaming.splitChunkSN", params.StreamingCfg.SplitChunkSN.Key)
+		assert.False(t, params.StreamingCfg.SplitChunkSN.GetAsBool())
+		params.Save(params.StreamingCfg.SplitChunkSN.Key, "true")
+		assert.True(t, params.StreamingCfg.SplitChunkSN.GetAsBool())
+		params.Reset(params.StreamingCfg.SplitChunkSN.Key)
+		assert.False(t, params.StreamingCfg.SplitChunkSN.GetAsBool())
 		assert.Equal(t, false, params.StreamingCfg.WALScannerPauseConsumption.GetAsBool())
 		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 10*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())

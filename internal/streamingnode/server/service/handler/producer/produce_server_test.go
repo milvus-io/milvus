@@ -100,7 +100,7 @@ func TestProduceSendArm(t *testing.T) {
 	})
 
 	wal := mock_wal.NewMockWAL(t)
-	wal.EXPECT().Available().Return(make(<-chan struct{}))
+	wal.EXPECT().Unavailable().Return(make(<-chan struct{}))
 
 	p := &ProduceServer{
 		wal: wal,
@@ -324,7 +324,7 @@ func TestProduceServerSendLoop_RateLimitMessage(t *testing.T) {
 	})
 
 	wal := mock_wal.NewMockWAL(t)
-	wal.EXPECT().Available().Return(make(<-chan struct{}))
+	wal.EXPECT().Unavailable().Return(make(<-chan struct{}))
 
 	p := &ProduceServer{
 		wal: wal,
@@ -370,7 +370,7 @@ func TestProduceServerSendLoop_RateLimitMessageError(t *testing.T) {
 	})
 
 	wal := mock_wal.NewMockWAL(t)
-	wal.EXPECT().Available().Return(make(<-chan struct{}))
+	wal.EXPECT().Unavailable().Return(make(<-chan struct{}))
 
 	p := &ProduceServer{
 		wal: wal,
@@ -415,7 +415,7 @@ func TestProduceServerSendLoop_WALUnavailable(t *testing.T) {
 
 	availableCh := make(chan struct{})
 	wal := mock_wal.NewMockWAL(t)
-	wal.EXPECT().Available().Return(availableCh)
+	wal.EXPECT().Unavailable().Return(availableCh)
 
 	p := &ProduceServer{
 		wal: wal,
@@ -954,7 +954,7 @@ func TestProduceServerExecute(t *testing.T) {
 		Name: "test",
 		Term: 1,
 	})
-	l.EXPECT().Available().Return(make(<-chan struct{}))
+	l.EXPECT().Unavailable().Return(make(<-chan struct{}))
 	l.EXPECT().Register(mock.Anything).Return().Maybe()
 	l.EXPECT().Unregister(mock.Anything).Return().Maybe()
 	l.EXPECT().IsAvailable().Return(true)
@@ -1012,4 +1012,24 @@ func TestProduceServerExecute(t *testing.T) {
 
 	// Should have sent at least 2 messages: produce response + close response
 	assert.GreaterOrEqual(t, sendCallCount.Load(), int32(2))
+}
+
+func TestProduceServerValidateMessageRejectsChunkMarkers(t *testing.T) {
+	p := &ProduceServer{}
+
+	// An ordinary message produced by a client is accepted.
+	assert.NoError(t, p.validateMessage(message.CreateTestEmptyInsertMesage(1, nil)))
+
+	// Chunk markers are added below this layer and stripped on reassembly, so a
+	// message carrying them at ingress is foreign. Appending it would be read
+	// back as a corrupted chunk run and fail-stop the whole pchannel.
+	for _, props := range []map[string]string{
+		{"_ci": "0"},
+		{"_ct": "2"},
+		{"_ci": "0", "_ct": "2"},
+		{"_ci": "not-a-number", "_ct": "2"},
+	} {
+		err := p.validateMessage(message.CreateTestEmptyInsertMesage(1, props))
+		assert.Error(t, err, "properties: %v", props)
+	}
 }

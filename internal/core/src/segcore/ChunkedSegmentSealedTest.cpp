@@ -748,7 +748,9 @@ TEST(test_chunk_segment,
     auto old_offsets = segment->GetArrayOffsets(old_label);
     ASSERT_NE(old_offsets, nullptr);
     ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
-    // DataGen marks even-numbered rows valid for nullable fields by default.
+    // DataGen marks alternating rows valid for nullable scalar fields, starting
+    // with row 0. Sealed binlog serialization drops payloads from null rows, so
+    // only the three valid rows contribute elements to the shared offsets.
     constexpr int64_t valid_row_count = (row_count + 1) / 2;
     ASSERT_EQ(old_offsets->GetTotalElementCount(), valid_row_count * array_len);
 

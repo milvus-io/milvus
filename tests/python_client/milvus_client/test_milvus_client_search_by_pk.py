@@ -945,6 +945,82 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 class TestSearchByPkIndependent(TestMilvusClientV2Base):
     """Test search by primary keys functionality with independent collections"""
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_by_pk_preserves_requested_id_order(self):
+        """
+        target: verify search by primary keys preserves the requested ID order
+        method: compare top-1 results from vector search and search by non-ascending primary keys
+        expected: each search-by-PK result block matches the corresponding requested primary key
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 4
+
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field(fast_create_pk_field, DataType.INT64, is_primary=True)
+        schema.add_field(fast_create_vector_field, DataType.FLOAT_VECTOR, dim=dim)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=fast_create_vector_field,
+            index_type="FLAT",
+            metric_type="L2",
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        vectors = {
+            1: [1.0, 0.0, 0.0, 0.0],
+            2: [0.0, 1.0, 0.0, 0.0],
+            3: [0.0, 0.0, 1.0, 0.0],
+        }
+        data = [
+            {fast_create_pk_field: primary_key, fast_create_vector_field: vector}
+            for primary_key, vector in vectors.items()
+        ]
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        requested_ids = [3, 1, 2]
+        check_items = {
+            "enable_milvus_client_api": True,
+            "nq": len(requested_ids),
+            "limit": 1,
+            "metric": "L2",
+            "pk_name": fast_create_pk_field,
+        }
+        baseline_results, _ = self.search(
+            client,
+            collection_name,
+            data=[vectors[primary_key] for primary_key in requested_ids],
+            anns_field=fast_create_vector_field,
+            search_params={"metric_type": "L2", "params": {}},
+            limit=1,
+            check_task=CheckTasks.check_search_results,
+            check_items=check_items,
+        )
+        by_pk_results, _ = self.search(
+            client,
+            collection_name,
+            ids=requested_ids,
+            anns_field=fast_create_vector_field,
+            search_params={"metric_type": "L2", "params": {}},
+            limit=1,
+            check_task=CheckTasks.check_search_results,
+            check_items=check_items,
+        )
+
+        baseline_top1 = [result.ids[0] for result in baseline_results]
+        by_pk_top1 = [result.ids[0] for result in by_pk_results]
+        assert baseline_top1 == requested_ids
+        assert by_pk_top1 == baseline_top1
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_by_pk_on_empty_partition(self):
         """

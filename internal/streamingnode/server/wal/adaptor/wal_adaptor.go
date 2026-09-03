@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -103,6 +104,8 @@ type walAdaptorImpl struct {
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
+	chunkPayloadSizeValue  atomic.Int64                // cached payload budget per chunked WAL record; 0 until first computed.
+	chunkPayloadSizeAt     atomic.Int64                // unixnano of the last chunk-payload-size recompute.
 }
 
 // Metrics returns the metrics of the wal.
@@ -219,7 +222,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			}
 
 			metricsGuard.StartWALImplAppend()
-			msgID, err := w.retryAppendWhenRecoverableError(ctx, msg)
+			msgID, err := w.appendWithOptionalChunking(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
 			if err != nil {
 				return msgID, err
@@ -283,8 +286,94 @@ func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Sca
 	return w.roWALAdaptorImpl.Read(ctx, opts)
 }
 
-// retryAppendWhenRecoverableError retries the append operation when recoverable error occurs.
-func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+// appendWithOptionalChunking appends a logical message, splitting it into WAL
+// records only when streaming.splitChunkSN is enabled. During a rolling
+// upgrade, proxy.splitChunk stays enabled until every StreamingNode has been
+// upgraded and observed streaming.splitChunkSN=true.
+//
+// The timetick durability barrier does not depend on record adjacency: a
+// TimeTick(T) message is only published after every message with ts <= T has
+// been fully appended and acknowledged (the ack manager advances its
+// watermark over the consecutive acknowledged prefix, and a chunked message
+// acknowledges exactly once -- when its whole run is persisted), so no
+// downstream component can ever observe a half-written pack.
+func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	if !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
+		return w.appendOneWithRetry(ctx, msg)
+	}
+
+	chunkPayloadSize := w.chunkPayloadSize()
+	if chunkPayloadSize <= 0 || len(msg.IntoMessageProto().GetPayload()) <= chunkPayloadSize {
+		return w.appendOneWithRetry(ctx, msg)
+	}
+
+	// Split into chunks when the payload exceeds the backend's per-message
+	// limit, so the backend never sees an oversized record. Backends without
+	// a per-record cap (RocksMQ) get a zero budget and keep the pre-chunking
+	// single-record behavior. The successful append attempt of the first chunk
+	// supplies the logical message ID returned to the caller. On durable replay,
+	// the assembler keeps the later payload-identical retry observation, so its
+	// reassembled ID matches the acknowledged one.
+	chunks := message.SplitIntoChunks(msg, chunkPayloadSize)
+
+	var firstID message.MessageID
+	for i, chunk := range chunks {
+		msgID, err := w.appendOneWithRetry(ctx, chunk)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			firstID = msgID
+		}
+	}
+	return firstID, nil
+}
+
+// chunkPayloadSizeRefresh bounds how stale the cached chunk-payload budget may
+// be. The underlying config items (pulsar.maxMessageSize,
+// pulsar.messageReserveSize) are refreshable; a live DOWNWARD refresh takes
+// effect for chunking within this window. Note a message already stuck in
+// appendOneWithRetry's infinite retry loop never re-reads config regardless --
+// that exposure is pre-existing, and the cache only widens it by this window
+// for newly arriving appends.
+const chunkPayloadSizeRefresh = time.Second
+
+// chunkPayloadSize reports the payload-size budget per WAL record: the active
+// backend's enforced limit, or Woodpecker's configured Milvus chunk threshold,
+// minus reserve headroom for properties, cipher metadata, and the backend
+// envelope. A zero value disables chunking because no limit/threshold is
+// configured (RocksMQ or an unrecognized WAL); bounded WAL configuration is
+// normalized to at least 256 KiB before reaching this path.
+//
+// Served from a cache refreshed at most once per chunkPayloadSizeRefresh:
+// GetConfig traverses two concurrent lookup structures plus source resolution,
+// which is not per-append work the hot path should pay.
+func (w *walAdaptorImpl) chunkPayloadSize() int {
+	now := time.Now().UnixNano()
+	last := w.chunkPayloadSizeAt.Load()
+	if last != 0 && now-last < int64(chunkPayloadSizeRefresh) {
+		return int(w.chunkPayloadSizeValue.Load())
+	}
+	size := w.computeChunkPayloadSize()
+	w.chunkPayloadSizeValue.Store(int64(size))
+	w.chunkPayloadSizeAt.Store(now)
+	return size
+}
+
+func (w *walAdaptorImpl) computeChunkPayloadSize() int {
+	walName := w.rwWALImpls.WALName()
+	params := paramtable.Get()
+	maxMessageSize := params.WALMaxMessageSize(walName.String())
+	_, reserve := params.PulsarCfg.GetMessageSizeLimitsFor(maxMessageSize)
+	if maxMessageSize <= 0 || reserve < 0 || reserve >= maxMessageSize {
+		return 0
+	}
+	return maxMessageSize - reserve
+}
+
+// appendOneWithRetry appends a single message, retrying until it succeeds or
+// an unrecoverable error occurs.
+func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 5 * time.Second

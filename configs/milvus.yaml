@@ -190,6 +190,10 @@ woodpecker:
   meta:
     type: etcd # The Type of the metadata provider. currently only support etcd.
     prefix: woodpecker # The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.
+  # The target maximum size of each Woodpecker WAL record produced by Milvus. Unit: Byte.
+  # Woodpecker does not enforce a corresponding single-entry hard limit. Milvus uses this value as the WAL-layer chunk threshold and splits larger payloads into multiple records.
+  # Values below 256 KiB are clamped to 256 KiB. Invalid or out-of-range values fall back to the default 10 MiB limit.
+  maxMessageSize: 10485760
   client:
     segmentAppend:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
@@ -281,9 +285,13 @@ pulsar:
   port: 6650 # Port of Pulsar service.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
-  # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-  # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+  # By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+  # Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.
   maxMessageSize: 2097152
+  # The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+  # A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+  # Must be a 32-bit integer of at least 1024 bytes and smaller than the active WAL backend's message-size limit: a smaller reserve cannot absorb one record's envelope, so a full-budget chunk would still be rejected by the backend. Invalid or out-of-range values fall back to the default reserve size.
+  messageReserveSize: 65536
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
   # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
@@ -316,7 +324,7 @@ pulsar:
 #   producer:
 #     message:
 #       max:
-#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
@@ -379,6 +387,10 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
+  # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
+  # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
+  # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
+  splitChunk: true
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -482,6 +494,11 @@ proxy:
     # string wherever one appears, including inside either kind of array.
     legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+    # cost. Disabling restores the old always-decode behavior.
+    dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
     writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
@@ -1272,7 +1289,19 @@ quotaAndLimits:
     complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
     maxCollectionNum: 65536
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
-    maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
+    # maximum protobuf size of the Proxy-side materialized insert message, in bytes,
+    # for both insert and upsert; -1 means no limit. The check runs after Proxy field
+    # materialization, including generated fields, row IDs, timestamps, namespace data,
+    # and partial-upsert query reconstruction. It does not include later streaming-message
+    # properties, encryption expansion, StreamingNode-generated function fields, or the
+    # broker envelope.
+    maxInsertSize: 67108864
+    # maximum protobuf size of each Proxy-side materialized delete message, in bytes,
+    # for both delete and upsert tombstones; -1 means no limit. The check runs after
+    # primary keys and timestamps are materialized and routed to a vchannel. It does
+    # not include later streaming-message properties, encryption expansion, chunk
+    # markers, or the broker envelope.
+    maxDeleteSize: 16777216
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
     maxGroupSize: 10 # maximum size for one single group when doing search group by
   ddl:
@@ -1481,6 +1510,10 @@ streamingNode:
 
 # Any configuration related to the streaming service.
 streaming:
+  # Whether StreamingNode splits oversized logical messages into physical WAL records.
+  # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
+  # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
+  splitChunkSN: false
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

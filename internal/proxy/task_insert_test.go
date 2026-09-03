@@ -2,10 +2,14 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -19,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -53,6 +58,10 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 			},
 			RowIDs:     []int64{1},
 			Timestamps: []uint64{1},
+			// The proxy always produces column-based inserts (impl.go). Without
+			// it, NRows() reads the empty row-based RowData and the alignment
+			// check rejects the fixture.
+			Version: msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
 	result := &milvuspb.MutationResult{
@@ -383,22 +392,146 @@ func TestInsertTask(t *testing.T) {
 }
 
 func TestMaxInsertSize(t *testing.T) {
-	t.Run("test MaxInsertSize", func(t *testing.T) {
-		paramtable.Init()
-		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, "1")
-		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
-		it := insertTask{
-			ctx: context.Background(),
-			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: &msgpb.InsertRequest{
-					DbName:         "hooooooo",
-					CollectionName: "fooooo",
+	newIDAllocator := func(t *testing.T) *allocator.IDAllocator {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Status(nil),
+			ID:     1000,
+			Count:  10,
+		}, nil)
+		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+		require.NoError(t, err)
+		require.NoError(t, idAllocator.Start())
+		t.Cleanup(idAllocator.Close)
+		return idAllocator
+	}
+	newPrimaryFieldData := func() *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "id",
+			FieldId:   100,
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1}},
+					},
 				},
 			},
 		}
+	}
+	newValueFieldData := func() *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{strings.Repeat("x", 512)}},
+					},
+				},
+			},
+		}
+	}
+	const (
+		dbName         = "test_db"
+		collectionName = "test_max_insert_size"
+	)
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "value",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "1024"},
+				},
+			},
+		},
+	}
+	schema := mustNewSchemaInfo(collectionSchema)
+
+	t.Run("insert checks the materialized message", func(t *testing.T) {
+		paramtable.Init()
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID", mock.Anything, dbName, collectionName).Return(UniqueID(100), nil)
+		cache.On("GetCollectionInfo", mock.Anything, dbName, collectionName, UniqueID(100)).Return(&collectionInfo{Schema: schema}, nil)
+		cache.On("GetCollectionSchema", mock.Anything, dbName, collectionName).Return(schema, nil)
+		it := insertTask{
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Insert)),
+					DbName:         dbName,
+					CollectionName: collectionName,
+					PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+					FieldsData:     []*schemapb.FieldData{newPrimaryFieldData(), newValueFieldData()},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+			idAllocator: newIDAllocator(t),
+		}
+		require.NoError(t, validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()))
+		incomingSize := it.insertMsg.Size()
+		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, strconv.Itoa(incomingSize))
+		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+
 		err := it.PreExecute(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.Greater(t, it.insertMsg.Size(), incomingSize)
+	})
+
+	t.Run("upsert checks the materialized insert message", func(t *testing.T) {
+		paramtable.Init()
+		ut := upsertTask{
+			ctx:         context.Background(),
+			idAllocator: newIDAllocator(t),
+			schema:      schema,
+			result:      &milvuspb.MutationResult{},
+			req: &milvuspb.UpsertRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				FieldsData:     []*schemapb.FieldData{newPrimaryFieldData()},
+				NumRows:        1,
+				PartialUpdate:  true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Insert)),
+						DbName:         dbName,
+						CollectionName: collectionName,
+						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+						// queryPreExecute has already reconstructed the complete row
+						// before insertPreExecute is called.
+						FieldsData: []*schemapb.FieldData{newPrimaryFieldData(), newValueFieldData()},
+						NumRows:    1,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+		}
+		materializationInputSize := ut.upsertMsg.InsertMsg.Size()
+		require.Less(t, proto.Size(ut.req), materializationInputSize)
+		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, strconv.Itoa(materializationInputSize))
+		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+
+		err := ut.insertPreExecute(context.Background())
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.Greater(t, ut.upsertMsg.InsertMsg.Size(), materializationInputSize)
+	})
+
+	t.Run("-1 still disables the limit", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, "-1")
+		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+		assert.NoError(t, checkMaxInsertSize(context.Background(), "insert", 1<<30))
 	})
 }
 

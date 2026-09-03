@@ -183,9 +183,19 @@ func TestQuotaParam(t *testing.T) {
 		params.Save(params.QuotaConfig.MaxResourceGroupNumOfQueryNode.Key, "512")
 		assert.Equal(t, 512, params.QuotaConfig.MaxResourceGroupNumOfQueryNode.GetAsInt())
 
-		assert.Equal(t, -1, qc.MaxInsertSize.GetAsInt())
+		assert.Equal(t, 64*1024*1024, qc.MaxInsertSize.GetAsInt())
 		baseParams.Save(params.QuotaConfig.MaxInsertSize.Key, "1024")
 		assert.Equal(t, 1024, qc.MaxInsertSize.GetAsInt())
+		baseParams.Save(params.QuotaConfig.MaxInsertSize.Key, "-1")
+		assert.Equal(t, -1, qc.MaxInsertSize.GetAsInt())
+		baseParams.Reset(params.QuotaConfig.MaxInsertSize.Key)
+
+		assert.Equal(t, 16*1024*1024, qc.MaxDeleteSize.GetAsInt())
+		baseParams.Save(params.QuotaConfig.MaxDeleteSize.Key, "1024")
+		assert.Equal(t, 1024, qc.MaxDeleteSize.GetAsInt())
+		baseParams.Save(params.QuotaConfig.MaxDeleteSize.Key, "-1")
+		assert.Equal(t, -1, qc.MaxDeleteSize.GetAsInt())
+		baseParams.Reset(params.QuotaConfig.MaxDeleteSize.Key)
 	})
 
 	t.Run("test limit writing", func(t *testing.T) {
