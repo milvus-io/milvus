@@ -361,6 +361,13 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 3)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
@@ -400,6 +407,13 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 0)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)

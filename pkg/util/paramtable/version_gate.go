@@ -37,6 +37,10 @@ import (
 // applies the per-gate SwitchDelay stability window.
 const checkInterval = 100 * time.Millisecond
 
+// maxScanBackoff caps the exponential backoff of the session-scan retry in
+// watchLoop, so an unreachable etcd is not polled at the check rate forever.
+const maxScanBackoff = 5 * time.Second
+
 // sessionVersion is the minimal session info used for scanning, carrying only
 // the registered node version.
 type sessionVersion struct {
@@ -55,6 +59,13 @@ type gate struct {
 	resolved bool
 	armedAt  time.Time // when the cluster first stayed above GateVersion (zero = not armed)
 	wasAbove bool      // whether the cluster was above GateVersion at the last check
+
+	// retryAt is the earliest time the due flip may be retried after a
+	// transient failure (etcd unreachable, flip CAS error). The retry backs
+	// off exponentially up to SwitchDelay so a broken config center is not
+	// hammered at the check interval; zero means no backoff pending.
+	retryAt time.Time
+	backoff time.Duration
 }
 
 // confirmator is the one-shot cluster version confirmator. It is a
@@ -214,6 +225,7 @@ func (c *confirmator) close() {
 // rebuilds the watch from a fresh revision.
 func (c *confirmator) watchLoop(ctx context.Context) {
 	defer c.wg.Done()
+	scanBackoff := checkInterval
 	for {
 		rev, err := c.reloadSessions(ctx)
 		if err != nil {
@@ -221,11 +233,16 @@ func (c *confirmator) watchLoop(ctx context.Context) {
 				return
 			}
 			mlog.Warn(ctx, "version gate: session scan failed, retry", mlog.Err(err))
-			if !sleepCtx(ctx, checkInterval) {
+			if !sleepCtx(ctx, scanBackoff) {
 				return
+			}
+			scanBackoff *= 2
+			if scanBackoff > maxScanBackoff {
+				scanBackoff = maxScanBackoff
 			}
 			continue
 		}
+		scanBackoff = checkInterval
 		wch := c.cli.Watch(ctx, c.sessionPrefix, clientv3.WithPrefix(), clientv3.WithRev(rev))
 		for resp := range wch {
 			if err := resp.Err(); err != nil {
@@ -348,9 +365,16 @@ func (c *confirmator) processGates(ctx context.Context) bool {
 		}
 		g.wasAbove = above
 		due := above && !g.armedAt.IsZero() && now.Sub(g.armedAt) >= g.switcher.SwitchDelay
+		retryAt := g.retryAt
 		c.mu.Unlock()
 
 		if due {
+			if now.Before(retryAt) {
+				// A previous flip attempt failed transiently; back off instead
+				// of hammering the config center at the check interval.
+				allDone = false
+				continue
+			}
 			if !c.recheckAndFlip(ctx, g) {
 				allDone = false
 				continue
@@ -372,10 +396,12 @@ func (c *confirmator) processGates(ctx context.Context) bool {
 // read before the irreversible flip (the session watch is event-driven and its
 // events may lag behind the flip check), then performs the flip. It returns
 // true when the gate is resolved (flipped, or superseded by an explicit config
-// value).
+// value). Transient failures (etcd scan/flip errors) grow the gate's retry
+// backoff exponentially up to the SwitchDelay cap.
 func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 	min, _, err := c.scanSessions(ctx)
 	if err != nil {
+		c.backoffForRetryLocked(g)
 		mlog.Warn(ctx, "version gate: re-check sessions failed, retry later",
 			mlog.String("key", g.key), mlog.Err(err))
 		return false
@@ -384,6 +410,8 @@ func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 		c.mu.Lock()
 		g.armedAt = time.Time{}
 		g.wasAbove = false
+		g.retryAt = time.Time{}
+		g.backoff = 0
 		c.mu.Unlock()
 		mlog.Warn(ctx, "version gate: cluster below gate version at flip time, reset stability window",
 			mlog.String("key", g.key), mlog.String("gateVersion", g.switcher.GateVersion),
@@ -391,11 +419,33 @@ func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 		return false
 	}
 	if err := c.flip(ctx, g); err != nil {
+		c.backoffForRetryLocked(g)
 		mlog.Warn(ctx, "version gate: flip failed, will retry",
 			mlog.String("key", g.key), mlog.Err(err))
 		return false
 	}
+	// Flip succeeded (or the gate was superseded by an explicit value):
+	// clear any accumulated backoff.
+	c.mu.Lock()
+	g.retryAt = time.Time{}
+	g.backoff = 0
+	c.mu.Unlock()
 	return true
+}
+
+// backoffForRetryLocked grows the gate's flip-retry backoff exponentially up
+// to the SwitchDelay cap and schedules the next retry at now+backoff. Caller
+// must hold c.mu.
+func (c *confirmator) backoffForRetryLocked(g *gate) {
+	if g.backoff == 0 {
+		g.backoff = checkInterval
+	} else {
+		g.backoff *= 2
+	}
+	if g.backoff > g.switcher.SwitchDelay {
+		g.backoff = g.switcher.SwitchDelay
+	}
+	g.retryAt = time.Now().Add(g.backoff)
 }
 
 // flip writes the gate's TargetValue into the config center once. The write is
