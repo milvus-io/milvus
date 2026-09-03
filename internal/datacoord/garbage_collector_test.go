@@ -4138,6 +4138,53 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 		"JSON stats files should not be removed when segment is referenced by snapshot")
 }
 
+func TestGarbageCollector_recycleUnusedJSONStatsFiles_GlobalFormatPrefixOnce(t *testing.T) {
+	ctx := context.Background()
+	segments := make(map[int64]*SegmentInfo)
+	for segmentID := int64(1); segmentID <= 2; segmentID++ {
+		segments[segmentID] = &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           segmentID,
+				CollectionID: 100,
+				PartitionID:  10,
+				State:        commonpb.SegmentState_Flushed,
+				JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+					102: {
+						FieldID:                102,
+						Version:                1,
+						JsonKeyStatsDataFormat: 3,
+					},
+				},
+			},
+		}
+	}
+
+	meta := &meta{
+		catalog:    &datacoord.Catalog{},
+		segments:   &SegmentsInfo{segments: segments},
+		channelCPs: newChannelCps(),
+	}
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{cli: cli})
+
+	walkCalls := make(map[string]int)
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			walkCalls[prefix]++
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	gc.recycleUnusedJSONStatsFiles(ctx, nil)
+
+	assert.Equal(t, map[string]int{
+		"gc/json_stats/1": 1,
+		"gc/json_stats/2": 1,
+	}, walkCalls)
+}
+
 func Test_parseV3SegmentID(t *testing.T) {
 	rootPath := "files"
 
