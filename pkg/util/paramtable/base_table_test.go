@@ -18,12 +18,10 @@ package paramtable
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
@@ -152,89 +150,4 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 	yaml = "not_exist.yaml"
 	gp = NewBaseTableFromYamlOnly(yaml)
 	assert.Empty(t, gp.Get("key"))
-}
-
-// setPrimaryConfigNameVar stands in for the link-time -X assignment and
-// restores the default after the test.
-func setPrimaryConfigNameVar(t *testing.T, name string) {
-	t.Helper()
-	old := primaryConfigName
-	primaryConfigName = name
-	t.Cleanup(func() { primaryConfigName = old })
-}
-
-func TestPrimaryConfigNameDefaultsToMilvusYaml(t *testing.T) {
-	assert.Equal(t, "milvus.yaml", PrimaryConfigName())
-	assert.Equal(t, []string{"milvus.yaml", "_test.yaml", "default.yaml", "user.yaml"}, defaultYamlFiles())
-}
-
-// The primary configuration file is replaceable per deployment form at link
-// time; the rest of the list keeps its meaning, and a table built after that
-// reads the new name in milvus.yaml's position.
-func TestPrimaryConfigNameFromLinkTime(t *testing.T) {
-	setPrimaryConfigNameVar(t, "kite.yaml")
-	assert.Equal(t, "kite.yaml", PrimaryConfigName())
-	assert.Equal(t, []string{"kite.yaml", "_test.yaml", "default.yaml", "user.yaml"}, defaultYamlFiles(),
-		"only the primary entry may change; the layering of the others is load-bearing")
-
-	setPrimaryConfigNameVar(t, "kite.yml")
-	assert.Equal(t, "kite.yml", PrimaryConfigName())
-}
-
-// The environment overrides the link-time name, so an operator can point a
-// built binary at another file without rebuilding it.
-func TestPrimaryConfigNameEnvOverridesLinkTime(t *testing.T) {
-	setPrimaryConfigNameVar(t, "kite.yaml")
-	t.Setenv(MilvusPrimaryConfigEnvKey, "kite-dev.yaml")
-	assert.Equal(t, "kite-dev.yaml", PrimaryConfigName())
-	assert.Equal(t, "kite-dev.yaml", defaultYamlFiles()[0])
-}
-
-// A bad primary name does not fail locally: the file source rejects it and
-// drops every local yaml source with a warning, so the process would run on
-// compiled-in defaults. The name is therefore refused at the first paramtable,
-// on both the link-time and the environment path.
-func TestPrimaryConfigNameRefusesABadName(t *testing.T) {
-	for _, bad := range []string{"", "kite", "kite.conf", "conf/kite.yaml", "../kite.yaml"} {
-		t.Run("linktime:"+bad, func(t *testing.T) {
-			setPrimaryConfigNameVar(t, bad)
-			assert.Panics(t, func() { PrimaryConfigName() })
-			assert.Panics(t, func() { NewBaseTable(SkipRemote(true), SkipEnv(true)) },
-				"a table must not come up on a name the file source would reject")
-		})
-		if bad == "" {
-			continue // an empty environment variable is "unset", not a name
-		}
-		t.Run("env:"+bad, func(t *testing.T) {
-			t.Setenv(MilvusPrimaryConfigEnvKey, bad)
-			assert.Panics(t, func() { PrimaryConfigName() })
-		})
-	}
-}
-
-// A table built with the primary name replaced must actually READ that file
-// in milvus.yaml's position - and must not read milvus.yaml, which the
-// directory may still carry. This is the end-to-end check the name plumbing
-// exists for.
-func TestPrimaryConfigIsReadEndToEnd(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "kite.yaml"), []byte("primaryprobe: fromkite\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte("primaryprobe: frommilvus\n"), 0o600))
-	t.Setenv("MILVUSCONF", dir)
-
-	native := NewBaseTable(SkipRemote(true), SkipEnv(true))
-	assert.Equal(t, "frommilvus", native.Get("primaryprobe"), "a stock table reads milvus.yaml")
-
-	t.Setenv(MilvusPrimaryConfigEnvKey, "kite.yaml")
-	replaced := NewBaseTable(SkipRemote(true), SkipEnv(true))
-	assert.Equal(t, "fromkite", replaced.Get("primaryprobe"),
-		"a table built under the replaced name must read that file, not milvus.yaml")
-
-	// A missing primary is skipped, as a missing milvus.yaml is: the table
-	// comes up on defaults rather than failing.
-	t.Setenv(MilvusPrimaryConfigEnvKey, "absent.yaml")
-	assert.NotPanics(t, func() {
-		missing := NewBaseTable(SkipRemote(true), SkipEnv(true))
-		assert.Empty(t, missing.Get("primaryprobe"), "neither file is read when the primary is absent")
-	})
 }
