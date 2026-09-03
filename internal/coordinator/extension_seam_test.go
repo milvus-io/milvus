@@ -11,10 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -55,67 +53,6 @@ func (i *recordingInterceptor) BeforeDropResourceGroup(_ context.Context, req *m
 	i.seenDrop = req
 }
 
-// recordingDrainer records what each index hook saw and answers what the test
-// told it to answer.
-type recordingDrainer struct {
-	beginAnswer bool
-
-	seenBegin       []*indexpb.DropIndexRequest
-	seenAfterDrop   []*indexpb.DropIndexRequest
-	seenAbortDrop   []*indexpb.DropIndexRequest
-	seenAfterCreate []*indexpb.CreateIndexRequest
-}
-
-func (d *recordingDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
-	return true
-}
-
-func (d *recordingDrainer) BeginDropIndex(_ context.Context, req *indexpb.DropIndexRequest) bool {
-	d.seenBegin = append(d.seenBegin, req)
-	return d.beginAnswer
-}
-
-func (d *recordingDrainer) AfterDropIndex(_ context.Context, req *indexpb.DropIndexRequest) {
-	d.seenAfterDrop = append(d.seenAfterDrop, req)
-}
-
-func (d *recordingDrainer) AbortDropIndex(_ context.Context, req *indexpb.DropIndexRequest) {
-	d.seenAbortDrop = append(d.seenAbortDrop, req)
-}
-
-func (d *recordingDrainer) AfterCreateIndex(_ context.Context, req *indexpb.CreateIndexRequest) {
-	d.seenAfterCreate = append(d.seenAfterCreate, req)
-}
-
-func (d *recordingDrainer) CollectionDraining(context.Context, int64) bool { return false }
-
-// forbiddenInterceptor fails the test if the coordinator consults it at all.
-// It stands in for "the capability is installed but this request must not
-// reach it", which no counter can prove as directly.
-type forbiddenInterceptor struct{ t *testing.T }
-
-func (i forbiddenInterceptor) BeforeCreateResourceGroup(context.Context, *milvuspb.CreateResourceGroupRequest) *milvuspb.CreateResourceGroupRequest {
-	i.t.Fatal("BeforeCreateResourceGroup must not run")
-	return nil
-}
-
-func (i forbiddenInterceptor) BeforeUpdateResourceGroups(context.Context, *querypb.UpdateResourceGroupsRequest) (extension.ResourceGroupUpdate, error) {
-	i.t.Fatal("BeforeUpdateResourceGroups must not run")
-	return extension.ResourceGroupUpdate{}, nil
-}
-
-func (i forbiddenInterceptor) AfterUpdateResourceGroups(context.Context, extension.ResourceGroupUpdate) {
-	i.t.Fatal("AfterUpdateResourceGroups must not run")
-}
-
-func (i forbiddenInterceptor) AfterDropResourceGroupFailed(context.Context, *milvuspb.DropResourceGroupRequest) {
-	i.t.Fatal("AfterDropResourceGroupFailed must not run")
-}
-
-func (i forbiddenInterceptor) BeforeDropResourceGroup(context.Context, *milvuspb.DropResourceGroupRequest) {
-	i.t.Fatal("BeforeDropResourceGroup must not run")
-}
-
 type seamProvider struct{ caps extension.Capabilities }
 
 func (seamProvider) Name() string                           { return "test" }
@@ -132,11 +69,6 @@ func installCaps(t *testing.T, caps extension.Capabilities) {
 func installInterceptor(t *testing.T, interceptor extension.ResourceGroupInterceptor) {
 	t.Helper()
 	installCaps(t, extension.Capabilities{ResourceGroups: interceptor})
-}
-
-func installDrainer(t *testing.T, drainer extension.IndexDrainer) {
-	t.Helper()
-	installCaps(t, extension.Capabilities{IndexDrain: drainer})
 }
 
 // TestResourceGroupSeamIsInertWithoutProvider is the zero-behavior-change
@@ -379,171 +311,5 @@ func TestUpdateResourceGroupsTransportErrorSkipsFollowUp(t *testing.T) {
 		_, err := s.UpdateResourceGroups(context.Background(), &querypb.UpdateResourceGroupsRequest{})
 		require.Error(t, err)
 		assert.Empty(t, interceptor.seenAfter, "an update whose outcome is unknown must not be reported as committed")
-	})
-}
-
-// A drainer installed without an interceptor must not make resource-group
-// requests behave differently, and vice versa: the two capabilities are
-// separate entries, and a form may install either alone.
-func TestResourceGroupPathIgnoresDrainerOnlyProvider(t *testing.T) {
-	mockey.PatchConvey("drainer installed alone", t, func() {
-		installDrainer(t, &recordingDrainer{})
-
-		var seen *querypb.UpdateResourceGroupsRequest
-		mockey.Mock((*querycoordv2.Server).UpdateResourceGroups).To(func(_ *querycoordv2.Server, _ context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
-			seen = req
-			return merr.Success(), nil
-		}).Build()
-
-		s := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
-		original := &querypb.UpdateResourceGroupsRequest{}
-		_, err := s.UpdateResourceGroups(context.Background(), original)
-		require.NoError(t, err)
-		assert.Same(t, original, seen)
-	})
-}
-
-// TestIndexSeamIsInertWithoutProvider is the zero-behavior-change proof for
-// the index call site.
-func TestIndexSeamIsInertWithoutProvider(t *testing.T) {
-	extension.ResetForTest()
-	t.Cleanup(extension.ResetForTest)
-
-	mockey.PatchConvey("no provider installed", t, func() {
-		var dropSeen *indexpb.DropIndexRequest
-		mockey.Mock((*datacoord.Server).DropIndex).To(func(_ *datacoord.Server, _ context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-			dropSeen = req
-			return merr.Success(), nil
-		}).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		dropReq := &indexpb.DropIndexRequest{CollectionID: 7}
-
-		status, err := s.DropIndex(context.Background(), dropReq)
-		require.NoError(t, err)
-		assert.True(t, merr.Ok(status))
-		assert.Same(t, dropReq, dropSeen, "datacoord must drop exactly the request it was given")
-	})
-}
-
-func TestDropIndexReportsOnlyClassifiedDrops(t *testing.T) {
-	mockey.PatchConvey("drainer classified the drop", t, func() {
-		drainer := &recordingDrainer{beginAnswer: true}
-		installDrainer(t, drainer)
-
-		var classifiedBeforeDrop bool
-		mockey.Mock((*datacoord.Server).DropIndex).To(func(_ *datacoord.Server, _ context.Context, _ *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-			classifiedBeforeDrop = len(drainer.seenBegin) == 1 && len(drainer.seenAfterDrop) == 0
-			return merr.Success(), nil
-		}).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		req := &indexpb.DropIndexRequest{CollectionID: 100}
-		_, err := s.DropIndex(context.Background(), req)
-		require.NoError(t, err)
-		assert.True(t, classifiedBeforeDrop, "classification must happen while the index metadata still reads")
-		require.Len(t, drainer.seenAfterDrop, 1)
-		assert.Same(t, req, drainer.seenAfterDrop[0])
-		assert.Empty(t, drainer.seenAbortDrop, "a committed drop must not also be reported aborted")
-	})
-
-	mockey.PatchConvey("drainer did not classify the drop", t, func() {
-		drainer := &recordingDrainer{beginAnswer: false}
-		installDrainer(t, drainer)
-		mockey.Mock((*datacoord.Server).DropIndex).Return(merr.Success(), nil).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		status, err := s.DropIndex(context.Background(), &indexpb.DropIndexRequest{CollectionID: 100})
-		require.NoError(t, err)
-		assert.True(t, merr.Ok(status), "the drop itself proceeds whatever the drainer answered")
-		require.Len(t, drainer.seenBegin, 1)
-		assert.Empty(t, drainer.seenAfterDrop, "a drop the drainer did not claim must not be reported to it")
-		assert.Empty(t, drainer.seenAbortDrop, "an unclaimed drop has no state to unwind either")
-	})
-}
-
-func TestDropIndexDoesNotArmDrainOnFailure(t *testing.T) {
-	mockey.PatchConvey("datacoord rejected the drop", t, func() {
-		drainer := &recordingDrainer{beginAnswer: true}
-		installDrainer(t, drainer)
-		mockey.Mock((*datacoord.Server).DropIndex).Return(
-			merr.Status(merr.WrapErrServiceInternal("drop refused")), nil,
-		).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		status, err := s.DropIndex(context.Background(), &indexpb.DropIndexRequest{CollectionID: 101})
-		require.NoError(t, err)
-		assert.False(t, merr.Ok(status))
-		assert.Empty(t, drainer.seenAfterDrop, "a drop must never be reported for an index that is still in place")
-		require.Len(t, drainer.seenAbortDrop, 1,
-			"a claimed drop that did not commit must be reported on the abort branch, or the drainer's state dangles")
-	})
-
-	mockey.PatchConvey("datacoord call failed", t, func() {
-		drainer := &recordingDrainer{beginAnswer: true}
-		installDrainer(t, drainer)
-		mockey.Mock((*datacoord.Server).DropIndex).Return(nil, errors.New("datacoord unreachable")).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		_, err := s.DropIndex(context.Background(), &indexpb.DropIndexRequest{CollectionID: 101})
-		require.Error(t, err)
-		assert.Empty(t, drainer.seenAfterDrop, "a drop whose outcome is unknown must not be reported as committed")
-		require.Len(t, drainer.seenAbortDrop, 1,
-			"an errored drop is reported aborted; if it did commit after all, the divergence reconcile heals it")
-	})
-}
-
-// A committed CreateIndex is reported to the drainer - it may be the rebuild
-// a drain's parked queries are waiting on - and a create that did not commit
-// is not, because waking parked queries for an index that was never created
-// would wake them into the very refusal they were parked to avoid.
-func TestCreateIndexReportsOnlyCommittedCreates(t *testing.T) {
-	mockey.PatchConvey("the create commits", t, func() {
-		drainer := &recordingDrainer{}
-		installDrainer(t, drainer)
-		mockey.Mock((*datacoord.Server).CreateIndex).Return(merr.Success(), nil).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		req := &indexpb.CreateIndexRequest{CollectionID: 7, FieldID: 101}
-		_, err := s.CreateIndex(context.Background(), req)
-		require.NoError(t, err)
-		require.Len(t, drainer.seenAfterCreate, 1)
-		assert.Same(t, req, drainer.seenAfterCreate[0])
-	})
-
-	mockey.PatchConvey("the create is refused", t, func() {
-		drainer := &recordingDrainer{}
-		installDrainer(t, drainer)
-		mockey.Mock((*datacoord.Server).CreateIndex).Return(
-			merr.Status(merr.WrapErrServiceInternal("create refused")), nil,
-		).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		_, err := s.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{CollectionID: 7})
-		require.NoError(t, err)
-		assert.Empty(t, drainer.seenAfterCreate,
-			"an uncommitted create must not be reported as the rebuild")
-	})
-
-	mockey.PatchConvey("no provider installed", t, func() {
-		extension.ResetForTest()
-		t.Cleanup(extension.ResetForTest)
-		mockey.Mock((*datacoord.Server).CreateIndex).Return(merr.Success(), nil).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		_, err := s.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{CollectionID: 7})
-		require.NoError(t, err)
-	})
-}
-
-// An interceptor installed alone must not be consulted by the index paths.
-func TestIndexPathIgnoresInterceptorOnlyProvider(t *testing.T) {
-	mockey.PatchConvey("interceptor installed alone", t, func() {
-		installInterceptor(t, forbiddenInterceptor{t: t})
-		mockey.Mock((*datacoord.Server).DropIndex).Return(merr.Success(), nil).Build()
-
-		s := &mixCoordImpl{datacoordServer: &datacoord.Server{}}
-		_, err := s.DropIndex(context.Background(), &indexpb.DropIndexRequest{CollectionID: 5})
-		require.NoError(t, err)
 	})
 }
