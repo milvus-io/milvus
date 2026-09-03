@@ -11,7 +11,7 @@ segments. Delete is the initial transform payload. QueryNode and StreamingNode
 query resources consume the L0 output to advance transform visibility.
 
 Per-message ownership is defined by
-[WAL Message Ack Design](../message_ack.md).
+[WAL Message Ack Design](message_ack.md).
 
 ## 1. Ownership
 
@@ -19,18 +19,18 @@ Per-message ownership is defined by
 RecoveryStorage (pchannel)
   -> PChannelRecoveryManager
        +-- VChannelRecoveryModule A
-       |     +-- summaryView (walsummary.SummaryView of vchannel A)
+       |     +-- summaryView (per-vchannel view of the walsummary.Manager)
        |     +-- TransformLog A   (materialize-only consumer)
        +-- VChannelRecoveryModule B
-       |     +-- summaryView (walsummary.SummaryView of vchannel B)
+       |     +-- summaryView (per-vchannel view of the walsummary.Manager)
        |     +-- TransformLog B
        +-- walsummary.Manager (pchannel-scoped summary store, owns persistence)
              +-- views per vchannel
 ```
 
-Persistence lives exclusively in the [WALSummary](../summary.md) of the
-pchannel; the TransformLog owns **no** buffer, no chunk objects, and no catalog
-metadata.
+Persistence lives exclusively in the [WALSummary](summary.md) of the
+pchannel; the TransformLog owns **no persistent** buffer, no chunk objects,
+and no catalog metadata.
 
 TransformLog owns:
 
@@ -49,7 +49,7 @@ a per-vchannel section, plus a manifest. The summary decides **entirely on its
 own** when records become durable:
 
 - autonomous flush at the binary size threshold;
-- forced persistence through `RequestPersistThrough` (tracker stall / under
+- forced persistence through `RequestFlushThrough` (tracker stall / under
   pressure).
 
 There is no barrier trigger: external write APIs never force a summary flush.
@@ -57,8 +57,9 @@ The TransformLog never reads the summary store and never triggers persistence,
 and — crucially — **never waits for persistence either**: it observes the
 vchannel's messages directly and keeps its own window. L0 materialization and
 WALSummary persistence are not ordered against each other in any way. The
-message handles are retained by the summary view and released only after the
-covering chunk and manifest are durable, which still guarantees
+summary retains no WAL message handle: it keeps each record's WAL position and
+advances its confirmation frontier only after the covering chunk and manifest
+are durable, which still guarantees
 **WAL checkpoint <= durable summary frontier**; the materialization frontier
 may be ahead of or behind the durable frontier at any moment without losing
 data (see Recovery).
@@ -67,7 +68,7 @@ data (see Recovery).
 
 | Kind | WAL messages | Effect |
 |---|---|---|
-| Payload | Delete, committed Txn containing Delete | `summaryView.ObserveMessage` appends one ordered Delete record to the summary staging; `TransformLog.ObserveMessage` appends the same record to its own materialization window. |
+| Payload | Delete, committed Txn containing Delete | the summary's `Manager.ObserveMessage` (pchannel-level) appends one ordered Delete record to the summary staging; `TransformLog.ObserveMessage` appends the same record to its own materialization window. |
 | Barrier | RecoveryBarrier, Flush, ManualFlush, FlushAll, DropPartition, DropCollection, TruncateCollection, CreateCollection, schema-changing AlterCollection, AlterWAL | VChannel-level handlers only (segment flush etc.). No transform effect: neither the summary nor the TransformLog reacts to barriers. |
 | None | Insert and other messages | No transform effect. |
 
@@ -80,9 +81,9 @@ There is one Observe path for recovery and live messages:
 
 1. classify the message;
 2. return for `None`;
-3. `summaryView.ObserveMessage`: build the transform record (a standalone
-   proto), append it to the view staging, retain a message handle, and let the
-   summary decide about flushing (size threshold);
+3. the summary's `Manager.ObserveMessage`: build the transform record (a
+   standalone proto), append it to the summary staging, keep its WAL position,
+   and let the summary decide about flushing (size threshold);
 4. `TransformLog.ObserveMessage`: build the same record, skip it when its
    timetick is at or below the committed frontier or the recovery-loaded
    window coverage, append it to `pending` otherwise, and schedule a
@@ -108,7 +109,7 @@ committed frontier, in ascending timetick order:
 Replay deduplication: after a restart, WAL replay re-observes the records the
 recovered window already holds. Observation skips records at or below
 `loadedThrough`, so the window never duplicates the recovered backlog; the
-summary view independently skips records at or below its restored durable
+summary independently skips records at or below its restored durable
 frontier, so the same records are never rewritten into new chunks.
 
 ## 6. L0 Materialization
@@ -152,17 +153,18 @@ protocol and requires lifecycle idempotency or reconciliation.
 
 ## 7. Recovery
 
-1. the summary recovers its manifest (and fences the term via the catalog
-   meta);
+1. the summary restores its manifest (`Manager.Restore`: read the manifest of
+   the own term, probe forward for chunks, inherit the previous term's index
+   on a term handoff);
 2. for every vchannel, recovery loads the initial materialization window once:
    `summaryManager.ReadTransformEntries(vchannel, materializedTimeTick, +inf)`
    — the only read of the summary store in the whole consumer path; the
    coverage of the load becomes `loadedThrough`;
 3. the module restores `materialized_time_tick` from
    `VChannelMeta.transform_materialized_time_tick` and seeds the window;
-4. the summary view's durable frontier is restored from the manifest
-   (`Manager.DurableTimeTick` / `SetDurableTimeTick`), so replay does not
-   re-stage already-durable records;
+4. the summary's durable frontier per vchannel is restored from the manifest
+   (`Manager.DurableTimeTick`), so replay does not re-stage already-durable
+   records;
 5. live operation continues from the restored frontier.
 
 Consistency argument (no ordering between materialization and persistence):
@@ -180,10 +182,10 @@ Consistency argument (no ordering between materialization and persistence):
 ## 8. GC
 
 The summary releases chunk objects by retention budget, bounded below by the
-per-vchannel materialization frontiers mirrored via
-`Manager.SetMaterializedTimeTick`. A chunk fully covered by the materialization
-frontier is guaranteed to have been materialized (its L0 output is durable), so
-releasing it cannot lose transform data.
+per-vchannel GC positions (`Manager.AdvanceGCTimeTick`, restored by
+`Manager.Restore` from the vchannel metas). A chunk fully covered by the
+materialization frontier is guaranteed to have been materialized (its L0
+output is durable), so releasing it cannot lose transform data.
 
 ## 9. Invariants
 
