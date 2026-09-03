@@ -17,11 +17,13 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -35,64 +37,24 @@ import (
 const (
 	pathReplaceParentArray       = "array"
 	pathReplaceParentStructArray = "struct_array"
-
-	pathReplaceResultSuccess        = "success"
-	pathReplaceResultInvalidPath    = "invalid_path"
-	pathReplaceResultMissingPK      = "missing_pk"
-	pathReplaceResultNullParent     = "null_parent"
-	pathReplaceResultOutOfRange     = "out_of_range"
-	pathReplaceResultInvalidOperand = "invalid_operand"
-	pathReplaceResultInternalError  = "internal_error"
 )
 
-type pathReplaceCategorizedError struct {
-	category string
-	cause    error
-}
-
-func (e *pathReplaceCategorizedError) Error() string {
-	return e.cause.Error()
-}
-
-func (e *pathReplaceCategorizedError) Unwrap() error {
-	return e.cause
-}
-
-func categorizePathReplaceError(category string, err error) error {
-	if err == nil {
-		return nil
+func observePathReplaceParentOperations(req *milvuspb.UpsertRequest, plans map[string]*fieldPartialUpdatePlan) {
+	for _, plan := range plans {
+		if !plan.isPathReplace() {
+			continue
+		}
+		parentType := pathReplaceParentArray
+		if plan.structParent != nil {
+			parentType = pathReplaceParentStructArray
+		}
+		metrics.ProxyPathReplaceParentOperations.WithLabelValues(
+			paramtable.GetStringNodeID(),
+			req.GetDbName(),
+			req.GetCollectionName(),
+			parentType,
+		).Inc()
 	}
-	var categorized *pathReplaceCategorizedError
-	if errors.As(err, &categorized) {
-		return err
-	}
-	return &pathReplaceCategorizedError{category: category, cause: err}
-}
-
-func pathReplaceResultCategory(err error) string {
-	if err == nil {
-		return pathReplaceResultSuccess
-	}
-	var categorized *pathReplaceCategorizedError
-	if errors.As(err, &categorized) {
-		return categorized.category
-	}
-	if merr.GetErrorType(err) == merr.InputError {
-		return pathReplaceResultInvalidOperand
-	}
-	return pathReplaceResultInternalError
-}
-
-func observePathReplaceResult(req *milvuspb.UpsertRequest, err error) {
-	if !hasPathReplaceOp(req) {
-		return
-	}
-	metrics.ProxyPathReplaceResults.WithLabelValues(
-		paramtable.GetStringNodeID(),
-		req.GetDbName(),
-		req.GetCollectionName(),
-		pathReplaceResultCategory(err),
-	).Inc()
 }
 
 type fieldPartialUpdatePlan struct {
@@ -106,43 +68,6 @@ type fieldPartialUpdatePlan struct {
 
 func (p *fieldPartialUpdatePlan) isPathReplace() bool {
 	return p != nil && p.op == schemapb.FieldPartialUpdateOp_PATH_REPLACE
-}
-
-func hasPathReplaceOp(req *milvuspb.UpsertRequest) bool {
-	for _, op := range req.GetFieldOps() {
-		if op.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
-			return true
-		}
-	}
-	return false
-}
-
-func pathReplaceParentCategories(req *milvuspb.UpsertRequest, schema *schemapb.CollectionSchema) []string {
-	categories := make(map[string]struct{}, 2)
-	for _, op := range req.GetFieldOps() {
-		if op.GetOp() != schemapb.FieldPartialUpdateOp_PATH_REPLACE {
-			continue
-		}
-		for _, structField := range schema.GetStructArrayFields() {
-			if structField.GetName() == op.GetFieldName() {
-				categories[pathReplaceParentStructArray] = struct{}{}
-				break
-			}
-		}
-		for _, field := range schema.GetFields() {
-			if field.GetName() == op.GetFieldName() && field.GetDataType() == schemapb.DataType_Array {
-				categories[pathReplaceParentArray] = struct{}{}
-				break
-			}
-		}
-	}
-	result := make([]string, 0, len(categories))
-	for _, category := range []string{pathReplaceParentArray, pathReplaceParentStructArray} {
-		if _, ok := categories[category]; ok {
-			result = append(result, category)
-		}
-	}
-	return result
 }
 
 // TODO: Recursive Array fields do not support ARRAY_APPEND, ARRAY_REMOVE, or
@@ -215,14 +140,12 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 		if op == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
 			fd, ok := fieldDataByName[name]
 			if !ok {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidOperand,
-					merr.WrapErrParameterInvalidMsg(
-						fmt.Sprintf("partial-update op targets field %q not present in fields_data", name)))
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("partial-update op targets field %q not present in fields_data", name))
 			}
 			index, childName, hasChild, err := parsePathReplace(opMsg.GetPath())
 			if err != nil {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidPath,
-					merr.Wrapf(err, "invalid PATH_REPLACE path for field %q", name))
+				return nil, false, merr.Wrapf(err, "invalid PATH_REPLACE path for field %q", name)
 			}
 
 			if structSchema := schemaHelper.GetStructArrayFieldFromName(name); structSchema != nil {
@@ -230,14 +153,14 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 				if hasChild {
 					childSchema := findStructChildSchema(structSchema, childName)
 					if childSchema == nil {
-						return nil, false, categorizePathReplaceError(pathReplaceResultInvalidPath,
-							merr.WrapErrParameterInvalidMsg("child %q not found in struct field %q", childName, name))
+						return nil, false, merr.WrapErrParameterInvalidMsg(
+							"child %q not found in struct field %q", childName, name)
 					}
 					plan.explicitChild = childSchema
 				}
 				children, err := validatePathReplaceStructOperand(fd, plan, int(req.GetNumRows()))
 				if err != nil {
-					return nil, false, categorizePathReplaceError(pathReplaceResultInvalidOperand, err)
+					return nil, false, err
 				}
 				plan.operandChildren = children
 				plans[name] = plan
@@ -246,18 +169,18 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 
 			fieldSchema, err := findFieldSchemaByName(schema, name)
 			if err != nil {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidOperand, err)
+				return nil, false, err
 			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array || typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidOperand,
-					merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a non-recursive Array or ArrayOfStruct field, but field %q is %s", name, fieldSchema.GetDataType().String()))
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"PATH_REPLACE requires a non-recursive Array or ArrayOfStruct field, but field %q is %s", name, fieldSchema.GetDataType().String())
 			}
 			if hasChild {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidPath,
-					merr.WrapErrParameterInvalidMsg("child segment is only supported for ArrayOfStruct field %q", name))
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"child segment is only supported for ArrayOfStruct field %q", name)
 			}
 			if err := validatePathReplaceArrayOperand(fd, fieldSchema, int(req.GetNumRows())); err != nil {
-				return nil, false, categorizePathReplaceError(pathReplaceResultInvalidOperand, err)
+				return nil, false, err
 			}
 			plans[name] = &fieldPartialUpdatePlan{op: op, arrayParent: fieldSchema, index: index}
 			continue
@@ -337,7 +260,7 @@ func parsePathReplace(path string) (int, string, bool, error) {
 			return 0, "", false, merr.WrapErrParameterInvalidMsg("index %q is not a non-negative decimal integer", indexText)
 		}
 	}
-	parsedIndex, err := strconv.ParseUint(indexText, 10, strconv.IntSize)
+	parsedIndex, err := strconv.ParseInt(indexText, 10, strconv.IntSize)
 	if err != nil {
 		return 0, "", false, merr.WrapErrParameterInvalidMsg("index %q is out of range", indexText)
 	}
@@ -402,7 +325,7 @@ func validatePathReplaceArrayOperand(fd *schemapb.FieldData, schema *schemapb.Fi
 		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q has %d operand rows, expected %d", fd.GetFieldName(), len(arrayData.GetData()), rowCount)
 	}
 	for rowIndex, row := range arrayData.GetData() {
-		rowLen, err := typeutil.ScalarArrayRowElementCount(row, schema.GetElementType())
+		rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
 		if err != nil {
 			return merr.Wrapf(err, "PATH_REPLACE field %q row %d is invalid", fd.GetFieldName(), rowIndex)
 		}
@@ -465,7 +388,7 @@ func validatePathReplaceStructChildRows(fd *schemapb.FieldData, schema *schemapb
 			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE child %q has %d operand rows, expected %d", fd.GetFieldName(), len(arrayData.GetData()), rowCount)
 		}
 		for rowIndex, row := range arrayData.GetData() {
-			rowLen, err := typeutil.ScalarArrayRowElementCount(row, schema.GetElementType())
+			rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
 			if err != nil {
 				return merr.Wrapf(err, "PATH_REPLACE child %q row %d is invalid", fd.GetFieldName(), rowIndex)
 			}
@@ -487,7 +410,7 @@ func validatePathReplaceStructChildRows(fd *schemapb.FieldData, schema *schemapb
 			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE child %q has %d operand rows, expected %d", fd.GetFieldName(), len(vectorArray.GetData()), rowCount)
 		}
 		for rowIndex, row := range vectorArray.GetData() {
-			count, err := typeutil.VectorArrayRowElementCount(row, schema.GetElementType(), dim)
+			count, err := vectorArrayRowElementCount(row, schema.GetElementType(), dim)
 			if err != nil {
 				return merr.Wrapf(err, "PATH_REPLACE child %q row %d is invalid", fd.GetFieldName(), rowIndex)
 			}
@@ -512,6 +435,261 @@ func validateNonNullOperandRows(fd *schemapb.FieldData, rowCount int) error {
 		}
 	}
 	return nil
+}
+
+func updateArrayFieldByColumnWithPathReplace(
+	base, update *schemapb.FieldData,
+	baseIndices, updateIndices []int64,
+	index int,
+) error {
+	if base == nil || update == nil || len(baseIndices) == 0 {
+		return nil
+	}
+	if len(baseIndices) != len(updateIndices) {
+		return merr.WrapErrParameterInvalidMsg(
+			"baseIndices and updateIndices length mismatch: %d vs %d",
+			len(baseIndices), len(updateIndices))
+	}
+	if base.GetType() != schemapb.DataType_Array || update.GetType() != schemapb.DataType_Array {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires Array field data")
+	}
+	baseArray := base.GetScalars().GetArrayData()
+	updateArray := update.GetScalars().GetArrayData()
+	if baseArray == nil || updateArray == nil {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires non-nil ArrayData on both base and update")
+	}
+	if baseArray.GetElementType() != updateArray.GetElementType() {
+		return merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE element type mismatch: %s vs %s",
+			baseArray.GetElementType().String(), updateArray.GetElementType().String())
+	}
+
+	baseRows := baseArray.GetData()
+	updateRows := updateArray.GetData()
+	baseValidData := typeutil.GetFieldDataValidData(base)
+	updateValidData := typeutil.GetFieldDataValidData(update)
+	for i, baseIndex := range baseIndices {
+		updateIndex := updateIndices[i]
+		if baseIndex < 0 || int(baseIndex) >= len(baseRows) || updateIndex < 0 || int(updateIndex) >= len(updateRows) {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE row index is out of range")
+		}
+		if len(baseValidData) > 0 && int(baseIndex) >= len(baseValidData) {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE base valid_data is shorter than its row mapping")
+		}
+		if len(updateValidData) > 0 && int(updateIndex) >= len(updateValidData) {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand valid_data is shorter than its row mapping")
+		}
+		if len(baseValidData) > 0 && !baseValidData[baseIndex] {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE cannot target a null parent Array row")
+		}
+		if len(updateValidData) > 0 && !updateValidData[updateIndex] {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand Array row must not be null")
+		}
+		replaced, err := replaceArrayRowElement(
+			baseRows[baseIndex], updateRows[updateIndex], index, baseArray.GetElementType())
+		if err != nil {
+			return err
+		}
+		baseRows[baseIndex] = replaced
+	}
+	return nil
+}
+
+func replaceArrayRowElement(
+	base, update *schemapb.ScalarField,
+	index int,
+	elementType schemapb.DataType,
+) (*schemapb.ScalarField, error) {
+	baseLen, err := scalarArrayRowElementCount(base, elementType)
+	if err != nil {
+		return nil, err
+	}
+	if index < 0 || index >= baseLen {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE index %d is out of range for Array length %d", index, baseLen)
+	}
+	updateLen, err := scalarArrayRowElementCount(update, elementType)
+	if err != nil {
+		return nil, err
+	}
+	if updateLen != 1 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE operand must contain exactly one Array element")
+	}
+
+	out := proto.Clone(base).(*schemapb.ScalarField)
+	switch elementType {
+	case schemapb.DataType_Bool:
+		out.GetBoolData().Data = replaceArrayValue(out.GetBoolData().GetData(), update.GetBoolData().GetData(), index, 1)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		out.GetIntData().Data = replaceArrayValue(out.GetIntData().GetData(), update.GetIntData().GetData(), index, 1)
+	case schemapb.DataType_Int64:
+		out.GetLongData().Data = replaceArrayValue(out.GetLongData().GetData(), update.GetLongData().GetData(), index, 1)
+	case schemapb.DataType_Float:
+		out.GetFloatData().Data = replaceArrayValue(out.GetFloatData().GetData(), update.GetFloatData().GetData(), index, 1)
+	case schemapb.DataType_Double:
+		out.GetDoubleData().Data = replaceArrayValue(out.GetDoubleData().GetData(), update.GetDoubleData().GetData(), index, 1)
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		out.GetStringData().Data = replaceArrayValue(out.GetStringData().GetData(), update.GetStringData().GetData(), index, 1)
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support Array element type %s", elementType.String())
+	}
+	return out, nil
+}
+
+func replaceVectorArrayRowElement(
+	base, update *schemapb.VectorField,
+	index int,
+	elementType schemapb.DataType,
+	dim int64,
+) (*schemapb.VectorField, error) {
+	baseLen, err := vectorArrayRowElementCount(base, elementType, dim)
+	if err != nil {
+		return nil, err
+	}
+	if index < 0 || index >= baseLen {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE index %d is out of range for ArrayOfVector length %d", index, baseLen)
+	}
+	updateLen, err := vectorArrayRowElementCount(update, elementType, dim)
+	if err != nil {
+		return nil, err
+	}
+	if updateLen != 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand must contain exactly one vector")
+	}
+
+	out := proto.Clone(base).(*schemapb.VectorField)
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		out.GetFloatVector().Data = replaceArrayValue(
+			out.GetFloatVector().GetData(), update.GetFloatVector().GetData(), index, int(dim))
+	case schemapb.DataType_BinaryVector:
+		out.Data = &schemapb.VectorField_BinaryVector{BinaryVector: replaceArrayValue(
+			out.GetBinaryVector(), update.GetBinaryVector(), index, int((dim+7)/8))}
+	case schemapb.DataType_Float16Vector:
+		out.Data = &schemapb.VectorField_Float16Vector{Float16Vector: replaceArrayValue(
+			out.GetFloat16Vector(), update.GetFloat16Vector(), index, int(dim*2))}
+	case schemapb.DataType_BFloat16Vector:
+		out.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: replaceArrayValue(
+			out.GetBfloat16Vector(), update.GetBfloat16Vector(), index, int(dim*2))}
+	case schemapb.DataType_Int8Vector:
+		out.Data = &schemapb.VectorField_Int8Vector{Int8Vector: replaceArrayValue(
+			out.GetInt8Vector(), update.GetInt8Vector(), index, int(dim))}
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support ArrayOfVector element type %s", elementType.String())
+	}
+	return out, nil
+}
+
+func replaceArrayValue[T any](base, update []T, index, width int) []T {
+	out := slices.Clone(base)
+	copy(out[index*width:(index+1)*width], update)
+	return out
+}
+
+func scalarArrayRowElementCount(row *schemapb.ScalarField, elementType schemapb.DataType) (int, error) {
+	if row == nil {
+		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a non-nil Array row")
+	}
+	if len(row.GetValidData()) != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
+	}
+	switch elementType {
+	case schemapb.DataType_Bool:
+		if _, ok := row.GetData().(*schemapb.ScalarField_BoolData); !ok || row.GetBoolData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetBoolData().GetData()), nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		if _, ok := row.GetData().(*schemapb.ScalarField_IntData); !ok || row.GetIntData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetIntData().GetData()), nil
+	case schemapb.DataType_Int64:
+		if _, ok := row.GetData().(*schemapb.ScalarField_LongData); !ok || row.GetLongData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetLongData().GetData()), nil
+	case schemapb.DataType_Float:
+		if _, ok := row.GetData().(*schemapb.ScalarField_FloatData); !ok || row.GetFloatData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetFloatData().GetData()), nil
+	case schemapb.DataType_Double:
+		if _, ok := row.GetData().(*schemapb.ScalarField_DoubleData); !ok || row.GetDoubleData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetDoubleData().GetData()), nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		if _, ok := row.GetData().(*schemapb.ScalarField_StringData); !ok || row.GetStringData() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"Array row payload does not match element type %s", elementType.String())
+		}
+		return len(row.GetStringData().GetData()), nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support Array element type %s", elementType.String())
+	}
+}
+
+func vectorArrayRowElementCount(row *schemapb.VectorField, elementType schemapb.DataType, dim int64) (int, error) {
+	if row == nil || dim <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE requires a non-nil vector row and a positive dimension")
+	}
+	if len(row.GetValidData()) != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support ArrayOfVector element valid_data")
+	}
+	var payloadLen, width int
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		if _, ok := row.GetData().(*schemapb.VectorField_FloatVector); !ok || row.GetFloatVector() == nil {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"ArrayOfVector row payload does not match element type %s", elementType.String())
+		}
+		payloadLen, width = len(row.GetFloatVector().GetData()), int(dim)
+	case schemapb.DataType_BinaryVector:
+		if _, ok := row.GetData().(*schemapb.VectorField_BinaryVector); !ok {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"ArrayOfVector row payload does not match element type %s", elementType.String())
+		}
+		payloadLen, width = len(row.GetBinaryVector()), int((dim+7)/8)
+	case schemapb.DataType_Float16Vector:
+		if _, ok := row.GetData().(*schemapb.VectorField_Float16Vector); !ok {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"ArrayOfVector row payload does not match element type %s", elementType.String())
+		}
+		payloadLen, width = len(row.GetFloat16Vector()), int(dim*2)
+	case schemapb.DataType_BFloat16Vector:
+		if _, ok := row.GetData().(*schemapb.VectorField_Bfloat16Vector); !ok {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"ArrayOfVector row payload does not match element type %s", elementType.String())
+		}
+		payloadLen, width = len(row.GetBfloat16Vector()), int(dim*2)
+	case schemapb.DataType_Int8Vector:
+		if _, ok := row.GetData().(*schemapb.VectorField_Int8Vector); !ok {
+			return 0, merr.WrapErrParameterInvalidMsg(
+				"ArrayOfVector row payload does not match element type %s", elementType.String())
+		}
+		payloadLen, width = len(row.GetInt8Vector()), int(dim)
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support ArrayOfVector element type %s", elementType.String())
+	}
+	if width <= 0 || payloadLen%width != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"vector payload length %d is not divisible by element width %d", payloadLen, width)
+	}
+	return payloadLen / width, nil
 }
 
 func hasPathReplacePlan(plans map[string]*fieldPartialUpdatePlan) bool {
@@ -542,8 +720,8 @@ func validateExistingArrayPathRows(field *schemapb.FieldData, dataIndices, rowIn
 				return merr.WrapErrServiceInternalMsg("retrieved field %q has malformed parent valid_data", field.GetFieldName())
 			}
 			if !parentValidData[rowIndex] {
-				return categorizePathReplaceError(pathReplaceResultNullParent,
-					merr.WrapErrParameterInvalidMsg("PATH_REPLACE cannot target null parent row %d of field %q", i, field.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg(
+					"PATH_REPLACE cannot target null parent row %d of field %q", i, field.GetFieldName())
 			}
 		}
 		if dataIndex < 0 || int(dataIndex) >= len(arrayData.GetData()) {
@@ -553,13 +731,13 @@ func validateExistingArrayPathRows(field *schemapb.FieldData, dataIndices, rowIn
 		if row == nil {
 			return merr.WrapErrServiceInternalMsg("retrieved field %q contains a nil Array row", field.GetFieldName())
 		}
-		rowLen, err := typeutil.ScalarArrayRowElementCount(row, plan.arrayParent.GetElementType())
+		rowLen, err := scalarArrayRowElementCount(row, plan.arrayParent.GetElementType())
 		if err != nil {
 			return merr.WrapErrServiceInternalErr(err, "retrieved field %q row payload is malformed", field.GetFieldName())
 		}
 		if plan.index >= rowLen {
-			return categorizePathReplaceError(pathReplaceResultOutOfRange,
-				merr.WrapErrParameterInvalidMsg("PATH_REPLACE index %d is out of range for field %q row %d with length %d", plan.index, field.GetFieldName(), i, rowLen))
+			return merr.WrapErrParameterInvalidMsg(
+				"PATH_REPLACE index %d is out of range for field %q row %d with length %d", plan.index, field.GetFieldName(), i, rowLen)
 		}
 	}
 	return nil
@@ -629,12 +807,12 @@ func validateExistingStructPathRows(field *schemapb.FieldData, plan *fieldPartia
 			}
 		}
 		if !parentValid {
-			return categorizePathReplaceError(pathReplaceResultNullParent,
-				merr.WrapErrParameterInvalidMsg("PATH_REPLACE cannot target null parent row %d of field %q", requestRow, field.GetFieldName()))
+			return merr.WrapErrParameterInvalidMsg(
+				"PATH_REPLACE cannot target null parent row %d of field %q", requestRow, field.GetFieldName())
 		}
 		if plan.index >= expectedLen {
-			return categorizePathReplaceError(pathReplaceResultOutOfRange,
-				merr.WrapErrParameterInvalidMsg("PATH_REPLACE index %d is out of range for field %q row %d with length %d", plan.index, field.GetFieldName(), requestRow, expectedLen))
+			return merr.WrapErrParameterInvalidMsg(
+				"PATH_REPLACE index %d is out of range for field %q row %d with length %d", plan.index, field.GetFieldName(), requestRow, expectedLen)
 		}
 	}
 	return nil
@@ -651,7 +829,13 @@ func structChildRowLen(field *schemapb.FieldData, schema *schemapb.FieldSchema, 
 			return 0, merr.WrapErrServiceInternalMsg("missing Array row %d", rowIndex)
 		}
 		row := arrayData.GetData()[rowIndex]
-		rowLen, err := typeutil.ScalarArrayRowElementCount(row, schema.GetElementType())
+		if typeutil.IsNestedArrayTypeSchema(schema.GetTypeSchema()) {
+			if row.GetData() == nil || row.GetArrayData() == nil {
+				return 0, merr.WrapErrServiceInternalMsg("malformed nested Array row %d", rowIndex)
+			}
+			return len(row.GetArrayData().GetData()), nil
+		}
+		rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
 		if err != nil {
 			return 0, merr.WrapErrServiceInternalErr(err, "malformed Array row %d", rowIndex)
 		}
@@ -669,7 +853,7 @@ func structChildRowLen(field *schemapb.FieldData, schema *schemapb.FieldSchema, 
 			return 0, merr.WrapErrServiceInternalMsg("ArrayOfVector row %d has incompatible dimension metadata", rowIndex)
 		}
 		row := vectorArray.GetData()[rowIndex]
-		rowLen, err := typeutil.VectorArrayRowElementCount(row, schema.GetElementType(), dim)
+		rowLen, err := vectorArrayRowElementCount(row, schema.GetElementType(), dim)
 		if err != nil {
 			return 0, merr.WrapErrServiceInternalErr(err, "malformed ArrayOfVector row %d", rowIndex)
 		}
@@ -695,7 +879,7 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 			case schemapb.DataType_Array:
 				dstRows := dstChild.GetScalars().GetArrayData().GetData()
 				operandRows := operandChild.GetScalars().GetArrayData().GetData()
-				replaced, err := typeutil.ReplaceArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType())
+				replaced, err := replaceArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType())
 				if err != nil {
 					return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE child %q", structChildRawName(childSchema))
 				}
@@ -707,7 +891,7 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 				}
 				dstRows := dstChild.GetVectors().GetVectorArray().GetData()
 				operandRows := operandChild.GetVectors().GetVectorArray().GetData()
-				replaced, err := typeutil.ReplaceVectorArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType(), dim)
+				replaced, err := replaceVectorArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType(), dim)
 				if err != nil {
 					return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE child %q", structChildRawName(childSchema))
 				}

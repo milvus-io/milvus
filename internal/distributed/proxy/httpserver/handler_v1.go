@@ -861,14 +861,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		return
 	}
 	req.FieldOps = fieldOps
-	if hasPathReplaceFieldPartialUpdateOp(fieldOps) {
-		err := merr.WrapErrParameterInvalidMsg("PATH_REPLACE is not supported by REST v1 upsert")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: err.Error(),
-		})
-		return
-	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)

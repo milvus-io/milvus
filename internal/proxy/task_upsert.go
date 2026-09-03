@@ -306,11 +306,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
 	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
 	if len(resp.GetFieldsData()) == 0 {
-		err := merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
-		if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
-			return categorizePathReplaceError(pathReplaceResultMissingPK, err)
-		}
-		return err
+		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
 	}
 
 	existFieldData := resp.GetFieldsData()
@@ -343,14 +339,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	log.Info(ctx, "retrieveByPKs cost",
 		mlog.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
 		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()))
-	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
-		metrics.ProxyPathReplaceRetrievedRows.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			it.req.GetDbName(),
-			it.req.GetCollectionName(),
-		).Observe(float64(typeutil.GetSizeOfIDs(existIDs)))
-	}
-
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
@@ -475,8 +463,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("partial update on an AutoID collection requires every primary key to exist")
 	}
 	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && len(insertIdxInUpsert) > 0 {
-		return categorizePathReplaceError(pathReplaceResultMissingPK,
-			merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist"))
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist")
 	}
 
 	// 2. merge field data on update semantic
@@ -624,7 +611,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 							return err
 						}
 					} else if plan.isPathReplace() {
-						if err := typeutil.UpdateArrayFieldByColumnWithPathReplace(
+						if err := updateArrayFieldByColumnWithPathReplace(
 							dstField, upsertField, dstIndices, upsertSrcIndices, plan.index,
 						); err != nil {
 							log.Warn(ctx, "failed to materialize PATH_REPLACE field", mlog.String("fieldName", fieldSchema.GetName()), mlog.Err(err))
@@ -1711,27 +1698,16 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
-	for _, parentCategory := range pathReplaceParentCategories(it.req, schema.CollectionSchema) {
-		metrics.ProxyPathReplaceRequests.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			it.req.GetDbName(),
-			it.req.GetCollectionName(),
-			parentCategory,
-		).Inc()
-	}
-
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.
 	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema.CollectionSchema)
 	if err != nil {
-		if hasPathReplaceOp(it.req) {
-			err = categorizePathReplaceError(pathReplaceResultInvalidOperand, err)
-		}
 		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err
 	}
 	it.fieldPartialUpdatePlans = partialUpdatePlans
+	observePathReplaceParentOperations(it.req, partialUpdatePlans)
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
 		it.req.PartialUpdate = true
 	}

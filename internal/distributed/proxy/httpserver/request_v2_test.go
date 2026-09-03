@@ -53,7 +53,7 @@ func TestRequestV2_GetCollectionName(t *testing.T) {
 }
 
 func TestBuildFieldPartialUpdateOps(t *testing.T) {
-	ops, err := buildFieldPartialUpdateOps([]FieldPartialUpdateOpReq{
+	ops, err := buildFieldPartialUpdateOpsV2([]FieldPartialUpdateOpReq{
 		{FieldName: "tags", Op: "ARRAY_APPEND"},
 		{FieldName: "scores", Op: "ARRAY_REMOVE"},
 		{FieldName: "profile", Op: "PATH_REPLACE", Path: "[1][age]"},
@@ -77,14 +77,31 @@ func TestBuildFieldPartialUpdateOps_RejectsUnknownOp(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported partial update op")
 }
 
+func TestBuildFieldPartialUpdateOps_PathReplaceIsV2Only(t *testing.T) {
+	fieldOps := []FieldPartialUpdateOpReq{{FieldName: "profile", Op: "PATH_REPLACE", Path: "[1][age]"}}
+	_, err := buildFieldPartialUpdateOps(fieldOps)
+	assert.Error(t, err)
+
+	ops, err := buildFieldPartialUpdateOpsV2(fieldOps)
+	assert.NoError(t, err)
+	assert.Len(t, ops, 1)
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_PATH_REPLACE, ops[0].GetOp())
+	assert.Equal(t, "[1][age]", ops[0].GetPath())
+}
+
+func TestBuildFieldPartialUpdateOps_LegacyBuilderDoesNotForwardPath(t *testing.T) {
+	ops, err := buildFieldPartialUpdateOps([]FieldPartialUpdateOpReq{{
+		FieldName: "tags",
+		Op:        "ARRAY_APPEND",
+		Path:      "[1]",
+	}})
+	assert.NoError(t, err)
+	assert.Len(t, ops, 1)
+	assert.Empty(t, ops[0].GetPath())
+}
+
 func TestHasNonReplaceFieldPartialUpdateOp(t *testing.T) {
 	assert.False(t, hasNonReplaceFieldPartialUpdateOp(nil))
 	assert.False(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_REPLACE}}))
 	assert.True(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE}}))
-}
-
-func TestHasPathReplaceFieldPartialUpdateOp(t *testing.T) {
-	assert.False(t, hasPathReplaceFieldPartialUpdateOp(nil))
-	assert.False(t, hasPathReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}))
-	assert.True(t, hasPathReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE}}))
 }

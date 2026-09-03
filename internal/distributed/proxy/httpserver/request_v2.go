@@ -511,21 +511,36 @@ type FieldPartialUpdateOpReq struct {
 }
 
 func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOp, false)
+}
+
+func buildFieldPartialUpdateOpsV2(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOpV2, true)
+}
+
+func buildFieldPartialUpdateOpsWithParser(
+	fieldOps []FieldPartialUpdateOpReq,
+	parseOp func(string) (schemapb.FieldPartialUpdateOp_OpType, error),
+	includePath bool,
+) ([]*schemapb.FieldPartialUpdateOp, error) {
 	if len(fieldOps) == 0 {
 		return nil, nil
 	}
 
 	ops := make([]*schemapb.FieldPartialUpdateOp, 0, len(fieldOps))
 	for _, fieldOp := range fieldOps {
-		op, err := parseFieldPartialUpdateOp(fieldOp.Op)
+		op, err := parseOp(fieldOp.Op)
 		if err != nil {
 			return nil, err
 		}
-		ops = append(ops, &schemapb.FieldPartialUpdateOp{
+		partialUpdateOp := &schemapb.FieldPartialUpdateOp{
 			FieldName: fieldOp.FieldName,
 			Op:        op,
-			Path:      fieldOp.Path,
-		})
+		}
+		if includePath {
+			partialUpdateOp.Path = fieldOp.Path
+		}
+		ops = append(ops, partialUpdateOp)
 	}
 	return ops, nil
 }
@@ -533,15 +548,6 @@ func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb
 func hasNonReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
 	for _, fieldOp := range fieldOps {
 		if fieldOp.GetOp() != schemapb.FieldPartialUpdateOp_REPLACE {
-			return true
-		}
-	}
-	return false
-}
-
-func hasPathReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
-	for _, fieldOp := range fieldOps {
-		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
 			return true
 		}
 	}
@@ -556,12 +562,17 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 		return schemapb.FieldPartialUpdateOp_ARRAY_APPEND, nil
 	case "ARRAY_REMOVE":
 		return schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, nil
-	case "PATH_REPLACE":
-		return schemapb.FieldPartialUpdateOp_PATH_REPLACE, nil
 	default:
 		return schemapb.FieldPartialUpdateOp_REPLACE,
 			merr.WrapErrParameterInvalidMsg("unsupported partial update op: " + op)
 	}
+}
+
+func parseFieldPartialUpdateOpV2(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
+	if strings.EqualFold(strings.TrimSpace(op), "PATH_REPLACE") {
+		return schemapb.FieldPartialUpdateOp_PATH_REPLACE, nil
+	}
+	return parseFieldPartialUpdateOp(op)
 }
 
 type SearchReqV2 struct {
