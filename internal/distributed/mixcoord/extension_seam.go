@@ -29,7 +29,7 @@ import (
 // coordinator process. With none installed the two functions below do nothing.
 
 func coordinatorEngine() extension.CoordinatorEngine {
-	return extension.Caps().CoordinatorEngine
+	return extension.InstalledCoordinatorEngine()
 }
 
 // activeNotifier is what the coordinator implements to run work once this

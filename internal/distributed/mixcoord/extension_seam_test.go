@@ -47,19 +47,11 @@ func (e *recordingEngine) Stop() error {
 	return e.stopErr
 }
 
-type fakeEngineProvider struct{ engine extension.CoordinatorEngine }
-
-func (fakeEngineProvider) Name() string                       { return "test" }
-func (fakeEngineProvider) Requires() []extension.CapabilityID { return nil }
-func (p fakeEngineProvider) Capabilities() extension.Capabilities {
-	return extension.Capabilities{CoordinatorEngine: p.engine}
-}
-
 func installEngine(t *testing.T, e extension.CoordinatorEngine) {
 	t.Helper()
 	extension.ResetForTest()
 	t.Cleanup(extension.ResetForTest)
-	assert.NoError(t, extension.SetProvider(fakeEngineProvider{engine: e}))
+	extension.SetCoordinatorEngine(e)
 }
 
 func newTestServer(t *testing.T, coord *mockMix) *Server {
