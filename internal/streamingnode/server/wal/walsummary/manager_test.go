@@ -596,10 +596,10 @@ type failInjectingChunkManager struct {
 }
 
 func (c *failInjectingChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	if c.failManifest.Load() && strings.Contains(filePath, manifestObjectExt) {
+	if c.failManifest.Load() && strings.Contains(filePath, "/manifest/") {
 		return errors.New("injected manifest write failure")
 	}
-	if c.failChunk.Load() && !strings.Contains(filePath, manifestObjectExt) {
+	if c.failChunk.Load() && !strings.Contains(filePath, "/manifest/") {
 		return errors.New("injected chunk write failure")
 	}
 	return c.ChunkManager.Write(ctx, filePath, content)

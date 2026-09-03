@@ -37,6 +37,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"io/fs"
 	"path"
 	"sort"
@@ -64,13 +65,12 @@ const (
 	manifestVersion = 1
 	manifestHeader  = 16
 
-	chunkObjectPrefix = "chunk."
-	chunkObjectExt    = ".psc"
-	manifestObjectExt = ".manifest."
+	chunkObjectDir    = "chunks"
+	manifestObjectDir = "manifest"
 
-	// summaryObjectDir is the object storage directory of the summary store,
+	// walsummaryObjectDir is the object storage directory of the summary store,
 	// mirrored by the etcd DirectorySummaryStore constant of the metastore.
-	summaryObjectDir = "summary"
+	walsummaryObjectDir = "walsummary"
 )
 
 var (
@@ -303,13 +303,13 @@ func (s *Store) ProbeChunkForwardOfTerm(ctx context.Context, term int64, fromGen
 		return nil, errors.Wrapf(err, "failed to list summary chunks under %s", prefix)
 	}
 	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, len(keys))
-	termSuffix := ".term" + strconv.FormatInt(term, 10) + chunkObjectExt
+	termSuffix := "_" + fmt.Sprintf("%020d", term)
 	for _, key := range keys {
 		base := strings.TrimPrefix(key, prefix)
-		if !strings.HasPrefix(base, chunkObjectPrefix) || !strings.HasSuffix(base, termSuffix) {
+		if !strings.HasSuffix(base, termSuffix) {
 			continue
 		}
-		middle := strings.TrimSuffix(strings.TrimPrefix(base, chunkObjectPrefix), termSuffix)
+		middle := strings.TrimSuffix(base, termSuffix)
 		generation, err := strconv.ParseUint(middle, 10, 64)
 		if err != nil || generation < fromGeneration {
 			continue
@@ -344,37 +344,40 @@ func (s *Store) RemoveAllObjects(ctx context.Context) error {
 }
 
 // ---- key builders ----
+//
+// Keys are fixed-width, zero-padded decimals ("%020d"): lexicographic order
+// equals numeric order, so a prefix list returns chunks in generation order
+// without parsing. The width covers the full uint64 range (and every
+// non-negative int64); a wider value would silently break ordering, so these
+// formats must never shrink.
 
 func buildChunkKey(cm storage.ChunkManager, pchannel string, generation uint64, term int64) string {
 	return buildChunkPrefix(cm, pchannel) +
-		chunkObjectPrefix + strconv.FormatUint(generation, 10) +
-		".term" + strconv.FormatInt(term, 10) + chunkObjectExt
+		fmt.Sprintf("%020d_%020d", generation, term)
 }
 
 func buildChunkPrefix(cm storage.ChunkManager, pchannel string) string {
 	return path.Join(
 		cm.RootPath(),
-		"streamingnode",
-		summaryObjectDir,
+		walsummaryObjectDir,
 		sanitizePathPart(pchannel),
-		"chunks",
+		chunkObjectDir,
 	) + "/"
 }
 
 func buildManifestKey(cm storage.ChunkManager, pchannel string, term int64) string {
 	return path.Join(
 		cm.RootPath(),
-		"streamingnode",
-		summaryObjectDir,
+		walsummaryObjectDir,
 		sanitizePathPart(pchannel),
-	) + "/" + sanitizePathPart(pchannel) + manifestObjectExt + strconv.FormatInt(term, 10)
+		manifestObjectDir,
+	) + "/" + fmt.Sprintf("%020d", term)
 }
 
 func buildStorePrefix(cm storage.ChunkManager, pchannel string) string {
 	return path.Join(
 		cm.RootPath(),
-		"streamingnode",
-		summaryObjectDir,
+		walsummaryObjectDir,
 		sanitizePathPart(pchannel),
 	) + "/"
 }

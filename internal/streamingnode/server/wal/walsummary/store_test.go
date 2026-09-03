@@ -265,9 +265,9 @@ func TestInheritManifest(t *testing.T) {
 func TestChunkKeySanitize(t *testing.T) {
 	store := newTestStore(t)
 	key := store.ChunkKey(3)
-	assert.Contains(t, key, "/chunks/chunk.3.term1.psc")
+	assert.Contains(t, key, "/chunks/00000000000000000003_00000000000000000001")
 	manifestKey := store.ManifestKey()
-	assert.Contains(t, manifestKey, ".manifest.1")
+	assert.Contains(t, manifestKey, "/manifest/00000000000000000001")
 }
 
 func timeticks(records []*streamingpb.VChannelSummaryTransformRecord) []uint64 {
