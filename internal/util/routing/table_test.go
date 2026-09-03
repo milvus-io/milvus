@@ -226,6 +226,23 @@ func TestShardsFromMetaTreatsNoShardInfoAsNeverSplit(t *testing.T) {
 // has to be refused at derivation, non-retriably. Left in, it surfaces from
 // owner() as ErrCollectionRoutingStale -- retriable -- and every retry consumer
 // loops until its deadline on a condition no refresh can clear.
+// The legacy branch has the same gap in a different shape: equal lengths are
+// not the same set, and deriving from the channel list alone would hide a shard
+// list that names a vchannel the collection does not carry.
+func TestDeriveCompatRefusesAShardOutsideTheChannelList(t *testing.T) {
+	_, err := Derive(0, []string{"v0", "v1"}, []Shard{{Vchannel: "v0"}, {Vchannel: "v9"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"v9"`)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.False(t, merr.IsRetryableErr(err))
+
+	// same set, any order, is fine on this branch: the shards carry no residues
+	// here, so their order carries no information.
+	table, err := Derive(0, []string{"v0", "v1"}, []Shard{{Vchannel: "v1"}, {Vchannel: "v0"}})
+	require.NoError(t, err)
+	assert.False(t, table.IsExplicit())
+}
+
 func TestDeriveRefusesAShardOutsideTheChannelList(t *testing.T) {
 	_, err := Derive(2, []string{"v0", "v1"}, []Shard{
 		{Vchannel: "v0", Buckets: []uint64{0}},
