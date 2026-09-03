@@ -84,9 +84,6 @@ import (
 type CapabilityID string
 
 const (
-	// CapProxyExtension is the proxy-side behavior takeover.
-	CapProxyExtension CapabilityID = "proxy_extension"
-
 	// CapCoordinatorEngine is control-plane machinery hosted in the
 	// coordinator process, with its own gRPC services on the coordinator's
 	// server.
@@ -107,7 +104,6 @@ const (
 // forgotten in entries fails the tests instead of being silently
 // unrequirable.
 type Capabilities struct {
-	ProxyExt          ProxyExtension
 	CoordinatorEngine CoordinatorEngine
 
 	// Hook is milvus's own request hook (milvus-proto go-api/v3/hook), the
@@ -142,7 +138,6 @@ type capabilityEntry struct {
 // checked and tested - or does not exist.
 func (c Capabilities) entries() []capabilityEntry {
 	return []capabilityEntry{
-		{CapProxyExtension, c.ProxyExt},
 		{CapCoordinatorEngine, c.CoordinatorEngine},
 		{CapHook, c.Hook},
 	}

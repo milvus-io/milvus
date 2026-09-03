@@ -45,6 +45,11 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
+		if responder, ok := hoo.(refusalResponder); ok {
+			if resp, ok := responder.RefusalResponse(fullMethod, err); ok {
+				return resp, nil
+			}
+		}
 		return nil, hookError(err)
 	}
 	realResp, realErr = handler(newCtx, req)
@@ -66,6 +71,15 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 // refusal and what an SDK surfaces immediately. An error returned here can
 // only become a gRPC status, and a bare error becomes codes.Unknown, which
 // clients retry - the reason the original comment gives for not using merr.
+// refusalResponder is optionally implemented by a hook whose Before refuses
+// requests. When it answers a method with a response, the refusal travels in
+// that response's Status like any other Milvus error - carrying its error code
+// and reason to the client - instead of as the bare InvalidArgument below,
+// which every SDK reads as a transport-level failure with no classification.
+type refusalResponder interface {
+	RefusalResponse(fullMethod string, err error) (resp any, ok bool)
+}
+
 func hookError(err error) error {
 	if err == nil {
 		return nil
