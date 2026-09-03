@@ -45,10 +45,18 @@ walsummary.Manager (one per pchannel)
 
 ### 2.2 Objects (object storage)
 
+Object keys are fixed-width, zero-padded decimals (`%020d`): lexicographic
+order equals numeric order, so a prefix list returns chunks in generation
+order without parsing. The width covers the full uint64 range (and every
+non-negative int64); a wider value would silently break ordering, so the
+width must never shrink. Chunks and manifests live in separate directories
+(`chunks/`, `manifest/`) and carry no extension — the object types are
+distinguished by directory and by the magic inside each object.
+
 Chunk: one flush of one or more vchannels.
 
 ```text
-<root>/streamingnode/summary/<pchannel>/chunks/chunk.<gen>.term<term>.psc
+<root>/walsummary/<pchannel>/chunks/<generation>_<term>
 ```
 
 The key carries the term, so a fenced owner can never collide with the
@@ -57,7 +65,7 @@ successor's chunks.
 Manifest: the chunk index of the current term.
 
 ```text
-<root>/streamingnode/.../<pchannel>.manifest.<term>
+<root>/walsummary/<pchannel>/manifest/<term>
 ```
 
 ### 2.3 Term arbitration
@@ -65,7 +73,7 @@ Manifest: the chunk index of the current term.
 The summary store owns no catalog (etcd) record of its own. Term arbitration
 is split between two other mechanisms:
 
-- the object keys are term-scoped (`chunk.<gen>.term<term>`, `<pchannel>.manifest.<term>`),
+- the object keys are term-scoped (`<generation>_<term>`, `manifest/<term>`),
   so a superseded owner can never collide with the successor's chunks;
 - the consume-checkpoint advancement is NOT yet fenced on this branch: the
   checkpoint is the last-write commit point of the snapshot, and a superseded
