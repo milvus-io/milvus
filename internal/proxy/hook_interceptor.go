@@ -37,11 +37,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			mlog.String("full method", fullMethod), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
-		if err != nil {
-			// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
-			err = status.Error(codes.InvalidArgument, "detail: "+err.Error())
-		}
-		return mockResp, err
+		return mockResp, hookError(err)
 	}
 
 	if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
@@ -49,8 +45,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
-		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
-		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
+		return nil, hookError(err)
 	}
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
@@ -58,10 +53,25 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
-		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
-		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
+		return nil, hookError(err)
 	}
 	return realResp, realErr
+}
+
+// hookError is how a hook's refusal reaches the client.
+//
+// A refusal that must carry a classification the caller can act on does not
+// come through here at all: the hook answers it from Mock, with the RPC's own
+// response carrying merr.Status, which is how every milvus handler reports a
+// refusal and what an SDK surfaces immediately. An error returned here can
+// only become a gRPC status, and a bare error becomes codes.Unknown, which
+// clients retry - the reason the original comment gives for not using merr.
+func hookError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+	return status.Error(codes.InvalidArgument, "detail: "+err.Error())
 }
 
 func updateProxyFunctionCallMetric(fullMethod string, err error) {

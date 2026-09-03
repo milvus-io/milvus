@@ -54,13 +54,16 @@ type ChannelWorkload struct {
 	// ErrCollectionNotFullyLoaded (retriable), see selectNode. Empty is the
 	// absence of a scope and leaves routing exactly as before.
 	//
-	// EVERY construction site must carry it, and the way to do that is
-	// CollectionWorkLoad.ForChannel rather than a literal. Three paths build a
-	// ChannelWorkload directly instead of going through Execute -- the
-	// namespace single-shard fast paths in task_search.go, task_query.go and
-	// task_delete.go -- and one that forgets does not fail: it routes that
-	// subset of requests to another group's leader, silently, which is the
+	// A construction site does NOT have to set it. Every entry point of this
+	// package stamps the request's scope on from the context (see
+	// extension_seam.go), because a site that forgot would not fail - it would
+	// route that subset of requests to another group's leader, silently, the
 	// same wrong-routing-with-no-signal failure as filtering the channel map.
+	// Three paths build a ChannelWorkload directly rather than going through
+	// Execute - the namespace single-shard fast paths in task_search.go,
+	// task_query.go and task_delete.go - and they are covered by the stamp on
+	// ExecuteWithRetry. Setting it explicitly still wins, for a caller that
+	// names a scope the context does not carry.
 	ResourceGroup string
 }
 
@@ -344,6 +347,10 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
+	// Extension seam, see extension_seam.go: the request's routing scope is
+	// stamped on here, at the load balancer's own entry, so that no call site
+	// can silently omit it. Empty with no provider installed.
+	workload = scopedChannelWorkload(ctx, workload)
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 		mlog.String("channelName", workload.Channel),
@@ -494,6 +501,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
+	// Extension seam, see extension_seam.go.
+	workload = scopedCollectionWorkload(ctx, workload)
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 	)
@@ -524,6 +533,8 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 
 // ExecuteOneChannel will execute at any one channel in collection
 func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
+	// Extension seam, see extension_seam.go.
+	workload = scopedCollectionWorkload(ctx, workload)
 	// Unscoped: any one channel will do, so the first is taken. Scoped: the
 	// channel list is a map's key order, so the first channel may be one the
 	// group has no leader on; that refusal is the retriable

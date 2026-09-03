@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -72,6 +73,24 @@ func initHook() error {
 	storeExtension(DefaultExtension{})
 
 	path := paramtable.Get().ProxyCfg.SoPath.GetValue()
+
+	// A form compiled into this binary installs its hook by filling in the
+	// Hook capability, which is the same interface a plug-in provides and is
+	// consulted by the same interceptor. It is not merged with a plug-in:
+	// both answer VerifyAPIKey and the request interception, only one can,
+	// and picking silently would make which one wins depend on start-up
+	// order rather than on the deployment.
+	if compiled := ext.Caps().Hook; compiled != nil {
+		if path != "" {
+			return merr.WrapErrServiceInternalMsg(
+				"hookutil: proxy.soPath is set to %q and the installed extension provider also supplies a hook; "+
+					"both answer VerifyAPIKey and the request interception, and only one can", path)
+		}
+		storeHook(compiled)
+		mlog.Info(context.TODO(), "using the hook supplied by the extension provider")
+		return nil
+	}
+
 	if path == "" {
 		mlog.Info(context.TODO(), "empty so path, skip to load plugin")
 		return nil

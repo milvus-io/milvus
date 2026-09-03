@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -528,6 +529,23 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		rwNodes := replica.GetChannelRWNodes(shard)
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
+		}
+		// A sealed segment belongs on a regular query node, and the split
+		// between those and the streaming query nodes that carry delegators
+		// stays exactly as it was: this only runs when the replica has NO
+		// regular node at all.
+		//
+		// That is not a broken replica. A resource group whose only compute
+		// is a streaming node has none by construction - milvus keeps the
+		// query node embedded in a streaming node out of the resource
+		// manager, and `run streamingnode` enables that query node precisely
+		// so it can serve. Without this the candidate set is empty, no plan
+		// is produced, and the segment is never loaded: the delegator's
+		// readable target version therefore never advances, the load sits at
+		// partial progress until it times out, and nothing reports why,
+		// because no task was ever created to fail.
+		if len(rwNodes) == 0 && streamingutil.IsStreamingServiceEnabled() {
+			rwNodes = replica.GetRWSQNodes()
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
