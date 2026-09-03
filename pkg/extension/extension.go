@@ -21,7 +21,9 @@
 // After), a coordinator RPC, or a configuration item.
 //
 // A stock binary installs nothing: InstalledHook and InstalledCoordinatorEngine
-// answer nil, and milvus behaves as it always did.
+// answer nil, and milvus behaves as it always did. The one context mark this
+// package defines, WithQueryResourceGroup, pins a query to a resource group for
+// routing; nothing in a stock binary sets it.
 package extension
 
 import (

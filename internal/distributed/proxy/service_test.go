@@ -56,7 +56,6 @@ import (
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
