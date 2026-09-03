@@ -7,35 +7,18 @@
 
 ## 1. Core Purpose
 
-WALSummary is the **pchannel-scoped** compaction layer of a physical WAL
-channel: it extracts the durable-relevant payloads of the WAL into a compact,
-dense, append-only object-storage log that downstream consumers rebuild from.
-It is **not** owned by, or dedicated to, any single consumer — the payload it
-retains today happens to be the transform records (Delete and Txn-Delete), and
-the summary is the single owner of their persistence, but the mechanism is the
-general pchannel-level retained window. It exists for three reasons:
+WALSummary is the WAL consumer-side summary of a physical WAL channel: it
+centrally stores the brief fields of the WAL that downstream features need
+(for example primary keys, idempotency, TimeTick, and TransformLog entries).
+It exists for two reasons:
 
-1. **Log compaction.** The WAL keeps every message of a pchannel. The summary
-   extracts only the durable-relevant payloads (today the transform records)
-   into a compact, dense, append-only object-storage log, so a long-lived
-   channel does not force the WAL to retain the whole raw history: the WAL
-   checkpoint may advance past a message once its record is durable in the
-   summary.
-2. **Faster StreamingNode recovery.** On restart, the node must rebuild the
-   per-vchannel recovery state without replaying the entire WAL. The summary
-   restores its chunk index from the manifest in constant catalog access, then
-   replays only the WAL tail past the durable summary frontier — instead of
-   re-consuming every historical record from the message queue.
-3. **Lazy recovery of VChannel-level components.** The summary is the
-   pchannel-level retained window that any vchannel-scoped component can be
-   rebuilt from on demand, instead of from the raw WAL. Today the transform
-   consumer ([TransformLog](transform_log.md)) materializes its L0 segments
-   from this window; other components that need the same retained data at a
-   later point can be recovered lazily from the same chunks.
-
-The summary is **not** the L0 materializer itself: it only stages and persists
-records. Materialization is a downstream consumer concern (see
-[§5 Consumers: TransformLog](#5-consumers-transformlog)).
+1. **Log compression.** Keeping only these brief fields instead of the whole
+   raw WAL history shrinks the log size and lets the WAL checkpoint advance;
+   features no longer need to replay a large amount of WAL, which would make
+   fault recovery slow.
+2. **VChannel-level lazy loading.** The summary is stored centrally at
+   VChannel granularity, so any VChannel-level component can be recovered
+   lazily from the retained window on demand, instead of from the raw WAL.
 
 ## 2. Organization
 
