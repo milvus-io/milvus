@@ -244,11 +244,11 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{manifestIndex}},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:         SegmentIndexUpsert,
 				BuildID:      it.BuildID,
 				FinishedTask: result,
-			},
+			}},
 		},
 	}); err != nil {
 		// The segment can be retired between the health check above and the

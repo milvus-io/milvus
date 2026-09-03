@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -738,19 +739,20 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	writeIndexesToManifest, _ := taskIndexWriteToManifest(task)
 	targetIndexes := buildCopySegmentTargetIndexes(t.meta, job.GetCollectionId(), writeIndexesToManifest)
 
-	for _, mapping := range idMappings {
+	// Resolve the immutable source descriptions first, then prefetch only the
+	// manifest index sections the snapshot cannot answer on its own. The FFI
+	// calls are independent across segments, but build-ID allocation and request
+	// assembly below stay ordered so parallel I/O cannot change the request.
+	preparedSources := make([]*datapb.CopySegmentSource, len(idMappings))
+	manifestIndexesByMapping := make([][]packed.ManifestIndexInfo, len(idMappings))
+	manifestReadMappings := make([]int, 0, len(idMappings))
+	for i, mapping := range idMappings {
 		sourceSegID := mapping.GetSourceSegmentId()
-		targetSegID := mapping.GetTargetSegmentId()
-		partitionID := mapping.GetPartitionId()
-
-		// Get source segment description from snapshot
 		sourceSegDesc, ok := sourceSegmentMap[sourceSegID]
 		if !ok {
 			return nil, merr.WrapErrServiceInternal(
 				fmt.Sprintf("source segment %d not found in snapshot %s", sourceSegID, job.GetSnapshotName()))
 		}
-
-		// Build source with full binlog information
 		source := &datapb.CopySegmentSource{
 			CollectionId:         snapshotData.SnapshotInfo.GetCollectionId(),
 			PartitionId:          sourceSegDesc.GetPartitionId(),
@@ -758,17 +760,64 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			InsertBinlogs:        sourceSegDesc.GetBinlogs(),
 			StatsBinlogs:         sourceSegDesc.GetStatslogs(),
 			DeltaBinlogs:         sourceSegDesc.GetDeltalogs(),
-			IndexFiles:           sourceSegDesc.GetIndexFiles(),        // vector/scalar index file info
-			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
-			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),    // Text index files
-			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
-			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
-			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
+			IndexFiles:           sourceSegDesc.GetIndexFiles(),
+			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),
+			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),
+			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(),
+			ManifestPath:         sourceSegDesc.GetManifestPath(),
+			StorageVersion:       sourceSegDesc.GetStorageVersion(),
 			IsExternalCollection: isExternalCollection,
 			SourceRootPath:       sourceRootPath,
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
 			ManifestHasIndex:     cloneOptionalBool(sourceSegDesc.ManifestHasIndex),
 		}
+		preparedSources[i] = source
+
+		snapshotCarriesIndexFiles := len(source.GetIndexFiles()) > 0
+		manifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
+		if !snapshotCarriesIndexFiles && !manifestKnownEmpty && !job.GetExternal() &&
+			source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
+			manifestReadMappings = append(manifestReadMappings, i)
+		}
+	}
+
+	if len(manifestReadMappings) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		concurrency := min(len(manifestReadMappings), Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+		pool := conc.NewPool[struct{}](concurrency)
+		futures := make([]*conc.Future[struct{}], 0, len(manifestReadMappings))
+		for _, mappingIndex := range manifestReadMappings {
+			mappingIndex := mappingIndex
+			futures = append(futures, pool.Submit(func() (struct{}, error) {
+				if err := ctx.Err(); err != nil {
+					return struct{}{}, err
+				}
+				source := preparedSources[mappingIndex]
+				manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
+				if err != nil {
+					return struct{}{}, merr.Wrapf(err,
+						"failed to load source index metadata from manifest for segment %d", source.GetSegmentId())
+				}
+				manifestIndexesByMapping[mappingIndex] = manifestIndexes
+				return struct{}{}, ctx.Err()
+			}))
+		}
+		err := conc.BlockOnAll(futures...)
+		pool.Release()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for i, mapping := range idMappings {
+		sourceSegID := mapping.GetSourceSegmentId()
+		targetSegID := mapping.GetTargetSegmentId()
+		partitionID := mapping.GetPartitionId()
+
+		sourceSegDesc := sourceSegmentMap[sourceSegID]
+		source := preparedSources[i]
 		// WHICH INDEX FILES TO COPY: the snapshot's own index metadata wins.
 		// SegmentDescription.IndexFiles is the snapshot's capture of the etcd
 		// SegmentIndex records, so a segment that has them - including every
@@ -782,16 +831,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// sticky marker as proof of an empty index section or enumerates and
 		// retracts inherited entries itself; DataCoord does not need to ship a
 		// second advisory list of the same IDs.
-		manifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
-		if !snapshotCarriesIndexFiles && !manifestKnownEmpty && !job.GetExternal() &&
-			source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
-			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
-			if err != nil {
-				// The snapshot carries no etcd-derived files, so proceeding would
-				// silently omit manifest-resident index artifacts from the copy.
-				return nil, merr.Wrap(err, "failed to load source index metadata from manifest")
-			}
-			for _, manifestIndex := range manifestIndexes {
+		if !snapshotCarriesIndexFiles {
+			for _, manifestIndex := range manifestIndexesByMapping[i] {
 				if !snapshotHasIndex(snapshotData, manifestIndex.IndexID) {
 					continue
 				}

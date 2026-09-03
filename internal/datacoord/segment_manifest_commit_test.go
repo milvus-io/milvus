@@ -719,11 +719,11 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:         SegmentIndexUpsert,
 				BuildID:      buildID,
 				FinishedTask: taskInfo,
-			},
+			}},
 		},
 	}))
 
@@ -806,11 +806,11 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:         SegmentIndexUpsert,
 				BuildID:      buildID,
 				FinishedTask: taskInfo,
-			},
+			}},
 		},
 	})
 	require.Error(t, err)
@@ -850,14 +850,14 @@ func TestCommitSegmentManifestDiscardsResultForDeletedIndexTask(t *testing.T) {
 			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 999}}},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:    SegmentIndexUpsert,
 				BuildID: 999,
 				FinishedTask: &workerpb.IndexTaskInfo{
 					BuildID: 999,
 					State:   commonpb.IndexState_Finished,
 				},
-			},
+			}},
 		},
 	}))
 	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 211).GetManifestPath())
@@ -872,14 +872,14 @@ func TestCommitSegmentManifestsRejectsSegmentIndexMutation(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	commit := commitUpdates(213, "/tmp/milvus/insert_log/1/10/213")
-	commit.CatalogMutation.SegmentIndex = &SegmentIndexMutation{
+	commit.CatalogMutation.SegmentIndexes = []SegmentIndexMutation{{
 		Type:    SegmentIndexUpsert,
 		BuildID: 1,
 		FinishedTask: &workerpb.IndexTaskInfo{
 			BuildID: 1,
 			State:   commonpb.IndexState_Finished,
 		},
-	}
+	}}
 	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{commit})
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -954,10 +954,10 @@ func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:    SegmentIndexRemove,
 				BuildID: buildID,
-			},
+			}},
 		},
 	}))
 
@@ -999,7 +999,7 @@ func TestCommitSegmentManifestRemovesMissingSegmentIndexStillPublishes(t *testin
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: 801},
+			SegmentIndexes: []SegmentIndexMutation{{Type: SegmentIndexRemove, BuildID: 801}},
 		},
 	}))
 	require.Equal(t, newManifest, meta.GetSegment(context.Background(), 215).GetManifestPath())
@@ -1049,13 +1049,85 @@ func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T)
 				SegmentID:       216,
 				StorageConfig:   &indexpb.StorageConfig{},
 				Mutation:        ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{}},
-				CatalogMutation: SegmentCatalogMutation{SegmentIndex: tc.mutation},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: []SegmentIndexMutation{*tc.mutation}},
 			})
 			require.Error(t, err)
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			// The pointer must not have advanced.
 			require.Equal(t, packed.MarshalManifestPath(basePath, 3),
 				m.GetSegment(context.Background(), 216).GetManifestPath())
+		})
+	}
+}
+
+func TestCommitSegmentManifestRejectsAmbiguousSegmentIndexBatchBeforeManifestIO(t *testing.T) {
+	cases := []struct {
+		name      string
+		updates   *packed.ManifestUpdates
+		mutations []SegmentIndexMutation
+	}{
+		{
+			name: "duplicate build ID",
+			updates: &packed.ManifestUpdates{DropIndexes: []packed.DropIndexEntry{
+				{IndexID: 10, ExpectedBuildID: 1},
+			}},
+			mutations: []SegmentIndexMutation{
+				{Type: SegmentIndexRemove, BuildID: 1},
+				{Type: SegmentIndexRemove, BuildID: 1},
+			},
+		},
+		{
+			name: "multiple upserts",
+			updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{
+				{IndexID: 10, BuildID: 1},
+				{IndexID: 11, BuildID: 2},
+			}},
+			mutations: []SegmentIndexMutation{
+				{Type: SegmentIndexUpsert, BuildID: 1},
+				{Type: SegmentIndexUpsert, BuildID: 2},
+			},
+		},
+		{
+			name: "mixed upsert and removal",
+			updates: &packed.ManifestUpdates{
+				Indexes:     []packed.ManifestIndexInfo{{IndexID: 10, BuildID: 1}},
+				DropIndexes: []packed.DropIndexEntry{{IndexID: 11, ExpectedBuildID: 2}},
+			},
+			mutations: []SegmentIndexMutation{
+				{Type: SegmentIndexUpsert, BuildID: 1},
+				{Type: SegmentIndexRemove, BuildID: 2},
+			},
+		},
+		{
+			name:      "removal without matching retraction",
+			updates:   &packed.ManifestUpdates{},
+			mutations: []SegmentIndexMutation{{Type: SegmentIndexRemove, BuildID: 1}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			manifestCalls := 0
+			commitManifest := mockey.Mock(packed.CommitManifestUpdates).To(
+				func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+					manifestCalls++
+					return "", nil
+				}).Build()
+			defer commitManifest.UnPatch()
+
+			err = m.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+				SegmentID:     216,
+				StorageConfig: &indexpb.StorageConfig{},
+				Mutation: ManifestMutation{
+					Type:    ManifestMutationCommitUpdates,
+					Updates: tc.updates,
+				},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: tc.mutations},
+			})
+			require.Error(t, err)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.Zero(t, manifestCalls)
 		})
 	}
 }
@@ -1141,11 +1213,11 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
+			SegmentIndexes: []SegmentIndexMutation{{
 				Type:         SegmentIndexUpsert,
 				BuildID:      buildID,
 				FinishedTask: taskInfo,
-			},
+			}},
 		},
 	}))
 
@@ -1211,7 +1283,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 				Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
 			},
 			CatalogMutation: SegmentCatalogMutation{
-				SegmentIndex: &SegmentIndexMutation{
+				SegmentIndexes: []SegmentIndexMutation{{
 					Type:    SegmentIndexUpsert,
 					BuildID: restartBuildID,
 					FinishedTask: &workerpb.IndexTaskInfo{
@@ -1219,7 +1291,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 						State:         commonpb.IndexState_Finished,
 						IndexFileKeys: []string{"0", "1"},
 					},
-				},
+				}},
 			},
 		})
 	}()

@@ -262,7 +262,7 @@ func collectSegmentFiles(
 
 		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs
 		files.InsertBinlogs = allFiles
-		mlog.Info(context.TODO(), "collected InsertBinlogs from manifest",
+		mlog.Info(ctx, "collected InsertBinlogs from manifest",
 			mlog.String("basePath", basePath),
 			mlog.Int("fileCount", len(allFiles)),
 			mlog.Int64("storageVersion", source.GetStorageVersion()))
@@ -279,14 +279,14 @@ func collectSegmentFiles(
 			// GetManifestLobFiles returns absolute paths (the manifest
 			// deserializer calls ToAbsolute internally), so use them directly.
 			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
-			mlog.Info(context.TODO(), "collected LOB files from segment manifest",
+			mlog.Info(ctx, "collected LOB files from segment manifest",
 				mlog.String("manifestPath", manifestPath),
 				mlog.Int("lobFileCount", len(files.LobFiles)))
 		}
 	} else {
 		// StorageV1/V2: use pb paths (traditional non-packed format)
 		files.InsertBinlogs = extractFromPb(source.GetInsertBinlogs())
-		mlog.Info(context.TODO(), "using InsertBinlogs from pb",
+		mlog.Info(ctx, "using InsertBinlogs from pb",
 			mlog.Int("fileCount", len(files.InsertBinlogs)),
 			mlog.Int64("storageVersion", source.GetStorageVersion()))
 	}
@@ -401,7 +401,7 @@ func CopySegmentAndIndexFiles(
 	segmentID := source.GetSegmentId()
 	useManifest := source.GetStorageVersion() >= storage.StorageV3
 
-	mlog.Info(context.TODO(), "start copying segment and index files",
+	mlog.Info(ctx, "start copying segment and index files",
 		mlog.Int64("sourceSegmentID", segmentID),
 		mlog.Int64("storageVersion", source.GetStorageVersion()),
 		mlog.Bool("useManifest", useManifest),
@@ -422,7 +422,7 @@ func CopySegmentAndIndexFiles(
 	copiedFiles := make([]string, 0, len(mappings))
 	for src, dst := range mappings {
 		copySource := snapshotstorage.NormalizeSnapshotObjectPath(src)
-		mlog.Debug(context.TODO(), "copying file",
+		mlog.Debug(ctx, "copying file",
 			mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)),
 			mlog.String("dst", dst))
 
@@ -430,13 +430,13 @@ func CopySegmentAndIndexFiles(
 			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
 			fields = append(fields, mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)), mlog.String("dst", dst), mlog.Err(err))
-			mlog.Warn(context.TODO(), "failed to copy file", fields...)
+			mlog.Warn(ctx, "failed to copy file", fields...)
 			return nil, copiedFiles, merr.Wrapf(err, "failed to copy file from %s to %s", snapshotstorage.RedactSnapshotObjectPath(src), dst)
 		}
 		copiedFiles = append(copiedFiles, dst)
 	}
 
-	mlog.Info(context.TODO(), "all files copied successfully",
+	mlog.Info(ctx, "all files copied successfully",
 		mlog.Int("fileCount", len(mappings)))
 
 	// Step 3.5: When manifest is used (StorageV3+), InsertBinlogs were collected from manifest
@@ -454,7 +454,7 @@ func CopySegmentAndIndexFiles(
 				mappings[srcPath] = dstPath
 			}
 		}
-		mlog.Info(context.TODO(), "added logical insert binlog mappings for manifest segment",
+		mlog.Info(ctx, "added logical insert binlog mappings for manifest segment",
 			mlog.Int("pbPathCount", len(pbInsertPaths)))
 	}
 
@@ -495,7 +495,7 @@ func CopySegmentAndIndexFiles(
 		}
 		sourceManifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
 		targetManifestPath, manifestIndexBuildIDs, err = republishCopiedManifestIndexes(
-			targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos,
+			ctx, targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos,
 			sourceManifestKnownEmpty)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
@@ -510,7 +510,7 @@ func CopySegmentAndIndexFiles(
 
 	jsonKeyIndexInfos = shortenJSONStatsPath(jsonKeyIndexInfos)
 
-	mlog.Info(context.TODO(), "path compression completed",
+	mlog.Info(ctx, "path compression completed",
 		mlog.Int("binlogFields", len(segmentInfo.GetBinlogs())),
 		mlog.Int("indexCount", len(indexInfos)),
 		mlog.Int("jsonStatsCount", len(jsonKeyIndexInfos)))
@@ -545,7 +545,7 @@ func CopySegmentAndIndexFiles(
 		result.ManifestPath = targetManifestPath
 	}
 
-	mlog.Info(context.TODO(), "copy segment and index files completed successfully",
+	mlog.Info(ctx, "copy segment and index files completed successfully",
 		mlog.Int64("importedRows", result.ImportedRows))
 
 	return result, copiedFiles, nil
@@ -573,6 +573,7 @@ func CopySegmentAndIndexFiles(
 // object is already in the target bucket, so enumeration also works for an
 // external restore where DataCoord cannot read the source bucket.
 func republishCopiedManifestIndexes(
+	ctx context.Context,
 	targetManifestPath string,
 	target *datapb.CopySegmentTarget,
 	numRows int64,
@@ -580,6 +581,9 @@ func republishCopiedManifestIndexes(
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
 	sourceManifestKnownEmpty bool,
 ) (string, []int64, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	var drops []packed.DropIndexEntry
 	if !sourceManifestKnownEmpty {
 		existing, err := packed.GetManifestIndexInfos(targetManifestPath, targetStorageConfig)
@@ -600,7 +604,7 @@ func republishCopiedManifestIndexes(
 			drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID})
 		}
 	}
-	adds, err := buildTargetManifestIndexes(targetManifestPath, target, numRows, indexInfos)
+	adds, err := buildTargetManifestIndexes(ctx, targetManifestPath, target, numRows, indexInfos)
 	if err != nil {
 		return "", nil, err
 	}
@@ -610,6 +614,9 @@ func republishCopiedManifestIndexes(
 	}
 	if len(drops) == 0 && len(adds) == 0 {
 		return targetManifestPath, publishedBuildIDs, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
 	}
 
 	basePath, version, err := packed.UnmarshalManifestPath(targetManifestPath)
@@ -621,7 +628,7 @@ func republishCopiedManifestIndexes(
 	if err != nil {
 		return "", nil, merr.Wrap(err, "failed to commit copied manifest indexes")
 	}
-	mlog.Info(context.TODO(), "republished copied segment manifest indexes",
+	mlog.Info(ctx, "republished copied segment manifest indexes",
 		mlog.Int64("targetSegmentID", target.GetSegmentId()),
 		mlog.Int("droppedInheritedEntries", len(drops)),
 		mlog.Int("addedEntries", len(adds)),
@@ -639,11 +646,15 @@ func republishCopiedManifestIndexes(
 // restored collection, so index name is the only key that survives the snapshot
 // boundary.
 func buildTargetManifestIndexes(
+	ctx context.Context,
 	targetManifestPath string,
 	target *datapb.CopySegmentTarget,
 	numRows int64,
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
 ) ([]packed.ManifestIndexInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(indexInfos) == 0 {
 		return nil, nil
 	}
@@ -665,7 +676,7 @@ func buildTargetManifestIndexes(
 			// An index definition that did not survive the restore has no target
 			// to be recorded under. DataCoord's syncVectorScalarIndexes logs and
 			// skips the same case.
-			mlog.Warn(context.TODO(), "copied index has no target definition, skipping manifest entry",
+			mlog.Warn(ctx, "copied index has no target definition, skipping manifest entry",
 				mlog.Int64("targetSegmentID", target.GetSegmentId()),
 				mlog.String("indexName", info.GetIndexName()))
 			continue
@@ -679,7 +690,7 @@ func buildTargetManifestIndexes(
 			// always carried it through harmlessly: syncVectorScalarIndexes
 			// installs it with empty IndexFileKeys. Failing the whole copy on it
 			// here would turn a benign empty record into a failed restore.
-			mlog.Warn(context.TODO(), "copied index carries no artifact path, skipping manifest entry",
+			mlog.Warn(ctx, "copied index carries no artifact path, skipping manifest entry",
 				mlog.Int64("targetSegmentID", target.GetSegmentId()),
 				mlog.String("indexName", info.GetIndexName()))
 			continue
