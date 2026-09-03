@@ -150,6 +150,16 @@ func UpdateCopyTaskCompleteTs(completeTs uint64) UpdateCopySegmentTaskAction {
 	}
 }
 
+// UpdateCopyTaskIndexWriteToManifest persists the index placement chosen
+// before dispatch. It must not be recomputed while handling the worker result:
+// the runtime switch may have changed while the task was running or while
+// DataCoord was restarting.
+func UpdateCopyTaskIndexWriteToManifest(enabled bool) UpdateCopySegmentTaskAction {
+	return func(t CopySegmentTask) {
+		t.(*copySegmentTask).task.Load().IndexWriteToManifest = proto.Bool(enabled)
+	}
+}
+
 // ===========================================================================================
 // Task Interface and Implementation
 // ===========================================================================================
@@ -165,6 +175,7 @@ type CopySegmentTask interface {
 	GetNodeId() int64
 	GetState() datapb.CopySegmentTaskState
 	GetReason() string
+	GetIndexWriteToManifest() (bool, bool)
 	GetIdMappings() []*datapb.CopySegmentIDMapping // Lightweight ID mappings
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentTask
@@ -236,6 +247,13 @@ func (t *copySegmentTask) GetState() datapb.CopySegmentTaskState {
 // GetReason returns the failure reason (empty if task succeeded).
 func (t *copySegmentTask) GetReason() string {
 	return t.task.Load().GetReason()
+}
+
+// GetIndexWriteToManifest returns the dispatch-time placement and whether it
+// was explicitly persisted. Tasks created by older DataCoords have no value.
+func (t *copySegmentTask) GetIndexWriteToManifest() (bool, bool) {
+	task := t.task.Load()
+	return task.GetIndexWriteToManifest(), task.IndexWriteToManifest != nil
 }
 
 // GetIdMappings returns the source-to-target segment ID mappings.
@@ -351,6 +369,14 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	ctx := t.ctx
 	mlog.Info(ctx, "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.copyMeta.GetJob(ctx, t.GetJobId())
+	if _, ok := t.GetIndexWriteToManifest(); !ok {
+		if err := t.copyMeta.UpdateTask(ctx, t.GetTaskId(),
+			UpdateCopyTaskIndexWriteToManifest(writeSegmentIndexToManifest())); err != nil {
+			mlog.Warn(ctx, "failed to persist copy segment index placement before dispatch",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+			return
+		}
+	}
 	req, err := AssembleCopySegmentRequest(t, job)
 	if err != nil {
 		mlog.Warn(ctx, "failed to assemble copy segment request",
@@ -709,7 +735,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}
 	isExternalCollection := typeutil.IsExternalCollection(sourceSchema)
 
-	targetIndexes := buildCopySegmentTargetIndexes(t.meta, job.GetCollectionId())
+	writeIndexesToManifest, _ := taskIndexWriteToManifest(task)
+	targetIndexes := buildCopySegmentTargetIndexes(t.meta, job.GetCollectionId(), writeIndexesToManifest)
 
 	for _, mapping := range idMappings {
 		sourceSegID := mapping.GetSourceSegmentId()
@@ -740,6 +767,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			IsExternalCollection: isExternalCollection,
 			SourceRootPath:       sourceRootPath,
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
+			ManifestHasIndex:     cloneOptionalBool(sourceSegDesc.ManifestHasIndex),
 		}
 		// WHICH INDEX FILES TO COPY: the snapshot's own index metadata wins.
 		// SegmentDescription.IndexFiles is the snapshot's capture of the etcd
@@ -750,19 +778,21 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 
 		// If the snapshot predates manifest-only finished records, IndexFiles is
 		// already complete and no manifest read is needed. Otherwise, supplement
-		// it from the source manifest. The worker independently enumerates every
-		// inherited manifest entry after the copy and retracts it; DataCoord does
-		// not need to ship a second advisory list of the same IDs.
-		if !job.GetExternal() && source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
+		// it from the source manifest. After the copy the worker either uses the
+		// sticky marker as proof of an empty index section or enumerates and
+		// retracts inherited entries itself; DataCoord does not need to ship a
+		// second advisory list of the same IDs.
+		manifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
+		if !snapshotCarriesIndexFiles && !manifestKnownEmpty && !job.GetExternal() &&
+			source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
 			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
 			if err != nil {
-				// Proceeding without the inherited set would publish a target
-				// manifest still pointing at the source's index artifacts, so
-				// this cannot be downgraded to a warning.
+				// The snapshot carries no etcd-derived files, so proceeding would
+				// silently omit manifest-resident index artifacts from the copy.
 				return nil, merr.Wrap(err, "failed to load source index metadata from manifest")
 			}
 			for _, manifestIndex := range manifestIndexes {
-				if snapshotCarriesIndexFiles || !snapshotHasIndex(snapshotData, manifestIndex.IndexID) {
+				if !snapshotHasIndex(snapshotData, manifestIndex.IndexID) {
 					continue
 				}
 				info, ok := manifestIndexFilePathInfo(source.GetSegmentId(), manifestIndex)
@@ -953,6 +983,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				}
 			}
 			if err == nil {
+				err = validateCopiedManifestIndexPlacement(result, task, meta, publishedBuilds)
+			}
+			if err == nil {
 				err = meta.UpdateSegmentsInfo(ctx, operators...)
 			}
 			if err != nil {
@@ -1024,27 +1057,24 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	return nil
 }
 
-// verifyCopiedManifestIndexOwnership reads back the manifest pointer a worker
-// returned for a StorageV3 copy target and rejects it while it still carries an
-// index entry that does not belong to the target collection.
+// verifyCopiedManifestIndexOwnership resolves the build IDs actually published
+// in the copied manifest and rejects foreign target entries.
 //
-// The worker is supposed to retract every inherited entry and re-derive the
-// target's own before returning the pointer (republishCopiedManifestIndexes on
-// the DataNode). A DataNode from before that behavior existed completes the
-// copy without any retraction, and nothing in the protocol reveals it:
-// CopySegmentResult carries no acknowledgement and the cluster RPC has no
-// version gate. The manifest itself is therefore the only reliable evidence.
+// Current workers acknowledge a completed rewrite and return the build IDs
+// they published, avoiding a redundant object-storage read on every copied
+// segment. A result without that optional acknowledgement came from an older
+// worker, so DataCoord still reads the manifest back conservatively.
 // Publishing an unverified pointer would permanently record entries whose
 // stored paths walk back to the SOURCE collection's index artifacts, so a
 // leftover foreign entry is a hard failure - version skew must surface as a
 // failed task, not as silent metadata pollution.
 //
-// A copied entry belongs to the target iff its IndexID is one of the target
-// collection's index definitions - the same authoritative set
+// For the compatibility read-back, an entry belongs to the target iff its
+// IndexID is one of the target collection's index definitions - the same authoritative set
 // buildCopySegmentTargetIndexes shipped to the worker and
-// syncVectorScalarIndexes resolves against. The cost is one manifest read per
-// copied StorageV3 segment; other targets (including StorageV2, whose
-// manifest_path is a plain copied object, not a loon pointer) skip it.
+// syncVectorScalarIndexes resolves against. Only old-worker results pay this
+// compatibility read; other targets (including StorageV2, whose manifest_path
+// is a plain copied object, not a loon pointer) skip it.
 //
 // It returns the set of buildIDs the manifest actually carries, which is what
 // syncVectorScalarIndexes marks published. Absence of a foreign entry is NOT
@@ -1064,6 +1094,18 @@ func verifyCopiedManifestIndexOwnership(ctx context.Context, result *datapb.Copy
 	if segment == nil || segment.GetStorageVersion() < storage.StorageV3 {
 		return nil, nil
 	}
+	if result.ManifestIndexRewritten != nil {
+		if !result.GetManifestIndexRewritten() {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"copied manifest index rewrite was not completed for segment %d", result.GetSegmentId())
+		}
+		publishedBuilds := make(map[int64]struct{}, len(result.GetManifestIndexBuildIds()))
+		for _, buildID := range result.GetManifestIndexBuildIds() {
+			publishedBuilds[buildID] = struct{}{}
+		}
+		return publishedBuilds, nil
+	}
+
 	entries, err := packed.GetManifestIndexInfos(manifestPath, createStorageConfig())
 	if err != nil {
 		return nil, merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId())
@@ -1095,6 +1137,50 @@ func verifyCopiedManifestIndexOwnership(ctx context.Context, result *datapb.Copy
 	return publishedBuilds, nil
 }
 
+// validateCopiedManifestIndexPlacement checks the worker result against the
+// placement persisted before dispatch. It runs before the target segment is
+// made Flushed, so a mismatched or old worker cannot publish a visible segment
+// and only then fail index synchronization.
+func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
+	task CopySegmentTask, meta *meta, publishedBuilds map[int64]struct{},
+) error {
+	writeToManifest, known := task.GetIndexWriteToManifest()
+	if !known {
+		// Pre-upgrade tasks have no dispatch-time placement. The durable result
+		// (acknowledgement or compatibility read-back) remains authoritative.
+		return nil
+	}
+	if !writeToManifest && len(publishedBuilds) > 0 {
+		return merr.WrapErrServiceInternalMsg(
+			"copied manifest of segment %d contains index entries while manifest publication was disabled at dispatch",
+			result.GetSegmentId())
+	}
+	if !writeToManifest || meta == nil || meta.indexMeta == nil {
+		return nil
+	}
+	targetIndexNames := make(map[string]struct{})
+	for _, index := range meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
+		if index != nil && !index.IsDeleted {
+			targetIndexNames[index.IndexName] = struct{}{}
+		}
+	}
+	for _, indexInfo := range result.GetIndexInfos() {
+		if len(indexInfo.GetIndexFilePaths()) == 0 {
+			continue
+		}
+		if _, exists := targetIndexNames[indexInfo.GetIndexName()]; !exists {
+			continue
+		}
+		if _, published := publishedBuilds[indexInfo.GetBuildId()]; !published {
+			return merr.WrapErrServiceInternalMsg(
+				"copied manifest of segment %d carries no entry for index %q (buildID %d) while manifest publication was enabled at dispatch; "+
+					"the DataNode that ran the copy likely predates manifest index republication - upgrade it and retry the restore",
+				result.GetSegmentId(), indexInfo.GetIndexName(), indexInfo.GetBuildId())
+		}
+	}
+	return nil
+}
+
 // snapshotHasIndex reports whether the snapshot still defines the index a
 // manifest entry belongs to. A manifest can outlive a dropped index definition,
 // and copying that artifact would restore an index the snapshot never had.
@@ -1116,13 +1202,13 @@ func snapshotHasIndex(snapshotData *snapshotstorage.SnapshotData, indexID int64)
 // can carry several indexes on different paths, so fieldID cannot be used). The
 // worker knows the name it copied and nothing else about the target, so the
 // mapping is resolved here and shipped with the request.
-func buildCopySegmentTargetIndexes(m *meta, collectionID int64) []*datapb.CopySegmentTargetIndex {
+func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest bool) []*datapb.CopySegmentTargetIndex {
 	// Strict exclusivity with the etcd record: with manifest publication off,
 	// the copied segment's index records go to etcd (syncVectorScalarIndexes)
 	// and its manifest must gain no index entry. An empty map makes the worker
 	// miss every definition lookup, so it retracts the inherited entries and
 	// writes none of its own.
-	if !writeSegmentIndexToManifest() {
+	if !writeToManifest {
 		return nil
 	}
 	if m == nil || m.indexMeta == nil {
@@ -1152,6 +1238,23 @@ func buildCopySegmentTargetIndexes(m *meta, collectionID int64) []*datapb.CopySe
 		})
 	}
 	return targetIndexes
+}
+
+// taskIndexWriteToManifest returns the placement captured for the task. The
+// fallback keeps direct callers and persisted pre-upgrade tasks compatible;
+// scheduler dispatch always persists the fallback before issuing the RPC.
+func taskIndexWriteToManifest(task CopySegmentTask) (bool, bool) {
+	if enabled, ok := task.GetIndexWriteToManifest(); ok {
+		return enabled, true
+	}
+	return writeSegmentIndexToManifest(), false
+}
+
+func cloneOptionalBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	return proto.Bool(*value)
 }
 
 // ===========================================================================================
@@ -1216,10 +1319,9 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	numRows := result.GetImportedRows()
 	// A copy target records its indexes in its own manifest: the worker retracts
 	// the entries inherited from the source and writes the target's own in the
-	// manifest revision this result points at, which
-	// verifyCopiedManifestIndexOwnership has already read back by the time we get
-	// here. publishedBuilds is that read-back - the buildIDs the manifest really
-	// carries - so publication is decided per record, not per manifest pointer.
+	// manifest revision this result points at. publishedBuilds comes from the
+	// current worker's acknowledgement or an old-worker compatibility read-back,
+	// so publication is decided per record, not per manifest pointer.
 	// A pointer alone proves nothing: a DataNode that predates republication
 	// returns one whose index section is empty, and marking those records
 	// published would create a record that cannot be recovered on restart.
@@ -1249,26 +1351,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 		_, published := publishedBuilds[indexInfo.GetBuildId()]
 		hasArtifact := len(indexInfo.GetIndexFilePaths()) > 0
-		manifestResident := storageV3 && writeSegmentIndexToManifest() && hasArtifact
-		if manifestResident && !published {
-			err := merr.WrapErrServiceInternalMsg(
-				"copied manifest of segment %d carries no entry for index %q (buildID %d) while manifest publication is enabled; "+
-					"the DataNode that ran the copy likely predates manifest index republication - upgrade it and retry the restore",
-				result.GetSegmentId(), indexInfo.GetIndexName(), indexInfo.GetBuildId())
-			if updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-				UpdateCopyTaskReason(err.Error())); updateErr != nil {
-				mlog.Warn(ctx, "failed to update task state to Failed",
-					mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-			}
-			if updateErr := copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-				UpdateCopyJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(ctx, "failed to update job state to Failed",
-					mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-			}
-			return err
-		}
+		manifestResident := storageV3 && published && hasArtifact
 
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{

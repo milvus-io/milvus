@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -67,10 +68,8 @@ func mockNoManifestLobFiles(t *testing.T) {
 	t.Cleanup(func() { mock.UnPatch() })
 }
 
-// mockCopiedManifestIndexEntries stubs the enumeration
-// republishCopiedManifestIndexes performs on the copied manifest, which every
-// StorageV3 copy now runs unconditionally. Pass nil for a manifest whose index
-// section is empty.
+// mockCopiedManifestIndexEntries stubs the conservative enumeration performed
+// when the source snapshot does not prove its manifest index section empty.
 func mockCopiedManifestIndexEntries(t *testing.T, entries []packed.ManifestIndexInfo) {
 	t.Helper()
 	mock := mockey.Mock(packed.GetManifestIndexInfos).Return(entries, nil).Build()
@@ -2894,17 +2893,24 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 // When InsertBinlogs in pb is empty but manifest has files, Step 3.5 has nothing to add (no logical paths).
 func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 	mockNoManifestLobFiles(t)
-	mockCopiedManifestIndexEntries(t, nil)
+	manifestIndexReads := 0
+	manifestIndexMock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestIndexReads++
+			return nil, nil
+		}).Build()
+	defer manifestIndexMock.UnPatch()
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
 
 	source := &datapb.CopySegmentSource{
-		CollectionId:   111,
-		PartitionId:    222,
-		SegmentId:      333,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   manifestPath,
-		InsertBinlogs:  []*datapb.FieldBinlog{},
+		CollectionId:     111,
+		PartitionId:      222,
+		SegmentId:        333,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     manifestPath,
+		ManifestHasIndex: proto.Bool(false),
+		InsertBinlogs:    []*datapb.FieldBinlog{},
 	}
 
 	target := &datapb.CopySegmentTarget{
@@ -2935,6 +2941,10 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 	assert.Equal(t, int64(0), result.ImportedRows)
 	assert.Len(t, copiedFiles, 1)
 	assert.NotEmpty(t, result.ManifestPath)
+	assert.NotNil(t, result.ManifestIndexRewritten)
+	assert.True(t, result.GetManifestIndexRewritten())
+	assert.Empty(t, result.GetManifestIndexBuildIds())
+	assert.Zero(t, manifestIndexReads)
 }
 
 // TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged verifies that StorageV1 segments
@@ -3261,13 +3271,21 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
 	// The copied manifest genuinely holds no index entries and nothing was
 	// copied: the pointer is published untouched, without opening a manifest
-	// transaction. The emptiness is established by enumerating the manifest
-	// itself, not by trusting the (absent) shipped inherited-ID list.
-	mockCopiedManifestIndexEntries(t, nil)
-	republished, err := republishCopiedManifestIndexes(manifestPath,
-		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil)
+	// transaction or reading the manifest. The sticky snapshot marker proves
+	// the index section empty.
+	manifestReads := 0
+	mock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestReads++
+			return nil, nil
+		}).Build()
+	defer mock.UnPatch()
+	republished, publishedBuildIDs, err := republishCopiedManifestIndexes(manifestPath,
+		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil, true)
 	assert.NoError(t, err)
 	assert.Equal(t, manifestPath, republished)
+	assert.Empty(t, publishedBuildIDs)
+	assert.Zero(t, manifestReads)
 }
 
 func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInheritedIndexes(t *testing.T) {
@@ -3299,12 +3317,14 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 		}).Build()
 	defer commit.UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got)
 	assert.Equal(t, 1, commitCalls)
 	assert.Equal(t, []packed.DropIndexEntry{{IndexID: 5001}}, gotDrops)
 	assert.Empty(t, gotIndexes, "no target definitions must mean no copied index publication")
+	assert.Empty(t, publishedBuildIDs)
 }
 
 // CopySegmentTask is the DataNode worker used by snapshot restore. Exercise its
@@ -3361,16 +3381,19 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 				},
 			}
 
-			republished, err := republishCopiedManifestIndexes(copiedManifest, target, 4096, cfg, indexInfos)
+			republished, publishedBuildIDs, err := republishCopiedManifestIndexes(
+				copiedManifest, target, 4096, cfg, indexInfos, false)
 			require.NoError(t, err)
 			entries, err := packed.GetManifestIndexInfos(republished, cfg)
 			require.NoError(t, err)
 			if tc.enabled {
+				assert.Equal(t, []int64{888}, publishedBuildIDs)
 				require.Len(t, entries, 1)
 				assert.Equal(t, int64(777), entries[0].IndexID)
 				assert.Equal(t, int64(888), entries[0].BuildID)
 				assert.Equal(t, "vec_idx", entries[0].IndexName)
 			} else {
+				assert.Empty(t, publishedBuildIDs)
 				assert.Empty(t, entries)
 			}
 		})
@@ -3441,9 +3464,15 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 		},
 	}
 
-	// A legacy source manifest carries no index section, so enumerating the
-	// copied manifest yields nothing to drop.
-	mockCopiedManifestIndexEntries(t, nil)
+	// The sticky marker proves this legacy source manifest has no index section,
+	// so the copied manifest does not need to be read before adding the target.
+	manifestReads := 0
+	mock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestReads++
+			return nil, nil
+		}).Build()
+	defer mock.UnPatch()
 
 	// Read the fields out HERE rather than stashing the *ManifestUpdates for
 	// later. The caller passes a composite literal whose address does not
@@ -3464,7 +3493,8 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 			return republished, nil
 		}).Build().UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, true)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 
@@ -3474,6 +3504,8 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
 	assert.Equal(t, "vec_idx", gotIndexes[0].IndexName)
 	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
+	assert.Equal(t, []int64{888}, publishedBuildIDs)
+	assert.Zero(t, manifestReads)
 }
 
 // External restore: the source manifest sits in a foreign bucket DataCoord
@@ -3526,7 +3558,8 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 			return republished, nil
 		}).Build().UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 
@@ -3541,4 +3574,5 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 	require.Len(t, gotIndexes, 1, "only the re-derived target entries are installed")
 	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
 	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
+	assert.Equal(t, []int64{888}, publishedBuildIDs)
 }

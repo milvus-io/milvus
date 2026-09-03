@@ -484,14 +484,19 @@ func CopySegmentAndIndexFiles(
 	// artifact as a directory plus the file names within it, so it is derived
 	// while those paths are still the full ones this copy wrote; after step 8
 	// each is a bare file name and no entry could name a directory.
-	var targetManifestPath string
+	var (
+		targetManifestPath    string
+		manifestIndexBuildIDs []int64
+	)
 	if useManifest {
 		targetManifestPath, err = transformManifestPath(source.GetManifestPath(), source, target)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to transform manifest path")
 		}
-		targetManifestPath, err = republishCopiedManifestIndexes(
-			targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos)
+		sourceManifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
+		targetManifestPath, manifestIndexBuildIDs, err = republishCopiedManifestIndexes(
+			targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos,
+			sourceManifestKnownEmpty)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
 		}
@@ -527,6 +532,8 @@ func CopySegmentAndIndexFiles(
 	// produced by step 7, before index paths were shortened.
 	if useManifest {
 		result.ManifestPath = targetManifestPath
+		result.ManifestIndexRewritten = proto.Bool(true)
+		result.ManifestIndexBuildIds = manifestIndexBuildIDs
 	} else if source.GetStorageVersion() == storage.StorageV2 && source.GetManifestPath() != "" {
 		targetManifestPath, ok := mappings[source.GetManifestPath()]
 		if !ok {
@@ -561,8 +568,9 @@ func CopySegmentAndIndexFiles(
 // this copy actually wrote, in one transaction on top of the copied manifest, so
 // the pointer DataCoord publishes is already correct and needs no second commit.
 //
-// The entries to drop are enumerated from the copied manifest itself. The
-// manifest object is already in the target bucket, so this also works for an
+// The entries to drop are enumerated from the copied manifest itself unless
+// the snapshot's sticky marker proves the index section empty. The manifest
+// object is already in the target bucket, so enumeration also works for an
 // external restore where DataCoord cannot read the source bucket.
 func republishCopiedManifestIndexes(
 	targetManifestPath string,
@@ -570,47 +578,55 @@ func republishCopiedManifestIndexes(
 	numRows int64,
 	targetStorageConfig *indexpb.StorageConfig,
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
-) (string, error) {
-	existing, err := packed.GetManifestIndexInfos(targetManifestPath, targetStorageConfig)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to enumerate copied manifest index entries")
-	}
-	existingIDs := make(map[int64]struct{}, len(existing))
-	drops := make([]packed.DropIndexEntry, 0, len(existing))
-	for _, entry := range existing {
-		if _, seen := existingIDs[entry.IndexID]; seen {
-			// milvus-storage drops every entry whose index_id matches, so one
-			// drop per unique ID covers duplicates.
-			continue
+	sourceManifestKnownEmpty bool,
+) (string, []int64, error) {
+	var drops []packed.DropIndexEntry
+	if !sourceManifestKnownEmpty {
+		existing, err := packed.GetManifestIndexInfos(targetManifestPath, targetStorageConfig)
+		if err != nil {
+			return "", nil, merr.Wrap(err, "failed to enumerate copied manifest index entries")
 		}
-		existingIDs[entry.IndexID] = struct{}{}
-		// No ExpectedBuildID: the target segment is freshly created and
-		// exclusively owned by this task, so no rebuild can race this drop.
-		drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID})
+		existingIDs := make(map[int64]struct{}, len(existing))
+		drops = make([]packed.DropIndexEntry, 0, len(existing))
+		for _, entry := range existing {
+			if _, seen := existingIDs[entry.IndexID]; seen {
+				// milvus-storage drops every entry whose index_id matches, so one
+				// drop per unique ID covers duplicates.
+				continue
+			}
+			existingIDs[entry.IndexID] = struct{}{}
+			// No ExpectedBuildID: the target segment is freshly created and
+			// exclusively owned by this task, so no rebuild can race this drop.
+			drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID})
+		}
 	}
 	adds, err := buildTargetManifestIndexes(targetManifestPath, target, numRows, indexInfos)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	publishedBuildIDs := make([]int64, 0, len(adds))
+	for _, entry := range adds {
+		publishedBuildIDs = append(publishedBuildIDs, entry.BuildID)
 	}
 	if len(drops) == 0 && len(adds) == 0 {
-		return targetManifestPath, nil
+		return targetManifestPath, publishedBuildIDs, nil
 	}
 
 	basePath, version, err := packed.UnmarshalManifestPath(targetManifestPath)
 	if err != nil {
-		return "", merr.Wrap(err, "failed to parse copied manifest path")
+		return "", nil, merr.Wrap(err, "failed to parse copied manifest path")
 	}
 	republished, err := packed.CommitManifestUpdates(basePath, version, targetStorageConfig,
 		&packed.ManifestUpdates{DropIndexes: drops, Indexes: adds})
 	if err != nil {
-		return "", merr.Wrap(err, "failed to commit copied manifest indexes")
+		return "", nil, merr.Wrap(err, "failed to commit copied manifest indexes")
 	}
 	mlog.Info(context.TODO(), "republished copied segment manifest indexes",
 		mlog.Int64("targetSegmentID", target.GetSegmentId()),
 		mlog.Int("droppedInheritedEntries", len(drops)),
 		mlog.Int("addedEntries", len(adds)),
 		mlog.String("manifestPath", republished))
-	return republished, nil
+	return republished, publishedBuildIDs, nil
 }
 
 // buildTargetManifestIndexes projects the index artifacts this copy wrote into

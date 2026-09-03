@@ -170,23 +170,29 @@ sizes, engine versions). Identity does not survive the snapshot boundary —
 `RestoreIndexes()` allocates fresh index IDs and index name is the only stable
 key — so DataCoord resolves it when assembling the request and ships target
 index definitions keyed by name. The worker obtains row count from the source
-description and enumerates inherited entries from the copied manifest itself;
-the request does not duplicate either value.
+description. It enumerates inherited entries from the copied manifest unless
+the snapshot's sticky marker proves that manifest index-free.
 
-The target-definition map is the switch's lever on this path. With manifest
-publication off DataCoord ships an empty map, so the worker retracts the
-inherited entries and writes no target entries - the copied records go to etcd
-like any legacy build. With it on the map flows and the worker republishes;
-DataCoord then verifies the read-back and hard-fails the task if a synced
-artifact-bearing build has no entry (a DataNode predating republication),
-because such a record cannot be installed as manifest-resident and recovered
-on restart. A verified entry is installed in memory without creating a
-redundant etcd row; empty-artifact records still go to etcd.
+The target-definition map is the switch's lever on this path. DataCoord
+persists the selected placement on the copy task before dispatch, so a switch
+flip or DataCoord restart while the task runs cannot change where its result is
+installed. With manifest publication off DataCoord ships an empty map, so the
+worker retracts inherited entries and writes no target entries - the copied
+records go to etcd like any legacy build. With it on the map flows and the
+worker republishes. Current workers acknowledge the completed rewrite and the
+build IDs actually published, so DataCoord does not read the manifest again;
+results from older workers have no acknowledgement and retain the conservative
+read-back. A missing expected entry hard-fails before the target segment becomes
+visible. A verified entry is installed in memory without creating a redundant
+etcd row; empty-artifact records still go to etcd.
 
 On the source side, DataCoord reads a local source manifest while assembling
-the request only to supplement an older snapshot that lacks manifest-resident
-artifact metadata. Retraction is not sent separately: after copying, the worker
-enumerates and removes every inherited entry from the target manifest itself.
+the request only when snapshot metadata has no index files and the captured
+marker does not prove the manifest index-free. Snapshot manifest format V5
+persists this marker, while V1-V4 remain unknown and take the conservative read
+path. Retraction is not sent separately: after copying, the worker either uses
+the marker's proof of emptiness or enumerates and removes every inherited entry
+from the target manifest itself.
 
 ### Failure semantics
 
@@ -203,8 +209,11 @@ record to drive its GC.
 
 ## Compatibility and Scope
 
-The worker protocol is unchanged; `workerpb.IndexTaskInfo` gains no field. No
-local `minor_version` is introduced: milvus-storage removed that field from its
+The index-build worker protocol is unchanged; `workerpb.IndexTaskInfo` gains no
+field. Copy/restore adds optional source-marker, persisted-placement and worker
+acknowledgement fields. Their absence is the rolling-upgrade signal: old
+snapshots and old workers use the conservative manifest-read path. No local
+`minor_version` is introduced: milvus-storage removed that field from its
 manifest model.
 
 DataCoord passes completed `SegmentIndex` metadata through QueryCoord to

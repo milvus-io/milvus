@@ -537,6 +537,7 @@ type fakeManifestStore struct {
 	mu        sync.Mutex
 	revisions map[string][]packed.ManifestIndexInfo
 	failReads bool
+	readCount int
 }
 
 // failReadsFrom makes every subsequent manifest read fail, modeling a
@@ -582,6 +583,7 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 		func(manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
+			s.readCount++
 			if s.failReads {
 				return nil, merr.WrapErrIoFailedReason("throttled")
 			}
