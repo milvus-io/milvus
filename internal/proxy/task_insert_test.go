@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t *testing.T) {
@@ -72,7 +73,8 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
-	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil)
+	// Idempotency disabled: no decoration, so no key property and no insert result.
+	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -80,6 +82,428 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	header := msg.Header()
 	assert.NotNil(t, header.SchemaVersion)
 	assert.Equal(t, int32(0), header.GetSchemaVersion())
+	assert.Empty(t, message.IdempotencyKeyOf(msgs[0]))
+	_, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.False(t, ok)
+
+	// Idempotency enabled: the proxy decoration single-sources both the idempotency
+	// key (message property) and the per-write-unit insert result (insert header).
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
+	msgs, err = repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration())
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+
+	msg = message.MustAsMutableInsertMessageV1(msgs[0])
+	header = msg.Header()
+	assert.Equal(t, "key-1", message.IdempotencyKeyOf(msgs[0]))
+	extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.True(t, ok)
+	assert.Equal(t, []uint32{0}, extra.GetRowOffsets())
+	assert.Equal(t, []int64{1}, extra.GetIds().GetIntId().GetData())
+}
+
+func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *testing.T) {
+	paramtable.Init()
+	// The packer's single-row limit is per WAL backend: rocksmq declares none,
+	// so the size-driven split under test only exists on a bounded backend.
+	paramtable.SetRole(typeutil.StandaloneRole)
+	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	t.Cleanup(func() {
+		paramtable.SetRole("")
+		Params.Reset(Params.MQCfg.Type.Key)
+	})
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+
+	insertMsg, result := newIdempotentRepackInsertMsg(3)
+	payloads := insertMsg.GetFieldsData()[2].GetScalars().GetStringData().GetData()
+	for i := range payloads {
+		payloads[i] = strings.Repeat("x", 128*1024)
+	}
+	idxComputer := typeutil.NewFieldDataIdxComputer(insertMsg.GetFieldsData())
+	fieldIdxs := idxComputer.Compute(0)
+	rowSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), 0, fieldIdxs...)
+	require.NoError(t, err)
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(rowSize*2)))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+
+	msgs, err := repackInsertDataForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+		it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), 1)
+
+	assert.Equal(t, []uint32{0, 1, 2}, collectIdempotentRepackOffsets(t, msgs, "ch", "key-split"))
+}
+
+// An idempotent insert whose envelope crosses the transport limit must be SPLIT,
+// not rejected. Rejecting made every insert large enough to be packed to the
+// threshold fail the moment idempotency was enabled, while the identical batch
+// succeeded with it off -- the packer budgets only column bytes, so a full pack
+// has less than one row of headroom for an envelope whose overhead grows with
+// the row count.
+func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *testing.T) {
+	paramtable.Init()
+	// The packer's single-row limit is per WAL backend: rocksmq declares none,
+	// so the size-driven split under test only exists on a bounded backend.
+	paramtable.SetRole(typeutil.StandaloneRole)
+	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	t.Cleanup(func() {
+		paramtable.SetRole("")
+		Params.Reset(Params.MQCfg.Type.Key)
+	})
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+
+	// One row, and it alone must be over the transport limit -- which the
+	// formatter floors at minWALMessageSize, so the row has to clear that floor
+	// on its own or the limit this test sets would be raised out from under it.
+	insertMsg, result := newIdempotentRepackInsertMsgWithPayload(1, strings.Repeat("a", 512*1024))
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+
+	bodyOnly, err := repackInsertDataForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, bodyOnly, 1)
+
+	withIdempotency, err := repackInsertDataForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+		it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Len(t, withIdempotency, 1)
+	require.Greater(t, withIdempotency[0].EstimateSize(), bodyOnly[0].EstimateSize())
+	require.Greater(t, withIdempotency[0].EstimateSize()-1, bodyOnly[0].EstimateSize())
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+
+	// The non-idempotent path must stay under the same limit: the final
+	// streaming-message size guard exists specifically for the extra idempotency
+	// metadata, so a plain insert of the same body must still pass.
+	withoutIdempotency, err := repackInsertDataForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, withoutIdempotency, 1)
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+
+	// A single row cannot be split further, so this one still fails -- but with an
+	// error that names the real constraint.
+	_, err = repackInsertDataForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+		it.idempotentInsertDecoration(),
+	)
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.Contains(t, err.Error(), "does not fit in one WAL message")
+}
+
+// The same batch with more than one row is split until every message fits,
+// instead of failing the whole insert.
+func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing.T) {
+	paramtable.Init()
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil).Maybe()
+
+	insertMsg, result := newIdempotentRepackInsertMsg(8)
+	// Pad each row so the per-row payload dominates the fixed header cost:
+	// halving the whole envelope must still leave room for one row, otherwise
+	// the split has nowhere to go and the insert is rejected instead.
+	payloads := insertMsg.GetFieldsData()[2].GetScalars().GetStringData().GetData()
+	for i := range payloads {
+		payloads[i] = strings.Repeat("x", 128*1024)
+	}
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "104857600"))
+	whole, err := repackInsertDataForStreamingService(
+		context.Background(), cache, []string{"ch"},
+		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Len(t, whole, 1)
+
+	// Force the built envelope over the limit; the rows must be redistributed
+	// across several messages rather than the insert failing.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(whole[0].EstimateSize()/2)))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	split, err := repackInsertDataForStreamingService(
+		context.Background(), cache, []string{"ch"},
+		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(split), 1)
+	for _, msg := range split {
+		require.LessOrEqual(t, msg.EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+	}
+}
+
+func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempotentHeaders(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetRole(typeutil.StandaloneRole)
+	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	t.Cleanup(func() {
+		paramtable.SetRole("")
+		Params.Reset(Params.MQCfg.Type.Key)
+	})
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	cache := NewMockCache(t)
+	cache.On("GetPartitions", mock.Anything, "db", "coll").Return(map[string]int64{
+		"partition_0": 300,
+		"partition_1": 301,
+	}, nil)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
+
+	// The single row must clear minWALMessageSize on its own; see
+	// newIdempotentRepackInsertMsgWithPayload.
+	insertMsg, result := newIdempotentRepackInsertMsgWithPayload(1, strings.Repeat("a", 512*1024))
+	partitionKeys := insertMsg.GetFieldsData()[1]
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 3, Name: "payload", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	bodyOnly, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, bodyOnly, 1)
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+
+	withoutIdempotency, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, withoutIdempotency, 1)
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+		it.idempotentInsertDecoration(),
+	)
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.Contains(t, err.Error(), "a single insert row does not fit in one WAL message")
+}
+
+func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessagesShareKey(t *testing.T) {
+	paramtable.Init()
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitions(mock.Anything, "db", "coll").Return(map[string]int64{
+		"partition_0": 300,
+		"partition_1": 301,
+	}, nil)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
+
+	insertMsg, result := newIdempotentRepackInsertMsg(16)
+	partitionKeys := insertMsg.GetFieldsData()[1]
+	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, []string{"partition_0", "partition_1"})
+	require.NoError(t, err)
+	require.Contains(t, hashValues, uint32(0))
+	require.Contains(t, hashValues, uint32(1))
+
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 3, Name: "payload", DataType: schemapb.DataType_VarChar},
+		},
+	}
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-partition", result: result}
+
+	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		cache,
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+		it.idempotentInsertDecoration(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), 1)
+
+	partitionIDs := typeutil.NewSet[int64]()
+	for _, raw := range msgs {
+		header := message.MustAsMutableInsertMessageV1(raw).Header()
+		require.Len(t, header.GetPartitions(), 1)
+		partitionIDs.Insert(header.GetPartitions()[0].GetPartitionId())
+	}
+	assert.ElementsMatch(t, []int64{300, 301}, partitionIDs.Collect())
+	assert.ElementsMatch(t, []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+		collectIdempotentRepackOffsets(t, msgs, "ch", "key-partition"))
+}
+
+func newIdempotentRepackInsertMsg(rows int) (*msgstream.InsertMsg, *milvuspb.MutationResult) {
+	return newIdempotentRepackInsertMsgWithPayload(rows, "payload")
+}
+
+// newIdempotentRepackInsertMsgWithPayload builds the same fixture with a chosen
+// per-row payload. A test that drives the transport limit needs rows big enough
+// that the limit it asks for survives walMessageSizeFormatter's floor
+// (minWALMessageSize): a smaller value is silently raised to it, and the split
+// under test would never trigger.
+func newIdempotentRepackInsertMsgWithPayload(rows int, payload string) (*msgstream.InsertMsg, *milvuspb.MutationResult) {
+	pks := make([]int64, 0, rows)
+	partitionKeys := make([]int64, 0, rows)
+	payloads := make([]string, 0, rows)
+	rowIDs := make([]int64, 0, rows)
+	timestamps := make([]uint64, 0, rows)
+	for i := 0; i < rows; i++ {
+		pks = append(pks, int64(i+1))
+		partitionKeys = append(partitionKeys, int64(i))
+		payloads = append(payloads, payload)
+		rowIDs = append(rowIDs, int64(1000+i))
+		timestamps = append(timestamps, uint64(2000+i))
+	}
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{Ctx: context.Background()},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, SourceID: 1},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "coll",
+			PartitionName:  "_default",
+			NumRows:        uint64(rows),
+			Version:        msgpb.InsertDataVersion_ColumnBased,
+			FieldsData: []*schemapb.FieldData{
+				int64FieldData("pk", 1, pks),
+				int64FieldData("part", 2, partitionKeys),
+				stringFieldData(3, "payload", payloads),
+			},
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+		},
+	}
+	result := &milvuspb.MutationResult{
+		IDs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}},
+		},
+	}
+	return insertMsg, result
+}
+
+func stringFieldData(fieldID int64, name string, values []string) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name,
+		FieldId:   fieldID,
+		Type:      schemapb.DataType_VarChar,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: values},
+				},
+			},
+		},
+	}
+}
+
+func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage, vchannel string, key string) []uint32 {
+	t.Helper()
+	offsets := make([]uint32, 0)
+	for _, raw := range msgs {
+		require.Equal(t, vchannel, raw.VChannel())
+		msg := message.MustAsMutableInsertMessageV1(raw)
+		header := msg.Header()
+		require.Equal(t, key, message.IdempotencyKeyOf(raw))
+		extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
+		require.True(t, ok)
+		body := msg.MustBody()
+		require.Equal(t, body.GetNumRows(), uint64(len(extra.GetRowOffsets())))
+		require.Equal(t, body.GetNumRows(), uint64(len(extra.GetIds().GetIntId().GetData())))
+		offsets = append(offsets, extra.GetRowOffsets()...)
+	}
+	return offsets
 }
 
 func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
@@ -366,7 +790,8 @@ func TestInsertTask(t *testing.T) {
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
 		cache := NewMockCache(t)
-		cache.On("GetCollectionID",
+		cache.On(
+			"GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
@@ -604,19 +1029,22 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
-	cache.On("GetCollectionID",
+	cache.On(
+		"GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
+	cache.On(
+		"GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(info, nil)
 
-	cache.On("GetCollectionInfo",
+	cache.On(
+		"GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
@@ -739,19 +1167,22 @@ func TestInsertTask_Function(t *testing.T) {
 	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
-	cache.On("GetCollectionID",
+	cache.On(
+		"GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
+	cache.On(
+		"GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(info, nil)
 
-	cache.On("GetPartitionInfo",
+	cache.On(
+		"GetPartitionInfo",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
@@ -762,7 +1193,8 @@ func TestInsertTask_Function(t *testing.T) {
 		CreatedTimestamp:    10001,
 		CreatedUtcTimestamp: 10002,
 	}, nil)
-	cache.On("GetCollectionInfo",
+	cache.On(
+		"GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
@@ -808,7 +1240,8 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 func TestInsertTask_Namespace(t *testing.T) {
 	paramtable.Init()
 	cache := NewMockCache(t)
-	cache.On("GetDatabaseInfo",
+	cache.On(
+		"GetDatabaseInfo",
 		mock.Anything,
 		mock.Anything,
 	).Return(&databaseInfo{Properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
