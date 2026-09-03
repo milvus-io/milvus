@@ -3,254 +3,146 @@
 - **Created:** 2026-08-31
 - **Author(s):** @xiaocai2333
 - **Status:** In progress
-- **Component:** pkg/extension | cmd/milvus | paramtable | Proxy | Coordinator
+- **Component:** pkg/extension | cmd/milvus | hookutil | Proxy | Coordinator
 - **Related Issues:** #52979
-- **Implemented by:** #52981 (mechanism), seams follow per package
+- **Implemented by:** #52981
 
 ## Summary
 
-`pkg/extension` lets a distribution that is **compiled into the milvus binary**
-take over a fixed set of behaviors - proxy-side request interception, API-key
-verification, RBAC seeding, DDL admission, a coordinator-hosted control-plane
-engine, resource-group interception, graceful vector-index drop, per-resource-
-group load placement and unauthenticated internal listeners - without forking
-the code that hosts them. A distribution links its implementation, installs one
-`Provider` at boot, and builds its own `main` around the exported
-`cmd/milvus.Main`. A stock binary installs nothing and behaves exactly as
-before.
-
-This document is the contract: the shape of the table, the rules under which
-it evolves, the conventions every capability follows, and which seams have
-landed.
+A distribution that compiles its own behavior into the milvus binary needs two
+things from milvus: a way to install a request hook without a `.so`, and a
+callback that starts its control-plane engine when the coordinator becomes
+active and stops it on shutdown. `pkg/extension` is those two setters, plus
+the two context marks the proxy reads. Everything else such a distribution
+does is either the hook's own reach, a coordinator RPC, or a configuration
+item. A stock binary installs nothing and behaves exactly as before.
 
 ## Motivation
 
-The managed-cloud form of milvus had been a fork carrying ~9 behavior changes
-in the proxy and the coordinators. Every rebase re-applied them by hand, and
-every change to a hosting function risked silently dropping one. The existing
-plug-in point, `internal/util/hookutil`, loads a `.so` and covers request
-observation and API-key verification only; it cannot reach coordinator
-internals, listeners or load semantics, and its untyped `interface{}` surface
-cannot express what those need.
-
-The alternative to a fork is a set of typed seams in the tree, consulted at the
-points the fork used to patch, with the implementation living out of tree.
-Nothing in a community build should pay for them: no allocation, no lock, one
-atomic load and one nil comparison on a request path.
+The managed-cloud form of milvus had been a fork carrying a handful of
+behavior changes in the proxy and the coordinators, re-applied by hand on
+every rebase. The first attempt to replace the fork was a table of eight
+typed capabilities consulted from eighteen places in the tree. Reviewing it
+against the fork's actual needs showed that most entries were not
+capabilities: four were constants per deployment (configuration), two
+duplicated what the request hook already does on every proxy RPC, one
+duplicated coordinator RPCs, and one was an answer with no RPC that belonged
+on the wire. What remains is small enough to state on one page.
 
 ## Public interfaces
 
-### The table
-
 ```go
-type Capabilities struct {
-    ProxyExt          ProxyExtension
-    APIKey            APIKeyVerifier
-    RBACBootstrap     RBACBootstrapper
-    Admission         AdmissionChecker
-    CoordinatorEngine CoordinatorEngine
-    ResourceGroups    ResourceGroupInterceptor
-    IndexDrain        IndexDrainer
-    LoadPlacement     LoadPlacementScope
-    InternalSurfaces  InternalSurfaces
-}
+package extension
 
-type Provider interface {
-    Name() string
-    Requires() []CapabilityID
-    Capabilities() Capabilities
-}
+func SetHook(h hook.Hook)                     // hookutil prefers it over proxy.soPath
+func InstalledHook() hook.Hook
 
-func SetProvider(p Provider) error   // at most once, before any component starts
-func Caps() *Capabilities            // one atomic load; read-only by contract
+type Coordinator interface {                  // the coordinator as its own clients see it
+	rootcoordpb.RootCoordClient
+	querypb.QueryCoordClient
+	datapb.DataCoordClient
+}
+type CoordinatorEngine interface {
+	Start(ctx context.Context, coord Coordinator) error
+	Stop() error
+}
+func SetCoordinatorEngine(e CoordinatorEngine)
+func InstalledCoordinatorEngine() CoordinatorEngine
+
+func WithInternalDomain(ctx) context.Context      // set by the internal-domain listeners
+func FromInternalDomain(ctx) bool
+func WithQueryResourceGroup(ctx, rg) context.Context   // set by a hook's Before
+func QueryResourceGroupFromContext(ctx) string
 ```
 
-A nil field means "not taken over, native path". `SetProvider` fails - with
-`merr.ErrServiceInternal` - on a nil or typed-nil provider, a typed-nil
-capability, a `Requires()` entry that is absent or unknown, and a second
-installation. `Caps()` returns a shared zero table when nothing is installed
-so both paths cost the same.
+A distribution calls the two setters, then `cmd/milvus.Main(os.Args)`.
 
-### The entry point
+### The request hook
 
-`cmd/milvus.Main(args []string)` is the former `cmd/main.go` body. A
-distribution's `main`:
+`hook.Hook` (milvus-proto) is consulted by the proxy's unary interceptor for
+every RPC on both the gRPC and the REST surface, and by `CreateReplicateStream`.
+`Mock` answers without forwarding, `Before` may rewrite the request in place,
+block, and return the context the handler runs under, `After` sees the result.
+`VerifyAPIKey` answers the API key; with `common.security.requireAPIKey` on,
+the external listener refuses username/password credentials.
 
-```go
-func main() {
-    if err := extension.SetProvider(kite.Provider()); err != nil {
-        log.Fatal(err)
-    }
-    milvus.Main(os.Args)
-}
-```
+Two additions to hookutil and the interceptor:
 
-`Main` copies `args` and does not modify the caller's slice.
+- A compiled-in hook (`SetHook`) is used in preference to `proxy.soPath`, and a
+  deployment that configures both is refused at start-up.
+- A hook whose `Before` refuses a request may implement
+  `RefusalResponse(fullMethod string, err error) (resp any, ok bool)`. When it
+  answers, the refusal travels in the response's `Status` - classified, with
+  its reason - instead of as the bare `InvalidArgument` the interceptor
+  otherwise returns. `InvalidArgument` is in pymilvus's non-retried set, so a
+  bare refusal is not retried either; what it lacks is the error code.
 
-### The primary configuration file
+### The coordinator engine
 
-`paramtable.PrimaryConfigName()` reports the file every paramtable reads in
-`milvus.yaml`'s position. It is decided **before the process starts**: at link
-time through
-`-ldflags "-X github.com/milvus-io/milvus/pkg/v3/util/paramtable.primaryConfigName=kite.yaml"`,
-overridden by the `MILVUS_PRIMARY_CONFIG` environment variable. It cannot be a
-call: `internal/proxy`, `datacoord`, `rootcoord`, the coordinator and the
-component clients all declare `var Params = paramtable.Get()` at package level,
-and `Get` calls `Init`, so the global table exists before any `main` or `init`
-a distribution could write. A name that is not a bare `.yaml`/`.yml` file name
-panics at the first table, because the file source's own rejection of such a
-name silently drops every local yaml source.
+`mixcoord` starts the installed engine once the replica is ACTIVE (a standby
+never starts it), on the coordinator client it uses itself, and stops it on
+shutdown. A start failure on activation is fatal: a coordinator serving without
+its engine would accept work nothing accounts for. The engine reaches the
+coordinator through nothing but `Coordinator`, so what it can do is exactly
+what a proxy can do - including seeding its own accounts through
+`CreateCredential` / `OperateUserRole`, and reading per-resource-group load
+progress through `ShowLoadCollections` with `resource_group` set.
 
-## Design
+### Context marks
 
-### Evolution policy
+- `WithInternalDomain` is stamped by the two unauthenticated listeners
+  `proxy.internalDomain.grpcPort` / `httpPort` open (both 0, closed, by
+  default). It is how a hook tells the control plane's call from a tenant's on
+  the shared handler.
+- `WithQueryResourceGroup` pins a query to one resource group. The shard
+  client routes it to the leaders whose replica lives in that group
+  (`ShardLeadersList.resource_groups`) and the proxy attributes its latency to
+  that group. Nothing in a stock binary sets it.
 
-The table and the interfaces are consumed outside this repository, so they
-change under one rule set (also in the package doc of `pkg/extension`):
+## Configuration this mechanism relies on
 
-1. `Capabilities` gains fields; it never loses or renames one. A new capability
-   is a new field with a new interface.
-2. An interface a **form implements** is one of two kinds, and says which:
-   - **Noop-based**: every method has an inert answer, given by a `NoopXxx`
-     type implementations embed. A method may be added only together with
-     its inert default. `ProxyExtension`, `AdmissionChecker`,
-     `RBACBootstrapper`, `CoordinatorEngine`, `ResourceGroupInterceptor`,
-     `IndexDrainer`, `LoadPlacementScope`.
-   - **Frozen**: no inert answer exists, so no method is ever added; a new
-     need becomes a new `Capabilities` field. `APIKeyVerifier`,
-     `InternalSurfaces`.
-3. An interface **milvus implements** and hands to a form (`MixCoord`,
-   `ProxyConnections`, `CoordClient`, `CredentialStore`) may gain methods and
-   never loses one.
-4. Structs crossing the boundary (`QueryPlacement`, `ResourceGroupUpdate`,
-   `ShardLeaderReadiness`, `InternalListeners`) gain fields, never lose them.
-
-Consequence: every signature in `pkg/extension` is a one-time decision. This
-is why the reject hooks take a `context.Context`, `AdmissionChecker` receives
-the request, and `InternalSurfaces` returns a struct.
-
-### Fall-through and short-circuit
-
-Every `Intercept*` method answers "fall through" with the zero value of its
-results: `nil` error, `(false, nil)`, `(nil, nil)`. Anything else is a
-short-circuit. None of them returns `*commonpb.Status`: `merr.Status(nil)` is a
-**non-nil success status**, so a Status-returning hook written as
-`return merr.Status(check())` would have short-circuited every request the
-check passed - Insert answering success with an empty result and dropping the
-rows. With `error` as the type, the same idiom is `return check()` and a
-passing check falls through by construction.
-
-Each method states whether it MAY REJECT, MAY REPLACE, or is OBSERVE ONLY; an
-undocumented method observes (the HBASE-18770 convention).
-
-### Error contract
-
-An error a form returns reaches the client through `merr.Status`, so it must be
-or wrap (with `merr.Wrap/Wrapf`) a sentinel from `pkg/util/merr`. Any other
-error collapses to `UnexpectedError` (code 1), which no SDK retries. A
-condition the request caused is an input-class sentinel; a condition of the
-deployment (a cluster not up yet) is `merr.ErrServiceUnavailable` or another
-retriable one.
-
-### Mutation
-
-A request handed to a form is read-only, and so is everything reachable from
-it: milvus runs the native path on the same object after a fall-through and may
-log or retry it. Where a hook may hand milvus something else to use, it returns
-it (`RewriteRequestParams`, `BeforeCreateResourceGroup`, `ResourceGroupUpdate.
-Forward`).
-
-### Request annotation
-
-`OnConnect` / `RewriteRequestParams` / `EnsureQueryReady` are one mechanism: a
-form learns which of its own clusters a request is for - at Connect, per RPC,
-or from a reserved DQL parameter it strips - carries it on the context under
-its own key, and reads it back when admitting the query. milvus never learns
-the vocabulary. `OnDisconnect` bounds the per-connection half.
-
-### Routing scope
-
-`EnsureQueryReady` returns a `QueryPlacement`; its `ResourceGroup` is bound
-onto the request context by milvus alone (`WithQueryResourceGroup`, private
-key) and honored by the shard-leader lookup, so "made ready on" and "routed to"
-are the same resource group by construction. `QueryPlacement.Release` runs
-`Finish` at most once and is deferred by the seam on every exit path including
-panics.
-
-### Shard-leader readiness
-
-`ShardLeaderReadiness` and its reason constants are defined once, here.
-querycoord's computation (`internal/querycoordv2/utils`, added by #52716) is
-to import and return this type; #52716 currently carries its own copy with
-identical values, and whichever of the two PRs merges second makes the switch.
-When a producer returns an error the struct is unspecified; callers classify
-on the error with `merr.IsRetryableErr` first.
-
-### Relation to hookutil
-
-hookutil stays the surface for out-of-tree binary plug-ins; a capability is
-added here, never there. Where both could answer (API keys) the seam consults
-this package first and falls back to hookutil only when the capability is nil.
-
-## Seams
-
-Nothing in #52981 consults the table. Each seam lands as its own change with
-the tests that exercise the fall-through and the takeover path.
-
-| Capability | Seam | Status |
+| Key | Default | What a distribution sets it for |
 |---|---|---|
-| `ProxyExtension.InterceptDML` | proxy Insert/Delete/Upsert/Flush/FlushAll/ImportV2 | pending |
-| `ProxyExtension.InterceptAdminRPC` | 27 admin RPCs in proxy impl.go | pending |
-| `ProxyExtension` load-semantics group | proxy Load/Release/GetLoadState/GetLoadingProgress | pending |
-| `ProxyExtension.OnConnect/OnDisconnect/Start` | proxy Connect + connection manager | pending |
-| `ProxyExtension.RewriteRequestParams/EnsureQueryReady` | proxy Search/HybridSearch/Query | pending |
-| `APIKeyVerifier` | proxy authentication interceptor | pending |
-| `RBACBootstrapper` | rootcoord init, writing through the catalog as `MetaTable.InitCredential`/`initRbac` do (the broadcast path is not up yet) | pending |
-| `AdmissionChecker` | rootcoord CreateCollection/CreateDatabase | pending |
-| `CoordinatorEngine` | distributed/mixcoord server | pending, after #52716 |
-| `ResourceGroupInterceptor` | querycoord resource-group handlers | pending |
-| `IndexDrainer` | datacoord DropIndex/CreateIndex, querycoord index checker | pending |
-| `LoadPlacementScope` | querycoord load job | pending |
-| `InternalSurfaces` | distributed/proxy listeners | pending |
+| `common.security.requireAPIKey` | false | external listener accepts API keys only |
+| `proxy.internalDomain.grpcPort` / `httpPort` | 0 / 0 | unauthenticated control-plane listeners |
+| `queryCoord.resourceGroupScopedLoad` | false | a load names only the groups it changes |
+| `queryCoord.reloadSegmentOnIndexDrop` | true | keep dropped indexes on loaded segments until release |
+| `dataCoord.index.allowVectorIndexDropOnLoadedCollection` | false | let the drop through; admission is the hook's |
+| `dataCoord.index.queryNodesScaleToZero` | false | index engine versions with no QueryNode session |
+| `dataCoord.externalCollection.refreshWaitForIndex` | false | hold a refresh until its segments are indexed |
+| `builtinRoles.*` | - | the roles the distribution's accounts bind to |
 
-## Compatibility, deprecation, migration
+## Compatibility
 
-- No behavior change in a stock binary: no seam consults the table; `cmd/main.go`
-  is a thin wrapper around `Main`; the primary config name defaults to
-  `milvus.yaml`.
-- No configuration key is added. `MILVUS_PRIMARY_CONFIG` is an environment
-  variable read only by `paramtable`.
-- `ResetForTest` exists only under the `test` build tag.
-- The pkg/proto types that cross the boundary (`querypb`, `indexpb`,
-  `internalpb`) carry no cross-version promise; an in-tree form compiles
-  against the same revision.
+- `ShowCollectionsRequest.resource_group` and `ShardLeadersList.resource_groups`
+  are appended proto fields; an old peer leaves them empty and both sides read
+  empty as "no scope".
+- Every configuration item defaults to the stock behavior.
+- `hook.Hook` is milvus-proto's and unchanged.
+- The default configuration file is `milvus.yaml`; a distribution that ships
+  its configuration under another name places it as `user.yaml` in
+  `MILVUSCONF`, which the existing file list already reads last.
 
 ## Test plan
 
-- `pkg/extension`: registry (install, requirement, unknown requirement, double
-  install, typed-nil provider and capability, every `CapabilityID` requirable
-  when supplied and refusable when absent), every Noop base inert and
-  inherited by an embedder, the short-circuit-by-type guard, `QueryPlacement.
-  Release` once-only, context keys unforgeable. 100% statement coverage under
-  `-race`.
-- `paramtable`: default name, link-time name, environment override, bad names
-  refused on both paths, and end to end: a table built under the replaced name
-  reads that file and not `milvus.yaml`; a missing primary is skipped.
-- `cmd/milvus`: `Main` returns on the usage branch and leaves the caller's
-  args intact; the package is now in `run_go_unittest.sh` and
-  `run_go_codecov.sh`.
-- Each seam change carries its own tests for fall-through and takeover.
+- `pkg/extension`: the setters and getters, and both context marks.
+- hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
+  default.
+- proxy: the refusal-response path; a hook-pinned resource group reaches the
+  search task; per-resource-group latency series exist only for pinned
+  requests; the internal-domain listeners open only when configured.
+- mixcoord: the engine starts on activation only, receives the coordinator
+  client, and is stopped once.
+- querycoord / datacoord: each configuration item off (stock) and on.
 
 ## Rejected alternatives
 
-- **Extending hookutil.** Untyped, `.so`-loaded, and unable to reach the
-  coordinator, listeners or load semantics. Kept for its existing users.
-- **One `Capabilities` field per method group of `ProxyExtension`** (split into
-  `DMLInterceptor`, `LoadSemantics`, ...). Fully consistent with "fields only",
-  but the seams already written against one interface would be reworked for a
-  benefit the Noop base already provides. Revisit if a form ever needs one
-  group without the others.
-- **A run-time `UsePrimaryConfigName(name)` call.** Shipped first, then found
-  to be unreachable early enough (see "The primary configuration file").
-- **Returning `*commonpb.Status` from the reject hooks.** The `merr.Status(nil)`
-  trap; see "Fall-through and short-circuit".
+- **A capability table with a `Provider`, `Requires()` and typed-nil checks.**
+  Shipped first as #52981. Eight capabilities, nine cross-boundary interfaces,
+  eighteen read points; most entries were constants or duplicates of existing
+  mechanisms. Replaced by this document.
+- **A link-time primary configuration file name.** An entrypoint that renames
+  the file solves it with no milvus change.
+- **Per-callback interfaces for the proxy request path.** Every proxy RPC
+  already passes the hook's `Mock`, `Before` and `After`, and `Before` returns
+  the handler's context.
