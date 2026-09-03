@@ -39,6 +39,21 @@ type functionConfig struct {
 	// the legacy format. Explicit "false" keeps legacy format forever (escape
 	// hatch); explicit "true" force-enables and bypasses the version gate (use
 	// with caution).
+	//
+	// Notes on the auto-switch behavior:
+	//   - The flip is a one-shot decision taken by the MixCoord confirmator:
+	//     once it flips the value to "true" it writes the config-center (etcd)
+	//     key, which then outranks file/env sources per the usual config
+	//     priority. After the flip, the only working override is the etcd
+	//     config-center key itself (`<etcd.rootPath>/config/<key>`); a "false"
+	//     set in milvus.yaml or env afterwards is silently ignored. Explicit
+	//     "false"/"true" set before the flip (in any source) is honored and
+	//     skips the etcd write.
+	//   - Setting "false" at startup makes the gate resolve immediately and the
+	//     confirmator exits; reverting "false" back to "auto" at runtime does
+	//     not re-arm the gate (the confirmator is one-shot), so the flip only
+	//     takes effect after a MixCoord restart. Operators can still intervene
+	//     at any time by setting "true" or "false" explicitly.
 	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
 }
 
