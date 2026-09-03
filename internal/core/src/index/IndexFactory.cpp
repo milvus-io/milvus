@@ -50,6 +50,7 @@
 #include "pb/schema.pb.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 namespace {
@@ -107,6 +108,15 @@ GetFileName(const std::string& path) {
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
+proto::common::LoadPriority
+ResolveLoadPriority(const std::map<std::string, std::string>& index_params) {
+    // Missing or unrecognized values use the higher-concurrency pool so the
+    // loading-memory estimate remains conservative.
+    const auto it = index_params.find(LOAD_PRIORITY);
+    return it == index_params.end() ? proto::common::LoadPriority::HIGH
+                                    : PriorityForLoad(it->second);
+}
+
 IndexType
 HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
     switch (type) {
@@ -126,13 +136,13 @@ HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
 std::optional<ScalarIndexType>
 ResolveHybridInternalIndexType(
     const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    proto::common::LoadPriority load_priority) {
     if (index_files.empty() || !file_manager_context.Valid()) {
         return std::nullopt;
     }
 
     storage::MemFileManagerImpl file_manager(file_manager_context);
-    const auto load_priority = proto::common::LoadPriority::HIGH;
     auto type_file =
         std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
             return GetFileName(f) == INDEX_TYPE;
@@ -156,7 +166,11 @@ ResolveHybridInternalIndexType(
         AssertInfo(input != nullptr,
                    "failed to open packed hybrid index file: {}",
                    index_files.front());
-        auto reader = storage::IndexEntryReader::Open(input, input->Size());
+        auto reader =
+            storage::IndexEntryReader::Open(input,
+                                            input->Size(),
+                                            /*collection_id=*/0,
+                                            PriorityForLoad(load_priority));
         AssertInfo(reader != nullptr,
                    "failed to create reader for packed hybrid index file");
         if (reader->HasMeta(INDEX_TYPE)) {
@@ -504,6 +518,7 @@ IndexFactory::ScalarIndexLoadResource(
     const auto scalar_version =
         GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
+    const auto load_priority = ResolveLoadPriority(index_params);
 
     knowhere::expected<knowhere::Resource> resource;
 
@@ -513,7 +528,7 @@ IndexFactory::ScalarIndexLoadResource(
     if (index_type == milvus::index::ASCENDING_SORT) {
         if (scalar_version >= 3) {
             const auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
-                index_size_in_bytes, scalar_version);
+                index_size_in_bytes, scalar_version, load_priority);
             const auto legacy_aux_bytes = SortLegacyAuxBytes(num_rows);
             if (mmap_enable) {
                 request.final_memory_cost = legacy_aux_bytes;
@@ -541,7 +556,7 @@ IndexFactory::ScalarIndexLoadResource(
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (scalar_version >= 3) {
             const auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
-                index_size_in_bytes, scalar_version);
+                index_size_in_bytes, scalar_version, load_priority);
             if (mmap_enable) {
                 const auto legacy_csr_resident_bytes =
                     MarisaLegacyCsrBytes(num_rows, 2);
@@ -578,9 +593,10 @@ IndexFactory::ScalarIndexLoadResource(
                index_type == milvus::index::NGRAM_INDEX_TYPE) {
         const auto validity_bitmap_bytes = ValidityBitmapBytes(num_rows);
         const auto stream_memory_overhead =
-            scalar_version >= 3 ? ScalarIndexStreamMemoryOverhead(
-                                      index_size_in_bytes, scalar_version)
-                                : index_size_in_bytes;
+            scalar_version >= 3
+                ? ScalarIndexStreamMemoryOverhead(
+                      index_size_in_bytes, scalar_version, load_priority)
+                : index_size_in_bytes;
         if (mmap_enable) {
             request.final_memory_cost = validity_bitmap_bytes;
             request.final_disk_cost = index_size_in_bytes;
@@ -605,8 +621,11 @@ IndexFactory::ScalarIndexLoadResource(
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (scalar_version >= 3) {
             const auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
-                index_size_in_bytes, scalar_version);
+                index_size_in_bytes, scalar_version, load_priority);
             if (mmap_enable) {
+                // TODO: Once bitmap cardinality is exposed to admission
+                // estimation, account for the BITSET load mode's per-value
+                // resident bitsets here.
                 const auto resident_bytes = BitsetBytes(num_rows);
                 const auto frozen_buffer_bytes =
                     BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
@@ -680,8 +699,9 @@ IndexFactory::ScalarIndexLoadResource(
     }
 
     try {
-        const auto internal_index_type =
-            ResolveHybridInternalIndexType(index_files, file_manager_context);
+        const auto load_priority = ResolveLoadPriority(index_params);
+        const auto internal_index_type = ResolveHybridInternalIndexType(
+            index_files, file_manager_context, load_priority);
         if (internal_index_type.has_value()) {
             const auto resolved_index_type =
                 HybridInternalIndexTypeToIndexType(internal_index_type.value());

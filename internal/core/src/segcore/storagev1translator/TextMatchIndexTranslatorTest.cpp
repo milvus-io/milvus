@@ -46,7 +46,7 @@ TEST(TextMatchIndexTranslatorTest,
     constexpr int64_t kIndexSize = std::numeric_limits<int64_t>::max() / 4;
     constexpr int64_t kNumRows = 512 * 1024;
     constexpr int64_t kValidityBitmapBytes = kNumRows / 8;
-    constexpr auto kLoadPriority = proto::common::LoadPriority::HIGH;
+    constexpr auto kLoadPriority = proto::common::LoadPriority::LOW;
 
     TextMatchIndexLoadInfo load_info{
         true, 1, 2, "{}", kIndexSize, 3, kNumRows, "disable"};

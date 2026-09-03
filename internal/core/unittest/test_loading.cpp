@@ -31,6 +31,26 @@
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
 
+class ThreadPoolMaxSizeGuard {
+ public:
+    ThreadPoolMaxSizeGuard(milvus::ThreadPool& pool, int max_threads)
+        : pool_(pool), original_max_threads_(pool.GetMaxThreadNum()) {
+        pool_.Resize(max_threads);
+    }
+
+    ~ThreadPoolMaxSizeGuard() {
+        pool_.Resize(static_cast<int>(original_max_threads_));
+    }
+
+    ThreadPoolMaxSizeGuard(const ThreadPoolMaxSizeGuard&) = delete;
+    ThreadPoolMaxSizeGuard&
+    operator=(const ThreadPoolMaxSizeGuard&) = delete;
+
+ private:
+    milvus::ThreadPool& pool_;
+    const size_t original_max_threads_;
+};
+
 class IndexLoadTest : public ::testing::TestWithParam<Param> {
  protected:
     void
@@ -404,6 +424,45 @@ TEST(IndexLoadTest, ScalarV3SortUsesStreamConcurrencyBound) {
                                                         0,
                                                         0);
     EXPECT_EQ(small_mmap_request.max_memory_cost, kSmallIndexSize);
+}
+
+TEST(IndexLoadTest, ScalarV3EstimateUsesConfiguredLoadPriority) {
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    ThreadPoolMaxSizeGuard high_pool_guard(high_pool, 2);
+    ThreadPoolMaxSizeGuard low_pool_guard(low_pool, 1);
+
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    const auto high_stream_overhead = 2UL * DEFAULT_INDEX_FILE_SLICE_SIZE;
+    const auto low_stream_overhead = DEFAULT_INDEX_FILE_SLICE_SIZE;
+
+    auto estimate_mmap_peak = [](const std::string& index_type,
+                                 const char* load_priority) {
+        std::map<std::string, std::string> index_params{
+            {milvus::index::INDEX_TYPE, index_type},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+        if (load_priority != nullptr) {
+            index_params[milvus::LOAD_PRIORITY] = load_priority;
+        }
+        return milvus::index::IndexFactory::GetInstance()
+            .ScalarIndexLoadResource(
+                milvus::DataType::VARCHAR, 0, kIndexSize, index_params, true, 0)
+            .max_memory_cost;
+    };
+
+    for (const auto* index_type : {milvus::index::ASCENDING_SORT,
+                                   milvus::index::MARISA_TRIE,
+                                   milvus::index::INVERTED_INDEX_TYPE,
+                                   milvus::index::NGRAM_INDEX_TYPE}) {
+        EXPECT_EQ(estimate_mmap_peak(index_type, "LOW"), low_stream_overhead)
+            << index_type;
+    }
+    EXPECT_EQ(estimate_mmap_peak(milvus::index::BITMAP_INDEX_TYPE, "LOW"),
+              kIndexSize + low_stream_overhead);
+    EXPECT_EQ(estimate_mmap_peak(milvus::index::ASCENDING_SORT, nullptr),
+              high_stream_overhead);
 }
 
 TEST(IndexLoadTest, ScalarV2SortRetainsWholeEntryBound) {

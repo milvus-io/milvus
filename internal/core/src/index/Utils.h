@@ -191,8 +191,7 @@ ParseConfigFromIndexParams(
 uint64_t
 ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
                                 int32_t scalar_version,
-                                proto::common::LoadPriority load_priority =
-                                    proto::common::LoadPriority::HIGH);
+                                proto::common::LoadPriority load_priority);
 
 struct IndexDataCodec {
     std::list<std::unique_ptr<storage::DataCodec>> codecs_{};
