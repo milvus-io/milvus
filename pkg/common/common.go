@@ -994,7 +994,7 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 // ParseShardSplitMode reads CollectionShardSplitMode out of a property list,
 // returning the canonical value.
 //
-// An unrecognised value is an error rather than a fall back to the default: a
+// An unrecognized value is an error rather than a fall back to the default: a
 // typo that silently meant "auto" would hand the size trigger a collection the
 // operator believes they control by hand.
 func ParseShardSplitMode(kvs []*commonpb.KeyValuePair) (mode string, exist bool, parseErr error) {

@@ -76,7 +76,7 @@ func TestCollectionRoutingFieldsLegacyDefaults(t *testing.T) {
 	// A legacy collection persisted before shard split has neither routing fields
 	// nor shard infos. Unmarshalling must leave the modulus zero and shard_by
 	// empty — the two values that mean "never split, never declared" — so the
-	// routing behaviour is unchanged.
+	// routing behavior is unchanged.
 	legacy := &pb.CollectionInfo{
 		ID:                   2,
 		Schema:               MarshalCollectionModel(newRoutingCollection()).Schema,

@@ -92,7 +92,7 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 
 	// 1b. check the shard-split properties.
 	//
-	// Checked here and not only on the alter path: a mode nothing recognises
+	// Checked here and not only on the alter path: a mode nothing recognizes
 	// reads back as the "auto" default, so a typo at CREATE time would hand the
 	// size trigger a collection the operator believes they took control of, and
 	// no later request would ever tell them. A shard count set at create time is
