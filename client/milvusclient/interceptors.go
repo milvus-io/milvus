@@ -40,6 +40,10 @@ const (
 
 	databaseHeader = `dbname`
 
+	// idempotencyKeyHeader carries the client-supplied idempotency key for
+	// Insert; must stay in sync with util.HeaderIdempotencyKey on the server.
+	idempotencyKeyHeader = `idempotency-key`
+
 	// ClientRequestMsecKey temp const value, TODO use common package def after upgrading milvus/pkg version
 	ClientRequestMsecKey string = "client-request-unixmsec"
 

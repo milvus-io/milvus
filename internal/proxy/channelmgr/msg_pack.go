@@ -64,7 +64,7 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
 	walName message.WALName,
-) ([]msgstream.TsMsg, error) {
+) ([]msgstream.TsMsg, [][]int, error) {
 	// Keep the existing cross-WAL packing threshold separate from the
 	// backend-specific hard limit for a row that cannot be split further.
 	splitThreshold := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
@@ -102,16 +102,18 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
 
 	repackedMsgs := make([]msgstream.TsMsg, 0)
+	repackedRowOffsets := make([][]int, 0)
 	requestSize := 0
 	msg := createInsertMsg(segmentID, channelName)
+	msgRowOffsets := make([]int, 0)
 	for _, offset := range rowOffsets {
 		fieldIdxs := idxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
-			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			return nil, nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
 				"single row at offset %d is too large to fit in one WAL message: estimated size=%d bytes, limit=%d bytes",
 				offset, curRowMessageSize, singleRowLimit,
 			))
@@ -121,7 +123,9 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		// message first.
 		if msg.NumRows > 0 && requestSize+curRowMessageSize >= splitThreshold {
 			repackedMsgs = append(repackedMsgs, msg)
+			repackedRowOffsets = append(repackedRowOffsets, msgRowOffsets)
 			msg = createInsertMsg(segmentID, channelName)
+			msgRowOffsets = make([]int, 0)
 			requestSize = 0
 		}
 
@@ -130,11 +134,13 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
 		msg.NumRows++
+		msgRowOffsets = append(msgRowOffsets, offset)
 		requestSize += curRowMessageSize
 	}
 	if msg.NumRows > 0 {
 		repackedMsgs = append(repackedMsgs, msg)
+		repackedRowOffsets = append(repackedRowOffsets, msgRowOffsets)
 	}
 
-	return repackedMsgs, nil
+	return repackedMsgs, repackedRowOffsets, nil
 }

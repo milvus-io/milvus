@@ -116,6 +116,7 @@ func waitForReservationOK(ctx context.Context, tasks ...*ProduceGuard) error {
 type ProduceGuard struct {
 	producer *ResumableProducer
 	msgs     []message.MutableMessage
+	opts     []ProduceOption
 	r        *rate.Reservation
 }
 
@@ -131,6 +132,8 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 		return g.producer.produceInternal(ctx, g.msgs[0])
 	}
 	if len(g.msgs) == 1 {
+		// No idempotency key is applied here: a single message already carries its
+		// own key from the layer that built it (the proxy, for inserts).
 		msg := g.msgs[0]
 		// Only a local CAS message without transaction context needs wrapping.
 		// Replication already carries the source transaction and must preserve it.
@@ -259,6 +262,11 @@ func (g *ProduceGuard) appendTxnBody(ctx context.Context, txn *message.TxnContex
 }
 
 // commitTxn commits the transaction.
+//
+// The idempotency key for a single insert is stamped on the message by the proxy
+// (single-sourced alongside the insert result). Only the commit-txn message is
+// synthesized here in the producer, out of the proxy's reach, so it is the one
+// message that needs the key applied at this layer.
 func (g *ProduceGuard) commitTxn(
 	ctx context.Context,
 	vchannel string,
@@ -269,15 +277,25 @@ func (g *ProduceGuard) commitTxn(
 		WithVChannel(vchannel).
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey(idempotencyKeyFromProduceOptions(g.opts...)).
 		MustBuildMutable()
-	message.InjectTraceContext(ctx, commitTxn)
 	if partialUpdateCAS {
 		if err := message.MarkPartialUpdateCASCommit(commitTxn); err != nil {
 			return nil, err
 		}
 	}
+	message.InjectTraceContext(ctx, commitTxn)
 
 	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
+}
+
+func idempotencyKeyFromProduceOptions(opts ...ProduceOption) string {
+	for i := len(opts) - 1; i >= 0; i-- {
+		if opts[i].IdempotencyKey != "" {
+			return opts[i].IdempotencyKey
+		}
+	}
+	return ""
 }
 
 // Cancel cancel the produce task.

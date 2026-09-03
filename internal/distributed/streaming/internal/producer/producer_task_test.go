@@ -430,7 +430,10 @@ func TestProduceGuard_Commit_Txn(t *testing.T) {
 
 	// 3. commitTxn
 	p.EXPECT().Append(mock.Anything, mock.MatchedBy(func(m message.MutableMessage) bool {
-		return m.MessageType() == message.MessageTypeCommitTxn
+		if m.MessageType() != message.MessageTypeCommitTxn {
+			return false
+		}
+		return message.IdempotencyKeyOf(m) == "key-1"
 	})).Return(&types.AppendResult{}, nil)
 	p.EXPECT().Available().Return(make(chan struct{})).Maybe()
 	p.EXPECT().IsAvailable().Return(true).Maybe()
@@ -443,11 +446,62 @@ func TestProduceGuard_Commit_Txn(t *testing.T) {
 
 	limiter := rate.NewLimiter(rate.Inf, 200)
 	res := limiter.ReserveN(time.Now(), msg1.EstimateSize()+msg2.EstimateSize())
-	task := &ProduceGuard{producer: rp, r: res, msgs: []message.MutableMessage{msg1, msg2}}
+	task := &ProduceGuard{producer: rp, r: res, msgs: []message.MutableMessage{msg1, msg2}, opts: []ProduceOption{{IdempotencyKey: "key-1"}}}
 
 	resAppend, err := task.commit(context.Background())
 	assert.NoError(t, err)
 	assert.NotNil(t, resAppend)
+}
+
+func TestProduceGuard_Commit_SingleMessageKeepsProxyIdempotencyKey(t *testing.T) {
+	// The proxy single-sources the idempotency key of a single insert onto the
+	// message property. The producer must not stamp it again on the autocommit
+	// path: only the commit-txn message it synthesizes itself needs the key.
+	p := mock_producer.NewMockProducer(t)
+	msg := createRealInsertMessage(t, "test-v")
+	require.Empty(t, message.IdempotencyKeyOf(msg))
+
+	p.EXPECT().Append(mock.Anything, mock.MatchedBy(func(m message.MutableMessage) bool {
+		return m.MessageType() == message.MessageTypeInsert && message.IdempotencyKeyOf(m) == ""
+	})).Return(&types.AppendResult{}, nil)
+	p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+
+	rp := NewResumableProducer(func(ctx context.Context, opts *handler.ProducerOptions) (producer.Producer, error) {
+		return p, nil
+	}, &ProducerOptions{PChannel: "test"})
+	defer rp.Close()
+
+	limiter := rate.NewLimiter(rate.Inf, 200)
+	res := limiter.ReserveN(time.Now(), msg.EstimateSize())
+	task := &ProduceGuard{producer: rp, r: res, msgs: []message.MutableMessage{msg}, opts: []ProduceOption{{IdempotencyKey: "key-1"}}}
+
+	resAppend, err := task.commit(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, resAppend)
+}
+
+func TestIdempotencyKeyFromProduceOptions(t *testing.T) {
+	assert.Empty(t, idempotencyKeyFromProduceOptions())
+	assert.Empty(t, idempotencyKeyFromProduceOptions(ProduceOption{}))
+	assert.Equal(t, "key-1", idempotencyKeyFromProduceOptions(ProduceOption{IdempotencyKey: "key-1"}))
+	// The last non-empty option wins.
+	assert.Equal(t, "key-2", idempotencyKeyFromProduceOptions(
+		ProduceOption{IdempotencyKey: "key-1"},
+		ProduceOption{IdempotencyKey: "key-2"},
+	))
+
+	// An empty key must not materialize the property at all: a keyless commit txn
+	// message must carry no idempotency property, not an empty-valued one.
+	msg := message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("test-v").
+		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey(idempotencyKeyFromProduceOptions()).
+		MustBuildMutable()
+	assert.Empty(t, message.IdempotencyKeyOf(msg))
+	assert.NotContains(t, msg.Properties().ToRawMap(), "_ik")
 }
 
 func TestProduceGuard_Commit_TxnExpiredRetry(t *testing.T) {
