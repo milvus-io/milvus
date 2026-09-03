@@ -102,6 +102,12 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) Prepare() error {
+	// The listener is bound here (so the address can be advertised before
+	// recovery) but Serve is deferred until after the coordinator recovery
+	// barrier (startGrpcAfterRecovery). During recovery or while standby, the
+	// port accepts TCP connections but never answers HTTP/2: clients observe
+	// the dial timeout, not an immediate connection refused, and a TCP-socket
+	// liveness probe reports the never-accepting standby as up.
 	listener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
