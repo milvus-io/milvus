@@ -283,6 +283,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	RequireAPIKey         ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -979,6 +980,19 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.RequireAPIKey = ParamItem{
+		Key:     "common.security.requireAPIKey",
+		Version: "3.0.0",
+		Doc: `Refuse username and password authentication on the external listener, so only an API key is accepted there.
+A deployment whose users authenticate through keys issued elsewhere sets this, and a milvus credential can then no longer
+be used to bypass that key system. It does not disable credentials themselves: internal listeners and the RBAC the control
+plane seeds are untouched, and with authorizationEnabled off nothing authenticates at all and this has no effect.
+Verification of the key itself is the hook's (proxy.soPath, or a hook compiled into the binary).`,
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RequireAPIKey.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
@@ -5720,6 +5734,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	IndexQueryNodesScaleToZero          ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6488,6 +6503,23 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
+
+	p.IndexQueryNodesScaleToZero = ParamItem{
+		Key:          "dataCoord.index.queryNodesScaleToZero",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether no QueryNode being online means the pool is scaled to zero rather than missing.
+Natively, no QueryNode session means no readers, and the index engine versions negotiated from those sessions fall to
+zero and the store-path gate to the legacy layout - the conservative reading when nodes are expected to exist and their
+absence is a degradation. A deployment that starts QueryNodes on demand inverts that: no session is the RESTING state,
+and most index builds happen in it. Version zero is then not conservative but wrong, because knowhere reads engine
+version 0 as "disk load only for DISKANN" and misroutes other disk indexes onto the in-memory path.
+With this set, an empty session set is answered from THIS process's own engine versions instead of from zero, on the
+assumption that a QueryNode started later runs the same image as the coordinator. Do not set it where the QueryNode
+pool can run an image older than the coordinator.`,
+		Export: true,
+	}
+	p.IndexQueryNodesScaleToZero.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

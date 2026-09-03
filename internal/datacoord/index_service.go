@@ -1005,6 +1005,13 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		if err != nil {
 			return merr.Status(err), nil
 		}
+		// Extension seam, see extension_seam.go: consulted once per REQUEST,
+		// outside the loop - the answer depends on the collection and the
+		// request's index name, not on which index the loop is looking at.
+		// (A DropAll request reaches this with its one empty name, and every
+		// index it covers shares that one answer.) With none installed this
+		// answers false and the refusal below stands.
+		dropWhileLoadedAllowed := vectorIndexDropWhileLoadedAllowed(ctx, req.GetCollectionID(), req.GetIndexName())
 		// check if there is any vector index to drop
 		for _, index := range indexes {
 			field := typeutil.GetField(schema, index.FieldID)
@@ -1017,7 +1024,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 					mlog.FieldFieldID(index.FieldID))
 				continue
 			}
-			if typeutil.IsVectorType(field.GetDataType()) {
+			if typeutil.IsVectorType(field.GetDataType()) && !dropWhileLoadedAllowed {
 				mlog.Warn(context.TODO(), "vector index cannot be dropped on loaded collection", mlog.String("indexName", req.IndexName), mlog.Int64("collectionID", req.GetCollectionID()), mlog.Int64("fieldID", index.FieldID))
 				return merr.Status(merr.WrapErrParameterInvalidMsg("vector index cannot be dropped on loaded collection: %d", req.GetCollectionID())), nil
 			}

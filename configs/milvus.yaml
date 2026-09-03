@@ -884,6 +884,16 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
+    # Whether no QueryNode being online means the pool is scaled to zero rather than missing.
+    # Natively, no QueryNode session means no readers, and the index engine versions negotiated from those sessions fall to
+    # zero and the store-path gate to the legacy layout - the conservative reading when nodes are expected to exist and their
+    # absence is a degradation. A deployment that starts QueryNodes on demand inverts that: no session is the RESTING state,
+    # and most index builds happen in it. Version zero is then not conservative but wrong, because knowhere reads engine
+    # version 0 as "disk load only for DISKANN" and misroutes other disk indexes onto the in-memory path.
+    # With this set, an empty session set is answered from THIS process's own engine versions instead of from zero, on the
+    # assumption that a QueryNode started later runs the same image as the coordinator. Do not set it where the QueryNode
+    # pool can run an image older than the coordinator.
+    queryNodesScaleToZero: false
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
@@ -924,6 +934,13 @@ dataCoord:
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
+  externalCollection:
+    # Hold an external-collection refresh in progress until every segment it produced is indexed.
+    # Off, a refresh completes when its data lands, and queries meet the new segments before their indexes exist -
+    # correct, but brute-force-scanned. On, the job stays InProgress (progress 90-100 tracks index building) and the
+    # refreshed data becomes visible only once it is servable at indexed speed. Deployments that load collections on
+    # demand per query cluster enable this: their queries have no warm replica to hide the unindexed window behind.
+    refreshWaitForIndex: false
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -1197,6 +1214,12 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Refuse username and password authentication on the external listener, so only an API key is accepted there.
+    # A deployment whose users authenticate through keys issued elsewhere sets this, and a milvus credential can then no longer
+    # be used to bypass that key system. It does not disable credentials themselves: internal listeners and the RBAC the control
+    # plane seeds are untouched, and with authorizationEnabled off nothing authenticates at all and this has no effect.
+    # Verification of the key itself is the hook's (proxy.soPath, or a hook compiled into the binary).
+    requireAPIKey: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 

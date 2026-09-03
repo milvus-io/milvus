@@ -94,17 +94,21 @@ type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
-	ctx                context.Context
-	wg                 sync.WaitGroup
-	grpcHTTPWg         sync.WaitGroup
-	proxy              types.ProxyComponent
-	httpListener       net.Listener
-	grpcListener       net.Listener
-	tcpServer          cmux.CMux
-	httpServer         *http.Server
-	grpcInternalServer *grpc.Server
-	grpcExternalServer *grpc.Server
-	listenerManager    *listenerManager
+	ctx          context.Context
+	wg           sync.WaitGroup
+	grpcHTTPWg   sync.WaitGroup
+	proxy        types.ProxyComponent
+	httpListener net.Listener
+	// The internal-domain listeners a form's extension declares; nil when
+	// none is installed. See internal_domain.go.
+	internalDomainGrpcServer *grpc.Server
+	internalDomainHTTPServer *http.Server
+	grpcListener             net.Listener
+	tcpServer                cmux.CMux
+	httpServer               *http.Server
+	grpcInternalServer       *grpc.Server
+	grpcExternalServer       *grpc.Server
+	listenerManager          *listenerManager
 
 	serverID atomic.Int64
 
@@ -127,13 +131,15 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
-	username, password, ok := httpserver.ParseUsernamePassword(c)
-	if ok {
-		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
-			c.Set(httpserver.ContextUsername, username)
-			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
-			return
+	if !proxy.Params.CommonCfg.RequireAPIKey.GetAsBool() {
+		username, password, ok := httpserver.ParseUsernamePassword(c)
+		if ok {
+			if proxy.PasswordVerify(c, username, password) {
+				mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+				c.Set(httpserver.ContextUsername, username)
+				c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
+				return
+			}
 		}
 	}
 	rawToken := httpserver.GetAuthorization(c)
@@ -620,6 +626,11 @@ func (s *Server) start() error {
 		return err
 	}
 
+	if err := s.startInternalDomainServers(); err != nil {
+		mlog.Error(context.TODO(), "failed to start the internal-domain listeners", mlog.Err(err))
+		return err
+	}
+
 	if err := s.proxy.Register(); err != nil {
 		mlog.Warn(context.TODO(), "failed to register Proxy", mlog.Err(err))
 		return err
@@ -651,6 +662,11 @@ func (s *Server) Stop() (err error) {
 	defer func() {
 		logger.Info(s.ctx, "Proxy stopped", mlog.Err(err))
 	}()
+
+	// Closed before the proxy component itself: these listeners serve the
+	// component, and a request accepted after it stopped has nothing to answer
+	// it. Safe when none was opened.
+	s.stopInternalDomainServers()
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()

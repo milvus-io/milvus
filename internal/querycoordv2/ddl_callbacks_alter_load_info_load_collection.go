@@ -62,6 +62,11 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
+	// A request that speaks only for the resource groups it names leaves the
+	// placement of the others alone; natively it states the whole placement and
+	// this returns what AssignReplica just produced.
+	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
+		ctx, req.GetCollectionID(), resourceGroups, expectedReplicasNumber, currentLoadConfig)
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
