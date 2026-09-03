@@ -1009,40 +1009,15 @@ func (s *mixCoordImpl) GetShardLeaders(ctx context.Context, req *querypb.GetShar
 }
 
 func (s *mixCoordImpl) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: with none installed this returns req.
-	return s.queryCoordServer.CreateResourceGroup(ctx, beforeCreateResourceGroup(ctx, req))
+	return s.queryCoordServer.CreateResourceGroup(ctx, req)
 }
 
 func (s *mixCoordImpl) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go. This is the one resource-group
-	// request whose control flow an interceptor can change, so the native path
-	// is spelled out first: with none installed the update is forwarded
-	// exactly as it arrived and nothing below runs.
-	interceptor := resourceGroupInterceptor()
-	if interceptor == nil {
-		return s.queryCoordServer.UpdateResourceGroups(ctx, req)
-	}
-	update, err := interceptor.BeforeUpdateResourceGroups(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	if update.Applied {
-		return merr.Success(), nil
-	}
-	status, err := s.queryCoordServer.UpdateResourceGroups(ctx, update.RequestToApply(req))
-	afterUpdateResourceGroups(ctx, update, status, err)
-	return status, err
+	return s.queryCoordServer.UpdateResourceGroups(ctx, req)
 }
 
 func (s *mixCoordImpl) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: with none installed neither call
-	// does anything. A drop that does not commit is reported back, because the
-	// Before hook's teardown has already happened by then and cannot be
-	// undone.
-	beforeDropResourceGroup(ctx, req)
-	status, err := s.queryCoordServer.DropResourceGroup(ctx, req)
-	afterDropResourceGroupFailed(ctx, req, status, err)
-	return status, err
+	return s.queryCoordServer.DropResourceGroup(ctx, req)
 }
 
 func (s *mixCoordImpl) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {

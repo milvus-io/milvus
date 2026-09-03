@@ -46,7 +46,6 @@ type stubProxyExtension struct{ NoopProxyExtension }
 var allCapabilityIDs = []CapabilityID{
 	CapProxyExtension,
 	CapCoordinatorEngine,
-	CapResourceGroupInterceptor,
 	CapHook,
 }
 
@@ -56,7 +55,6 @@ func fullCapabilities() Capabilities {
 	return Capabilities{
 		ProxyExt:          stubProxyExtension{},
 		CoordinatorEngine: &fakeCoordinatorEngine{},
-		ResourceGroups:    stubResourceGroupInterceptor{},
 		Hook:              stubHook{},
 	}
 }
