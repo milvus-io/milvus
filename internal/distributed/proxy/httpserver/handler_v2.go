@@ -73,19 +73,11 @@ type HandlersV2 struct {
 var _ interface{ IsDQLQueueFull() bool } = (*proxy.Proxy)(nil)
 
 func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
-	return NewHandlersV2WithCheckAuth(proxyClient, proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool())
-}
-
-// NewHandlersV2WithCheckAuth builds the v2 handlers with an explicit
-// authorization decision, for a listener whose auth posture differs from the
-// global switch - an internal-domain listener serves the control plane with
-// no credentials however the external one is configured.
-func NewHandlersV2WithCheckAuth(proxyClient types.ProxyComponent, checkAuth bool) *HandlersV2 {
 	h := &HandlersV2{
 		proxy:        proxyClient,
 		metaCache:    getProxyMetaCache(proxyClient),
 		dqlQueueFull: func() bool { return false },
-		checkAuth:    checkAuth,
+		checkAuth:    proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
 	}
 	// a component without the probe (e.g. a remote proxy client) admits everything
 	if provider, ok := proxyClient.(interface{ IsDQLQueueFull() bool }); ok {

@@ -428,14 +428,6 @@ func TestComponentParam(t *testing.T) {
 		params.Reset(Params.SplitChunkProxy.Key)
 		assert.True(t, Params.SplitChunkProxy.GetAsBool())
 
-		// The internal-domain listeners are closed unless a deployment opens them.
-		assert.Equal(t, 0, Params.InternalDomainGrpcPort.GetAsInt())
-		assert.Equal(t, 0, Params.InternalDomainHTTPPort.GetAsInt())
-		params.Save(Params.InternalDomainGrpcPort.Key, "26330")
-		params.Save(Params.InternalDomainHTTPPort.Key, "9093")
-		assert.Equal(t, 26330, Params.InternalDomainGrpcPort.GetAsInt())
-		assert.Equal(t, 9093, Params.InternalDomainHTTPPort.GetAsInt())
-
 		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)
 
 		t.Logf("healthCheckTimeout: %v", &Params.HealthCheckTimeout)

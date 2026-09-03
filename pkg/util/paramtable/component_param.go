@@ -2414,12 +2414,6 @@ type proxyConfig struct {
 	ConnectionClientInfoTTLSeconds ParamItem `refreshable:"true"`
 	MaxConnectionNum               ParamItem `refreshable:"true"`
 
-	// internal-domain listeners: unauthenticated copies of the gRPC and REST
-	// surfaces for a control plane that reaches the proxy over an isolated
-	// network. Port 0 keeps a listener closed.
-	InternalDomainGrpcPort ParamItem `refreshable:"false"`
-	InternalDomainHTTPPort ParamItem `refreshable:"false"`
-
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
@@ -3062,24 +3056,6 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.MaxConnectionNum.Init(base.mgr)
-
-	p.InternalDomainGrpcPort = ParamItem{
-		Key:          "proxy.internalDomain.grpcPort",
-		Version:      "3.0.0",
-		Doc:          "port of an additional gRPC listener that serves the full MilvusService without authentication, for a control plane on an isolated network; 0 keeps it closed",
-		DefaultValue: "0",
-		Export:       true,
-	}
-	p.InternalDomainGrpcPort.Init(base.mgr)
-
-	p.InternalDomainHTTPPort = ParamItem{
-		Key:          "proxy.internalDomain.httpPort",
-		Version:      "3.0.0",
-		Doc:          "port of an additional REST listener (/v2/vectordb and /metrics) without authentication, for a control plane on an isolated network; 0 keeps it closed",
-		DefaultValue: "0",
-		Export:       true,
-	}
-	p.InternalDomainHTTPPort.Init(base.mgr)
 
 	p.SlowQuerySpanInSeconds = ParamItem{
 		Key:          "proxy.slowQuerySpanInSeconds",

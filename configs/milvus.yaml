@@ -456,9 +456,6 @@ proxy:
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
   connectionClientInfoTTLSeconds: 86400 # inactive client info TTL duration, in seconds
   maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos
-  internalDomain:
-    grpcPort: 0 # port of an additional gRPC listener that serves the full MilvusService without authentication, for a control plane on an isolated network; 0 keeps it closed
-    httpPort: 0 # port of an additional REST listener (/v2/vectordb and /metrics) without authentication, for a control plane on an isolated network; 0 keeps it closed
   gracefulStopTimeout: 30 # seconds. force stop node without graceful stop
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
