@@ -84,6 +84,11 @@ func toMessageHashSplitTargets(task *datapb.SplitShardTask, sourceVChannel strin
 		}
 		converted = append(converted, &message.SplitShardTarget{
 			Vchannel: target.GetVchannel(),
+			// The fence message is the PERMANENT record a delegator derives the
+			// window's fronting assignment from, and the streamingnode refuses
+			// a target that carries no residue. Copied, since the task's slice
+			// is mutated by later rounds.
+			Routing: &schemapb.HashRouting{Buckets: append([]uint64(nil), target.GetBuckets()...)},
 		})
 	}
 	return converted
@@ -97,6 +102,11 @@ func allMessageHashSplitTargets(targets []*datapb.SplitShardTaskTarget) []*messa
 	for _, target := range targets {
 		converted = append(converted, &message.SplitShardTarget{
 			Vchannel: target.GetVchannel(),
+			// The fence message is the PERMANENT record a delegator derives the
+			// window's fronting assignment from, and the streamingnode refuses
+			// a target that carries no residue. Copied, since the task's slice
+			// is mutated by later rounds.
+			Routing: &schemapb.HashRouting{Buckets: append([]uint64(nil), target.GetBuckets()...)},
 		})
 	}
 	return converted
@@ -293,10 +303,35 @@ func (m *shardSplitManager) commitRouting(
 // routing key a function of mutable state; recording it at the first split
 // freezes it.
 func shardByOf(collection *collectionInfo) string {
-	if collection.Schema.GetEnableNamespace() {
+	if placedByNamespace(collection) {
 		return "hash(" + common.NamespaceFieldName + ")"
 	}
 	return "hash(" + primaryFieldNameOf(collection.Schema) + ")"
+}
+
+// placedByNamespace reports whether a collection's rows are placed by their
+// namespace -- which is what makes hash($namespace_id) a valid routing key for
+// it, and what makes the metadata-only relabel a valid redistribution.
+//
+// That is ONE configuration, not every namespace collection. The proxy places
+// a row by namespace only when namespace.sharding.enabled is true AND
+// namespace.mode is partition_key; sharding.enabled is written as false at
+// create time unless the request set it, so the default namespace collection
+// has every row spread over all shards by primary key. Splitting such a
+// collection by namespace would send a namespace's new rows to one shard while
+// its existing rows stay everywhere, and relabeling its segments would move
+// rows placed by primary key under a namespace-keyed shard. It must split under
+// hash(pk), by rewrite, like any other primary-key collection.
+//
+// Both properties are immutable after creation, so this is decidable from the
+// collection's own properties; rootcoord's routing commit checks the same
+// condition before persisting the key, so a wrong answer here is refused there.
+func placedByNamespace(collection *collectionInfo) bool {
+	if collection == nil || collection.Schema == nil || !collection.Schema.GetEnableNamespace() {
+		return false
+	}
+	return collection.Properties[common.NamespaceShardingEnabledKey] == "true" &&
+		collection.Properties[common.NamespaceModeKey] == common.NamespaceModePartitionKey
 }
 
 // primaryFieldNameOf returns the collection's primary key field name.

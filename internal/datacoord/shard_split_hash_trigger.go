@@ -136,9 +136,10 @@ func isHashRouted(collection *collectionInfo) bool {
 	}
 	// Every collection now routes the same way -- the hash of its routing key,
 	// modulo the collection's modulus -- so what this really asks is whether the
-	// routing key is the primary key. A namespace collection routes by its
-	// namespace, and its splits are driven by namespace count rather than size.
-	return !collection.Schema.GetEnableNamespace()
+	// routing key is the primary key. Only a collection whose rows are PLACED by
+	// namespace routes by it (see placedByNamespace); a namespace collection
+	// whose rows are placed by primary key is hash-routed like any other.
+	return !placedByNamespace(collection)
 }
 
 // isHashSplittable reports whether the automatic trigger may split a

@@ -50,11 +50,26 @@ func TestIsHashSplittable(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "namespace collection takes the relabel path instead",
+			name: "a collection placed by namespace takes the relabel path instead",
 			coll: &collectionInfo{
 				Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+				Properties: map[string]string{
+					common.NamespaceShardingEnabledKey: "true",
+					common.NamespaceModeKey:            common.NamespaceModePartitionKey,
+				},
 			},
 			want: false,
+		},
+		{
+			// The default namespace collection: sharding.enabled is written as
+			// false at create time, so its rows are placed by primary key and it
+			// is the hash trigger's, like any other primary-key collection.
+			name: "a namespace collection placed by primary key is hash-split",
+			coll: &collectionInfo{
+				Schema:     &schemapb.CollectionSchema{EnableNamespace: true},
+				Properties: map[string]string{common.NamespaceShardingEnabledKey: "false"},
+			},
+			want: true,
 		},
 		{name: "nil collection", coll: nil, want: false},
 		{name: "no schema", coll: &collectionInfo{}, want: false},
@@ -370,12 +385,27 @@ func TestHashRoutedIgnoresTheMode(t *testing.T) {
 	assert.False(t, isHashSplittable(manual),
 		"but the automatic trigger must not touch it")
 
-	// A namespace collection routes by its namespace, and its splits are driven
-	// by namespace count rather than size, so the size trigger leaves it alone.
+	// A collection PLACED by namespace routes by it, and its splits are driven by
+	// namespace count rather than size, so the size trigger leaves it alone.
 	namespaced := &collectionInfo{
 		ID:     2,
 		Schema: &schemapb.CollectionSchema{Name: "ns_test", EnableNamespace: true},
+		Properties: map[string]string{
+			common.NamespaceShardingEnabledKey: "true",
+			common.NamespaceModeKey:            common.NamespaceModePartitionKey,
+		},
 	}
 	assert.False(t, isHashRouted(namespaced))
 	assert.False(t, isHashSplittable(namespaced))
+
+	// A namespace collection whose rows are placed by primary key -- the default,
+	// sharding.enabled=false -- is hash-routed like any other. Routing it by
+	// namespace would split its new rows from its existing ones.
+	pkPlaced := &collectionInfo{
+		ID:         3,
+		Schema:     &schemapb.CollectionSchema{Name: "ns_default", EnableNamespace: true},
+		Properties: map[string]string{common.NamespaceShardingEnabledKey: "false"},
+	}
+	assert.True(t, isHashRouted(pkPlaced))
+	assert.True(t, isHashSplittable(pkPlaced))
 }

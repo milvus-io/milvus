@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -316,18 +315,6 @@ func residueShardInfoPB(state schemapb.ShardState, lastTruncateTimeTick uint64, 
 		}
 	}
 	return si
-}
-
-// toMessageSplitTargets converts the persisted targets to the message form.
-func toMessageSplitTargets(targets []*datapb.SplitShardTaskTarget) []*message.SplitShardTarget {
-	converted := make([]*message.SplitShardTarget, 0, len(targets))
-	for _, target := range targets {
-		converted = append(converted, &message.SplitShardTarget{
-			Vchannel: target.GetVchannel(),
-			Routing:  &schemapb.HashRouting{Buckets: append([]uint64(nil), target.GetBuckets()...)},
-		})
-	}
-	return converted
 }
 
 func splitTargetVChannels(targets []*datapb.SplitShardTaskTarget) []string {

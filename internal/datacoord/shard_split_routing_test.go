@@ -24,9 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // captureRouter records the routing commit the split task sends.
@@ -207,4 +209,41 @@ func TestCarryThroughShardInfoPBHandlesNil(t *testing.T) {
 	info := carryThroughShardInfoPB(nil)
 	assert.Equal(t, schemapb.ShardState_ShardNormal, info.GetState())
 	assert.Nil(t, info.GetRouting())
+}
+
+// The fence message is the permanent record a delegator derives the split
+// window's fronting assignment from, and the streamingnode refuses a target
+// that carries no residue -- so the per-source target list must carry each
+// fronted target's residues, not only its name. This was the only live fence
+// builder and it dropped them; the fence parameter's own validation is what
+// caught it.
+func TestMessageSplitTargetsCarryTheirResidues(t *testing.T) {
+	task := &datapb.SplitShardTask{
+		TaskId:         100,
+		CollectionId:   1,
+		Sources:        []*datapb.SplitShardTaskSource{{Vchannel: "v0"}},
+		RoutingModulus: 2,
+		Targets: []*datapb.SplitShardTaskTarget{
+			{Vchannel: "v1", Buckets: []uint64{0}},
+			{Vchannel: "v2", Buckets: []uint64{1}},
+		},
+	}
+	for _, targets := range [][]*message.SplitShardTarget{
+		toMessageHashSplitTargets(task, "v0"),
+		allMessageHashSplitTargets(task.GetTargets()),
+	} {
+		require.Len(t, targets, 2)
+		for i, target := range targets {
+			assert.Equal(t, task.Targets[i].GetVchannel(), target.GetVchannel())
+			assert.Equal(t, task.Targets[i].GetBuckets(), target.GetRouting().GetBuckets())
+		}
+		// and the fence parameter built from them passes its own validation.
+		param := streaming.SplitShardParam{CollectionID: 1, SourceVChannel: "v0", SplitTaskID: 100, RoutingModulus: 2, Targets: targets}
+		require.NoError(t, param.Validate())
+	}
+
+	// Mutating the message must not reach back into the task.
+	msgTargets := toMessageHashSplitTargets(task, "v0")
+	msgTargets[0].Routing.Buckets[0] = 99
+	assert.Equal(t, []uint64{0}, task.Targets[0].GetBuckets())
 }

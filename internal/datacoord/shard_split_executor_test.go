@@ -283,7 +283,7 @@ func TestAdvanceFencing(t *testing.T) {
 		// recovers T_switch.
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
-		})).Return(nil, status.NewShardFenced("v0", 1900)).Once()
+		})).Return(nil, status.NewShardFenced("v0", 1900, 0)).Once()
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -44,12 +45,23 @@ func newSplitTestMeta(enableNamespace bool, vchannel string, namespaceRows map[i
 	for partitionID := range namespaceRows {
 		partitions = append(partitions, partitionID)
 	}
+	// enableNamespace models a collection PLACED by namespace -- the one
+	// configuration the relabel split is valid for -- so it carries the two
+	// properties that make it so, not only the schema flag.
+	var properties map[string]string
+	if enableNamespace {
+		properties = map[string]string{
+			common.NamespaceShardingEnabledKey: "true",
+			common.NamespaceModeKey:            common.NamespaceModePartitionKey,
+		}
+	}
 	m.collections.Insert(1, &collectionInfo{
 		ID: 1,
 		Schema: &schemapb.CollectionSchema{
 			Name:            "split_test",
 			EnableNamespace: enableNamespace,
 		},
+		Properties:    properties,
 		Partitions:    partitions,
 		VChannelNames: []string{vchannel},
 	})

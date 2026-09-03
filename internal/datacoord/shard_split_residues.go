@@ -73,10 +73,21 @@ func residuesOf(collection *collectionInfo) (*shardResidues, error) {
 		}
 	}
 	if !explicit {
-		// Never split: shard i owns residue i at modulus N.
-		out.modulus = uint64(len(shards))
-		for i, shard := range shards {
-			out.byVChannel[shard.Vchannel] = []uint64{uint64(i)}
+		// Never split. The convention -- shard i owns residue i at modulus N --
+		// has exactly one implementation, in the routing package, and it is keyed
+		// on the order the vchannel list defines; re-deriving it here from a map
+		// would produce a permutation nothing downstream can detect.
+		vchannels := make([]string, 0, len(shards))
+		for _, shard := range shards {
+			vchannels = append(vchannels, shard.Vchannel)
+		}
+		modulus, legacy, err := routing.LegacyShards(vchannels)
+		if err != nil {
+			return nil, err
+		}
+		out.modulus = modulus
+		for _, shard := range legacy {
+			out.byVChannel[shard.Vchannel] = shard.Buckets
 		}
 		return out, nil
 	}

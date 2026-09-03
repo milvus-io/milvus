@@ -283,9 +283,11 @@ func (m *shardSplitManager) detectOnce() {
 	}
 
 	for _, collection := range m.meta.GetCollections() {
-		if !collection.Schema.GetEnableNamespace() {
-			// only the namespace (multi-tenant) collections are subject to
-			// the metadata-only relabel split.
+		if !placedByNamespace(collection) {
+			// Only a collection whose rows are placed by namespace may take the
+			// metadata-only relabel split: that is what confines a namespace to
+			// one shard and lets a segment move whole. A namespace collection
+			// placed by primary key is the hash trigger's, and is rewritten.
 			continue
 		}
 		for _, vchannel := range collection.VChannelNames {
