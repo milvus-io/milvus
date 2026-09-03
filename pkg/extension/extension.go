@@ -108,10 +108,6 @@ const (
 	// resource groups it names.
 	CapLoadPlacementScope CapabilityID = "load_placement_scope"
 
-	// CapInternalSurfaces is the unauthenticated internal-domain listeners a
-	// form serves its control plane on.
-	CapInternalSurfaces CapabilityID = "internal_surfaces"
-
 	// CapHook is milvus's own request hook, compiled into the binary rather
 	// than loaded from proxy.soPath.
 	CapHook CapabilityID = "hook"
@@ -133,7 +129,6 @@ type Capabilities struct {
 	ResourceGroups    ResourceGroupInterceptor
 	IndexDrain        IndexDrainer
 	LoadPlacement     LoadPlacementScope
-	InternalSurfaces  InternalSurfaces
 
 	// Hook is milvus's own request hook (milvus-proto go-api/v3/hook), the
 	// interface whose Mock, Before and After the proxy's unary interceptor
@@ -173,7 +168,6 @@ func (c Capabilities) entries() []capabilityEntry {
 		{CapResourceGroupInterceptor, c.ResourceGroups},
 		{CapIndexDrain, c.IndexDrain},
 		{CapLoadPlacementScope, c.LoadPlacement},
-		{CapInternalSurfaces, c.InternalSurfaces},
 		{CapHook, c.Hook},
 	}
 }
