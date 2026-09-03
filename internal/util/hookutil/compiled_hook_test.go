@@ -19,6 +19,7 @@
 package hookutil
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,4 +85,51 @@ func TestInitHookRefusesACompiledInHookBesideAPlugin(t *testing.T) {
 	err := initHook()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only one can")
+}
+
+// initRecordingHook is a compiled-in hook that remembers how it was
+// initialised, and can refuse.
+type initRecordingHook struct {
+	MockAPIHook
+	params  map[string]string
+	initErr error
+	inits   int
+}
+
+func (h *initRecordingHook) Init(params map[string]string) error {
+	h.inits++
+	h.params = params
+	return h.initErr
+}
+
+// A compiled-in hook is initialised the way a plug-in is: once, with the hook
+// configuration, before it is stored. It is the one call that tells the hook
+// it runs in the proxy process.
+func TestInitHookInitialisesTheCompiledInHookWithTheHookConfig(t *testing.T) {
+	paramtable.Init()
+	hp := paramtable.GetHookParams()
+	require.NoError(t, hp.Save("somekey", "someValue"))
+	t.Cleanup(func() { _ = hp.Save("somekey", "") })
+	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	installHook(t, h)
+
+	require.NoError(t, initHook())
+
+	assert.Equal(t, 1, h.inits, "initialised exactly once")
+	assert.Equal(t, "someValue", h.params["somekey"], "the hook sees the hook.* configuration, as a plug-in does")
+	assert.Same(t, h, GetHook(), "the initialised hook is the one stored")
+}
+
+// A hook that cannot initialise is a proxy that does not start, exactly as
+// for a plug-in.
+func TestInitHookFailsWhenTheCompiledInHookCannotInitialise(t *testing.T) {
+	paramtable.Init()
+	h := &initRecordingHook{initErr: errors.New("the internal port is taken")}
+	installHook(t, h)
+
+	err := initHook()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "the internal port is taken")
+	_, isDefault := GetHook().(DefaultHook)
+	assert.True(t, isDefault, "a hook that failed to initialise is not stored")
 }
