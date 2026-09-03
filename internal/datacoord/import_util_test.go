@@ -417,7 +417,10 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 			{
 				ImportFile: &internalpb.ImportFile{Id: 0, Paths: []string{"l0-prefix"}},
 				HashedStats: map[string]*datapb.PartitionImportStats{
-					"c0": {PartitionDataSize: map[int64]int64{3: 1}},
+					"c0": {
+						PartitionDataSize: map[int64]int64{3: 1},
+						PartitionRows:     map[int64]int64{3: 1},
+					},
 				},
 			},
 		},
@@ -466,6 +469,219 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, storage.StorageV2, importReq.GetStorageVersion())
 	assert.False(t, importReq.GetUseLoonFfi())
+}
+
+func newAssignSegmentsTestMeta(t *testing.T) *meta {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+	return meta
+}
+
+func newAssignSegmentsTestAllocator(t *testing.T) allocator.Allocator {
+	var nextID int64 = 10
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	})
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(100), nil)
+	return alloc
+}
+
+func newAssignSegmentsTestJobAndTask(t *testing.T, writeMode string) (*importJob, *importTask) {
+	options := []*commonpb.KeyValuePair(nil)
+	if writeMode != "" {
+		options = []*commonpb.KeyValuePair{
+			{Key: importutilv2.WriteMode, Value: writeMode},
+		}
+	}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			PartitionIDs: []int64{3},
+			Vchannels:    []string{"c0"},
+			Options:      options,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
+		},
+	}
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        job.GetJobID(),
+		TaskID:       4,
+		CollectionID: job.GetCollectionID(),
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 0, Paths: []string{"file"}},
+				HashedStats: map[string]*datapb.PartitionImportStats{
+					"c0": {
+						PartitionDataSize: map[int64]int64{3: 1},
+						PartitionRows:     map[int64]int64{3: 1},
+					},
+				},
+			},
+		},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job).Maybe()
+	task := &importTask{
+		importMeta: importMeta,
+	}
+	task.task.Store(taskProto)
+	return job, task
+}
+
+// newAssignSegmentsUpsertTestJobAndTask builds an Upsert job/task with an explicit row-data
+// size and row count, so tests can exercise the L1/L0 size computations independently.
+func newAssignSegmentsUpsertTestJobAndTask(t *testing.T, dataSize, rows int64) (*importJob, *importTask) {
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			PartitionIDs: []int64{3},
+			Vchannels:    []string{"c0"},
+			Options: []*commonpb.KeyValuePair{
+				{Key: importutilv2.WriteMode, Value: "Upsert"},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
+		},
+	}
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        job.GetJobID(),
+		TaskID:       4,
+		CollectionID: job.GetCollectionID(),
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 0, Paths: []string{"file"}},
+				HashedStats: map[string]*datapb.PartitionImportStats{
+					"c0": {
+						PartitionDataSize: map[int64]int64{3: dataSize},
+						PartitionRows:     map[int64]int64{3: rows},
+					},
+				},
+			},
+		},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job).Maybe()
+	task := &importTask{
+		importMeta: importMeta,
+	}
+	task.task.Store(taskProto)
+	return job, task
+}
+
+func countSegmentLevels(t *testing.T, meta *meta, segmentIDs []int64) (l0Count, l1Count int) {
+	for _, id := range segmentIDs {
+		segment := meta.GetSegment(context.Background(), id)
+		assert.NotNil(t, segment)
+		switch segment.GetLevel() {
+		case datapb.SegmentLevel_L0:
+			l0Count++
+		case datapb.SegmentLevel_L1:
+			l1Count++
+		}
+	}
+	return l0Count, l1Count
+}
+
+func TestAssignSegments_AppendAllocatesOnlyL1(t *testing.T) {
+	job, task := newAssignSegmentsTestJobAndTask(t, "")
+	alloc := newAssignSegmentsTestAllocator(t)
+	meta := newAssignSegmentsTestMeta(t)
+
+	segments, err := AssignSegments(job, task, alloc, meta, 1024)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+
+	l0Count, l1Count := countSegmentLevels(t, meta, segments)
+	assert.Equal(t, 0, l0Count)
+	assert.Equal(t, 1, l1Count)
+}
+
+func TestAssignSegments_UpsertAllocatesBothLevels(t *testing.T) {
+	job, task := newAssignSegmentsTestJobAndTask(t, "Upsert")
+	alloc := newAssignSegmentsTestAllocator(t)
+	meta := newAssignSegmentsTestMeta(t)
+
+	segments, err := AssignSegments(job, task, alloc, meta, 1024)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 2)
+
+	l0Count, l1Count := countSegmentLevels(t, meta, segments)
+	assert.Equal(t, 1, l0Count)
+	assert.Equal(t, 1, l1Count)
+}
+
+// TestAssignSegments_UpsertL0CountBoundedByRows verifies that the L0 (delete) segment count
+// for an Upsert job is derived from the row count rather than from the row-data byte size.
+// With 1,000,000 rows and the default 16MiB FlushDeleteBufferBytes, the L0 round divides
+// 1,000,000*estimatedDeleteRecordSize(64) = 64,000,000 bytes by 16,777,216, yielding 4 segments.
+// Dividing the 100GiB row-data size directly by FlushDeleteBufferBytes would instead yield 6400.
+func TestAssignSegments_UpsertL0CountBoundedByRows(t *testing.T) {
+	const (
+		dataSize       = 100 * 1024 * 1024 * 1024 // 100GiB row-data size
+		rows           = 1_000_000
+		segmentMaxSize = 512 * 1024 * 1024 // 512MiB L1 segment size
+	)
+	job, task := newAssignSegmentsUpsertTestJobAndTask(t, dataSize, rows)
+	alloc := newAssignSegmentsTestAllocator(t)
+	meta := newAssignSegmentsTestMeta(t)
+
+	segments, err := AssignSegments(job, task, alloc, meta, segmentMaxSize)
+	assert.NoError(t, err)
+
+	l0Count, l1Count := countSegmentLevels(t, meta, segments)
+	assert.Equal(t, 200, l1Count)
+	assert.Equal(t, 4, l0Count)
+	assert.Less(t, l0Count, l1Count, "L0 segment count must not scale with the row-data byte size")
+}
+
+func TestAssignSegments_DeleteAllocatesOnlyL0(t *testing.T) {
+	job, task := newAssignSegmentsTestJobAndTask(t, "Delete")
+	alloc := newAssignSegmentsTestAllocator(t)
+	meta := newAssignSegmentsTestMeta(t)
+
+	segments, err := AssignSegments(job, task, alloc, meta, 1024)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+
+	l0Count, l1Count := countSegmentLevels(t, meta, segments)
+	assert.Equal(t, 1, l0Count)
+	assert.Equal(t, 0, l1Count)
 }
 
 func TestImportUtil_RegroupImportFiles(t *testing.T) {

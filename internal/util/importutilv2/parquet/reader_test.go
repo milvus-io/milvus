@@ -581,6 +581,66 @@ func (s *ReaderSuite) TestStringPK() {
 	}
 }
 
+// TestDeleteKeyProjection writes a parquet file against a full collection schema (primary key
+// plus an extra column), then reads it with a schema that keeps only the primary key field.
+// It asserts the reader ignores the extra column instead of erroring or reading it.
+func (s *ReaderSuite) TestDeleteKeyProjection() {
+	fullSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "extra",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	filePath := fmt.Sprintf("/tmp/test_%d_delete_key_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	s.Require().NoError(err)
+	insertData, err := writeParquet(wf, fullSchema, s.numRows, 0)
+	s.Require().NoError(err)
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	s.Require().NoError(err)
+
+	// Mirrors importutilv2.BuildDeleteKeySchema's output (primary key field only, AutoID
+	// cleared); importutilv2 can't be imported here without an import cycle through this
+	// package.
+	pkField := typeutil.Clone(fullSchema.Fields[0])
+	pkField.AutoID = false
+	projectedSchema := &schemapb.CollectionSchema{
+		Name:   fullSchema.GetName(),
+		Fields: []*schemapb.FieldSchema{pkField},
+	}
+
+	reader, err := NewReader(ctx, cm, projectedSchema, filePath, 64*1024*1024)
+	s.NoError(err)
+	s.NotNil(reader)
+	defer reader.Close()
+
+	res, err := reader.Read()
+	s.NoError(err)
+	s.Equal(s.numRows, res.GetRowNum())
+	s.Len(res.Data, 1)
+	pkData, ok := res.Data[pkField.GetFieldID()]
+	s.True(ok)
+	for i := 0; i < s.numRows; i++ {
+		s.Equal(insertData.Data[pkField.GetFieldID()].GetRow(i), pkData.GetRow(i))
+	}
+	_, hasExtra := res.Data[fullSchema.Fields[1].GetFieldID()]
+	s.False(hasExtra)
+}
+
 func (s *ReaderSuite) TestVector() {
 	dataTypes := []schemapb.DataType{
 		schemapb.DataType_BinaryVector,

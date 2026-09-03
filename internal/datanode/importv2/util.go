@@ -157,14 +157,32 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
+// PickSegment picks any segment for the channel/partition, ignoring level.
 func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) (int64, error) {
+	return pickSegment(segments, vchannel, partitionID, "", func(*datapb.ImportRequestSegment) bool { return true })
+}
+
+// PickSegmentByLevel picks a segment of the requested level.
+func PickSegmentByLevel(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64, level datapb.SegmentLevel) (int64, error) {
+	return pickSegment(segments, vchannel, partitionID, level.String(), func(info *datapb.ImportRequestSegment) bool {
+		return info.GetLevel() == level
+	})
+}
+
+func pickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64, level string,
+	match func(*datapb.ImportRequestSegment) bool,
+) (int64, error) {
 	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
-		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
+		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID && match(info)
 	})
 
 	if len(candidates) == 0 {
-		return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s and partition %d",
-			vchannel, partitionID)
+		if level == "" {
+			return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s and partition %d",
+				vchannel, partitionID)
+		}
+		return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s, partition %d and level %s",
+			vchannel, partitionID, level)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))

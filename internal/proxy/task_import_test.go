@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -28,7 +29,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -407,4 +412,172 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 
 	s.Error(err)
 	s.Contains(err.Error(), "collection not found")
+}
+
+func TestImportTask_WriteModeNormalization(t *testing.T) {
+	t.Run("write_mode field is normalized into options", func(t *testing.T) {
+		req := &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Delete,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		}
+		opts, err := normalizeImportWriteMode(req)
+		assert.NoError(t, err)
+		assert.True(t, importutilv2.IsDeleteMode(opts))
+	})
+
+	t.Run("options and field must not disagree", func(t *testing.T) {
+		req := &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Delete,
+			Options:        []*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Upsert"}},
+		}
+		_, err := normalizeImportWriteMode(req)
+		assert.Error(t, err)
+	})
+
+	t.Run("backup and write_mode are mutually exclusive", func(t *testing.T) {
+		req := &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Delete,
+			Options:        []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}},
+		}
+		_, err := normalizeImportWriteMode(req)
+		assert.Error(t, err)
+	})
+
+	t.Run("write_mode field unset defers to options", func(t *testing.T) {
+		req := &internalpb.ImportRequest{
+			CollectionName: "coll",
+			Options:        []*commonpb.KeyValuePair{{Key: importutilv2.WriteMode, Value: "Delete"}},
+		}
+		opts, err := normalizeImportWriteMode(req)
+		assert.NoError(t, err)
+		assert.True(t, importutilv2.IsDeleteMode(opts))
+	})
+
+	t.Run("l0_import and write_mode are mutually exclusive", func(t *testing.T) {
+		req := &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Delete,
+			Options:        []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+		}
+		_, err := normalizeImportWriteMode(req)
+		assert.Error(t, err)
+	})
+}
+
+// TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction verifies that write_mode=Delete
+// is not subject to the l0_import "collection must be unloaded" restriction: L0 compaction
+// delivers deletes into already-loaded segments, unlike l0_import which needs WatchDmChannels
+// to register the L0 segment on the delegator.
+func TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil)
+	chMgr := channelmgr.NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"ch-0"}, nil)
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	// The collection reports as loaded; PreExecute must still succeed for delete-mode.
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:        merr.Success(),
+		CollectionIDs: []int64{collectionID},
+	}, nil).Maybe()
+
+	task := &importTask{
+		ctx:  ctx,
+		node: &Proxy{chMgr: chMgr, mixCoord: mixCoord},
+		req: &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Delete,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		},
+	}
+	task.metaCache = mockCache
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{common.AllPartitionsID}, task.partitionIDs)
+}
+
+// TestImportTask_UpsertRejectsAutoIDPrimaryKey verifies that write_mode=Upsert is rejected at
+// PreExecute for a collection whose primary key is auto-generated: the import file carries no
+// primary keys for such a collection (import readers reject an explicit pk column on autoID
+// fields by default), so there is nothing for upsert to overwrite.
+func TestImportTask_UpsertRejectsAutoIDPrimaryKey(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil)
+
+	task := &importTask{
+		ctx: ctx,
+		req: &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Upsert,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		},
+	}
+	task.metaCache = mockCache
+
+	err := task.PreExecute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "auto-generated")
+	assert.Contains(t, err.Error(), "coll")
+}
+
+// TestImportTask_UpsertAllowsNonAutoIDPrimaryKey verifies that write_mode=Upsert passes the
+// autoID gate for a collection with a user-assigned primary key.
+func TestImportTask_UpsertAllowsNonAutoIDPrimaryKey(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil)
+
+	chMgr := channelmgr.NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"ch-0"}, nil)
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+
+	task := &importTask{
+		ctx:  ctx,
+		node: &Proxy{chMgr: chMgr},
+		req: &internalpb.ImportRequest{
+			CollectionName: "coll",
+			WriteMode:      internalpb.ImportWriteMode_Upsert,
+			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
+		},
+	}
+	task.metaCache = mockCache
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
 }

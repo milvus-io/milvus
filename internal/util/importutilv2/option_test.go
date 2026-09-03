@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -226,4 +227,50 @@ func TestIsAutoCommit(t *testing.T) {
 	// explicit false
 	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
 	assert.False(t, IsAutoCommit(opts))
+}
+
+func TestGetWriteMode(t *testing.T) {
+	t.Run("absent defaults to append", func(t *testing.T) {
+		mode, err := GetWriteMode(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, internalpb.ImportWriteMode_Append, mode)
+		assert.False(t, IsDeleteMode(nil))
+		assert.False(t, IsUpsertMode(nil))
+	})
+
+	t.Run("delete and upsert round-trip", func(t *testing.T) {
+		opts := []*commonpb.KeyValuePair{{Key: WriteMode, Value: "Delete"}}
+		mode, err := GetWriteMode(opts)
+		assert.NoError(t, err)
+		assert.Equal(t, internalpb.ImportWriteMode_Delete, mode)
+		assert.True(t, IsDeleteMode(opts))
+		assert.True(t, ProducesDeletes(opts))
+		assert.False(t, ProducesInserts(opts))
+
+		opts = []*commonpb.KeyValuePair{{Key: WriteMode, Value: "Upsert"}}
+		assert.True(t, IsUpsertMode(opts))
+		assert.True(t, ProducesDeletes(opts))
+		assert.True(t, ProducesInserts(opts))
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		opts := []*commonpb.KeyValuePair{{Key: WriteMode, Value: "delete"}}
+		mode, err := GetWriteMode(opts)
+		assert.NoError(t, err)
+		assert.Equal(t, internalpb.ImportWriteMode_Delete, mode)
+	})
+
+	t.Run("unknown value rejected", func(t *testing.T) {
+		opts := []*commonpb.KeyValuePair{{Key: WriteMode, Value: "Replace"}}
+		_, err := GetWriteMode(opts)
+		assert.Error(t, err)
+	})
+
+	t.Run("malformed value degrades predicates to append", func(t *testing.T) {
+		opts := []*commonpb.KeyValuePair{{Key: WriteMode, Value: "Replace"}}
+		assert.False(t, IsDeleteMode(opts))
+		assert.False(t, IsUpsertMode(opts))
+		assert.False(t, ProducesDeletes(opts))
+		assert.True(t, ProducesInserts(opts))
+	})
 }

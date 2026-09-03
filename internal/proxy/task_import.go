@@ -108,6 +108,24 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 
+	normalizedOptions, err := normalizeImportWriteMode(req)
+	if err != nil {
+		return err
+	}
+	req.Options = normalizedOptions
+
+	if importutilv2.IsUpsertMode(req.GetOptions()) {
+		pkField, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if pkField.GetAutoID() {
+			return merr.WrapErrImportFailedMsg(
+				"write_mode=Upsert is not supported on collection %s: the primary key is auto-generated, "+
+					"so the import file carries no primary keys to overwrite", req.GetCollectionName())
+		}
+	}
+
 	channels, err := node.chMgr.GetVChannels(collectionID)
 	if err != nil {
 		return err
@@ -116,6 +134,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 
 	isBackup := importutilv2.IsBackup(req.GetOptions())
 	isL0Import := importutilv2.IsL0Import(req.GetOptions())
+	isDeleteMode := importutilv2.IsDeleteMode(req.GetOptions())
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
@@ -129,7 +148,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		partitionIDs = []UniqueID{partitionID}
-	} else if isL0Import {
+	} else if isL0Import || isDeleteMode {
 		if req.GetPartitionName() == "" {
 			partitionIDs = []UniqueID{common.AllPartitionsID}
 		} else {
@@ -139,17 +158,19 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			}
 			partitionIDs = []UniqueID{partitionID}
 		}
-		// Currently, querynodes first load L0 segments and then load L1 segments.
-		// Therefore, to ensure the deletes from L0 import take effect,
-		// the collection needs to be in an unloaded state,
-		// and then all L0 and L1 segments should be loaded at once.
-		// We will remove this restriction after querynode supported to load L0 segments dynamically.
-		loaded, err := isCollectionLoaded(ctx, node.mixCoord, collectionID)
-		if err != nil {
-			return err
-		}
-		if loaded {
-			return merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first")
+		if isL0Import {
+			// Currently, querynodes first load L0 segments and then load L1 segments.
+			// Therefore, to ensure the deletes from L0 import take effect,
+			// the collection needs to be in an unloaded state,
+			// and then all L0 and L1 segments should be loaded at once.
+			// We will remove this restriction after querynode supported to load L0 segments dynamically.
+			loaded, err := isCollectionLoaded(ctx, node.mixCoord, collectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first")
+			}
 		}
 	} else {
 		if hasPartitionKey {
@@ -261,4 +282,48 @@ func GetImportFiles(internals []*internalpb.ImportFile) []*msgpb.ImportFile {
 
 func (it *importTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// normalizeImportWriteMode validates the typed write_mode field against any write_mode
+// already in options, rejects conflicting or unsupported combinations, and returns options
+// with write_mode normalized in.
+func normalizeImportWriteMode(req *internalpb.ImportRequest) ([]*commonpb.KeyValuePair, error) {
+	options := req.GetOptions()
+	fromOptions, err := importutilv2.GetWriteMode(options)
+	if err != nil {
+		return nil, err
+	}
+	fromField := req.GetWriteMode()
+	if fromField == internalpb.ImportWriteMode_Append {
+		// field unset; defer to whatever write_mode options already carry
+	} else if fromOptions != internalpb.ImportWriteMode_Append && fromOptions != fromField {
+		return nil, merr.WrapErrImportFailedMsg(
+			"import write_mode conflict: field says %s but options say %s", fromField, fromOptions)
+	} else {
+		fromOptions = fromField
+	}
+
+	if fromOptions != internalpb.ImportWriteMode_Append {
+		if importutilv2.IsBackup(options) {
+			return nil, merr.WrapErrImportFailedMsg(
+				"write_mode=%s is not supported for backup-restore imports", fromOptions)
+		}
+		if importutilv2.IsL0Import(options) {
+			return nil, merr.WrapErrImportFailedMsg(
+				"write_mode=%s cannot be combined with l0_import", fromOptions)
+		}
+	}
+
+	merged := make([]*commonpb.KeyValuePair, 0, len(options)+1)
+	for _, kv := range options {
+		if kv.GetKey() == importutilv2.WriteMode {
+			continue
+		}
+		merged = append(merged, kv)
+	}
+	merged = append(merged, &commonpb.KeyValuePair{
+		Key:   importutilv2.WriteMode,
+		Value: fromOptions.String(),
+	})
+	return merged, nil
 }

@@ -1901,6 +1901,52 @@ func (s *Server) GetGcStatus(ctx context.Context) (*datapb.GetGcStatusResponse, 
 	}, nil
 }
 
+// checkL0ImportAllowed rejects a legacy l0_import request when dataCoord.import.enableL0Import
+// is false. A write_mode=Delete/Upsert job does not set l0_import and is never gated here.
+func checkL0ImportAllowed(options []*commonpb.KeyValuePair) error {
+	if !importutilv2.IsL0Import(options) {
+		return nil
+	}
+	if Params.DataCoordCfg.EnableL0Import.GetAsBool() {
+		return nil
+	}
+	return merr.WrapErrImportFailed("l0 import is disabled " +
+		"(dataCoord.import.enableL0Import=false); fold L0 deletes into data segment deltalogs " +
+		"before restore, or use write_mode=Delete/Upsert for file-based deletion")
+}
+
+// checkWriteModeSupported validates the write_mode option and, for Delete/Upsert, rejects the
+// request when the collection still has data segments without a manifest path. Such segments
+// never receive import-produced deletes, because delivery to a loaded segment happens only
+// through the manifest bump that L0 compaction performs and SegmentChecker turns into a Reopen.
+func (s *Server) checkWriteModeSupported(ctx context.Context, collectionID int64, options []*commonpb.KeyValuePair) error {
+	// Parse before predicating: IsDeleteMode/ProducesDeletes swallow a parse error and answer as
+	// if the mode were Append, so asking them first would let a malformed write_mode through as a
+	// plain append.
+	mode, err := importutilv2.GetWriteMode(options)
+	if err != nil {
+		return err
+	}
+	if mode != internalpb.ImportWriteMode_Delete && mode != internalpb.ImportWriteMode_Upsert {
+		return nil
+	}
+	legacy := s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
+			isFlushed(segment) &&
+			segment.GetLevel() != datapb.SegmentLevel_L0 &&
+			segment.GetManifestPath() == ""
+	}))
+	if len(legacy) == 0 {
+		return nil
+	}
+	return merr.WrapErrImportFailedMsg(
+		"write_mode=%s requires manifest-based (storage v3) data segments, but collection %d has %d segment(s) without a manifest. "+
+			"Deletes reach loaded segments only through the manifest-driven reopen path, so on those segments they would never take effect. "+
+			"Enable common.storage.useLoonFFI so new segments get a manifest, and dataCoord.compaction.storageVersion.enabled "+
+			"so the storage-version upgrade compaction rewrites the existing ones, or delete through the streaming Delete RPC",
+		mode, collectionID, len(legacy))
+}
+
 // ImportV2 handles import requests from proxy by broadcasting import messages.
 // This is the entry point for all user-initiated imports.
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
@@ -1927,15 +1973,13 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
-	// Reject L0 import when disabled (default). Restoring L0 (delete-only) segments
-	// is incompatible with commit_timestamp (2PC / replication imports), where it
-	// silently breaks delete semantics. Backups should have their L0 deletes folded
-	// into per-segment deltalogs beforehand; set dataCoord.import.enableL0Import=true
-	// to re-enable the legacy behavior.
-	if importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool() {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("l0 import is disabled " +
-			"(dataCoord.import.enableL0Import=false); fold L0 deletes into data segment deltalogs " +
-			"before restore, or set the config to true to re-enable the legacy L0 import"))
+	if err := checkL0ImportAllowed(in.GetOptions()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	if err := s.checkWriteModeSupported(ctx, in.GetCollectionID(), in.GetOptions()); err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -2016,11 +2060,14 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// gate is disabled (replicated from a cluster where it is enabled, or a
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
-	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	l0Err := checkL0ImportAllowed(in.GetOptions())
+
+	// Same handling as l0Err: failed terminally below rather than returned as an error.
+	writeModeErr := s.checkWriteModeSupported(ctx, in.GetCollectionID(), in.GetOptions())
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled {
+	if isBackup && l0Err == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2077,13 +2124,18 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	if l0ImportDisabled {
+	if l0Err != nil {
 		mlog.Warn(ctx, "l0 import is disabled, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()))
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()),
+			mlog.Err(l0Err))
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
-			"into data segment deltalogs before restore, or set the config to true on this cluster " +
-			"to re-enable the legacy L0 import")(job)
+		UpdateJobReason(l0Err.Error())(job)
+	} else if writeModeErr != nil {
+		mlog.Warn(ctx, "write_mode requires storage v3, creating the job in Failed state",
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()),
+			mlog.Err(writeModeErr))
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(writeModeErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

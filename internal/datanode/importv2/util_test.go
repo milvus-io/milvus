@@ -233,6 +233,33 @@ func Test_PickSegment(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPickSegmentByLevel(t *testing.T) {
+	segments := []*datapb.ImportRequestSegment{
+		{SegmentID: 1, PartitionID: 10, Vchannel: "ch0", Level: datapb.SegmentLevel_L1},
+		{SegmentID: 2, PartitionID: 10, Vchannel: "ch0", Level: datapb.SegmentLevel_L0},
+	}
+
+	got, err := PickSegmentByLevel(segments, "ch0", 10, datapb.SegmentLevel_L0)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), got)
+
+	got, err = PickSegmentByLevel(segments, "ch0", 10, datapb.SegmentLevel_L1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), got)
+
+	_, err = PickSegmentByLevel(segments, "ch1", 10, datapb.SegmentLevel_L0)
+	assert.Error(t, err)
+}
+
+func TestPickSegment_LegacyRequestWithoutLevel(t *testing.T) {
+	segments := []*datapb.ImportRequestSegment{
+		{SegmentID: 5, PartitionID: 10, Vchannel: "ch0"},
+	}
+	got, err := PickSegment(segments, "ch0", 10)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), got)
+}
+
 func Test_CheckRowsEqual(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{

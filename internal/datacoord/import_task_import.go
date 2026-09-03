@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -240,7 +239,6 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		totalRows := int64(0)
-		job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
 			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
@@ -254,14 +252,15 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// producer-reported Statistics (it knows the V3 manifest-side
 			// footprint); fall back to array reconstruction for rolling
 			// upgrade where the datanode ships no Statistics.
-			// L0 imports carry only deletes; non-L0 imports carry inserts.
+			// L0 segments carry only deletes; other segments carry inserts.
 			importStats := info.GetStats()
 			if importStats == nil {
 				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), info.GetDeltalogs())
 			}
+			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
+			isDeleteSegment := segment != nil && segment.GetLevel() == datapb.SegmentLevel_L0
 			var minTs, maxTs uint64
-			isL0Import := importutilv2.IsL0Import(job.GetOptions())
-			if isL0Import {
+			if isDeleteSegment {
 				minTs = importStats.GetDeltaTimestampFrom()
 				maxTs = importStats.GetDeltaTimestampTo()
 			} else {
