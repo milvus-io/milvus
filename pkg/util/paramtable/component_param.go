@@ -379,7 +379,6 @@ type commonConfig struct {
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	AdminAuthEnabled      ParamItem `refreshable:"true"`
-	RequireAPIKey         ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -1153,19 +1152,6 @@ Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
 		// is off, so an anonymous request cannot persist a disabling value.
 	}
 	p.AdminAuthEnabled.Init(base.mgr)
-	p.RequireAPIKey = ParamItem{
-		Key:     "common.security.requireAPIKey",
-		Version: "3.0.0",
-		Doc: `Refuse username and password authentication on the external listener, so only an API key is accepted there.
-A deployment whose users authenticate through keys issued elsewhere sets this, and a milvus credential can then no longer
-be used to bypass that key system. It does not disable credentials themselves: internal listeners and the RBAC the control
-plane seeds are untouched, and with authorizationEnabled off nothing authenticates at all and this has no effect.
-Verification of the key itself is the hook's (proxy.soPath, or a hook compiled into the binary).`,
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.RequireAPIKey.Init(base.mgr)
-
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
 		Version: "2.2.1",

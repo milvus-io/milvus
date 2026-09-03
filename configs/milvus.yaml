@@ -1284,12 +1284,6 @@ common:
     # or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
     # Not settable through /management/config/alter. Watch milvus_admin_auth_total.
     adminAuthEnabled: false
-    # Refuse username and password authentication on the external listener, so only an API key is accepted there.
-    # A deployment whose users authenticate through keys issued elsewhere sets this, and a milvus credential can then no longer
-    # be used to bypass that key system. It does not disable credentials themselves: internal listeners and the RBAC the control
-    # plane seeds are untouched, and with authorizationEnabled off nothing authenticates at all and this has no effect.
-    # Verification of the key itself is the hook's (proxy.soPath, or a hook compiled into the binary).
-    requireAPIKey: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 

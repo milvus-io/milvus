@@ -217,15 +217,13 @@ func authenticate(c *gin.Context) {
 }
 
 func authenticateWithChallenge(c *gin.Context, challenge bool) {
-	if !proxy.Params.CommonCfg.RequireAPIKey.GetAsBool() {
-		username, password, ok := httpserver.ParseUsernamePasswordWithChallenge(c, challenge)
-		if ok {
-			if proxy.PasswordVerify(c, username, password) {
-				mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
-				c.Set(httpserver.ContextUsername, username)
-				c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
-				return
-			}
+	username, password, ok := httpserver.ParseUsernamePasswordWithChallenge(c, challenge)
+	if ok {
+		if proxy.PasswordVerify(c, username, password) {
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
+			c.Set(httpserver.ContextUsername, username)
+			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
+			return
 		}
 	}
 	rawToken := httpserver.GetAuthorization(c)
