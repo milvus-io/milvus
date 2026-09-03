@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -200,17 +201,64 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
+	// Full AutoID Upsert classifies caller-supplied primary keys before writing,
+	// so the collection must be queryable before the request is submitted.
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
+	})
+	s.NoError(err)
+	s.NoError(merr.Error(createIndexStatus))
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.NoError(merr.Error(loadStatus))
+	s.WaitForLoad(ctx, collectionName)
+
 	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, 0)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	upsertResult, err := c.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
-		HashKeys:       hashKeys,
-		NumRows:        uint32(rowNum),
-	})
-	s.NoError(err)
+	newUpsertRequest := func() *milvuspb.UpsertRequest {
+		return &milvuspb.UpsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
+	componentParams := paramtable.Get()
+	configKey := componentParams.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key
+	s.Require().NoError(componentParams.Save(configKey, "false"))
+	defer func() {
+		_ = componentParams.Reset(configKey)
+	}()
+
+	rejectedResult, err := c.MilvusClient.Upsert(ctx, newUpsertRequest())
+	s.Require().NoError(err)
+	s.Require().NotNil(rejectedResult)
+	rejectedErr := merr.Error(rejectedResult.GetStatus())
+	s.ErrorIs(rejectedErr, merr.ErrAutoIDUpsertTargetNotFound)
+	s.Equal(int32(112), merr.Code(rejectedErr))
+	s.False(rejectedResult.GetStatus().GetRetriable())
+	s.Equal("true", rejectedResult.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
+	s.Empty(rejectedResult.GetIDs())
+	s.Zero(rejectedResult.GetInsertCnt())
+	s.Zero(rejectedResult.GetDeleteCnt())
+	s.Zero(rejectedResult.GetUpsertCnt())
+
+	s.Require().NoError(componentParams.Reset(configKey))
+	s.True(componentParams.ProxyCfg.AutoIDUpsertInsertOnNotFound.GetAsBool())
+	upsertResult, err := c.MilvusClient.Upsert(ctx, newUpsertRequest())
+	s.Require().NoError(err)
+	s.Require().NotNil(upsertResult)
 	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
@@ -234,32 +282,6 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
-	// create index
-	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
-	})
-	s.NoError(err)
-	err = merr.Error(createIndexStatus)
-	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
-	}
-
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
-	// load
-	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	err = merr.Error(loadStatus)
-	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
-	}
-	s.WaitForLoad(ctx, collectionName)
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10

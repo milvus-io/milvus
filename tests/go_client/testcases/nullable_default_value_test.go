@@ -2301,15 +2301,10 @@ func TestNullableVectorUpsert(t *testing.T) {
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, nb, upsertRes1.UpsertCount)
 
-			// For AutoID=true, upsert returns new IDs, need to update actualPkData
+			// Full AutoID Upsert preserves the primary keys of existing rows.
 			if autoID {
 				upsertedIDs := upsertRes1.IDs.(*column.ColumnInt64)
-				newPkData := upsertedIDs.Data()
-				// Clear old expected state
-				expectedVectorMap = make(map[int64][]float32)
-				expectedScalarMap = make(map[int64]int32)
-				// Update actualPkData with new IDs
-				actualPkData = newPkData
+				require.Equal(t, actualPkData, upsertedIDs.Data())
 			}
 
 			// Update expected state: all vectors null
@@ -2355,18 +2350,10 @@ func TestNullableVectorUpsert(t *testing.T) {
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, upsert2Nb, upsertRes2.UpsertCount)
 
-			// For AutoID=true, upsert returns new IDs for the upserted rows
+			// Existing AutoID rows keep their primary keys on Full Upsert.
 			if autoID {
 				upsertedIDs := upsertRes2.IDs.(*column.ColumnInt64)
-				newPkData := upsertedIDs.Data()
-				// Update actualPkData for rows nullPercent to nb-1
-				for i := range upsert2Nb {
-					// Remove old expected state
-					delete(expectedVectorMap, actualPkData[i+nullPercent])
-					delete(expectedScalarMap, actualPkData[i+nullPercent])
-					// Update to new PK
-					actualPkData[i+nullPercent] = newPkData[i]
-				}
+				require.Equal(t, upsert2PkData, upsertedIDs.Data())
 			}
 
 			// Update expected state: rows nullPercent to nb-1 now have valid vectors

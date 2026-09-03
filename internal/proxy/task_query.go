@@ -79,8 +79,13 @@ type queryTask struct {
 	// fixedSnapshotTimestamp pins internal queries whose read timestamp is
 	// also used as a later write-side correctness proof.
 	fixedSnapshotTimestamp uint64
-	preferredNodes         map[string]int64
-	fastSkip               bool
+	// fixedGuaranteeTimestamp is the minimum metadata fence for a fixed-snapshot
+	// internal query. Generic preprocessing may raise the guarantee when it sees
+	// newer collection metadata, without changing row or TTL visibility. A zero
+	// value retains the legacy behavior that uses the snapshot as the guarantee.
+	fixedGuaranteeTimestamp uint64
+	preferredNodes          map[string]int64
+	fastSkip                bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -99,14 +104,27 @@ func (t *queryTask) getQueryLabel() string {
 	return metrics.QueryLabel
 }
 
-// applyFixedSnapshotTimestamp restores the exact read fence after generic
-// query preprocessing adjusts consistency and collection metadata fences.
+// applyFixedSnapshotTimestamp restores the internal query's explicit read
+// fence after generic consistency and collection-metadata processing.
 func (t *queryTask) applyFixedSnapshotTimestamp(guaranteeTimestamp uint64) uint64 {
 	if t.fixedSnapshotTimestamp == 0 {
 		return guaranteeTimestamp
 	}
 	t.MvccTimestamp = t.fixedSnapshotTimestamp
+	if t.fixedGuaranteeTimestamp != 0 {
+		return max(guaranteeTimestamp, t.fixedGuaranteeTimestamp)
+	}
 	return t.fixedSnapshotTimestamp
+}
+
+func (t *queryTask) ttlReferenceTimestamps(guaranteeTimestamp uint64) (uint64, uint64) {
+	entityTTLTimestamp := guaranteeTimestamp
+	collectionTTLTimestamp := t.GetBase().GetTimestamp()
+	if t.fixedGuaranteeTimestamp != 0 {
+		entityTTLTimestamp = t.fixedSnapshotTimestamp
+		collectionTTLTimestamp = t.fixedSnapshotTimestamp
+	}
+	return entityTTLTimestamp, collectionTTLTimestamp
 }
 
 type queryParams struct {
@@ -888,8 +906,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs = t.applyFixedSnapshotTimestamp(guaranteeTs)
 
 	t.GuaranteeTimestamp = guaranteeTs
+	entityTTLTimestamp, collectionTTLTimestamp := t.ttlReferenceTimestamps(guaranteeTs)
 	// Extract physical time for entity-level TTL (issue #47413)
-	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(entityTTLTimestamp)
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
@@ -899,12 +918,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.IsIterator = queryParams.isIterator
 
 	if collectionInfo.CollectionTTL != 0 {
-		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		physicalTime := tsoutil.PhysicalTime(collectionTTLTimestamp)
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
-		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
+		if t.CollectionTtlTimestamps > collectionTTLTimestamp {
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", collectionTTLTimestamp, collectionInfo.CollectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()

@@ -970,6 +970,7 @@ func partialUpdateCASTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASIDs(finalInsertPKs),
 	}
+	task.insertPKs = partialUpdateCASIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASIDs(deletePKs)
 	task.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{}},
@@ -1014,6 +1015,7 @@ func partialUpdateCASRealPackTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASIDs(finalInsertPKs),
 	}
+	task.insertPKs = partialUpdateCASIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASIDs(deletePKs)
 	task.idAllocator = &allocator.IDAllocator{}
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
@@ -1465,6 +1467,106 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	require.Empty(t, msgs)
 }
 
+func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
+	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+	task.insertPKs = partialUpdateCASIDs([]int64{10})
+	task.result.IDs = partialUpdateCASIDs([]int64{99})
+	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
+	defer collectionPatch.UnPatch()
+
+	var routingIDs *schemapb.IDs
+	repackPatch := mockey.Mock(repackInsertDataForStreamingService).To(
+		func(
+			_ context.Context,
+			_ Cache,
+			_ []string,
+			_ *msgstream.InsertMsg,
+			result *milvuspb.MutationResult,
+			_ *streamingmessage.CipherConfig,
+			_ int32,
+			_ map[string]*messagespb.PartialUpdateCAS,
+		) ([]streamingmessage.MutableMessage, error) {
+			routingIDs = result.GetIDs()
+			return nil, nil
+		},
+	).Build()
+	defer repackPatch.UnPatch()
+
+	msgs, err := task.packInsertMessage(context.Background(), nil)
+	require.NoError(t, err)
+	require.Empty(t, msgs)
+	require.Equal(t, []int64{10}, routingIDs.GetIntId().GetData())
+	require.Equal(t, []int64{99}, task.result.GetIDs().GetIntId().GetData())
+}
+
+func TestPackDeleteMessageSkipsEmptyPrimaryKeys(t *testing.T) {
+	task := &upsertTask{
+		upsertMsg: &msgstream.UpsertMsg{
+			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{
+				PrimaryKeys: &schemapb.IDs{},
+			}},
+		},
+	}
+
+	msgs, err := task.packDeleteMessage(context.Background(), nil)
+	require.NoError(t, err)
+	require.Empty(t, msgs)
+}
+
+func TestFullAutoIDMixedPlanRoutesExistingInsertAndDeleteTogether(t *testing.T) {
+	const (
+		existingPK  = int64(10)
+		generatedPK = int64(1001)
+	)
+	task := partialUpdateCASRealPackTestTask(
+		t,
+		[]int64{existingPK, 20},
+		[]int64{existingPK, generatedPK},
+		[]int64{existingPK},
+	)
+	task.req.PartialUpdate = false
+	task.req.FieldOps = nil
+	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
+
+	m := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*allocator.IDAllocator).Alloc).Return(UniqueID(1000), UniqueID(1001), nil).Build()
+	defer m.UnPatch()
+	m = mockey.Mock(channelmgr.GetActiveWALName).Return(streamingmessage.WALNameRocksmq).Build()
+	defer m.UnPatch()
+
+	insertMsgs, err := task.packInsertMessage(context.Background(), nil)
+	require.NoError(t, err)
+	deleteMsgs, err := task.packDeleteMessage(context.Background(), nil)
+	require.NoError(t, err)
+
+	insertChannels := make(map[int64]string)
+	for _, msg := range insertMsgs {
+		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+		primaryData, err := typeutil.GetPrimaryFieldData(body.GetFieldsData(), task.schema.GetFields()[0])
+		require.NoError(t, err)
+		ids, err := parsePrimaryFieldData2IDs(primaryData)
+		require.NoError(t, err)
+		for _, id := range ids.GetIntId().GetData() {
+			insertChannels[id] = msg.VChannel()
+		}
+	}
+	require.Contains(t, insertChannels, existingPK)
+	require.Contains(t, insertChannels, generatedPK)
+
+	deleteChannels := make(map[int64]string)
+	for _, msg := range deleteMsgs {
+		body := streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody()
+		for _, id := range body.GetPrimaryKeys().GetIntId().GetData() {
+			deleteChannels[id] = msg.VChannel()
+		}
+	}
+	require.Equal(t, map[int64]string{existingPK: insertChannels[existingPK]}, deleteChannels)
+	require.NotContains(t, deleteChannels, generatedPK)
+}
+
 func TestAppendUpsertAttemptMapsSchemaVersionMismatch(t *testing.T) {
 	task, insertMsgs, _ := partialUpdateCASTestTask(t, false, []int64{10}, []int64{10}, nil)
 	fakeWAL := newPartialUpdateCASTestWAL(t, 1)
@@ -1519,6 +1621,7 @@ func partialUpdateCASStringTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASStringIDs(finalInsertPKs),
 	}
+	task.insertPKs = partialUpdateCASStringIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASStringIDs(deletePKs)
 	task.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{}},
@@ -2281,8 +2384,9 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 
 func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 	const (
-		beginTS = uint64(100)
-		readTS  = uint64(200)
+		beginTS  = uint64(100)
+		readTS   = uint64(200)
+		updateTS = uint64(250)
 	)
 	var captured *queryTask
 
@@ -2314,6 +2418,7 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 	task := createTestUpdateTask()
 	task.SetTs(beginTS)
 	task.partialUpdateReadTs = readTS
+	task.collectionUpdateTimestamp = updateTS
 	task.partitionKeyMode = false
 	task.upsertMsg = &msgstream.UpsertMsg{
 		DeleteMsg: &msgstream.DeleteMsg{
@@ -2329,7 +2434,7 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 			IntId: &schemapb.LongArray{Data: []int64{1}},
 		},
 	}
-	_, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
+	_, _, err := retrieveByPKs(context.Background(), task, ids, []string{"id"})
 
 	require.NoError(t, err)
 	require.NotNil(t, captured)
@@ -2337,9 +2442,542 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 	require.Equal(t, commonpb.ConsistencyLevel_Customized, captured.request.GetConsistencyLevel())
 	require.Equal(t, commonpb.ConsistencyLevel_Customized, captured.GetConsistencyLevel())
 	require.Equal(t, readTS, captured.request.GetGuaranteeTimestamp())
+	require.Equal(t, []string{"id"}, captured.request.GetOutputFields())
 	require.Equal(t, readTS, captured.GetMvccTimestamp())
 	require.Equal(t, readTS, captured.fixedSnapshotTimestamp)
+	require.Zero(t, captured.fixedGuaranteeTimestamp)
 	require.Equal(t, beginTS, task.BeginTs())
+}
+
+func TestRetrieveByPKsUsesFullAutoIDClassificationFences(t *testing.T) {
+	const (
+		classificationTS = uint64(200)
+		updateTS         = uint64(250)
+	)
+	var captured *queryTask
+
+	m := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, task *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		captured = task
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	}).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*MetaCache).GetPartitionID).Return(int64(10), nil).Build()
+	defer m.UnPatch()
+
+	task := createTestUpdateTask()
+	task.SetTs(classificationTS)
+	task.fullAutoIDUpsert = true
+	task.collectionUpdateTimestamp = updateTS
+	task.partitionKeyMode = false
+	task.upsertMsg = &msgstream.UpsertMsg{
+		DeleteMsg: &msgstream.DeleteMsg{
+			DeleteRequest: &msgpb.DeleteRequest{
+				PartitionName: "_default",
+			},
+		},
+	}
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		},
+	}
+	_, _, err := retrieveByPKs(context.Background(), task, ids, []string{"id"})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	require.Equal(t, updateTS, captured.request.GetGuaranteeTimestamp())
+	require.Equal(t, []string{"id"}, captured.request.GetOutputFields())
+	require.Equal(t, classificationTS, captured.GetMvccTimestamp())
+	require.Equal(t, classificationTS, captured.fixedSnapshotTimestamp)
+	require.Equal(t, updateTS, captured.fixedGuaranteeTimestamp)
+}
+
+func TestClassifyFullAutoIDUpsertPreservesRequestOrder(t *testing.T) {
+	primaryField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "id",
+		IsPrimaryKey: true,
+		AutoID:       true,
+		DataType:     schemapb.DataType_Int64,
+	}
+	requestIDs := partialUpdateCASIDs([]int64{10, 20, 30})
+	queryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			partialUpdateCASPKFieldData([]int64{30, 10}),
+		},
+	}
+	m := mockey.Mock(retrieveByPKs).Return(queryResult, segcore.StorageCost{}, nil).Build()
+	defer m.UnPatch()
+
+	task := createTestUpdateTask()
+	task.schema = mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name:   "test_collection",
+		Fields: []*schemapb.FieldSchema{primaryField},
+	})
+	task.insertOnNotFound = true
+	require.NoError(t, task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField))
+	require.Equal(t, []bool{true, false, true}, task.fullAutoIDPlan.existing)
+	require.Equal(t, []int64{10, 30}, task.fullAutoIDPlan.deleteIDs.GetIntId().GetData())
+}
+
+func TestClassifyFullAutoIDUpsertRejectsMalformedResults(t *testing.T) {
+	primaryField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
+	}
+	requestIDs := partialUpdateCASIDs([]int64{10, 20})
+
+	for _, tc := range []struct {
+		name       string
+		fieldsData []*schemapb.FieldData
+	}{
+		{name: "missing primary key field"},
+		{name: "unrequested primary key", fieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 30})}},
+		{name: "duplicate primary key", fieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 10})}},
+		{
+			name: "empty wrong primary key type",
+			fieldsData: []*schemapb.FieldData{{
+				FieldName: "id",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}},
+				}},
+			}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queryResult := &milvuspb.QueryResults{
+				Status:     merr.Success(),
+				FieldsData: tc.fieldsData,
+			}
+			m := mockey.Mock(retrieveByPKs).Return(queryResult, segcore.StorageCost{}, nil).Build()
+			defer m.UnPatch()
+
+			task := createTestUpdateTask()
+			task.insertOnNotFound = true
+			err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.Nil(t, task.fullAutoIDPlan)
+		})
+	}
+}
+
+func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID: 101, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+			},
+		},
+	})
+	newRequest := func() *milvuspb.UpsertRequest {
+		return &milvuspb.UpsertRequest{
+			Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Upsert)),
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			NumRows:        1,
+			FieldsData: []*schemapb.FieldData{
+				partialUpdateCASPKFieldData([]int64{10}),
+				{
+					FieldName: "tags",
+					FieldId:   101,
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Int64,
+							Data: []*schemapb.ScalarField{{
+								Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}},
+							}},
+						}},
+					}},
+				},
+			},
+		}
+	}
+	installMetadataMocks := func(t *testing.T) {
+		t.Helper()
+		collectionIDPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+		t.Cleanup(func() { collectionIDPatch.UnPatch() })
+		collectionInfoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+			UpdateTimestamp: 12345,
+			Schema:          schema,
+		}, nil).Build()
+		t.Cleanup(func() { collectionInfoPatch.UnPatch() })
+		collectionSchemaPatch := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+		t.Cleanup(func() { collectionSchemaPatch.UnPatch() })
+		partitionModePatch := mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+		t.Cleanup(func() { partitionModePatch.UnPatch() })
+		partitionInfoPatch := mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
+		t.Cleanup(func() { partitionInfoPatch.UnPatch() })
+	}
+
+	for _, value := range []string{"true", "false"} {
+		t.Run("non replace field op promotes to partial with config "+value, func(t *testing.T) {
+			installMetadataMocks(t)
+			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key, value))
+			t.Cleanup(func() {
+				Params.Reset(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key)
+			})
+			m := mockey.Mock((*upsertTask).preparePartialUpdateCASGroups).Return(nil).Build()
+			defer m.UnPatch()
+			m = mockey.Mock((*upsertTask).queryPreExecute).Return(nil).Build()
+			defer m.UnPatch()
+			m = mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+			defer m.UnPatch()
+			m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+			defer m.UnPatch()
+
+			req := newRequest()
+			req.FieldOps = []*schemapb.FieldPartialUpdateOp{{
+				FieldName: "tags",
+				Op:        schemapb.FieldPartialUpdateOp_ARRAY_APPEND,
+			}}
+			task := &upsertTask{
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      context.Background(),
+				req:      req,
+			}
+			task.SetTs(100)
+
+			require.NoError(t, task.PreExecute(context.Background()))
+			require.True(t, task.req.GetPartialUpdate())
+			require.False(t, task.fullAutoIDUpsert)
+			require.False(t, task.insertOnNotFound)
+		})
+	}
+
+	for _, tc := range []struct {
+		name     string
+		value    string
+		expected bool
+	}{
+		{name: "enabled", value: "true", expected: true},
+		{name: "disabled", value: "false", expected: false},
+	} {
+		t.Run("full AutoID upsert reads "+tc.name+" proxy config", func(t *testing.T) {
+			installMetadataMocks(t)
+			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key, tc.value))
+			t.Cleanup(func() {
+				Params.Reset(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key)
+			})
+			m := mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+			defer m.UnPatch()
+			m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+			defer m.UnPatch()
+			task := &upsertTask{
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      context.Background(),
+				req:      newRequest(),
+			}
+			task.SetTs(100)
+
+			require.NoError(t, task.PreExecute(context.Background()))
+			require.True(t, task.fullAutoIDUpsert)
+			require.Equal(t, tc.expected, task.insertOnNotFound)
+		})
+	}
+
+	t.Run("refresh applies only to later admitted request", func(t *testing.T) {
+		installMetadataMocks(t)
+		key := Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key
+		require.NoError(t, Params.Save(key, "true"))
+		t.Cleanup(func() {
+			Params.Reset(key)
+		})
+		m := mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+		defer m.UnPatch()
+		m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+		defer m.UnPatch()
+		newTask := func() *upsertTask {
+			task := &upsertTask{
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      context.Background(),
+				req:      newRequest(),
+			}
+			task.SetTs(100)
+			return task
+		}
+
+		admitted := newTask()
+		require.NoError(t, admitted.PreExecute(context.Background()))
+		require.True(t, admitted.insertOnNotFound)
+
+		require.NoError(t, Params.Save(key, "false"))
+		require.True(t, admitted.insertOnNotFound)
+
+		later := newTask()
+		require.NoError(t, later.PreExecute(context.Background()))
+		require.False(t, later.insertOnNotFound)
+	})
+}
+
+func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
+	primaryField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "id",
+		IsPrimaryKey: true,
+		AutoID:       true,
+		DataType:     schemapb.DataType_Int64,
+	}
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			primaryField,
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+	})
+	fields := []*schemapb.FieldData{
+		partialUpdateCASPKFieldData([]int64{10, 20}),
+		{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}},
+			}},
+		},
+	}
+	return &upsertTask{
+		ctx:              context.Background(),
+		schema:           schema,
+		idAllocator:      &allocator.IDAllocator{},
+		fullAutoIDUpsert: true,
+		insertOnNotFound: false,
+		req: &milvuspb.UpsertRequest{
+			CollectionName: "test_collection",
+			FieldsData:     fields,
+			NumRows:        2,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "test_collection",
+				PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+				FieldsData:     fields,
+				NumRows:        2,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			}},
+			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
+		},
+		result: &milvuspb.MutationResult{},
+		node:   &Proxy{},
+	}
+}
+
+func TestClassifyFullAutoIDUpsertRejectsMixedBatchBeforeAllocation(t *testing.T) {
+	retrievePatch := mockey.Mock(retrieveByPKs).Return(
+		&milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				partialUpdateCASPKFieldData([]int64{10}),
+			},
+		},
+		segcore.StorageCost{},
+		nil,
+	).Build()
+	defer retrievePatch.UnPatch()
+	allocationCalls := 0
+	allocationPatch := mockey.Mock(common.AllocAutoID).To(
+		func(func(uint32) (typeutil.UniqueID, typeutil.UniqueID, error), uint32, uint64) (int64, int64, error) {
+			allocationCalls++
+			return 1000, 1002, nil
+		},
+	).Build()
+	defer allocationPatch.UnPatch()
+
+	task := newFullAutoIDUpsertPreExecuteTask()
+
+	err := task.insertPreExecute(context.Background())
+	require.ErrorIs(t, err, merr.ErrAutoIDUpsertTargetNotFound)
+	require.Equal(t, 0, allocationCalls)
+	require.Empty(t, task.rowIDs)
+}
+
+func TestClassifyFullAutoIDUpsertPropagatesQueryErrorBeforeAllocation(t *testing.T) {
+	queryErr := merr.WrapErrServiceUnavailable("full AutoID Upsert classification query failed")
+	retrievePatch := mockey.Mock(retrieveByPKs).Return(
+		(*milvuspb.QueryResults)(nil),
+		segcore.StorageCost{},
+		queryErr,
+	).Build()
+	defer retrievePatch.UnPatch()
+	allocationCalls := 0
+	allocationPatch := mockey.Mock(common.AllocAutoID).To(
+		func(func(uint32) (typeutil.UniqueID, typeutil.UniqueID, error), uint32, uint64) (int64, int64, error) {
+			allocationCalls++
+			return 1000, 1002, nil
+		},
+	).Build()
+	defer allocationPatch.UnPatch()
+
+	task := newFullAutoIDUpsertPreExecuteTask()
+	err := task.insertPreExecute(context.Background())
+
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, 0, allocationCalls)
+	require.Empty(t, task.rowIDs)
+	require.Nil(t, task.fullAutoIDPlan)
+}
+
+func TestInsertPreExecuteFullAutoIDBuildsMixedRowPlan(t *testing.T) {
+	primaryField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
+	}
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			primaryField,
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+	})
+	fields := []*schemapb.FieldData{
+		partialUpdateCASPKFieldData([]int64{10, 20, 30}),
+		{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}}},
+			}},
+		},
+	}
+	retrievePatch := mockey.Mock(retrieveByPKs).Return(
+		&milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				partialUpdateCASPKFieldData([]int64{30, 10}),
+			},
+		},
+		segcore.StorageCost{},
+		nil,
+	).Build()
+	defer retrievePatch.UnPatch()
+	allocationPatch := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1003), nil).Build()
+	defer allocationPatch.UnPatch()
+
+	task := &upsertTask{
+		ctx:              context.Background(),
+		schema:           schema,
+		idAllocator:      &allocator.IDAllocator{},
+		fullAutoIDUpsert: true,
+		insertOnNotFound: true,
+		req: &milvuspb.UpsertRequest{
+			CollectionName: "test_collection",
+			FieldsData:     fields,
+			NumRows:        3,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "test_collection",
+				PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+				FieldsData:     fields,
+				NumRows:        3,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			}},
+			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
+		},
+		result: &milvuspb.MutationResult{},
+		node:   &Proxy{},
+	}
+	task.SetTs(500)
+
+	require.NoError(t, task.insertPreExecute(context.Background()))
+	task.refreshMutationResultCounts()
+	require.Equal(t, []int64{1000, 1001, 1002}, task.rowIDs)
+	require.Equal(t, []int64{10, 1001, 30}, task.insertPKs.GetIntId().GetData())
+	require.Equal(t, []int64{10, 1001, 30}, task.result.GetIDs().GetIntId().GetData())
+	require.Equal(t, []int64{10, 30}, task.upsertMsg.DeleteMsg.GetPrimaryKeys().GetIntId().GetData())
+	require.Equal(t, int64(2), task.upsertMsg.DeleteMsg.GetNumRows())
+	require.Equal(t, int64(2), task.result.GetDeleteCnt())
+	require.Equal(t, int64(3), task.result.GetInsertCnt())
+	require.Equal(t, int64(3), task.result.GetUpsertCnt())
+}
+
+func TestFinalizeFullAutoIDUpsertUsesMixedFinalIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		primaryField   *schemapb.FieldSchema
+		requestIDs     *schemapb.IDs
+		requestField   *schemapb.FieldData
+		expectedIDs    *schemapb.IDs
+		expectedDelete *schemapb.IDs
+	}{
+		{
+			name:           "Int64",
+			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
+			requestIDs:     partialUpdateCASIDs([]int64{10, 20, 30}),
+			requestField:   partialUpdateCASPKFieldData([]int64{10, 20, 30}),
+			expectedIDs:    partialUpdateCASIDs([]int64{10, 1001, 30}),
+			expectedDelete: partialUpdateCASIDs([]int64{10, 30}),
+		},
+		{
+			name:           "VarChar",
+			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_VarChar},
+			requestIDs:     partialUpdateCASStringIDs([]string{"10", "lookup", "30"}),
+			requestField:   partialUpdateCASStringPKFieldData([]string{"10", "lookup", "30"}),
+			expectedIDs:    partialUpdateCASStringIDs([]string{"10", "1001", "30"}),
+			expectedDelete: partialUpdateCASStringIDs([]string{"10", "30"}),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &upsertTask{
+				rowIDs: []int64{1000, 1001, 1002},
+				fullAutoIDPlan: &fullAutoIDUpsertPlan{
+					requestIDs: tc.requestIDs,
+					existing:   []bool{true, false, true},
+					deleteIDs:  tc.expectedDelete,
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{tc.requestField}}},
+					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
+				},
+				result: &milvuspb.MutationResult{},
+			}
+
+			require.NoError(t, task.finalizeFullAutoIDUpsert(tc.primaryField))
+			require.True(t, proto.Equal(tc.expectedIDs, task.insertPKs))
+			require.True(t, proto.Equal(tc.expectedIDs, task.result.GetIDs()))
+			require.NotSame(t, task.insertPKs, task.result.GetIDs())
+			require.True(t, proto.Equal(tc.expectedDelete, task.upsertMsg.DeleteMsg.GetPrimaryKeys()))
+			require.Equal(t, int64(2), task.upsertMsg.DeleteMsg.GetNumRows())
+
+			primaryData, err := typeutil.GetPrimaryFieldData(task.upsertMsg.InsertMsg.GetFieldsData(), tc.primaryField)
+			require.NoError(t, err)
+			actualIDs, err := parsePrimaryFieldData2IDs(primaryData)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(tc.expectedIDs, actualIDs))
+		})
+	}
+}
+
+func TestFinalizeFullAutoIDUpsertAcceptsAllocatorValueEqualToLookupKey(t *testing.T) {
+	primaryField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
+	}
+	lookupIDs := partialUpdateCASIDs([]int64{1000})
+	task := &upsertTask{
+		rowIDs: []int64{1000},
+		fullAutoIDPlan: &fullAutoIDUpsertPlan{
+			requestIDs: lookupIDs,
+			existing:   []bool{false},
+			deleteIDs:  &schemapb.IDs{},
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1000})},
+			}},
+			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
+		},
+		result: &milvuspb.MutationResult{},
+	}
+
+	require.NoError(t, task.finalizeFullAutoIDUpsert(primaryField))
+	require.Equal(t, []int64{1000}, task.result.GetIDs().GetIntId().GetData())
+	require.Zero(t, task.upsertMsg.DeleteMsg.GetNumRows())
+	require.Zero(t, typeutil.GetSizeOfIDs(task.upsertMsg.DeleteMsg.GetPrimaryKeys()))
 }
 
 func TestRetrieveByPKsRejectsMissingPartialUpdateReadTs(t *testing.T) {
@@ -2364,6 +3002,21 @@ func TestRetrieveByPKsRejectsMissingPartialUpdateReadTs(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "partial update read timestamp is unavailable")
+}
+
+func TestRetrieveByPKsRejectsNilQueryResult(t *testing.T) {
+	m := mockey.Mock((*Proxy).query).Return(nil, segcore.StorageCost{}, nil).Build()
+	defer m.UnPatch()
+
+	task := createTestUpdateTask()
+	task.SetTs(100)
+	task.partitionKeyMode = true
+	ids := partialUpdateCASIDs([]int64{1})
+
+	result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"id"})
+	require.Nil(t, result)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Contains(t, err.Error(), "upsert retrieve returned nil result")
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {

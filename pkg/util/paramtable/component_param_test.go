@@ -499,6 +499,12 @@ func TestComponentParam(t *testing.T) {
 		params.Save("proxy.skipAutoIDCheck", "true")
 		assert.True(t, Params.SkipAutoIDCheck.GetAsBool())
 
+		assert.True(t, Params.AutoIDUpsertInsertOnNotFound.GetAsBool())
+		params.Save(Params.AutoIDUpsertInsertOnNotFound.Key, "false")
+		assert.False(t, Params.AutoIDUpsertInsertOnNotFound.GetAsBool())
+		params.Reset(Params.AutoIDUpsertInsertOnNotFound.Key)
+		assert.True(t, Params.AutoIDUpsertInsertOnNotFound.GetAsBool())
+
 		assert.False(t, Params.SkipPartitionKeyCheck.GetAsBool())
 		params.Save("proxy.skipPartitionKeyCheck", "true")
 		assert.True(t, Params.SkipPartitionKeyCheck.GetAsBool())

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -41,19 +42,115 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
 	const snapshotTS = uint64(100)
-	task := &queryTask{
+	legacyTask := &queryTask{
 		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
 		fixedSnapshotTimestamp: snapshotTS,
 	}
+	require.Equal(t, snapshotTS, legacyTask.applyFixedSnapshotTimestamp(300))
+	require.Equal(t, snapshotTS, legacyTask.GetMvccTimestamp())
 
-	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
-	require.Equal(t, snapshotTS, guaranteeTS)
-	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
+	classificationTask := &queryTask{
+		RetrieveRequest:         &internalpb.RetrieveRequest{MvccTimestamp: 200},
+		fixedSnapshotTimestamp:  snapshotTS,
+		fixedGuaranteeTimestamp: 250,
+	}
+	require.Equal(t, uint64(300), classificationTask.applyFixedSnapshotTimestamp(300))
+	require.Equal(t, snapshotTS, classificationTask.GetMvccTimestamp())
+}
+
+func TestQueryTaskTTLReferenceTimestamps(t *testing.T) {
+	task := &queryTask{
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{Timestamp: 300},
+		},
+		fixedSnapshotTimestamp:  100,
+		fixedGuaranteeTimestamp: 250,
+	}
+	entityTS, collectionTS := task.ttlReferenceTimestamps(250)
+	require.Equal(t, uint64(100), entityTS)
+	require.Equal(t, uint64(100), collectionTS)
+
+	task.fixedGuaranteeTimestamp = 0
+	entityTS, collectionTS = task.ttlReferenceTimestamps(100)
+	require.Equal(t, uint64(100), entityTS)
+	require.Equal(t, uint64(300), collectionTS)
+}
+
+func TestQueryTaskPreExecutePreservesFixedSnapshot(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(200)
+	)
+	classificationTime := time.Unix(1_700_000_000, 0)
+	classificationTS := tsoutil.ComposeTSByTime(classificationTime)
+	capturedUpdateTS := tsoutil.ComposeTSByTime(classificationTime.Add(-time.Second))
+	fixedGuaranteeTS := max(classificationTS, capturedUpdateTS)
+	queryUpdateTS := tsoutil.ComposeTSByTime(classificationTime.Add(time.Second))
+	schedulerTS := tsoutil.ComposeTSByTime(classificationTime.Add(2 * time.Second))
+	collectionTTL := time.Hour
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	})
+	collectionInfo := &collectionInfo{
+		CollID:          collectionID,
+		Schema:          schema,
+		UpdateTimestamp: queryUpdateTS,
+		CollectionTTL:   uint64(collectionTTL),
+	}
+	metaCache := &MetaCache{}
+	collectionIDMocker := mockey.Mock(metaCache.GetCollectionID).Return(collectionID, nil).Build()
+	defer collectionIDMocker.UnPatch()
+	collectionInfoMocker := mockey.Mock(metaCache.GetCollectionInfo).Return(collectionInfo, nil).Build()
+	defer collectionInfoMocker.UnPatch()
+	collectionSchemaMocker := mockey.Mock(metaCache.GetCollectionSchema).Return(schema, nil).Build()
+	defer collectionSchemaMocker.UnPatch()
+	partitionsMocker := mockey.Mock(metaCache.GetPartitions).Return(map[string]UniqueID{
+		Params.CommonCfg.DefaultPartitionName.GetValue(): partitionID,
+	}, nil).Build()
+	defer partitionsMocker.UnPatch()
+
+	ctx := context.Background()
+	task := &queryTask{
+		baseTask:  baseTask{MetaCache: metaCache},
+		Condition: NewTaskCondition(ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base:          &commonpb.MsgBase{},
+			MvccTimestamp: schedulerTS,
+		},
+		ctx: ctx,
+		request: &milvuspb.QueryRequest{
+			Base:               &commonpb.MsgBase{},
+			DbName:             "default",
+			CollectionName:     "test_collection",
+			Expr:               "id in [1]",
+			OutputFields:       []string{"id"},
+			ConsistencyLevel:   commonpb.ConsistencyLevel_Customized,
+			GuaranteeTimestamp: fixedGuaranteeTS,
+		},
+		fixedSnapshotTimestamp:  classificationTS,
+		fixedGuaranteeTimestamp: fixedGuaranteeTS,
+	}
+	require.NoError(t, task.OnEnqueue())
+	task.SetTs(schedulerTS)
+
+	require.NoError(t, task.PreExecute(ctx))
+	require.Equal(t, queryUpdateTS, task.GetGuaranteeTimestamp())
+	require.Equal(t, classificationTS, task.GetMvccTimestamp())
+	require.Equal(t, uint64(classificationTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+	require.Equal(t, tsoutil.ComposeTSByTime(classificationTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
 }
 
 func TestQueryTask_all(t *testing.T) {
