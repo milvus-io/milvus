@@ -181,10 +181,18 @@ func (kv *MemoryKV) Remove(ctx context.Context, key string) error {
 func (kv *MemoryKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	result := make([]string, 0, len(keys))
-	for _, key := range keys {
+	result := make([]string, len(keys))
+	missing := make([]string, 0)
+	for i, key := range keys {
 		item := kv.tree.Get(memoryKVItem{key: key})
-		result = append(result, item.(memoryKVItem).value.String())
+		if item == nil {
+			missing = append(missing, key)
+			continue
+		}
+		result[i] = item.(memoryKVItem).value.String()
+	}
+	if len(missing) > 0 {
+		return result, merr.WrapErrIoKeyNotFound(strings.Join(missing, ","))
 	}
 	return result, nil
 }
@@ -193,10 +201,18 @@ func (kv *MemoryKV) MultiLoad(ctx context.Context, keys []string) ([]string, err
 func (kv *MemoryKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	result := make([][]byte, 0, len(keys))
-	for _, key := range keys {
+	result := make([][]byte, len(keys))
+	missing := make([]string, 0)
+	for i, key := range keys {
 		item := kv.tree.Get(memoryKVItem{key: key})
-		result = append(result, item.(memoryKVItem).value.ByteSlice())
+		if item == nil {
+			missing = append(missing, key)
+			continue
+		}
+		result[i] = item.(memoryKVItem).value.ByteSlice()
+	}
+	if len(missing) > 0 {
+		return result, merr.WrapErrIoKeyNotFound(strings.Join(missing, ","))
 	}
 	return result, nil
 }

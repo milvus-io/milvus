@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -42,6 +43,26 @@ func TestMemoryKV_SaveAndLoadBytes(t *testing.T) {
 	_value, err = mem.LoadBytes(context.TODO(), noKey)
 	assert.Error(t, err)
 	assert.Empty(t, _value)
+}
+
+func TestMemoryKVMultiLoadMissingKeys(t *testing.T) {
+	t.Run("string values", func(t *testing.T) {
+		mem := NewMemoryKV()
+		require.NoError(t, mem.Save(context.TODO(), "present", "value"))
+
+		values, err := mem.MultiLoad(context.TODO(), []string{"present", "missing"})
+		assert.Equal(t, []string{"value", ""}, values)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("byte values", func(t *testing.T) {
+		mem := NewMemoryKV()
+		require.NoError(t, mem.SaveBytes(context.TODO(), "present", []byte("value")))
+
+		values, err := mem.MultiLoadBytes(context.TODO(), []string{"present", "missing"})
+		assert.Equal(t, [][]byte{[]byte("value"), nil}, values)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	})
 }
 
 func TestMemoryKV_LoadBytesRange(t *testing.T) {
