@@ -528,7 +528,8 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *analyzer_params,
                                       uintptr_t num_threads,
                                       uintptr_t overall_memory_budget_in_bytes,
-                                      bool in_ram);
+                                      bool in_ram,
+                                      bool enable_background_merge);
 
 void tantivy_set_log_level(const char *level);
 

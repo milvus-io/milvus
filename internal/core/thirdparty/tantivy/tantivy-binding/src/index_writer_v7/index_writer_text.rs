@@ -31,6 +31,7 @@ impl IndexWriterWrapperImpl {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create text index writer, field_name: {}, tantivy_index_version 7",
@@ -48,6 +49,13 @@ impl IndexWriterWrapperImpl {
         index.tokenizers().register(tokenizer_name, tokenizer);
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        if !enable_background_merge {
+            // Sealed text index builds preserve memory-budget-flushed segments
+            // to avoid merge write amplification. Growing segments keep the
+            // default policy, otherwise the segment count grows unbounded
+            // across periodic commits.
+            index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+        }
 
         Ok(IndexWriterWrapperImpl {
             field,

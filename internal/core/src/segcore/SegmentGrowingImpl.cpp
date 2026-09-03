@@ -1839,7 +1839,8 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
         200,
         unique_id.c_str(),
         "milvus_tokenizer",
-        field_meta.get_analyzer_params().c_str());
+        field_meta.get_analyzer_params().c_str(),
+        /*enable_background_merge=*/true);
     index->Commit();
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
