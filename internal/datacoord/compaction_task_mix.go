@@ -229,14 +229,25 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	if err != nil {
 		return err
 	}
+	// SegmentMeta is committed; commit its metrics once. A retried completion
+	// returns the already-committed outputs with an empty mutation.
+	metricMutation.commit()
 	// Apply metrics after successful meta update.
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-	metricMutation.commit()
 	for _, newSegID := range newSegmentIDs {
 		select {
 		case getBuildIndexChSingleton() <- newSegID:
 		default:
 		}
+	}
+
+	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
+	// manifest versions advanced); schedule an asynchronous DataView snapshot
+	// reconciliation. The recompute runs on the latest SegmentMeta, so it
+	// observes both the output publish and the input retirement in one
+	// projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))

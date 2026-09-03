@@ -55,6 +55,68 @@ type mockMix struct {
 	types.MixCoordComponent
 }
 
+type recoveryWaiterFunc func(context.Context) error
+
+func (f recoveryWaiterFunc) WaitForRecovery(ctx context.Context) error {
+	return f(ctx)
+}
+
+func TestWaitForRecoveryAndStart(t *testing.T) {
+	ready := make(chan struct{})
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	waiter := recoveryWaiterFunc(func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ready:
+			return nil
+		}
+	})
+	go func() {
+		done <- waitForRecoveryAndStart(context.Background(), waiter, func() error {
+			close(started)
+			return nil
+		})
+	}()
+
+	select {
+	case <-started:
+		assert.Fail(t, "grpc server started before coordinator recovery completed")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(ready)
+	assert.NoError(t, <-done)
+	select {
+	case <-started:
+	default:
+		assert.Fail(t, "grpc server did not start after coordinator recovery completed")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	startCalled := false
+	err := waitForRecoveryAndStart(ctx, recoveryWaiterFunc(func(ctx context.Context) error {
+		return ctx.Err()
+	}), func() error {
+		startCalled = true
+		return nil
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, startCalled)
+
+	ctx, cancel = context.WithCancel(context.Background())
+	err = waitForRecoveryAndStart(ctx, recoveryWaiterFunc(func(context.Context) error {
+		cancel()
+		return nil
+	}), func() error {
+		startCalled = true
+		return nil
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, startCalled)
+}
+
 func (m *mockMix) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
@@ -96,6 +158,10 @@ func (m *mockMix) SetTiKVClient(client *txnkv.Client) {
 }
 
 func (m *mockMix) SetMixCoordClient(client types.MixCoordClient) {
+}
+
+func (m *mockMix) WaitForRecovery(context.Context) error {
+	return nil
 }
 
 func (m *mockMix) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)) {
@@ -148,7 +214,9 @@ func TestRun(t *testing.T) {
 		svr, err = NewServer(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, svr)
-		svr.mixCoord = &mockMix{}
+		mixCoord := &mockMix{}
+		svr.mixCoord = mixCoord
+		svr.recoveryWaiter = mixCoord
 
 		paramtable.Get().Save(rcServerConfig.Port.Key, fmt.Sprintf("%d", rand.Int()%100+10010))
 		etcdConfig := &paramtable.Get().EtcdCfg

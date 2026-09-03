@@ -597,14 +597,23 @@ func (t *clusteringCompactionTask) completeTask() error {
 		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsAndVersion", err)
 	}
 
-	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
-		mlog.Warn(context.TODO(), "completeTask update task state to completed failed", mlog.Err(err))
-		return err
-	}
 	// mark input segments as dropped
 	// now, the segment view only includes the result segments.
 	if err = t.markInputSegmentsDropped(); err != nil {
-		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
+		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, wait for retry", mlog.Err(err))
+		return err
+	}
+	// The SegmentMeta mutation is committed (outputs visible, inputs dropped);
+	// schedule an asynchronous DataView snapshot reconciliation. The recompute
+	// runs on the latest SegmentMeta, so it observes both the visibility flip
+	// and the input retirement in one projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
+
+	if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+		mlog.Warn(context.TODO(), "completeTask update task state to completed failed", mlog.Err(err))
+		return err
 	}
 
 	return nil
@@ -683,7 +692,28 @@ func (t *clusteringCompactionTask) doClean() error {
 				return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentsInfo", err)
 			}
 		} else {
-			// after v2.5.0, mark the results segment as dropped
+			// after v2.5.0
+			// If the results were already published (markResultSegmentsVisible
+			// committed) before the task failed - e.g. a transient
+			// markInputSegmentsDropped error after the partition-stats version
+			// started referencing them - dropping them here would orphan that
+			// stats version. Finish retiring the inputs instead; the
+			// partition-stats version keeps pointing at the visible results.
+			resultsVisible := false
+			for _, segID := range t.GetTaskProto().GetResultSegments() {
+				seg := t.meta.GetHealthySegment(context.TODO(), segID)
+				if seg != nil && !seg.GetIsInvisible() {
+					resultsVisible = true
+					break
+				}
+			}
+			if resultsVisible {
+				if err := t.markInputSegmentsDropped(); err != nil {
+					return err
+				}
+				return nil
+			}
+			// mark the results segment as dropped
 			var operators []UpdateOperator
 			hasResultSegments := len(t.GetTaskProto().GetResultSegments()) != 0
 			if hasResultSegments {

@@ -520,25 +520,30 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	)
 
 	if len(v3Deltalogs) > 0 {
-		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+		if err := t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...); err != nil {
+			return err
+		}
+		// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+		// the DataView snapshot is reconciled asynchronously from SegmentMeta.
+		if meta, ok := t.meta.(*meta); ok {
+			meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		}
+		return nil
 	}
-	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+	// the DataView snapshot is reconciled asynchronously from SegmentMeta. The
+	// recompute observes the new Manifest version, so the DataView advances
+	// compact_version even though membership is unchanged (L0 is a hard
+	// trigger: a Manifest-version change has no dedicated counter).
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
+	return nil
 }
 
-// commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
-// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
-// CommitSegmentManifests acquires all targets' manifest locks as a single atomic
-// operation, runs the loon transactions in parallel outside segMu (from the same
-// dataCoord.compaction.levelzero.manifestUpdatePoolSize pool), and lands every pointer
-// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
-// Folding the input drops in makes the whole L0 result atomic — the targets gain their
-// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
-// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
-// one catalog.Update each.
-// A target dropped during the plan is skipped by the primitive itself as a benign
-// terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
-// manifest, manifest I/O error) is returned, failing the save so the scheduler retries.
-// extraOperators still commit even when every target was skipped (commits empty).
 func (t *l0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog, extraOperators ...UpdateOperator) error {
 	commits := make([]SegmentManifestCommit, 0, len(deltalogsBySegment))
 	for segmentID, deltalogs := range deltalogsBySegment {

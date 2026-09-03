@@ -214,6 +214,30 @@ func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
 }
 
+func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collectionID int64) (bool, error) {
+	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch collection.State {
+	case pb.CollectionState_CollectionCreated:
+		return true, nil
+	case pb.CollectionState_CollectionCreating,
+		pb.CollectionState_CollectionDropping,
+		pb.CollectionState_CollectionDropped:
+		return false, nil
+	default:
+		return false, merr.WrapErrDataIntegrityMsg(
+			"collection %d has unknown state %d during DataView recovery",
+			collectionID,
+			collection.State,
+		)
+	}
+}
+
 func (c *Core) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(c.stateCode.Load())
 }
@@ -586,15 +610,14 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
-		// Recover file resource refCnt for pending schema broadcast tasks
-		// before registering DDL callbacks, so ack callbacks won't race with recovery.
+		// Recover file resource refCnt for pending schema broadcast tasks before
+		// MixCoord registers DDL callbacks after coordinator recovery.
 		// See #48612.
 		pending := broadcast.GetPendingSchemaFileResources()
 		if len(pending) > 0 {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
 		}
-		RegisterDDLCallbacks(c)
 	})
 	mlog.Info(context.TODO(), "RootCoord init successfully")
 	return initError

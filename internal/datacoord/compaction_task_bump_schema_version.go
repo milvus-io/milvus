@@ -363,7 +363,6 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
 		return err
 	}
-
 	var newSegmentIDs []UniqueID
 	if isMaterializationResult(result) {
 		// In-place schema-bump materialization: DataCoord runs the StorageV3
@@ -390,6 +389,13 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		case getBuildIndexChSingleton() <- newSegID:
 		default:
 		}
+	}
+
+	// The SegmentMeta mutation is committed (schema bump rewrites manifests);
+	// schedule an asynchronous DataView snapshot reconciliation so consumers
+	// observe the new manifest versions.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
