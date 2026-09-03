@@ -13,7 +13,7 @@ A distribution that compiles its own behavior into the milvus binary needs two
 things from milvus: a way to install a request hook without a `.so`, and a
 callback that starts its control-plane engine when the coordinator becomes
 active and stops it on shutdown. `pkg/extension` is those two setters, plus
-the two context marks the proxy reads. Everything else such a distribution
+the one context mark the proxy reads. Everything else such a distribution
 does is either the hook's own reach, a coordinator RPC, or a configuration
 item. A stock binary installs nothing and behaves exactly as before.
 
@@ -49,8 +49,6 @@ type CoordinatorEngine interface {
 func SetCoordinatorEngine(e CoordinatorEngine)
 func InstalledCoordinatorEngine() CoordinatorEngine
 
-func WithInternalDomain(ctx) context.Context      // set by the internal-domain listeners
-func FromInternalDomain(ctx) bool
 func WithQueryResourceGroup(ctx, rg) context.Context   // set by a hook's Before
 func QueryResourceGroupFromContext(ctx) string
 ```
@@ -63,19 +61,15 @@ A distribution calls the two setters, then `cmd/milvus.Main(os.Args)`.
 every RPC on both the gRPC and the REST surface, and by `CreateReplicateStream`.
 `Mock` answers without forwarding, `Before` may rewrite the request in place,
 block, and return the context the handler runs under, `After` sees the result.
-`VerifyAPIKey` answers the API key; with `common.security.requireAPIKey` on,
-the external listener refuses username/password credentials.
+`VerifyAPIKey` answers the API key. Whether the external listener also accepts
+a username and password is a policy the hook itself enforces from `Before`,
+which sees the same metadata the authentication interceptor does; a refusal
+from `Before` always reaches the client as the interceptor's own
+`InvalidArgument`, which is in pymilvus's non-retried set.
 
-Two additions to hookutil and the interceptor:
-
-- A compiled-in hook (`SetHook`) is used in preference to `proxy.soPath`, and a
-  deployment that configures both is refused at start-up.
-- A hook whose `Before` refuses a request may implement
-  `RefusalResponse(fullMethod string, err error) (resp any, ok bool)`. When it
-  answers, the refusal travels in the response's `Status` - classified, with
-  its reason - instead of as the bare `InvalidArgument` the interceptor
-  otherwise returns. `InvalidArgument` is in pymilvus's non-retried set, so a
-  bare refusal is not retried either; what it lacks is the error code.
+One addition to hookutil: a compiled-in hook (`SetHook`) is used in preference
+to `proxy.soPath`, and a deployment that configures both is refused at
+start-up.
 
 ### The coordinator engine
 
@@ -90,27 +84,34 @@ progress through `ShowLoadCollections` with `resource_group` set.
 
 ### Context marks
 
-- `WithInternalDomain` is stamped by the two unauthenticated listeners
-  `proxy.internalDomain.grpcPort` / `httpPort` open (both 0, closed, by
-  default). It is how a hook tells the control plane's call from a tenant's on
-  the shared handler.
-- `WithQueryResourceGroup` pins a query to one resource group. The shard
-  client routes it to the leaders whose replica lives in that group
-  (`ShardLeadersList.resource_groups`) and the proxy attributes its latency to
-  that group. Nothing in a stock binary sets it.
+`WithQueryResourceGroup` pins a query to one resource group. The shard client
+routes it to the leaders whose replica lives in that group
+(`ShardLeadersList.resource_groups`) and the proxy attributes its latency to
+that group. Nothing in a stock binary sets it.
 
 ## Configuration this mechanism relies on
 
 | Key | Default | What a distribution sets it for |
 |---|---|---|
-| `common.security.requireAPIKey` | false | external listener accepts API keys only |
-| `proxy.internalDomain.grpcPort` / `httpPort` | 0 / 0 | unauthenticated control-plane listeners |
-| `queryCoord.resourceGroupScopedLoad` | false | a load names only the groups it changes |
-| `queryCoord.reloadSegmentOnIndexDrop` | true | keep dropped indexes on loaded segments until release |
-| `dataCoord.index.allowVectorIndexDropOnLoadedCollection` | false | let the drop through; admission is the hook's |
-| `dataCoord.index.queryNodesScaleToZero` | false | index engine versions with no QueryNode session |
 | `dataCoord.externalCollection.refreshWaitForIndex` | false | hold a refresh until its segments are indexed |
 | `builtinRoles.*` | - | the roles the distribution's accounts bind to |
+
+## General behavior
+
+Two things a distribution used to configure are unconditional milvus behavior
+now, not part of this mechanism:
+
+- A load request naming resource groups only ever changes the placement in
+  those groups: the groups it does not name keep the replicas they hold, and
+  the querycoord load job recognizes a request that only adds groups as a
+  pure expansion and keeps the collection serving instead of resetting it to
+  Loading.
+- With no QueryNode session registered, datacoord answers its own compiled-in
+  index engine version (knowhere's for vectors, the constant for scalars)
+  rather than zero, which knowhere would otherwise read as "only DISKANN
+  loads off disk" and misroute other disk indexes onto the in-memory path.
+  This assumes a QueryNode started later runs the same image as the
+  coordinator.
 
 ## Compatibility
 
@@ -125,15 +126,15 @@ progress through `ShowLoadCollections` with `resource_group` set.
 
 ## Test plan
 
-- `pkg/extension`: the setters and getters, and both context marks.
+- `pkg/extension`: the setters and getters, and the context mark.
 - hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
   default.
-- proxy: the refusal-response path; a hook-pinned resource group reaches the
-  search task; per-resource-group latency series exist only for pinned
-  requests; the internal-domain listeners open only when configured.
+- proxy: a hook-pinned resource group reaches the search task; per-resource-
+  group latency series exist only for pinned requests.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.
-- querycoord / datacoord: each configuration item off (stock) and on.
+- querycoord / datacoord: the remaining configuration items off (stock) and
+  on; the two now-default behaviors above.
 
 ## Rejected alternatives
 
