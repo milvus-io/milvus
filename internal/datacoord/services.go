@@ -738,7 +738,23 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// UpdateAsDroppedIfEmptyWhenFlushing, so publishing them here would
 		// serve a DataView listing a Dropped segment with no binlog or
 		// manifest - exactly what loadableProjection excludes.
-		if segment != nil && segment.GetNumOfRows() > 0 {
+		//
+		// The row count is committed inside the same txn by
+		// UpdateCheckPointOperator, so a growing segment flushed before any
+		// periodic checkpoint sync still reads 0 rows from meta here; gate on
+		// the row count the request itself carries (the checkpoint rows that
+		// the txn will commit, falling back to the current meta value) so the
+		// flush is not left out of the DataView.
+		hasRows := segment != nil && segment.GetNumOfRows() > 0
+		if !hasRows {
+			for _, cp := range req.GetCheckPoints() {
+				if cp.GetSegmentID() == req.GetSegmentID() && cp.GetNumOfRows() > 0 {
+					hasRows = true
+					break
+				}
+			}
+		}
+		if hasRows {
 			// Parse the Manifest version from the request (falling back to the
 			// segment's persisted path) so the snapshot records the true
 			// StorageV3 version instead of the "unknown, use SegmentMeta watch"
@@ -779,8 +795,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				// The composite txn short-circuited (no SegmentMeta mutation
 				// pending): no DataView version reached etcd, so discard the
 				// prepared in-memory snapshot too - committing it would serve
-				// a version that does not exist in the catalog.
+				// a version that does not exist in the catalog. The segment
+				// meta may still hold the Flushed state from a previous
+				// partially-committed attempt (chunked over-limit fallback),
+				// so converge the DataView membership via a recompute instead
+				// of leaving the segment absent until an unrelated trigger.
 				abortView()
+				s.meta.recomputeDataView(ctx, segment.GetCollectionID())
 			} else {
 				commitView()
 			}

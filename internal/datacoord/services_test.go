@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -291,6 +292,12 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	})
 	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, segment))
 
+	// The flush atomic-publish path only runs with sort compaction disabled
+	// (services.go gating); keep the default "true" and the DataView branch is
+	// skipped entirely and the retry contract has no exercising test.
+	paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
 	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
@@ -300,29 +307,55 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	require.NoError(s.T(), err)
 	s.testServer.dataViewManager = manager
 
+	// The composite flush publish writes the DataView key through
+	// catalog.Update (its DataViewEntry branch), not Catalog.SaveDataView, so
+	// inject the failure at the catalog txn layer the flush actually uses.
 	publishErr := merr.WrapErrServiceUnavailable("injected DataView publication failure")
-	saveDataViewMock := mockey.Mock((*datacoordkv.Catalog).SaveDataView).
+	updateMock := mockey.Mock((*datacoordkv.Catalog).Update).
 		Return(publishErr).Build()
+	defer updateMock.UnPatch()
 
 	req := &datapb.SaveBinlogPathsRequest{
-		Base:         &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:    10,
-		CollectionID: 999,
-		PartitionID:  999,
-		Channel:      "ch1",
-		Flushed:      true,
-		SegLevel:     datapb.SegmentLevel_L1,
+		Base:            &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+		SegmentID:       10,
+		CollectionID:    999,
+		PartitionID:     999,
+		Channel:         "ch1",
+		Flushed:         true,
+		SegLevel:        datapb.SegmentLevel_L1,
+		WithFullBinlogs: true,
+		Field2BinlogPaths: []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}},
+		CheckPoints: []*datapb.CheckPoint{{SegmentID: 10, NumOfRows: 100}},
 	}
 	resp, err := s.testServer.SaveBinlogPaths(ctx, req)
 	require.NoError(s.T(), err)
 	require.ErrorIs(s.T(), merr.Error(resp), publishErr)
-	require.Equal(s.T(), commonpb.SegmentState_Flushed, s.testServer.meta.GetSegment(ctx, 10).GetState())
-	saveDataViewMock.UnPatch()
+	// The atomic txn failed: neither SegmentMeta nor the DataView version
+	// reached etcd, so the segment stays Growing and the prepared flush
+	// snapshot is aborted (the collection baseline snapshot has no segment).
+	require.Equal(s.T(), commonpb.SegmentState_Growing, s.testServer.meta.GetSegment(ctx, 10).GetState())
+	ref, err := manager.Latest(ctx, 100)
+	require.NoError(s.T(), err)
+	require.NotNil(s.T(), ref)
+	segmentIDs := lo.FlatMap(ref.DataView().GetShards(), func(shard *viewpb.DataViewOfShard, _ int) []int64 {
+		return lo.FlatMap(shard.GetPartitions(), func(part *viewpb.DataViewOfPartition, _ int) []int64 {
+			return part.GetSegmentIds()
+		})
+	})
+	require.NotContains(s.T(), segmentIDs, int64(10))
+	ref.Deref()
+	updateMock.UnPatch()
 
+	// On retry the composite write succeeds: SegmentMeta is committed and the
+	// DataView snapshot is published atomically.
 	resp, err = s.testServer.SaveBinlogPaths(ctx, req)
 	require.NoError(s.T(), err)
 	require.True(s.T(), merr.Ok(resp))
-	ref, err := manager.Latest(ctx, 100)
+	require.Equal(s.T(), commonpb.SegmentState_Flushed, s.testServer.meta.GetSegment(ctx, 10).GetState())
+	ref, err = manager.Latest(ctx, 100)
 	require.NoError(s.T(), err)
 	require.NotNil(s.T(), ref)
 	defer ref.Deref()
