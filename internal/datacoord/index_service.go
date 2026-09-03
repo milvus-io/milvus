@@ -1065,83 +1065,60 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
-	// Served entirely from in-memory SegmentIndex metadata, with no manifest
-	// read: a manifest index entry is never published without the matching
-	// record being installed in memory in the same commit (see
-	// CommitSegmentManifest), a copy target gets its records from
-	// syncVectorScalarIndexes, and reload rebuilds manifest-resident records
-	// from the manifests at startup. An empty record set here
-	// therefore means the segment has no index artifact, not that its record
-	// is elsewhere. This is a load-path RPC driven by QueryCoord's index
-	// checker, so a per-segment object read would be paid on every round by
-	// exactly the segments that are legitimately unindexed.
 	segmentsIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
-			EnableIndex:  len(segIdxes) != 0,
+			EnableIndex:  false,
 			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
 		}
 		if len(segIdxes) != 0 {
-			ret.SegmentInfo[segID].IndexInfos = s.getIndexFilePathInfosFromSegmentIndexes(segID, segIdxes)
+			ret.SegmentInfo[segID].EnableIndex = true
+			for _, segIdx := range segIdxes {
+				if segIdx.IndexState == commonpb.IndexState_Finished {
+					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
+						segIdx.IndexStorePathVersion, segIdx.CollectionID,
+						segIdx.PartitionID, segIdx.SegmentID,
+						segIdx.BuildID, segIdx.IndexVersion)
+					indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
+					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+					// respect segment-based index type
+					for _, param := range indexParams {
+						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
+							param.Value = segIdx.IndexType
+							break
+						}
+					}
+					indexName := s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
+						indexName = segIdx.IndexType
+					}
+					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
+						&indexpb.IndexFilePathInfo{
+							SegmentID:                 segID,
+							FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							IndexID:                   segIdx.IndexID,
+							BuildID:                   segIdx.BuildID,
+							IndexName:                 indexName,
+							IndexParams:               indexParams,
+							IndexFilePaths:            indexFilePaths,
+							SerializedSize:            segIdx.IndexSerializedSize,
+							MemSize:                   segIdx.IndexMemSize,
+							IndexVersion:              segIdx.IndexVersion,
+							NumRows:                   segIdx.NumRows,
+							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+						})
+				}
+			}
 		}
 	}
 
 	return ret, nil
-}
-
-// getIndexFilePathInfosFromSegmentIndexes projects SegmentIndex metadata into
-// full object-storage paths.
-//
-// A record with no index_file_keys needs no manifest lookup: the only way a
-// finished build records none is a fake-finished one (a segment too small to
-// train), and publishIndexToManifest skips exactly that case, so no manifest
-// entry exists to find. The copy path derives the target's records and its
-// manifest entries from the same worker result, so the two agree there too.
-func (s *Server) getIndexFilePathInfosFromSegmentIndexes(segID int64, segIdxes map[UniqueID]*model.SegmentIndex) []*indexpb.IndexFilePathInfo {
-	infos := make([]*indexpb.IndexFilePathInfo, 0, len(segIdxes))
-	for _, segIdx := range segIdxes {
-		if segIdx.IndexState != commonpb.IndexState_Finished {
-			continue
-		}
-		fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
-		builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
-			segIdx.IndexStorePathVersion, segIdx.CollectionID,
-			segIdx.PartitionID, segIdx.SegmentID,
-			segIdx.BuildID, segIdx.IndexVersion)
-		indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-		indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
-		// respect segment-based index type
-		for _, param := range indexParams {
-			if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
-				param.Value = segIdx.IndexType
-				break
-			}
-		}
-		indexName := s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
-		if segIdx.IndexType != "" && segIdx.IndexType != indexName {
-			indexName = segIdx.IndexType
-		}
-		infos = append(infos, &indexpb.IndexFilePathInfo{
-			SegmentID:                 segID,
-			FieldID:                   fieldID,
-			IndexID:                   segIdx.IndexID,
-			BuildID:                   segIdx.BuildID,
-			IndexName:                 indexName,
-			IndexParams:               indexParams,
-			IndexFilePaths:            builder.BuildFilePaths(segIdx.IndexFileKeys),
-			SerializedSize:            segIdx.IndexSerializedSize,
-			MemSize:                   segIdx.IndexMemSize,
-			IndexVersion:              segIdx.IndexVersion,
-			NumRows:                   segIdx.NumRows,
-			CurrentIndexVersion:       segIdx.CurrentIndexVersion,
-			CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
-			IndexStorePathVersion:     segIdx.IndexStorePathVersion,
-		})
-	}
-	return infos
 }
 
 // ListIndexes returns all indexes created on provided collection.

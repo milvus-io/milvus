@@ -156,20 +156,9 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if !published {
-		// With writeSegmentIndexToManifest on, FinishTask's etcd write is
-		// skipped for a manifest-backed segment (skipSegmentIndexEtcdWrite), so
-		// a decline above - a failed build, a dropped index definition, an
-		// unhealthy segment - leaves the record memory-only: it is lost on
-		// restart and the build is simply reissued or dies with its segment.
 		if err := it.meta.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
-		// The record was written without a manifest entry. Flag the segment so a
-		// backfill can find it without walking every index record; the flag is a
-		// hint, so setting it for a case that turns out not to need work (a
-		// fake-finished build) only costs a later recheck. Segments the backfill
-		// can never act on at all are filtered inside the setter.
-		it.meta.markManifestIndexBackfillPending(it.SegmentID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil

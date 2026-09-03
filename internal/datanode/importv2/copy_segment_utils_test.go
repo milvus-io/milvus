@@ -3138,9 +3138,9 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 		CollectionId: 100,
 		PartitionId:  200,
 		SegmentId:    300,
-		NumRows:      4096,
-		TargetIndexes: map[string]*datapb.CopySegmentTargetIndex{
-			"vec_idx": {
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{
+				IndexName:  "vec_idx",
 				IndexId:    777,
 				FieldId:    101,
 				ColumnName: "vector",
@@ -3159,7 +3159,7 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, indexInfos)
+	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	require.Len(t, entries, 1)
 
@@ -3196,7 +3196,7 @@ func TestBuildTargetManifestIndexes_NoTargetDefinition(t *testing.T) {
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, indexInfos)
+	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	assert.Empty(t, entries)
 }
@@ -3211,9 +3211,9 @@ func TestBuildTargetManifestIndexes_NoArtifactPathIsSkippedNotFatal(t *testing.T
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
 	target := &datapb.CopySegmentTarget{
 		SegmentId: 300,
-		TargetIndexes: map[string]*datapb.CopySegmentTargetIndex{
-			"empty_idx": {IndexId: 10, FieldId: 101, ColumnName: "vec", IndexType: "HNSW"},
-			"real_idx":  {IndexId: 11, FieldId: 102, ColumnName: "vec2", IndexType: "HNSW"},
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "empty_idx", IndexId: 10, FieldId: 101, ColumnName: "vec", IndexType: "HNSW"},
+			{IndexName: "real_idx", IndexId: 11, FieldId: 102, ColumnName: "vec2", IndexType: "HNSW"},
 		},
 	}
 	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
@@ -3225,7 +3225,7 @@ func TestBuildTargetManifestIndexes_NoArtifactPathIsSkippedNotFatal(t *testing.T
 		},
 	}
 
-	entries, err := buildTargetManifestIndexes(manifestPath, target, indexInfos)
+	entries, err := buildTargetManifestIndexes(manifestPath, target, 4096, indexInfos)
 	assert.NoError(t, err)
 	// The empty one is dropped; the one with a real artifact still lands, so the
 	// skip cannot silently swallow a sibling index in the same segment.
@@ -3265,7 +3265,7 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 	// itself, not by trusting the (absent) shipped inherited-ID list.
 	mockCopiedManifestIndexEntries(t, nil)
 	republished, err := republishCopiedManifestIndexes(manifestPath,
-		&datapb.CopySegmentTarget{SegmentId: 300}, &indexpb.StorageConfig{}, nil)
+		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, manifestPath, republished)
 }
@@ -3299,7 +3299,7 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 		}).Build()
 	defer commit.UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, &indexpb.StorageConfig{}, indexInfos)
+	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got)
 	assert.Equal(t, 1, commitCalls)
@@ -3343,15 +3343,13 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			require.NoError(t, err)
 
 			target := &datapb.CopySegmentTarget{
-				CollectionId:      100,
-				PartitionId:       200,
-				SegmentId:         300,
-				NumRows:           4096,
-				InheritedIndexIds: []int64{5001},
+				CollectionId: 100,
+				PartitionId:  200,
+				SegmentId:    300,
 			}
 			if tc.enabled {
-				target.TargetIndexes = map[string]*datapb.CopySegmentTargetIndex{
-					"vec_idx": {IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+				target.TargetIndexes = []*datapb.CopySegmentTargetIndex{
+					{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
 				}
 			}
 			indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
@@ -3363,7 +3361,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 				},
 			}
 
-			republished, err := republishCopiedManifestIndexes(copiedManifest, target, cfg, indexInfos)
+			republished, err := republishCopiedManifestIndexes(copiedManifest, target, 4096, cfg, indexInfos)
 			require.NoError(t, err)
 			entries, err := packed.GetManifestIndexInfos(republished, cfg)
 			require.NoError(t, err)
@@ -3430,11 +3428,8 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 		CollectionId: 100,
 		PartitionId:  200,
 		SegmentId:    300,
-		NumRows:      4096,
-		// Legacy source manifest: no index entries to inherit.
-		InheritedIndexIds: nil,
-		TargetIndexes: map[string]*datapb.CopySegmentTargetIndex{
-			"vec_idx": {IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
 		},
 	}
 	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
@@ -3469,7 +3464,7 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 			return republished, nil
 		}).Build().UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, &indexpb.StorageConfig{}, indexInfos)
+	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 
@@ -3494,11 +3489,8 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 		CollectionId: 100,
 		PartitionId:  200,
 		SegmentId:    300,
-		NumRows:      4096,
-		// External restore ships nothing to retract.
-		InheritedIndexIds: nil,
-		TargetIndexes: map[string]*datapb.CopySegmentTargetIndex{
-			"vec_idx": {IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
 		},
 	}
 	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
@@ -3534,7 +3526,7 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 			return republished, nil
 		}).Build().UnPatch()
 
-	got, err := republishCopiedManifestIndexes(manifestPath, target, &indexpb.StorageConfig{}, indexInfos)
+	got, err := republishCopiedManifestIndexes(manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos)
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 

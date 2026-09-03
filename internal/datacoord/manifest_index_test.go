@@ -354,8 +354,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 
 // withSegmentIndexManifestWrites flips
 // dataCoord.index.writeSegmentIndexToManifest for one test and restores it
-// afterwards. enabled=true publishes index records to segment manifests and
-// skips their etcd writes; enabled=false is the legacy etcd-only behavior.
+// afterwards. enabled=true publishes completed StorageV3 artifacts to segment
+// manifests; enabled=false is the legacy etcd-only behavior.
 func withSegmentIndexManifestWrites(t *testing.T, enabled bool) {
 	t.Helper()
 	key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
@@ -366,7 +366,8 @@ func withSegmentIndexManifestWrites(t *testing.T, enabled bool) {
 
 // setupManifestReloadMeta builds a meta holding one healthy StorageV3 segment
 // and the collection's index definition, but no SegmentIndex record - the
-// state a restart lands in when SegmentIndex etcd writes are off.
+// state a restart lands in after manifest publication retires the Finished
+// etcd row.
 func setupManifestReloadMeta(t *testing.T) *meta {
 	t.Helper()
 	const (
@@ -418,7 +419,7 @@ func mockReloadManifestEntry(t *testing.T, buildID int64) {
 	t.Cleanup(func() { infos.UnPatch() })
 }
 
-// The switch's whole point: with SegmentIndex etcd writes off, a restart must
+// Once a successful build has retired its Finished etcd row, a restart must
 // still see the segment as indexed. Reload rebuilds the record from the
 // manifest and the consumers that decide "is this segment indexed" - which
 // have no manifest fallback of their own - work off that rebuilt state.
@@ -679,8 +680,8 @@ func publishRestartTask(t *testing.T, m *meta) {
 	require.NoError(t, it.setJobInfo(result))
 }
 
-// End to end for the switch: with SegmentIndex etcd writes off, a finished
-// index is published to the manifest and to nothing else, and a full DataCoord
+// End to end for the switch: a finished artifact is published to the manifest
+// and its task row is retired from etcd, and a full DataCoord
 // restart against the same catalog still comes up seeing the segment as
 // indexed. This is the claim the switch has to make good on, and the reason
 // the manifest-driven reload exists - the consumers asserted below have no
@@ -723,6 +724,15 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
 	_, ok := restarted.indexMeta.GetIndexJob(restartBuildID)
 	assert.True(t, ok, "the index inspector must not reissue a build for it")
+
+	// Turning publication off affects new completions only. The durable marker
+	// still makes the already manifest-resident record recoverable.
+	withSegmentIndexManifestWrites(t, false)
+	restartedOff := bootMetaForRestart(t, catalog, restartCollID)
+	recoveredOff, ok := restartedOff.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok, "turning the switch off must not hide a manifest-resident index")
+	assert.Equal(t, commonpb.IndexState_Finished, recoveredOff.IndexState)
+	assert.Equal(t, []string{"0", "1"}, recoveredOff.IndexFileKeys)
 }
 
 // The control: with manifest writes off (the default), the same flow persists
@@ -743,6 +753,15 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	require.Len(t, persisted, 1)
 	assert.EqualValues(t, restartBuildID, persisted[0].BuildID)
 	assert.Equal(t, commonpb.IndexState_Finished, persisted[0].IndexState)
+
+	// Recovery is always invoked to support mode changes, but an unmarked
+	// all-etcd segment must cause no manifest read. Make every attempted read
+	// fail and prove a disabled-mode restart still succeeds from etcd alone.
+	store.failReadsFrom()
+	restarted := bootMetaForRestart(t, catalog, restartCollID)
+	recovered, ok := restarted.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 }
 
 // Regression test for the off-to-on transition with an in-flight build.
@@ -750,11 +769,11 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 // A build started while the switch was off leaves an InProgress row in etcd.
 // After flipping the switch on and restarting, that row reloads and the
 // inspector re-dispatches the same buildID; when the build finishes, the
-// record goes to the manifest and the etcd write is gated. If the gate merely
-// skipped the write, the InProgress row would survive forever: every later
+// record goes to the manifest and the publishing transaction deletes the task
+// row. If it merely stopped updating that row, InProgress would survive forever: every later
 // boot's etcd-wins dedup would resurrect it over the manifest's Finished
 // entry and re-dispatch the build again - an unbounded per-restart rebuild
-// loop with no GC path for the row. The gate must instead retire the row in
+// loop with no GC path for the row. Publication must retire the row in
 // the same transaction that publishes the manifest entry.
 func TestOffEraEtcdRowRetiredOnManifestPublication(t *testing.T) {
 	withSegmentIndexManifestWrites(t, false)
@@ -799,14 +818,9 @@ func TestOffEraEtcdRowRetiredOnManifestPublication(t *testing.T) {
 // Regression test for an ABBA deadlock between the manifest commit and every
 // other SegmentIndex writer.
 //
-// With the switch off, the etcd-write gate resolves whether a segment is
-// manifest-backed through meta, which takes segMu - and every caller of that
-// gate (UpdateIndexState, FinishTask, AddSegmentIndex, ...) already holds
-// keyLock(buildID). CommitSegmentManifest used to take segMu first and only
-// then keyLock while staging, so the two orders formed a cycle on a shared
-// buildID and hung DataCoord globally. Go's RWMutex writer preference widens
-// it: a pending segMu.Lock blocks new readers, so a keyLock holder waiting on
-// segMu.RLock cannot progress either.
+// CommitSegmentManifest must take keyLock before segMu, matching every other
+// SegmentIndex writer. Reversing that order forms a cycle on a shared buildID
+// and can hang DataCoord globally.
 //
 // Rather than racing the two paths and hoping to hit a microsecond window,
 // this asserts the invariant that makes the cycle impossible: while blocked on
@@ -952,35 +966,6 @@ func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 	assert.Empty(t, m.indexMeta.GetSegmentIndexes(100, 5001))
 }
 
-// publishIndexToManifest declines a build whose segment was dropped while it
-// ran (task_index.go), so no manifest entry is ever written for it. The etcd
-// gate must decline too: reloadSegmentIndexesFromManifests skips unhealthy
-// segments, so a record withheld here is rebuildable from nowhere. Its
-// BUILD_ROOTED bytes would still be reclaimed by the V0 orphan sweep, but a
-// COLLECTION_ROOTED artifact leaks permanently - recycleUnusedIndexFilesV1 is
-// driven by metadata that no longer exists.
-func TestDroppedSegmentKeepsSegmentIndexEtcdWrite(t *testing.T) {
-	withSegmentIndexManifestWrites(t, true)
-	m := setupManifestReloadMeta(t)
-	m.indexMeta.manifestBackedSegment = m.isManifestBackedSegment
-	require.True(t, m.isManifestBackedSegment(5001), "the healthy V3 segment is manifest-backed")
-
-	const droppedID = UniqueID(5002)
-	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             droppedID,
-		CollectionID:   100,
-		PartitionID:    10,
-		State:          commonpb.SegmentState_Dropped,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5002", 3),
-	})))
-
-	assert.False(t, m.isManifestBackedSegment(droppedID),
-		"a dropped segment publishes no manifest entry and the reload skips it, so the etcd write must not be withheld")
-	assert.False(t, m.indexMeta.skipSegmentIndexEtcdWrite(droppedID))
-}
-
 // seedUnpublishedBuild is seedRestartFixture up to but not including the
 // publish: the segment, an index definition with the given name, and an
 // in-flight build record - the state a build is in when its worker result
@@ -1121,33 +1106,6 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	require.Error(t, validateManifestIndexPublishable(5001, pathless))
 }
 
-// A false marker proves the manifest never carried an index entry, so reload
-// must not even read it: an all-etcd cluster boots with zero object-storage
-// reads, and an unreadable manifest on an unmarked segment cannot abort boot.
-func TestReloadSkipsUnmarkedSegments(t *testing.T) {
-	m, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             5002,
-		CollectionID:   100,
-		PartitionID:    10,
-		State:          commonpb.SegmentState_Flushed,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5002", 3),
-		// ManifestHasIndex deliberately unset.
-	})))
-
-	// Every read fails; reload succeeding proves no read was attempted.
-	infos := mockey.Mock(packed.GetManifestIndexInfos).
-		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
-	defer infos.UnPatch()
-
-	require.NoError(t, m.reloadSegmentIndexesFromManifests(context.TODO()),
-		"an unmarked segment's manifest must not be read, readable or not")
-	assert.Empty(t, m.indexMeta.GetSegmentIndexes(100, 5002))
-}
-
 // With the switch off, publishIndexToManifest declines before touching
 // anything: zero manifest I/O, and setJobInfo records the result the legacy
 // way - an etcd row and no manifest entry, so the segment stays unmarked.
@@ -1181,36 +1139,4 @@ func TestPublishIndexToManifestDeclinedWhenSwitchOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, persisted, 1, "the record must take the legacy etcd path")
 	assert.Equal(t, commonpb.IndexState_Finished, persisted[0].IndexState)
-	assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
-}
-
-// The reversibility claim the marker exists for: an index published to the
-// manifest while the switch was on must still be visible after the switch is
-// turned off and DataCoord restarts. Reload is driven by the durable marker,
-// not by the current configuration, so the flip cannot orphan the index (and
-// GC therefore cannot delete its files).
-func TestSegmentIndexSurvivesSwitchFlipOffAfterPublication(t *testing.T) {
-	withSegmentIndexManifestWrites(t, true)
-	newFakeManifestStore(t)
-	ctx := context.TODO()
-
-	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	m := bootMetaForRestart(t, catalog, restartCollID)
-	seedRestartFixture(t, m)
-	require.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex(),
-		"publication must have set the durable marker")
-
-	// The operator turns the switch back off, then DataCoord restarts.
-	key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
-	paramtable.Get().Save(key, "false")
-
-	restarted := bootMetaForRestart(t, catalog, restartCollID)
-	recovered := restarted.indexMeta.GetSegmentIndexes(restartCollID, restartSegID)
-	require.Len(t, recovered, 1, "the manifest-resident record must survive the off flip")
-	segIdx := recovered[restartIndexID]
-	require.NotNil(t, segIdx)
-	assert.Equal(t, commonpb.IndexState_Finished, segIdx.IndexState)
-	assert.EqualValues(t, restartBuildID, segIdx.BuildID)
-	assert.True(t, restarted.GetSegment(ctx, restartSegID).GetManifestHasIndex(),
-		"the sticky marker itself must survive the restart")
 }

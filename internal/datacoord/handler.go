@@ -1041,11 +1041,6 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 	return uncompressedJSONStats
 }
 
-// uncompressIndexFiles projects the segment's SegmentIndex metadata into full
-// object-storage paths for a snapshot export. Like GetIndexInfos it reads no
-// manifest: an index artifact published to a manifest always has its record
-// installed in memory by the same commit, so an empty result here means the
-// segment carries no index artifact.
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
 	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(collectionID, segID)
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
