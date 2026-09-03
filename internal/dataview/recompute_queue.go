@@ -18,9 +18,10 @@ package dataview
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -86,7 +87,7 @@ func (q *dataViewRecomputeQueue) Enqueue(collectionID int64) error {
 	}
 }
 
-// run drains the queue until ctx is cancelled. A failed reconciliation is
+// run drains the queue until ctx is canceled. A failed reconciliation is
 // retried by re-enqueueing after a short pause; a persistently failing
 // projection is ultimately converged by the recovery rebuild.
 func (q *dataViewRecomputeQueue) run(ctx context.Context) {
