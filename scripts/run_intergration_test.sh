@@ -75,7 +75,6 @@ TEST_ARGS=(
     -coverpkg=./...
     -coverprofile=profile.out
     -covermode=atomic
-    -caseTimeout=20m 
     -timeout=60m
 )
 
