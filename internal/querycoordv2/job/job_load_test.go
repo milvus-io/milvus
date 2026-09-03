@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -470,12 +469,13 @@ func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.ctx = context.Background()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	// The keep-loaded fast path is extension-gated: only a form that manages
-	// placement itself gets it, so these tests install a placement-capable
-	// provider. TestNativeBinaryNeverTakesTheFastPath is the other half.
-	extension.ResetForTest()
-	suite.T().Cleanup(extension.ResetForTest)
-	suite.Require().NoError(extension.SetProvider(placementOnlyProvider{}))
+	// The keep-loaded fast path is configuration-gated: only a deployment that
+	// scopes load requests to the resource groups they name gets it, so these
+	// tests turn queryCoord.resourceGroupScopedLoad on.
+	// TestNativeBinaryNeverTakesTheFastPath is the other half.
+	scopedKey := paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.Key
+	paramtable.Get().Save(scopedKey, "true")
+	suite.T().Cleanup(func() { paramtable.Get().Reset(scopedKey) })
 
 	suite.catalog = mocks.NewQueryCoordCatalog(suite.T())
 	// The collection under test always carries exactly one partition, so a
@@ -946,20 +946,6 @@ func TestIncrementalExpansion(t *testing.T) {
 
 // placementOnlyProvider declares exactly the LoadPlacement capability the
 // fast-path gate looks for.
-type placementOnlyProvider struct{}
-
-func (placementOnlyProvider) Name() string                       { return "test" }
-func (placementOnlyProvider) Requires() []extension.CapabilityID { return nil }
-func (placementOnlyProvider) Capabilities() extension.Capabilities {
-	return extension.Capabilities{LoadPlacement: inertPlacement{}}
-}
-
-type inertPlacement struct{}
-
-func (inertPlacement) ScopedToNamedResourceGroups(context.Context, int64, []string) bool {
-	return true
-}
-
 // A stock binary never takes the fast path, whatever the request looks like:
 // the same add-resource-group request that the extension-gated path keeps
 // loaded falls through to the native overwrite - reset to Loading, one
@@ -967,13 +953,13 @@ func (inertPlacement) ScopedToNamedResourceGroups(context.Context, int64, []stri
 // the new resource group loads, or the whole collection is released on
 // timeout) is exactly what it always was.
 func (suite *IncrementalExpansionSuite) TestNativeBinaryNeverTakesTheFastPath() {
-	extension.ResetForTest()
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.Key, "false")
 	suite.seedLoadedCollection(1, rgA, 1)
 
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
 		replicaConfig(1, rgA), replicaConfig(2, rgB)))
 	suite.NoError(err)
-	suite.Equal(1, putCalls, "with no provider installed the meta overwrite must happen exactly as upstream")
+	suite.Equal(1, putCalls, "with the scoped load off the meta overwrite must happen exactly as upstream")
 
 	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Require().NotNil(collection)

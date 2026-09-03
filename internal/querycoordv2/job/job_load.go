@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -340,15 +339,15 @@ func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int6
 //     group. An extra replica in a resource group that is already loaded would
 //     be left with no task at all, so that request keeps the overwrite.
 func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadConfigMessageHeader, newReplicas []*messagespb.LoadReplicaConfig) bool {
-	// Extension-gated: only a deployment form that manages placement itself
-	// (the LoadPlacement capability) gets the keep-loaded fast path. The
-	// native add-resource-group semantics - reset to Loading, block the
+	// Only a deployment that scopes load requests to the resource groups they
+	// name (queryCoord.resourceGroupScopedLoad) gets the keep-loaded fast path.
+	// The native add-resource-group semantics - reset to Loading, block the
 	// caller until the new resource group loads, release the collection if it
 	// cannot - stay byte-for-byte what they were on a stock binary, including
-	// their failure visibility: a form's engine watches per-resource-group
+	// their failure visibility: such a deployment watches per-resource-group
 	// progress itself, a native SDK caller has only the collection-wide
 	// answer, and handing it an instant 100% would hide a failed expansion.
-	if extension.Caps().LoadPlacement == nil {
+	if !paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.GetAsBool() {
 		return false
 	}
 	existing := job.meta.GetCollection(job.ctx, req.GetCollectionId())
