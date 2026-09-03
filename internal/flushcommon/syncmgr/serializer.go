@@ -79,6 +79,13 @@ func (p *SyncPack) WithBM25Stats(stats map[int64]*storage.BM25Stats) *SyncPack {
 	return p
 }
 
+// BM25Stats returns the BM25 stats attached to this pack, or nil when the
+// pack carries none. Used by tests and diagnostics to assert that stats
+// collected at insert preparation reach the writer.
+func (p *SyncPack) BM25Stats() map[int64]*storage.BM25Stats {
+	return p.bm25Stats
+}
+
 func (p *SyncPack) WithStartPosition(start *msgpb.MsgPosition) *SyncPack {
 	p.startPosition = start
 	return p
