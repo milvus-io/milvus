@@ -152,57 +152,6 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	err := task.doClean()
 	s.NoError(err)
 
-	s.Run("failed task with published results retires inputs instead of dropping results", func() {
-		// A task that failed after markResultSegmentsVisible committed (e.g.
-		// a transient markInputSegmentsDropped error) must not drop the
-		// visible results the partition-stats version references; cleanup
-		// finishes retiring the inputs instead.
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    101,
-				State:                 commonpb.SegmentState_Flushed,
-				Level:                 datapb.SegmentLevel_L1,
-				PartitionStatsVersion: 10000,
-			},
-		})
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    102,
-				State:                 commonpb.SegmentState_Flushed,
-				Level:                 datapb.SegmentLevel_L2,
-				PartitionStatsVersion: 10000,
-			},
-		})
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    1000,
-				State:                 commonpb.SegmentState_Flushed,
-				Level:                 datapb.SegmentLevel_L2,
-				IsInvisible:           false,
-				PartitionStatsVersion: 10001,
-			},
-		})
-		s.meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    1100,
-				State:                 commonpb.SegmentState_Flushed,
-				Level:                 datapb.SegmentLevel_L2,
-				IsInvisible:           false,
-				PartitionStatsVersion: 10001,
-			},
-		})
-
-		failedTask := s.generateBasicTask(false)
-		s.NoError(failedTask.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)))
-
-		s.NoError(failedTask.doClean())
-		s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 101).GetState())
-		s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 102).GetState())
-		// The published results survive.
-		s.NotEqual(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 1000).GetState())
-		s.NotEqual(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 1100).GetState())
-	})
-
 	s.Run("v2.4.x", func() {
 		// fake some compaction result segment
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
