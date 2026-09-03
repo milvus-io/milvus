@@ -103,11 +103,6 @@ const (
 	// collection.
 	CapIndexDrain CapabilityID = "index_drain"
 
-	// CapLoadPlacementScope is whether a load request states the
-	// collection's whole desired placement or only the placement of the
-	// resource groups it names.
-	CapLoadPlacementScope CapabilityID = "load_placement_scope"
-
 	// CapHook is milvus's own request hook, compiled into the binary rather
 	// than loaded from proxy.soPath.
 	CapHook CapabilityID = "hook"
@@ -128,7 +123,6 @@ type Capabilities struct {
 	CoordinatorEngine CoordinatorEngine
 	ResourceGroups    ResourceGroupInterceptor
 	IndexDrain        IndexDrainer
-	LoadPlacement     LoadPlacementScope
 
 	// Hook is milvus's own request hook (milvus-proto go-api/v3/hook), the
 	// interface whose Mock, Before and After the proxy's unary interceptor
@@ -167,7 +161,6 @@ func (c Capabilities) entries() []capabilityEntry {
 		{CapCoordinatorEngine, c.CoordinatorEngine},
 		{CapResourceGroupInterceptor, c.ResourceGroups},
 		{CapIndexDrain, c.IndexDrain},
-		{CapLoadPlacementScope, c.LoadPlacement},
 		{CapHook, c.Hook},
 	}
 }
