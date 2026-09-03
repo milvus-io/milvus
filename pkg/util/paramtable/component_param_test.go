@@ -1550,6 +1550,24 @@ func TestWriteSegmentIndexToManifest(t *testing.T) {
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 }
 
+func TestManifestIndexBackfillParams(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.False(t, params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool())
+	assert.Equal(t, 60*time.Second, params.DataCoordCfg.ManifestIndexBackfillInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 1000, params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt())
+	assert.Equal(t, 16, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillBatchSize.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt())
+
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key, "2147483648")
+	assert.Equal(t, math.MaxInt32, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+}
+
 func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))

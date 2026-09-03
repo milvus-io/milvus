@@ -3279,10 +3279,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 
 	removeSegmentIndexCalled := false
 	removedBuildID := int64(0)
-	mock8 := mockey.Mock((*indexMeta).RemoveSegmentIndex).To(func(ctx context.Context, buildID int64) error {
+	mock8 := mockey.Mock((*indexMeta).removeSegmentIndexIfCatalogBacked).To(func(ctx context.Context, buildID int64) (bool, error) {
 		removeSegmentIndexCalled = true
 		removedBuildID = buildID
-		return nil
+		return true, nil
 	}).Build()
 	defer mock8.UnPatch()
 

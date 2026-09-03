@@ -156,6 +156,7 @@ type Server struct {
 
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
+	manifestIndexBackfillInspector   *manifestIndexBackfillInspector
 	analyzeInspector                 *analyzeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
@@ -327,6 +328,9 @@ func (s *Server) initDataCoord() error {
 
 	s.initIndexInspector(storageCli)
 	mlog.Info(s.ctx, "init task scheduler done")
+
+	s.initManifestIndexBackfillInspector()
+	mlog.Info(s.ctx, "init manifest index backfill inspector done")
 
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
@@ -666,6 +670,12 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 	}
 }
 
+func (s *Server) initManifestIndexBackfillInspector() {
+	if s.manifestIndexBackfillInspector == nil {
+		s.manifestIndexBackfillInspector = newManifestIndexBackfillInspector(s.ctx, s.meta)
+	}
+}
+
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
 		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
@@ -768,6 +778,9 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Start()
+	}
 	s.analyzeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
@@ -1087,6 +1100,11 @@ func (s *Server) Stop() error {
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")
+
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index backfill inspector stopped")
 
 	s.analyzeInspector.Stop()
 	mlog.Info(s.ctx, "datacoord analyze inspector stopped")

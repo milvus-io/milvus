@@ -1619,12 +1619,27 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	}
 
 	for _, item := range legacyItems {
-		gc.recycleRecordOnlySegmentIndex(ctx, item)
+		gc.recycleRecordOnlySegmentIndex(ctx, segment, item)
 	}
 	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
 }
 
-func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, item segmentIndexGCItem) {
+func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, observed *SegmentInfo, item segmentIndexGCItem) {
+	// Keep record-only cleanup ordered with publication. Selection may have
+	// read an index-free revision just before backfill installed this build.
+	// Recheck that observation under the manifest lock before deleting bytes
+	// or the record that drives manifest retraction on the next GC cycle.
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(item.segIdx.SegmentID)
+	defer locks.Unlock(item.segIdx.SegmentID)
+	current := gc.meta.GetSegment(ctx, item.segIdx.SegmentID)
+	if current != nil && isSegmentHealthy(current) &&
+		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
+			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
+		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
+			mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+		return
+	}
 	log := segmentIndexGCLog(item)
 	log.Info(ctx, "GC Segment Index file start...")
 	if err := gc.removeObjectFiles(ctx, item.files); err != nil {

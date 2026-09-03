@@ -116,6 +116,9 @@ const (
 	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
 	// revision retracts.
 	SegmentIndexRemove
+	// SegmentIndexBackfill publishes an existing finished artifact and retires
+	// its historical catalog row without replacing the in-memory record.
+	SegmentIndexBackfill
 )
 
 // SegmentIndexMutation is one SegmentIndex half of a manifest commit: a record
@@ -249,10 +252,15 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			}
 			return err
 		}
-		if staged.record != nil && staged.record.SegmentID != commit.SegmentID {
+		if staged.record != nil &&
+			(staged.record.CollectionID != segment.GetCollectionID() ||
+				staged.record.PartitionID != segment.GetPartitionID() ||
+				staged.record.SegmentID != commit.SegmentID) {
 			return merr.WrapErrServiceInternalMsg(
-				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
-				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
+				"segment index mutation for build %d targets collection/partition/segment %d/%d/%d, not committing segment %d/%d/%d",
+				indexMutation.BuildID,
+				staged.record.CollectionID, staged.record.PartitionID, staged.record.SegmentID,
+				segment.GetCollectionID(), segment.GetPartitionID(), commit.SegmentID)
 		}
 		if indexMutation.Type == SegmentIndexRemove && staged.record != nil &&
 			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) {
@@ -261,7 +269,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				commit.SegmentID, staged.record.IndexID, indexMutation.BuildID)
 		}
 		stagedIndexes = append(stagedIndexes, staged)
-		if indexMutation.Type == SegmentIndexUpsert {
+		if indexMutation.Type == SegmentIndexUpsert || indexMutation.Type == SegmentIndexBackfill {
 			for _, manifestIndex := range commit.Mutation.Updates.Indexes {
 				if manifestIndex.BuildID != indexMutation.BuildID {
 					continue
@@ -425,11 +433,11 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 		seen[mutation.BuildID] = struct{}{}
 		buildIDs = append(buildIDs, mutation.BuildID)
 		switch mutation.Type {
-		case SegmentIndexUpsert:
+		case SegmentIndexUpsert, SegmentIndexBackfill:
 			upserts++
 			if !commitPublishesIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
-					"segment index upsert requires a matching manifest entry, segmentID=%d buildID=%d",
+					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
 					commit.SegmentID, mutation.BuildID)
 			}
 		case SegmentIndexRemove:
@@ -442,7 +450,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 	}
 	if upserts > 0 && len(mutations) != 1 {
 		return nil, merr.WrapErrServiceInternalMsg(
-			"segment manifest commit cannot combine an index upsert with other index mutations, segmentID=%d",
+			"segment manifest commit cannot combine an index publication with other index mutations, segmentID=%d",
 			commit.SegmentID)
 	}
 	sort.Slice(buildIDs, func(i, j int) bool { return buildIDs[i] < buildIDs[j] })
