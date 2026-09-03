@@ -110,7 +110,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.SearchRequest, sourceResults []*internalpb.SearchResults, children []*shardDelegator) ([]*internalpb.SearchResults, error) {
 	subReqs := req.GetReq().GetSubReqs()
 	if len(sourceResults) != len(subReqs) {
-		return nil, errors.Errorf("advanced search returned %d sub-results, expected %d sub-requests", len(sourceResults), len(subReqs))
+		return nil, merr.WrapErrServiceInternalMsg("advanced search returned %d sub-results, expected %d sub-requests", len(sourceResults), len(subReqs))
 	}
 	perSubReq := make([][]*internalpb.SearchResults, len(subReqs))
 	for i := range sourceResults {
@@ -122,7 +122,7 @@ func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.
 			return nil, errors.Wrapf(err, "fronting advanced search on split child %s failed", child.vchannelName)
 		}
 		if len(childResults) != len(subReqs) {
-			return nil, errors.Errorf("split child %s returned %d sub-results, expected %d", child.vchannelName, len(childResults), len(subReqs))
+			return nil, merr.WrapErrServiceInternalMsg("split child %s returned %d sub-results, expected %d", child.vchannelName, len(childResults), len(subReqs))
 		}
 		for i := range childResults {
 			perSubReq[i] = append(perSubReq[i], childResults[i])
@@ -386,7 +386,13 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []*mess
 			continue // a background spawn is already in flight
 		}
 		sd.spawning[vchannel] = struct{}{}
-		go sd.spawnChildAsync(target)
+		// Detached from the request's cancellation but not from its values: the
+		// spawn must outlive the fence message that asked for it -- a child
+		// canceled with the request would leave the target unfronted -- while
+		// trace context should still follow it. Not the request ctx itself,
+		// deliberately.
+		ctx := context.WithoutCancel(ctx)
+		go sd.spawnChildAsync(ctx, target) //nolint:gosec // G118: the spawn must outlive the request that carried the fence; canceling it with the request would leave the target unfronted. Values (trace) are kept, only cancellation is dropped.
 	}
 	return nil
 }
@@ -396,9 +402,9 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []*mess
 // so node shutdown unblocks it. On success the child is published into the
 // fronting set; on failure it is logged and the slot is cleared (a later fence
 // re-consume can retry).
-func (sd *shardDelegator) spawnChildAsync(target *messagespb.SplitShardTarget) {
+func (sd *shardDelegator) spawnChildAsync(ctx context.Context, target *messagespb.SplitShardTarget) {
 	vchannel := target.GetVchannel()
-	child, err := sd.childSpawner.SpawnSplitChild(context.Background(), SpawnChildParams{
+	child, err := sd.childSpawner.SpawnSplitChild(ctx, SpawnChildParams{
 		CollectionID:   sd.collectionID,
 		ReplicaID:      sd.replicaID,
 		Version:        sd.version,
