@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -42,7 +43,8 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		}
 		r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	}
-	r.Logger().Info(ctx, "recover checkpoint done",
+	r.Logger().Info(
+		ctx, "recover checkpoint done",
 		mlog.String("checkpoint", r.checkpoint.MessageID.String()),
 		mlog.Uint64("timetick", r.checkpoint.TimeTick),
 		mlog.Int64("magic", r.checkpoint.Magic),
@@ -72,7 +74,48 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
 		return err
 	}
-	return conc.BlockOnAll(fVChannel, fSegment)
+	return r.recoverSummary(ctx, channelInfo)
+}
+
+// recoverSummary restores the pchannel's WAL summary from object storage, so
+// its consumers see the durable records that precede the checkpoint.
+func (r *recoveryStorageImpl) recoverSummary(ctx context.Context, channelInfo types.PChannelInfo) error {
+	enabled := paramtable.Get().StreamingCfg.IdempotencyEnabled.GetAsBool()
+	chunkManager := resource.Resource().ChunkManager()
+	if !enabled && chunkManager == nil {
+		// Nothing to start, and no store to drop.
+		return nil
+	}
+	store := walsummary.NewStore(chunkManager, channelInfo.Name, channelInfo.Term)
+	if !enabled {
+		// The summary has no other consumer on this branch yet, so it is not
+		// started at all when idempotency is off: nothing would read what it
+		// persists, and observing every message would be pure overhead.
+		//
+		// Whatever an earlier enabled run left behind is dropped here rather
+		// than kept: with the feature off nothing records, and the WAL is
+		// truncated past what the store covers, so a retained store is stale by
+		// definition and a later re-enable would rebuild windows from it. The
+		// delete is best-effort -- a failure only leaves objects to reap on the
+		// next open, and must not fail the WAL open.
+		if err := store.RemoveAllObjects(ctx); err != nil {
+			r.Logger().Warn(ctx, "failed to drop the disabled wal summary store", mlog.Err(err))
+		}
+		return nil
+	}
+	summaryManager := walsummary.NewManager(walsummary.ManagerConfig{
+		PChannel:          channelInfo.Name,
+		Term:              channelInfo.Term,
+		Store:             store,
+		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize()),
+		MaxRetainedChunks: paramtable.Get().StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt(),
+		Logger:            r.Logger(),
+	})
+	if err := summaryManager.Restore(ctx); err != nil {
+		return errors.Wrap(err, "failed to restore the wal summary")
+	}
+	r.summaryManager = summaryManager
+	return nil
 }
 
 // initializeRecoverInfo initializes the recover info for the given channel.
@@ -161,7 +204,8 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to save recovery snapshot to catalog")
 	}
-	r.Logger().Info(ctx, "initialize checkpoint done",
+	r.Logger().Info(
+		ctx, "initialize checkpoint done",
 		mlog.Int("vchannels", len(vchannels)),
 		mlog.String("checkpoint", checkpoint.MessageId.String()),
 		mlog.Uint64("timetick", checkpoint.TimeTick),
