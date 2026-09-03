@@ -7,30 +7,35 @@
 
 ## 1. Core Purpose
 
-WALSummary is the **pchannel-scoped** transform log of a physical WAL channel.
-It is the single owner of transform-record persistence and exists for three
-reasons:
+WALSummary is the **pchannel-scoped** compaction layer of a physical WAL
+channel: it extracts the durable-relevant payloads of the WAL into a compact,
+dense, append-only object-storage log that downstream consumers rebuild from.
+It is **not** owned by, or dedicated to, any single consumer — the payload it
+retains today happens to be the transform records (Delete and Txn-Delete), and
+the summary is the single owner of their persistence, but the mechanism is the
+general pchannel-level retained window. It exists for three reasons:
 
 1. **Log compaction.** The WAL keeps every message of a pchannel. The summary
-   extracts only the transform payloads (Delete and Txn-Delete records) into a
-   compact, dense, append-only object-storage log, so a long-lived channel does
-   not force the WAL to retain the whole raw history: the WAL checkpoint may
-   advance past a delete once its record is durable in the summary.
+   extracts only the durable-relevant payloads (today the transform records)
+   into a compact, dense, append-only object-storage log, so a long-lived
+   channel does not force the WAL to retain the whole raw history: the WAL
+   checkpoint may advance past a message once its record is durable in the
+   summary.
 2. **Faster StreamingNode recovery.** On restart, the node must rebuild the
    per-vchannel recovery state without replaying the entire WAL. The summary
    restores its chunk index from the manifest in constant catalog access, then
    replays only the WAL tail past the durable summary frontier — instead of
-   re-consuming every historical delete from the message queue.
-3. **Lazy recovery of future VChannel-level components.** The summary is the
+   re-consuming every historical record from the message queue.
+3. **Lazy recovery of VChannel-level components.** The summary is the
    pchannel-level retained window that any vchannel-scoped component can be
-   rebuilt from on demand. Today the transform consumer
-   ([TransformLog](transform_log.md)) materializes its L0 segments from this
-   window; other components that need transform data at a later point can be
-   recovered lazily from the same retained chunks instead of from the raw WAL.
+   rebuilt from on demand, instead of from the raw WAL. Today the transform
+   consumer ([TransformLog](transform_log.md)) materializes its L0 segments
+   from this window; other components that need the same retained data at a
+   later point can be recovered lazily from the same chunks.
 
 The summary is **not** the L0 materializer itself: it only stages and persists
 records. Materialization is a downstream consumer concern (see
-[§5 TransformLog](#5-transformlog)).
+[§5 Consumers: TransformLog](#5-consumers-transformlog)).
 
 ## 2. Organization
 
@@ -158,10 +163,11 @@ dropped/tombstoned vchannel) and advanced at runtime by
 (= `math.MaxUint64`) when a vchannel's cleanup snapshot is durable, releasing
 everything of that vchannel regardless of consumption.
 
-## 5. TransformLog
+## 5. Consumers: TransformLog
 
-[TransformLog](transform_log.md) is the first VChannel-level consumer of the
-summary. It is deliberately decoupled from the summary:
+[TransformLog](transform_log.md) is the **first** VChannel-level consumer of
+the summary, and today the only one. It is deliberately decoupled from the
+summary:
 
 - on the write path it only materializes the vchannel's transform records into
   DataCoord-managed L0 segments — it owns no persistent buffer, no chunk
