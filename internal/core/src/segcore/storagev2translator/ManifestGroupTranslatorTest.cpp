@@ -239,7 +239,7 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*cache_warmup_policy=*/
-            CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
             /*support_eviction=*/true,
             /*cache_key_suffix=*/"",
             /*fallback_bytes_per_row=*/0,

@@ -7372,7 +7372,8 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
     const SchemaPtr& current_schema,
     const SchemaPtr& target_schema,
     RuntimeResourceState& runtime) {
-    if (runtime.struct_to_array_offsets.empty()) {
+    if (runtime.struct_to_array_offsets.empty() &&
+        runtime.array_offsets_map.empty()) {
         return;
     }
 
@@ -7404,6 +7405,32 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
             it = runtime.struct_to_array_offsets.erase(it);
         } else {
             ++it;
+        }
+    }
+
+    // Keep the field-id lookup consistent with the struct-generation map.
+    // Removed children and reused field IDs must not retain offsets from the
+    // previous schema generation.
+    for (auto it = runtime.array_offsets_map.begin();
+         it != runtime.array_offsets_map.end();) {
+        const auto field_id = it->first;
+        bool survives = current_schema->has_field(field_id) &&
+                        target_schema->has_field(field_id);
+        if (survives) {
+            const auto current_struct_name = GetStructNameForArrayField(
+                current_schema->operator[](field_id));
+            const auto target_struct_name =
+                GetStructNameForArrayField(target_schema->operator[](field_id));
+            survives = current_struct_name.has_value() &&
+                       current_struct_name == target_struct_name &&
+                       surviving_structs.find(*target_struct_name) !=
+                           surviving_structs.end();
+        }
+
+        if (survives) {
+            ++it;
+        } else {
+            it = runtime.array_offsets_map.erase(it);
         }
     }
 }

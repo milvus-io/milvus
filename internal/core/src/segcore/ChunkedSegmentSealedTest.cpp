@@ -748,7 +748,9 @@ TEST(test_chunk_segment,
     auto old_offsets = segment->GetArrayOffsets(old_label);
     ASSERT_NE(old_offsets, nullptr);
     ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
-    ASSERT_EQ(old_offsets->GetTotalElementCount(), row_count * array_len);
+    // DataGen marks even-numbered rows valid for nullable fields by default.
+    constexpr int64_t valid_row_count = (row_count + 1) / 2;
+    ASSERT_EQ(old_offsets->GetTotalElementCount(), valid_row_count * array_len);
 
     auto new_schema = std::make_shared<Schema>();
     new_schema->set_schema_version(2);
