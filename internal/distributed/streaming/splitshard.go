@@ -168,7 +168,7 @@ func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*Spl
 			// with it, so the caller recovers it even after a crash that lost
 			// the persisted value. A zero task id is a fence placed by a build
 			// that did not record one: treated as our own, which is what the
-			// behaviour was before the id existed.
+			// behavior was before the id existed.
 			return &SplitShardResult{SwitchTimeTick: streamErr.FencedTimeTick}, errors.Wrapf(ErrSourceVChannelFenced, "%s", err.Error())
 		}
 		return nil, errors.Wrap(err, "append split shard message failed")
