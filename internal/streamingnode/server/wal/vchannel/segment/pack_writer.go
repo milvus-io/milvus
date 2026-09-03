@@ -87,7 +87,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 	if schema == nil {
 		return nil, retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing flush pack schema is nil"))
 	}
-	insertData, err := buildGrowingInsertData(schema, pack)
+	insertData, bm25Stats, err := buildGrowingInsertData(schema, pack)
 	if err != nil {
 		return nil, retry.Unrecoverable(err)
 	}
@@ -102,6 +102,9 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		WithTimeRange(pack.FromTimeTick, pack.ToTimeTick).
 		WithBatchRows(int64(pack.Rows)).
 		WithLevel(datapb.SegmentLevel_L1)
+	if len(bm25Stats) > 0 {
+		syncPack = syncPack.WithBM25Stats(bm25Stats)
+	}
 	request := &growingBulkWriteRequest{
 		syncPack:       syncPack,
 		metaCache:      metaCache,
@@ -139,10 +142,10 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 	}, nil
 }
 
-func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) ([]*storage.InsertData, error) {
+func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) ([]*storage.InsertData, map[int64]*storage.BM25Stats, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	insertMessages := make([]*msgstream.InsertMsg, 0, len(pack.Inserts))
 	for _, raw := range pack.Inserts {
@@ -164,6 +167,18 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			request.CollectionID = pack.CollectionID
 			request.PartitionID = insert.Assignment.GetPartitionId()
 			request.SegmentID = insert.Assignment.GetSegmentAssignment().GetSegmentId()
+			// The proxy fills Timestamps with the TSOs it allocated at receive
+			// time; persist the WAL timetick instead so every replica of this
+			// chunk and the checkpoint agree on the same timestamp column (see
+			// recoverInsertMsgFromHeader in pkg/streaming/util/message/adaptor).
+			timestamps := make([]uint64, request.GetNumRows())
+			for i := range timestamps {
+				timestamps[i] = insert.TimeTick
+			}
+			request.Timestamps = timestamps
+			if request.Base != nil {
+				request.Base.Timestamp = insert.TimeTick
+			}
 			insertMessages = append(insertMessages, &msgstream.InsertMsg{
 				BaseMsg: msgstream.BaseMsg{
 					BeginTimestamp: insert.TimeTick,
@@ -173,22 +188,35 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			})
 			return nil
 		}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if len(insertMessages) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
+		return nil, nil, merr.WrapErrServiceInternalMsg("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
 	}
 	prepared, err := writebuffer.PrepareInsert(schema, pkField, insertMessages)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return lo.FlatMap(prepared, func(data *writebuffer.InsertData, _ int) []*storage.InsertData {
+	insertData := lo.FlatMap(prepared, func(data *writebuffer.InsertData, _ int) []*storage.InsertData {
 		if data.GetSegmentID() != pack.SegmentID {
 			return nil
 		}
 		return data.GetDatas()
-	}), nil
+	})
+	var bm25Stats map[int64]*storage.BM25Stats
+	for _, data := range prepared {
+		if data.GetSegmentID() != pack.SegmentID {
+			continue
+		}
+		for fieldID, stats := range data.GetBM25Stats() {
+			if bm25Stats == nil {
+				bm25Stats = make(map[int64]*storage.BM25Stats)
+			}
+			bm25Stats[fieldID] = stats
+		}
+	}
+	return insertData, bm25Stats, nil
 }
 
 func writeGrowingBulkPack(ctx context.Context, req *growingBulkWriteRequest) (*growingBulkWriteResult, error) {
