@@ -45,7 +45,6 @@ type stubProxyExtension struct{ NoopProxyExtension }
 // fails a test instead of going unnoticed.
 var allCapabilityIDs = []CapabilityID{
 	CapProxyExtension,
-	CapRBACBootstrap,
 	CapCoordinatorEngine,
 	CapResourceGroupInterceptor,
 	CapHook,
@@ -56,7 +55,6 @@ var allCapabilityIDs = []CapabilityID{
 func fullCapabilities() Capabilities {
 	return Capabilities{
 		ProxyExt:          stubProxyExtension{},
-		RBACBootstrap:     &fakeBootstrapper{},
 		CoordinatorEngine: &fakeCoordinatorEngine{},
 		ResourceGroups:    stubResourceGroupInterceptor{},
 		Hook:              stubHook{},
