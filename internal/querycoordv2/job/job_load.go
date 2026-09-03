@@ -339,17 +339,6 @@ func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int6
 //     group. An extra replica in a resource group that is already loaded would
 //     be left with no task at all, so that request keeps the overwrite.
 func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadConfigMessageHeader, newReplicas []*messagespb.LoadReplicaConfig) bool {
-	// Only a deployment that scopes load requests to the resource groups they
-	// name (queryCoord.resourceGroupScopedLoad) gets the keep-loaded fast path.
-	// The native add-resource-group semantics - reset to Loading, block the
-	// caller until the new resource group loads, release the collection if it
-	// cannot - stay byte-for-byte what they were on a stock binary, including
-	// their failure visibility: such a deployment watches per-resource-group
-	// progress itself, a native SDK caller has only the collection-wide
-	// answer, and handing it an instant 100% would hide a failed expansion.
-	if !paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.GetAsBool() {
-		return false
-	}
 	existing := job.meta.GetCollection(job.ctx, req.GetCollectionId())
 	if existing == nil || existing.GetStatus() != querypb.LoadStatus_Loaded {
 		return false
