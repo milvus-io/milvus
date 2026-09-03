@@ -18,7 +18,6 @@ package common
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"math/bits"
 	"strconv"
@@ -1008,7 +1007,7 @@ func ParseShardSplitMode(kvs []*commonpb.KeyValuePair) (mode string, exist bool,
 		case ShardSplitModeManual:
 			return ShardSplitModeManual, true, nil
 		default:
-			return "", true, fmt.Errorf("%s must be %q or %q, got %q",
+			return "", true, merr.WrapErrParameterInvalidMsg("%s must be %q or %q, got %q",
 				CollectionShardSplitMode, ShardSplitModeAuto, ShardSplitModeManual, kv.GetValue())
 		}
 	}
