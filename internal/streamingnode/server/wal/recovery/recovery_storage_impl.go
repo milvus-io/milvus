@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -101,6 +102,12 @@ type recoveryStorageImpl struct {
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
+
+	// summaryManager is the pchannel-scoped WAL summary. It observes the same
+	// message stream as the recovery storage and owns the durable records of
+	// the consumers that read the summary -- today only the idempotency view.
+	// nil when the summary is not enabled for this pchannel.
+	summaryManager *walsummary.Manager
 }
 
 // Metrics gets the metrics of the wal.
@@ -236,6 +243,15 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 		return
 	}
 	r.handleMessage(ctx, msg)
+
+	// The summary observes the same stream independently of the recovery
+	// storage's own bookkeeping: it maintains its own staging bytes and flush
+	// threshold, and retains no reference to the message.
+	if r.summaryManager != nil {
+		// The summary builds its record inline and keeps no reference to the
+		// message, so it is passed directly.
+		r.summaryManager.ObserveMessage(ctx, msg)
+	}
 
 	r.updateCheckpoint(ctx, msg)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
