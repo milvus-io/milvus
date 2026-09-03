@@ -80,14 +80,14 @@ func initHook() error {
 	// both answer VerifyAPIKey and the request interception, only one can,
 	// and picking silently would make which one wins depend on start-up
 	// order rather than on the deployment.
-	if compiled := ext.Caps().Hook; compiled != nil {
+	if compiled := ext.InstalledHook(); compiled != nil {
 		if path != "" {
 			return merr.WrapErrServiceInternalMsg(
-				"hookutil: proxy.soPath is set to %q and the installed extension provider also supplies a hook; "+
+				"hookutil: proxy.soPath is set to %q and a hook is also compiled in; "+
 					"both answer VerifyAPIKey and the request interception, and only one can", path)
 		}
 		storeHook(compiled)
-		mlog.Info(context.TODO(), "using the hook supplied by the extension provider")
+		mlog.Info(context.TODO(), "using the compiled-in hook")
 		return nil
 	}
 
