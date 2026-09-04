@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -145,10 +146,36 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 			return nil, err
 		}
 
-		if num > len(nodes) {
+		// A replica's compute is not only the resource manager's nodes. With
+		// the streaming service on, SpawnReplicasWithReplicaConfig below hands
+		// the replica the STREAMING query nodes of the same resource group,
+		// and the query node embedded in a streaming node is deliberately kept
+		// out of the resource manager (ResourceManager.handleNodeUp returns
+		// early for it) - it reaches a replica through the streaming node
+		// manager instead. Counting only the resource manager's nodes here
+		// therefore refuses a load into a resource group whose compute is a
+		// streaming node, while the spawn that follows would have placed the
+		// replica on it perfectly well.
+		//
+		// Only an installed form counts them. A stock deployment keeps its
+		// streaming nodes for delegators and its sealed segments on regular
+		// query nodes, and the balancers move nothing onto a streaming node's
+		// query node; admitting a replica on that compute would leave its
+		// segments there for good. The deployment shape that runs a resource
+		// group on streaming nodes alone is the one a compiled-in form
+		// builds, so the count follows extension.FormInstalled and the stock
+		// admission stays exactly what it was.
+		available := len(nodes)
+		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
+			if sqNodes, ok := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName]; ok {
+				available += sqNodes.Len()
+			}
+		}
+
+		if num > available {
 			mlog.Warn(ctx, "failed to check resource group", mlog.Err(err))
 			if checkNodeNum {
-				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
+				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, available, num)
 				return nil, err
 			}
 		}

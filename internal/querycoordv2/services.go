@@ -102,6 +102,21 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 				}, nil
 			}
 
+			if req.GetResourceGroup() != "" {
+				// Scoped to a resource group, a collection that is not loaded
+				// at all and has no failure recorded is a collection with no
+				// replica in that group: -1, the same answer a loaded
+				// collection gives for a group it has no replica in, so a
+				// caller polling one group's progress right after issuing a
+				// load is not told the load failed.
+				resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
+				resp.InMemoryPercentages = append(resp.InMemoryPercentages, -1)
+				resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, false)
+				resp.RefreshProgress = append(resp.RefreshProgress, 0)
+				resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{})
+				continue
+			}
+
 			err = merr.WrapErrCollectionNotLoaded(collectionID)
 			mlog.Warn(context.TODO(), "show collection failed", mlog.Err(err))
 			return &querypb.ShowCollectionsResponse{
@@ -111,6 +126,21 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 
 		if collection.IsRefreshed() {
 			refreshProgress = 100
+		}
+
+		// A request that names a resource group asks for the progress of the
+		// replicas living there, not the collection-wide figure; -1 says the
+		// group holds no replica of this collection.
+		if rgName := req.GetResourceGroup(); rgName != "" {
+			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
+			if err != nil {
+				mlog.Warn(ctx, "show collection failed on the resource-group scoped progress",
+					mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
+				return &querypb.ShowCollectionsResponse{
+					Status: merr.Status(err),
+				}, nil
+			}
+			percentage = scoped
 		}
 
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)

@@ -3126,6 +3126,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
+
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
@@ -3361,6 +3363,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
+
+	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3871,6 +3875,9 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
+			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true
@@ -7084,9 +7091,40 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 }
 
 // CreateReplicateStream establishes a replication stream on the target Milvus cluster.
-func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
+	// The hook is consulted by hand here, and only here, because the
+	// interceptor that consults it for every other RPC is a UNARY one and this
+	// is a stream: an interceptor chain binds to one of gRPC's two call kinds.
+	// It is consulted the same way even so, through HookInterceptor, so a hook
+	// sees Mock, Before and After in the order every other RPC gives it, and
+	// sees a typed, non-nil request: a stream has no request message of its
+	// own, and hook.Hook has no "req may be nil" contract, so the request is
+	// the empty message of the type this stream carries. The handler runs
+	// under the context Before returned, which is how a hook hands the stream
+	// what it put there. A Mock answer has no stream to be sent down, so a
+	// mocked stream simply ends with the hook's verdict. The default hook
+	// answers nothing, so a stock binary is unchanged.
 	ctx := stream.Context()
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateReplicateStream")
+	_, err := HookInterceptor(ctx, &milvuspb.ReplicateRequest{}, GetCurUserFromContextOrDefault(ctx),
+		milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+		func(ctx context.Context, _ any) (any, error) {
+			return nil, node.createReplicateStream(replicateStreamWithContext{stream, ctx})
+		})
+	return err
+}
+
+// replicateStreamWithContext is the replicate stream under the context the
+// hook's Before returned, so everything the stream server reads off its
+// context - the cluster id, the trace - sees what the hook put there.
+type replicateStreamWithContext struct {
+	milvuspb.MilvusService_CreateReplicateStreamServer
+	ctx context.Context
+}
+
+func (s replicateStreamWithContext) Context() context.Context { return s.ctx }
+
+func (node *Proxy) createReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(stream.Context(), "Proxy-CreateReplicateStream")
 	defer sp.End()
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
