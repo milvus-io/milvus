@@ -222,6 +222,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.targetObserver,
 		suite.checkerController,
 		suite.proxyManager,
+		suite.nodeMgr,
 	)
 
 	for _, collection := range suite.collections {

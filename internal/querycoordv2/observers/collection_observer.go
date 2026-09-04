@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -50,6 +51,7 @@ type CollectionObserver struct {
 	targetMgr            meta.TargetManagerInterface
 	targetObserver       *TargetObserver
 	checkerController    *checkers.CheckerController
+	nodeMgr              *session.NodeManager
 	partitionLoadedCount map[int64]int
 
 	loadTasks *typeutil.ConcurrentMap[string, LoadTask]
@@ -93,6 +95,9 @@ type LoadTask struct {
 	LastProgressAt time.Time
 }
 
+// NewCollectionObserver builds the observer. nodeMgr is read by the
+// resource-group-scoped timeout alone, to ask utils.ShardLeaderReadinessByResourceGroup
+// whether a group that looks stalled is in fact serving.
 func NewCollectionObserver(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
@@ -100,6 +105,7 @@ func NewCollectionObserver(
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
 	proxyManager proxyutil.ProxyClientManagerInterface,
+	nodeMgr *session.NodeManager,
 ) *CollectionObserver {
 	ob := &CollectionObserver{
 		dist:                 dist,
@@ -107,6 +113,7 @@ func NewCollectionObserver(
 		targetMgr:            targetMgr,
 		targetObserver:       targetObserver,
 		checkerController:    checherController,
+		nodeMgr:              nodeMgr,
 		partitionLoadedCount: make(map[int64]int),
 		loadTasks:            typeutil.NewConcurrentMap[string, LoadTask](),
 		proxyManager:         proxyManager,
@@ -582,6 +589,39 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 		return
 	}
 
+	// The percentage has not moved for a whole load timeout. Before anything
+	// is torn down, ask the question the proxy asks of this group - can its
+	// replicas serve every shard of the collection right now - and if the
+	// answer is yes, the group is not stalled, whatever the figure says.
+	//
+	// The two disagree by construction, not by accident. The percentage is
+	// measured against the NEXT target and integer-truncated, so a large
+	// collection under continuous flush can sit at a constant 99 for as long
+	// as the ingest lasts: every tick sees a freshly flushed segment in the
+	// next target that no replica carries yet. Readiness is measured against
+	// the CURRENT target, and says Ready the whole time. Without this check a
+	// group serving queries would be torn down for not moving, and the rule
+	// that keeps a Loaded collection's LAST replicas does not reach it - a
+	// collection loaded into several groups loses one that is serving.
+	//
+	// A Ready group refreshes its watermark rather than finishing: finishing
+	// is observeLoadStatus's decision, made on the percentage reaching 100
+	// with the current target promoted, and it stays that way. The task lives
+	// on and is asked again a load timeout later, which is what a fully loaded
+	// group does anyway. A Ready group that never samples 100 therefore keeps
+	// its task indefinitely, one cheap readiness read per load timeout; the
+	// task goes away with the collection, when it is released or dropped.
+	if ob.resourceGroupIsReady(ctx, task) {
+		mlog.RatedInfo(ctx, 0.1, "resource group load percentage has not moved for the load timeout, but its shard leaders are ready, keeping it",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.String("traceID", key),
+			mlog.Int32("loadPercentage", percentage))
+		task.LastProgressAt = now
+		ob.loadTasks.Insert(key, task)
+		return
+	}
+
 	mlog.Info(ctx, "load timeout for resource group, cancel it",
 		mlog.FieldCollectionID(task.CollectionID),
 		mlog.String("resourceGroup", task.ResourceGroup),
@@ -590,6 +630,25 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 		mlog.Int32("loadPercentage", percentage),
 		mlog.Duration("stalledFor", now.Sub(task.LastProgressAt)))
 	ob.releaseResourceGroupOnTimeout(ctx, key, task)
+}
+
+// resourceGroupIsReady answers whether the replicas of this task's resource
+// group can serve every shard of the collection right now, which is the same
+// verdict the proxy's readiness check gets. Anything short of a clear yes - an
+// unready shard, a missing current target, a read the stores cannot answer -
+// is a no: this is a shield against tearing down a serving group, and a
+// verdict that cannot be established is no evidence the group is serving.
+func (ob *CollectionObserver) resourceGroupIsReady(ctx context.Context, task LoadTask) bool {
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, ob.nodeMgr,
+		task.CollectionID, task.ResourceGroup)
+	if err != nil {
+		mlog.RatedWarn(ctx, 0.1, "failed to read the shard leader readiness of a resource group",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.Err(err))
+		return false
+	}
+	return readiness.Ready
 }
 
 // releaseResourceGroupOnTimeout tears down exactly the replicas of this
