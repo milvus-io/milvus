@@ -552,8 +552,9 @@ func (s *SegmentInfo) getDeltaCount() int64 {
 type SegmentInfoSelector func(*SegmentInfo) bool
 
 // ValidateManifestSegment checks that segments with manifest_path have empty
-// legacy stats fields. Returns a descriptive message if validation fails,
-// or empty string if the segment is valid.
+// legacy stats binlog fields. TextStatsLogs and JsonKeyStats are allowed because
+// they register which manifest index entries are valid for loading.
+// Returns a descriptive message if validation fails, or empty string if valid.
 func ValidateManifestSegment(info *SegmentInfo) string {
 	if info.GetManifestPath() == "" {
 		return ""
@@ -566,15 +567,8 @@ func ValidateManifestSegment(info *SegmentInfo) string {
 	if len(info.GetBm25Statslogs()) > 0 {
 		nonEmpty = append(nonEmpty, fmt.Sprintf("bm25statslogs(%d)", len(info.GetBm25Statslogs())))
 	}
-	if len(info.GetTextStatsLogs()) > 0 {
-		nonEmpty = append(nonEmpty, fmt.Sprintf("textStatsLogs(%d)", len(info.GetTextStatsLogs())))
-	}
-	if len(info.GetJsonKeyStats()) > 0 {
-		nonEmpty = append(nonEmpty, fmt.Sprintf("jsonKeyStats(%d)", len(info.GetJsonKeyStats())))
-	}
-
 	if len(nonEmpty) > 0 {
-		return fmt.Sprintf("segment %d has manifest_path but non-empty legacy stats fields: %v",
+		return fmt.Sprintf("segment %d has manifest_path but non-empty legacy stats binlog fields: %v",
 			info.GetID(), nonEmpty)
 	}
 	return ""

@@ -1402,7 +1402,7 @@ message CopySegmentJob {
   uint64 start_ts = 10;     // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
 
-  // Options (e.g., "copy_index": "true")
+  // Additional job metadata.
   repeated common.KeyValuePair options = 12;
 
   // Statistics
@@ -1428,6 +1428,9 @@ message CopySegmentJob {
   string snapshot_s3_location = 20;
   string external_spec = 21;
   string snapshot_fingerprint = 22;
+  // Whether index definitions and separately tracked reusable index artifacts
+  // must not be restored. StorageV3 manifest roots remain intact.
+  bool skip_index = 23;
 }
 
 message ImportJob {
@@ -1752,6 +1755,9 @@ message CreateSnapshotRequest {
   string description = 3; // user-defined snapshot description
   int64 collection_id= 4; // collection name
   int64 compaction_protection_seconds = 5; // duration in seconds to protect referenced segments from compaction, 0 = no protection
+  // If true, omit reusable index definitions and separately tracked index
+  // artifacts. StorageV3 manifest roots remain intact.
+  bool skip_index = 6;
 }
 
 message DropSnapshotRequest {
@@ -1840,6 +1846,7 @@ message SnapshotInfo {
   // Per-channel snapshot boundaries. Each position records the seek point used
   // to decide which segments from that channel are included in the snapshot.
   repeated msg.MsgPosition channel_seek_positions = 13;
+  bool skip_index = 14; // whether this snapshot was created without reusable indexes
 }
 
 // StorageV2SegmentManifest maps a segment ID to its plain manifest object path.
@@ -1914,6 +1921,9 @@ message RestoreSnapshotRequest {
   bool external = 6; // true when restoring from an external snapshot metadata URI
   string snapshot_s3_location = 7; // metadata file path for external snapshot restore
   string external_spec = 8; // optional external storage spec for cross-bucket restore source
+  // If true, restore data without creating indexes or copying separately
+  // tracked index artifacts. StorageV3 manifest roots remain intact.
+  bool skip_index = 9;
 }
 
 message RestoreSnapshotResponse {

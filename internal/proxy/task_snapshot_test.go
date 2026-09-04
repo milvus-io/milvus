@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -190,13 +191,18 @@ func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:        "test_snapshot",
 			Description: "test description",
+			SkipIndex:   true,
 		},
 		mixCoord:     mockMixCoord,
 		collectionID: 100,
 	}
 
 	// Mock successful MixCoord call
-	mockCreateSnapshot := mockey.Mock((*MixCoordMock).CreateSnapshot).Return(merr.Success(), nil).Build()
+	mockCreateSnapshot := mockey.Mock((*MixCoordMock).CreateSnapshot).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.CreateSnapshotRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+			assert.True(t, req.GetSkipIndex())
+			return merr.Success(), nil
+		}).Build()
 	defer mockCreateSnapshot.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -411,6 +417,7 @@ func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 			CreateTs:     12345,
 			CollectionId: 100,
 			PartitionIds: []int64{1, 2},
+			SkipIndex:    true,
 		},
 	}
 	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockResponse, nil).Build()
@@ -441,6 +448,7 @@ func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 	assert.Equal(t, "test_collection", task.result.GetCollectionName())
 	assert.Equal(t, []string{"partition1", "partition2"}, task.result.GetPartitionNames())
 	assert.Equal(t, int64(12345), task.result.GetCreateTs())
+	assert.True(t, task.result.GetSkipIndex())
 }
 
 func TestDescribeSnapshotTask_Execute_MixCoordError(t *testing.T) {
@@ -631,15 +639,20 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 			Name:           "test_snapshot",
 			CollectionName: "restored_collection",
 			DbName:         "default",
+			SkipIndex:      true,
 		},
 		mixCoord: mockMixCoord,
 	}
 
 	// Mock RestoreSnapshot - proxy directly calls DataCoord
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  1,
-	}, nil).Build()
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.RestoreSnapshotRequest, _ ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+			assert.True(t, req.GetSkipIndex())
+			return &datapb.RestoreSnapshotResponse{
+				Status: merr.Success(),
+				JobId:  1,
+			}, nil
+		}).Build()
 	defer mockRestoreSnapshot.UnPatch()
 
 	err := task.Execute(context.Background())

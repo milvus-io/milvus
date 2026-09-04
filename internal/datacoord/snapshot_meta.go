@@ -978,6 +978,7 @@ func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	snapshotS3Location string,
 	includeSegments bool,
 	storageConfig *indexpb.StorageConfig,
+	skipIndex bool,
 ) (*snapshotstorage.SnapshotData, error) {
 	snapshotData, err := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, snapshotS3Location, includeSegments)
 	if err != nil {
@@ -990,6 +991,7 @@ func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 			snapshotS3Location,
 			snapshotData,
 			storageConfig,
+			skipIndex,
 		); err != nil {
 			return nil, merr.Wrap(err, "invalid external snapshot data files")
 		}

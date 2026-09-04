@@ -50,12 +50,14 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		skipIndex bool,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
 		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		assert.True(t, skipIndex)
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -73,6 +75,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 			Name:                        "test_snapshot",
 			Description:                 "test description",
 			CompactionProtectionSeconds: 3600,
+			SkipIndex:                   true,
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -105,6 +108,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		skipIndex bool,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -357,11 +361,13 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 		collectionID int64,
 		jobID int64,
 		pinID int64,
+		skipIndex bool,
 	) (int64, error) {
 		restoreDataCalled = true
 		assert.Equal(t, "test_snapshot", snapshotName)
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID) // Verify jobID is passed from header
+		assert.True(t, skipIndex)
 		return jobID, nil
 	}).Build()
 	defer mockRestoreData.UnPatch()
@@ -394,6 +400,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 			CollectionId:       200,
 			JobId:              12345, // Pre-allocated jobID
 			SourceCollectionId: 100,
+			SkipIndex:          true,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -430,6 +437,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 		collectionID int64,
 		jobID int64,
 		pinID int64,
+		skipIndex bool,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -481,6 +489,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
 		jobID int64,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) (int64, error) {
 		restoreExternalDataCalled = true
 		assert.Equal(t, int64(100), sourceCollectionID)
@@ -490,6 +499,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
 		assert.Equal(t, int64(12345), jobID)
 		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
 		assert.Empty(t, snapshotFingerprint)
+		assert.True(t, skipIndex)
 		return jobID, nil
 	}).Build()
 	defer mockRestoreExternalData.UnPatch()
@@ -511,6 +521,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
 			External:           true,
 			SnapshotS3Location: "s3://bucket/files/snapshots/meta.json",
 			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+			SkipIndex:          true,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).

@@ -65,6 +65,16 @@ func ListSnapshotDataFiles(
 	snapshot *SnapshotData,
 	storageConfig *indexpb.StorageConfig,
 ) ([]SnapshotFileRef, error) {
+	return listSnapshotDataFiles(ctx, cm, snapshot, storageConfig, false)
+}
+
+func listSnapshotDataFiles(
+	ctx context.Context,
+	cm milvusstorage.ChunkManager,
+	snapshot *SnapshotData,
+	storageConfig *indexpb.StorageConfig,
+	skipIndex bool,
+) ([]SnapshotFileRef, error) {
 	if snapshot == nil {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
@@ -78,6 +88,7 @@ func ListSnapshotDataFiles(
 	collector := &snapshotFileRefCollector{
 		cm:            cm,
 		storageConfig: storageConfig,
+		skipIndex:     skipIndex || snapshot.SnapshotInfo.GetSkipIndex(),
 		byPath:        make(map[string]SnapshotFileRef),
 	}
 	for _, segment := range snapshot.Segments {
@@ -89,14 +100,17 @@ func ListSnapshotDataFiles(
 }
 
 // ValidateExternalSnapshotDataFiles also enforces the root derived from metadata URI.
+// When skipIndex is true, separately stored index artifacts are excluded from
+// validation; the complete StorageV3 manifest root is still validated.
 func ValidateExternalSnapshotDataFiles(
 	ctx context.Context,
 	cm milvusstorage.ChunkManager,
 	metadataFilePath string,
 	snapshot *SnapshotData,
 	storageConfig *indexpb.StorageConfig,
+	skipIndex bool,
 ) error {
-	refs, err := ListSnapshotDataFiles(ctx, cm, snapshot, storageConfig)
+	refs, err := listSnapshotDataFiles(ctx, cm, snapshot, storageConfig, skipIndex)
 	if err != nil {
 		return err
 	}
@@ -133,6 +147,7 @@ func validateSnapshotFileRefs(ctx context.Context, cm milvusstorage.ChunkManager
 type snapshotFileRefCollector struct {
 	cm            milvusstorage.ChunkManager
 	storageConfig *indexpb.StorageConfig
+	skipIndex     bool
 	byPath        map[string]SnapshotFileRef
 }
 
@@ -145,8 +160,10 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 		// are metadata placeholders and may be stale after format migration.
 	} else {
 		c.addFieldBinlogRefs(segment.GetBinlogs(), segment, SnapshotFileTypeInsertBinlog)
-		c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
-		c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
+		if !c.skipIndex {
+			c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
+			c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
+		}
 		if segment.GetStorageVersion() == milvusstorage.StorageV2 && segment.GetManifestPath() != "" {
 			c.add(SnapshotFileRef{
 				Path:      segment.GetManifestPath(),
@@ -159,7 +176,9 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 	c.addFieldBinlogRefs(segment.GetStatslogs(), segment, SnapshotFileTypeStatsBinlog)
 	c.addFieldBinlogRefs(segment.GetDeltalogs(), segment, SnapshotFileTypeDeltaBinlog)
 	c.addFieldBinlogRefs(segment.GetBm25Statslogs(), segment, SnapshotFileTypeBM25StatsBinlog)
-	c.addIndexRefs(segment.GetIndexFiles(), segment)
+	if !c.skipIndex {
+		c.addIndexRefs(segment.GetIndexFiles(), segment)
+	}
 	return nil
 }
 
@@ -184,7 +203,12 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 
 	if normalizedBasePath != "" {
 		// Keep the manifest root as a prefix reference for path rewriting, then
-		// list concrete objects separately so export copies physical files only.
+		// list concrete objects separately so export copies physical files. The
+		// complete StorageV3 root is copied even for skip-index snapshots because
+		// the source manifest is not rewritten and data shares this directory with
+		// reusable index artifacts. Index metadata is omitted separately, and new
+		// readers use that metadata as the loading allowlist. Older readers may not
+		// preserve this skip-index behavior after a version downgrade.
 		walkPrefix := normalizedBasePath
 		if walkPrefix[len(walkPrefix)-1] != '/' {
 			walkPrefix += "/"

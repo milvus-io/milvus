@@ -587,8 +587,8 @@ github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824 h1:zT7BfS7
 github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824/go.mod h1:vhIW04/SLFIXBKmm4O9hMbo6PaAnaLHfezQEtPRVgLs=
 github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b h1:TfeY0NxYxZzUfIfYe5qYDBzt4ZYRqzUjTR6CvUzjat8=
 github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b/go.mod h1:iwW+9cWfIzzDseEBCCeDSN5SD16Tidvy8cwQ7ZY8Qj4=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260806081414-16b288837fbd h1:4kGzK12oBDCn3OKRuDNWkMQnpDVRessbOtNZpVkxS54=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260806081414-16b288837fbd/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260824065314-63e3bc98f179 h1:4QKQa5oHzmaPuKpUgnNfFsbZDF+Zri2TGgBmndDvCzc=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260824065314-63e3bc98f179/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/minio/md5-simd v1.1.2 h1:Gdi1DZK69+ZVMoNHRXJyNcxrMA4dSxoYHZSQbirFg34=
 github.com/minio/md5-simd v1.1.2/go.mod h1:MzdKDxYpY2BT9XQFocsiZf/NKVtR7nkE4RoEpN+20RM=
 github.com/minio/minio-go/v7 v7.0.73 h1:qr2vi96Qm7kZ4v7LLebjte+MQh621fFWnv93p12htEo=

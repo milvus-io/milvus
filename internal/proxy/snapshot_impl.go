@@ -245,6 +245,7 @@ func (node *Proxy) RestoreExternalSnapshot(ctx context.Context, req *milvuspb.Re
 		External:             true,
 		SnapshotS3Location:   req.GetSnapshotMetadataUri(),
 		ExternalSpec:         req.GetExternalSpec(),
+		SkipIndex:            req.GetSkipIndex(),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		failStatus, failCause := failMetricLabel(err)

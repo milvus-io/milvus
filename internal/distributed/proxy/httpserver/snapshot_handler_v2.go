@@ -35,6 +35,7 @@ func (h *HandlersV2) createSnapshot(ctx context.Context, c *gin.Context, anyReq 
 		Name:                        httpReq.SnapshotName,
 		Description:                 httpReq.Description,
 		CompactionProtectionSeconds: httpReq.CompactionProtectionSeconds,
+		SkipIndex:                   httpReq.SkipIndex,
 	}
 	c.Set(ContextRequest, req)
 
@@ -106,6 +107,7 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 				"partitionNames": snapshot.GetPartitionNames(),
 				"createTs":       formatRESTInt64(snapshot.GetCreateTs(), allowInt64),
 				"s3Location":     snapshot.GetS3Location(),
+				"skipIndex":      snapshot.GetSkipIndex(),
 			},
 		})
 	}
@@ -127,6 +129,7 @@ func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq
 		CollectionName:       httpReq.SourceCollectionName,
 		TargetDbName:         targetDBName,
 		TargetCollectionName: httpReq.TargetCollectionName,
+		SkipIndex:            httpReq.SkipIndex,
 	}
 	c.Set(ContextRequest, req)
 

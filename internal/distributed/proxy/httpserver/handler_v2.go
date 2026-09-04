@@ -4135,6 +4135,7 @@ func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context
 		TargetCollectionName: httpReq.TargetCollectionName,
 		SnapshotMetadataUri:  httpReq.SnapshotMetadataURI,
 		ExternalSpec:         httpReq.ExternalSpec,
+		SkipIndex:            httpReq.SkipIndex,
 	}
 	c.Set(ContextRequest, req)
 

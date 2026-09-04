@@ -726,15 +726,17 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			InsertBinlogs:        sourceSegDesc.GetBinlogs(),
 			StatsBinlogs:         sourceSegDesc.GetStatslogs(),
 			DeltaBinlogs:         sourceSegDesc.GetDeltalogs(),
-			IndexFiles:           sourceSegDesc.GetIndexFiles(),        // vector/scalar index file info
-			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
-			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),    // Text index files
-			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
-			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
-			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
+			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),  // BM25 stats logs
+			ManifestPath:         sourceSegDesc.GetManifestPath(),   // manifest path for StorageV3+
+			StorageVersion:       sourceSegDesc.GetStorageVersion(), // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
 			SourceRootPath:       sourceRootPath,
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
+		}
+		if !job.GetSkipIndex() {
+			source.IndexFiles = sourceSegDesc.GetIndexFiles()
+			source.TextIndexFiles = sourceSegDesc.GetTextIndexFiles()
+			source.JsonKeyIndexFiles = sourceSegDesc.GetJsonKeyIndexFiles()
 		}
 		sources = append(sources, source)
 
@@ -752,22 +754,24 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			}
 			return nil
 		}
-		for _, indexFile := range sourceSegDesc.GetIndexFiles() {
-			if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
-				return nil, err
-			}
-		}
-		for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
-			if textIndex.GetBuildID() != 0 {
-				if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+		if !job.GetSkipIndex() {
+			for _, indexFile := range sourceSegDesc.GetIndexFiles() {
+				if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
 					return nil, err
 				}
 			}
-		}
-		for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
-			if jsonKeyIndex.GetBuildID() != 0 {
-				if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
-					return nil, err
+			for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
+				if textIndex.GetBuildID() != 0 {
+					if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+						return nil, err
+					}
+				}
+			}
+			for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
+				if jsonKeyIndex.GetBuildID() != 0 {
+					if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -839,66 +843,31 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 // Result Synchronization: Update Segment Metadata from DataNode Response
 // ===========================================================================================
 
-// SyncCopySegmentTask synchronizes task results from DataNode to DataCoord metadata.
-//
-// Process flow (on successful completion):
-//  1. For each segment result from DataNode:
-//     a. Compress binlog paths and fill logID
-//     b. Update segment binlogs (insert/stats/delta/BM25)
-//     c. Mark segment as Flushed
-//     d. Sync vector/scalar indexes to indexMeta
-//     e. Sync text indexes to segment metadata
-//     f. Sync JSON key indexes to segment metadata
-//  2. Record task execution metrics (executing duration, total duration)
-//  3. Mark task as completed with completion timestamp
-//
-// Process flow (on failure):
-//  1. Mark task as failed with reason
-//  2. Return error (job will be failed by caller)
-//
-// Parameters:
-//   - task: Copy segment task being synced
-//   - resp: QueryCopySegmentResponse from DataNode
-//   - copyMeta: Metadata manager for updating task state
-//   - meta: Segment metadata for updating binlogs and indexes
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// Why sync multiple index types:
-// - Vector/scalar indexes: Traditional dense/sparse vector and scalar indexes
-// - Text indexes: Full-text search indexes for VARCHAR fields
-// - JSON key indexes: Indexes on JSON field keys
-// - All must be copied and registered for query functionality
-//
-// Error handling:
-// - Any error during sync marks both task and job as failed
-// - Ensures data integrity (no partial restore)
-// - Provides clear error messages for troubleshooting
+// SyncCopySegmentTask synchronizes DataNode copy results into DataCoord metadata.
+// For each completed segment, it atomically publishes copied binlogs, the
+// StorageV3 manifest, text/JSON index metadata, and the Flushed state. It then
+// publishes vector/scalar index metadata to indexMeta. The task is completed
+// only after every segment result has been synchronized.
 func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, meta *meta) error {
 	ctx := context.TODO()
 
 	// Update task state based on response
 	switch resp.GetState() {
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
-		// Update binlog information for all segments
+		// Synchronize each copied segment.
 		for _, result := range resp.GetSegmentResults() {
-			// Update binlog info and segment state to Flushed
-			// For StorageV3+ segments, also update manifest_path
+			// Publish the copied data, manifest, and manifest-index metadata
+			// atomically before making the segment visible as Flushed.
 			var err error
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
-			// A copy target is a freshly created, exclusively owned segment and
-			// the worker returns a complete manifest pointer, so first-time
-			// publication is set inline via UpdateManifest (no CommitSegmentManifest
-			// serialization is needed for a segment no other writer touches).
+			operators := []UpdateOperator{op1}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
+			operators = append(operators, updateCopiedSegmentIndexMetadata(result), op3, op2)
 			err = meta.UpdateSegmentsInfo(ctx, operators...)
 			if err != nil {
 				// On error, mark task and job as failed
@@ -918,7 +887,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 						mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
 				}
 
-				mlog.Warn(context.TODO(), "update copy segment binlogs failed",
+				mlog.Warn(context.TODO(), "update copied segment metadata failed",
 					WrapCopySegmentTaskLog(task, mlog.String("err", err.Error()))...)
 				return err
 			}
@@ -928,20 +897,12 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				return err
 			}
 
-			// Sync text indexes
-			if err = syncTextIndexes(ctx, result, task, meta, copyMeta); err != nil {
-				return err
-			}
-
-			// Sync JSON key indexes
-			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
-				return err
-			}
-
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),
 					mlog.Int64("importedRows", result.GetImportedRows()),
 					mlog.Int("binlogFields", len(result.GetBinlogs())),
+					mlog.Int("textIndexCount", len(result.GetTextIndexInfos())),
+					mlog.Int("jsonIndexCount", len(result.GetJsonKeyIndexInfos())),
 					mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
@@ -967,6 +928,36 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			UpdateCopyTaskReason(resp.GetReason()))
 	}
 	return nil
+}
+
+func updateCopiedSegmentIndexMetadata(result *datapb.CopySegmentResult) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(result.GetSegmentId())
+		if segment == nil {
+			return false
+		}
+
+		updated := false
+		if len(result.GetTextIndexInfos()) > 0 {
+			if segment.TextStatsLogs == nil {
+				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+			}
+			for fieldID, stats := range result.GetTextIndexInfos() {
+				segment.TextStatsLogs[fieldID] = stats
+			}
+			updated = true
+		}
+		if len(result.GetJsonKeyIndexInfos()) > 0 {
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			for fieldID, stats := range result.GetJsonKeyIndexInfos() {
+				segment.JsonKeyStats[fieldID] = stats
+			}
+			updated = true
+		}
+		return updated
+	}
 }
 
 // ===========================================================================================
@@ -1109,137 +1100,5 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				mlog.Int64("sourceIndexID", indexInfo.GetIndexId()),
 				mlog.FieldBuildID(indexInfo.GetBuildId()))...)
 	}
-	return nil
-}
-
-// ===========================================================================================
-// Index Synchronization: Text Indexes
-// ===========================================================================================
-
-// syncTextIndexes synchronizes text index metadata to segment.
-//
-// Process flow:
-//  1. Update segment with text index logs
-//  2. Log success or mark task/job as failed
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - result: Segment copy result from DataNode
-//   - task: Copy segment task
-//   - meta: Metadata manager for updating segment
-//   - copyMeta: For marking task/job as failed on error
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// Text indexes:
-// - Full-text search indexes for VARCHAR fields
-// - Stored inline with segment metadata (not in indexMeta)
-// - Enables text search queries on restored collection
-func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
-) error {
-	if len(result.GetTextIndexInfos()) == 0 {
-		return nil
-	}
-
-	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetTextIndexLogs(result.GetTextIndexInfos()))
-	if err != nil {
-		mlog.Warn(ctx, "failed to update text index",
-			WrapCopySegmentTaskLog(task,
-				mlog.FieldSegmentID(result.GetSegmentId()),
-				mlog.Err(err))...)
-
-		// Mark task and job as failed
-		updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update task state to Failed",
-				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-		}
-
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update job state to Failed",
-				mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-		}
-		return err
-	}
-
-	mlog.Info(ctx, "synced text indexes",
-		WrapCopySegmentTaskLog(task,
-			mlog.FieldSegmentID(result.GetSegmentId()),
-			mlog.Int("count", len(result.GetTextIndexInfos())))...)
-	return nil
-}
-
-// ===========================================================================================
-// Index Synchronization: JSON Key Indexes
-// ===========================================================================================
-
-// syncJSONKeyIndexes synchronizes JSON key index metadata to segment.
-//
-// Process flow:
-//  1. Update segment with JSON key index logs
-//  2. Log success or mark task/job as failed
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - result: Segment copy result from DataNode
-//   - task: Copy segment task
-//   - meta: Metadata manager for updating segment
-//   - copyMeta: For marking task/job as failed on error
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// JSON key indexes:
-// - Indexes on keys within JSON fields
-// - Stored inline with segment metadata (not in indexMeta)
-// - Enables efficient queries on JSON field contents
-func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
-) error {
-	if len(result.GetJsonKeyIndexInfos()) == 0 {
-		return nil
-	}
-
-	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetJSONKeyIndexLogs(result.GetJsonKeyIndexInfos()))
-	if err != nil {
-		mlog.Warn(ctx, "failed to update json key index",
-			WrapCopySegmentTaskLog(task,
-				mlog.FieldSegmentID(result.GetSegmentId()),
-				mlog.Err(err))...)
-
-		// Mark task and job as failed
-		updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update task state to Failed",
-				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-		}
-
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update job state to Failed",
-				mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-		}
-		return err
-	}
-
-	mlog.Info(ctx, "synced json key indexes",
-		WrapCopySegmentTaskLog(task,
-			mlog.FieldSegmentID(result.GetSegmentId()),
-			mlog.Int("count", len(result.GetJsonKeyIndexInfos())))...)
 	return nil
 }
