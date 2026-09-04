@@ -965,9 +965,15 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     uint32_t var_dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(var_dim);
 
+    std::vector<FieldDataPtr> field_datas;
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto manifest_path_str = manifest.value_or("");
+    bool cached_already = false;
     bool nullable = false;
     uint64_t total_num_rows = 0;
     std::vector<uint8_t> valid_bitmap;
+    int64_t part_chunk_offset = 0;
 
     // Consumes one batch: accumulate row/validity bookkeeping, then append
     // the batch to the local raw-data file. The validity bitmap grows
@@ -1005,35 +1011,131 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                          is_vector_array ? &offsets : nullptr);
     };
 
-    auto manifest =
-        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto manifest_path_str = manifest.value_or("");
     if (manifest_path_str != "") {
-        AssertInfo(
-            loon_ffi_properties_ != nullptr,
-            "loon ffi properties is null when build index with manifest");
-        // Stream batches straight to the local file instead of
-        // materializing the whole column in memory first, so this task's
-        // retention drops from the full raw column to the reader's prefetch
-        // window plus the bounded decode window, and the disk write
-        // overlaps with fetch/decode.
-        IterateFieldDataFromManifest(
-            manifest_path_str,
-            loon_ffi_properties_,
-            field_meta_,
-            data_type,
-            dim,
-            element_type,
-            GetStorageColumnMapping(field_meta_.field_id),
-            consume_field_data);
+        all_remote_files.clear();
+        all_remote_files.push_back({manifest_path_str});
+    }
+
+    // For variable-dimension fields (dim <= 0, e.g. sparse vectors) without a
+    // manifest, GetFieldDatasFromStorageV2 already accepts the complete
+    // all_remote_files collection and returns the full field.  Calling it once
+    // outside the loop avoids redundant downloads when the segment has multiple
+    // column groups.
+    // VECTOR_ARRAY has a positive dim (the element vector dimension), but a
+    // variable number of vectors per row, so GetDataTypeSize() is not defined
+    // for it. Route it through the full-read path to avoid the fixed-width
+    // pagination that would throw DataTypeInvalid.
+    if (dim <= 0 || is_vector_array) {
+        if (manifest_path_str == "") {
+            field_datas =
+                GetFieldDatasFromStorageV2(all_remote_files,
+                                           GetFieldDataMeta().field_id,
+                                           data_type.value(),
+                                           element_type.value(),
+                                           dim,
+                                           fs_);
+        } else {
+            // Variable-width manifest fields (sparse vectors with dim <= 0,
+            // VECTOR_ARRAY) cannot use the fixed-width row pagination the
+            // dense-vector path relies on, but they must NOT fall back to
+            // GetFieldDatasFromManifest: that helper retains every decoded
+            // FieldData until the whole column is read, so a large sparse /
+            // embedding-list segment would need full-column memory plus Arrow
+            // buffers and can OOM the very large-segment index builds this
+            // path is meant to bound. Stream each batch straight to the local
+            // file instead, exactly as the pre-pagination code did: retention
+            // drops to the reader's prefetch window plus the bounded streaming
+            // decode window, and the disk write overlaps fetch/decode. This is
+            // streaming only; it does not add partial-download support for
+            // VECTOR_ARRAY.
+            cached_already = true;
+            IterateFieldDataFromManifest(
+                manifest_path_str,
+                loon_ffi_properties_,
+                field_meta_,
+                data_type,
+                dim,
+                element_type,
+                GetStorageColumnMapping(GetFieldDataMeta().field_id),
+                consume_field_data);
+        }
     } else {
-        auto field_datas =
-            GetFieldDatasFromStorageV2(all_remote_files,
-                                       GetFieldDataMeta().field_id,
-                                       data_type.value(),
-                                       element_type.value(),
-                                       dim,
-                                       fs_);
+        for (auto& remote_files_group : all_remote_files) {
+            if (dim >
+                0) {  // for vector indices try to use limited RAM when loading
+                cached_already = true;
+                // TODO add bit set handling if nullable
+                for (auto& remote_file : remote_files_group) {
+                    std::vector<std::vector<std::string>> current_files;
+                    std::vector<std::string> vector_file;
+                    vector_file.push_back(remote_file);
+                    current_files.push_back(vector_file);
+                    // Size the page by bytes, not a fixed row count, so the
+                    // memory budget holds regardless of dim and element size.
+                    size_t bytes_per_row =
+                        GetDataTypeSize(data_type.value(), dim);
+                    size_t max_rows =
+                        bytes_per_row > 0
+                            ? static_cast<size_t>(
+                                  DEFAULT_FIELD_MAX_MEMORY_LIMIT) /
+                                  bytes_per_row
+                            : 1000000;
+                    // Guarantee at least one row per page to avoid infinite
+                    // loops when a single row exceeds the budget.
+                    if (max_rows == 0) {
+                        max_rows = 1;
+                    }
+                    size_t offset = 0;
+                    while (true) {
+                        // limit download to max_rows per page to bound memory
+                        auto part_field_datas =
+                            manifest_path_str == ""
+                                ? GetFieldDatasFromStorageV2(
+                                      current_files,
+                                      GetFieldDataMeta().field_id,
+                                      data_type.value(),
+                                      element_type.value(),
+                                      dim,
+                                      fs_,
+                                      max_rows,
+                                      offset)
+                                : GetFieldDatasFromManifest(
+                                      manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta_,
+                                      data_type,
+                                      dim,
+                                      element_type,
+                                      max_rows,
+                                      offset,
+                                      GetStorageColumnMapping(
+                                          GetFieldDataMeta().field_id));
+                        if (part_field_datas.empty()) {
+                            break;
+                        }
+                        for (auto& field_data : part_field_datas) {
+                            offset += field_data->get_num_rows();
+                            consume_field_data(field_data);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!cached_already) {
+        if (valid_data_path.has_value()) {
+            for (auto& field_data : field_datas) {
+                if (field_data->IsNullable()) {
+                    nullable = true;
+                }
+            }
+        }
+        if (nullable) {
+            valid_bitmap.resize((total_num_rows + 7) / 8, 0);
+        }
+
+        int64_t chunk_offset = 0;
         for (auto& field_data : field_datas) {
             consume_field_data(field_data);
         }
@@ -1055,36 +1157,32 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
+        // offsets must contain at least the initial sentinel (0).  When all
+        // rows are null or contain empty embedding lists the vector is {0}
+        // which is valid — VectorDiskAnnIndex handles the empty-input case.
         AssertInfo(
-            !offsets.empty() && offsets.front() == 0,
+            offsets.size() >= 1 && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",
             offsets.size(),
             offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
-        if (offsets.size() == 1) {
-            AssertInfo(nullable || total_num_rows == 0,
-                       "non-nullable emb_list offsets must include rows");
-            AssertInfo(num_rows == 0,
-                       "empty emb_list offsets cannot reference raw vectors");
-        } else {
-            // Get offsets path from config if provided, otherwise use default
-            auto offsets_path = index::GetValueFromConfig<std::string>(
-                                    config, index::EMB_LIST_OFFSETS_PATH)
-                                    .value();
+        // Get offsets path from config if provided, otherwise use default
+        auto offsets_path = index::GetValueFromConfig<std::string>(
+                                config, index::EMB_LIST_OFFSETS_PATH)
+                                .value();
 
-            local_chunk_manager->CreateFile(offsets_path);
+        local_chunk_manager->CreateFile(offsets_path);
 
-            size_t num_offsets = offsets.size();
-            int64_t offsets_write_pos = 0;
+        size_t num_offsets = offsets.size();
+        int64_t offsets_write_pos = 0;
 
-            local_chunk_manager->Write(
-                offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
-            offsets_write_pos += sizeof(size_t);
+        local_chunk_manager->Write(
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
-            local_chunk_manager->Write(offsets_path,
-                                       offsets_write_pos,
-                                       offsets.data(),
-                                       offsets.size() * sizeof(size_t));
-        }
+        local_chunk_manager->Write(offsets_path,
+                                   offsets_write_pos,
+                                   offsets.data(),
+                                   offsets.size() * sizeof(size_t));
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
@@ -1449,6 +1547,8 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                       field_type,
                                       1,  // scalar field
                                       element_type,
+                                      0,
+                                      0,
                                       GetStorageColumnMapping(field_id));
 
         if (WriteOptFieldIvfData(field_type,
