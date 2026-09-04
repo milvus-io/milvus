@@ -275,18 +275,19 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
                                                          bitmap_input);
     } else {
         // No offset input: reverse-look-up the contiguous global row range
-        // [current_index_chunk_pos_, +real_batch_size) for this batch.
-        OffsetVector batch_offsets(real_batch_size);
-        auto start = current_index_chunk_pos_;
-        for (int64_t i = 0; i < real_batch_size; ++i) {
-            batch_offsets[i] = static_cast<int32_t>(start + i);
-        }
-        processed_size = ProcessIndexLookupByOffsetsWithMask<T>(
-            execute_sub_batch, &batch_offsets, res, valid_res, bitmap_input);
-        // ProcessIndexLookupByOffsets is stateless; advance the index cursor
-        // for the next batch. MoveCursor() honors the has_offset_input_ guard
-        // and, on the ScalarIndex path with no raw data, advances only the
-        // index cursor.
+        // [current_index_chunk_pos_, +real_batch_size) for this batch, without
+        // materializing a per-batch OffsetVector.
+        processed_size = ProcessIndexLookupSequentialWithMask<T>(
+            execute_sub_batch,
+            current_index_chunk_pos_,
+            real_batch_size,
+            res,
+            valid_res,
+            bitmap_input);
+        // ProcessIndexLookupSequentialWithMask is stateless; advance the index
+        // cursor for the next batch. MoveCursor() honors the has_offset_input_
+        // guard and, on the ScalarIndex path with no raw data, advances only
+        // the index cursor.
         MoveCursor();
     }
     AssertInfo(processed_size == real_batch_size,
