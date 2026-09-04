@@ -69,7 +69,6 @@
 #include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/Types.h"
-#include "parquet/statistics.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/plan.pb.h"
@@ -82,6 +81,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
@@ -111,7 +111,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
 
  public:
-    using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
@@ -2116,22 +2115,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         RuntimeResourceState* runtime,
-        std::optional<ParquetStatistics> statistics = {},
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
-
-    void
-    load_field_data_common(
-        FieldId field_id,
-        const std::shared_ptr<ChunkedColumnInterface>& column,
-        size_t num_rows,
-        DataType data_type,
-        bool enable_mmap,
-        bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {},
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(const std::shared_ptr<const RuntimeResourceState>& runtime,
@@ -2479,7 +2465,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                *current->load_info,
                                schema_snapshot,
                                runtime.get(),
-                               std::nullopt,
                                nullptr,
                                /*is_replace=*/true,
                                &committer);
@@ -2675,17 +2660,15 @@ CreateSealedSegment(
         schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 
-using ParquetStatisticsByField =
-    std::map<int64_t, ChunkedSegmentSealedImpl::ParquetStatistics>;
-
 struct LoadedGroupChunkMetadata {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-    ParquetStatisticsByField parquet_stats_by_field;
+    storagev2translator::SkipMetricsByField skip_metrics_by_field;
 };
 
 LoadedGroupChunkMetadata
-LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
-                       const std::vector<FieldId>& field_ids_for_stats,
-                       const std::string& debug_key);
+LoadGroupChunkMetadata(
+    const std::vector<std::string>& insert_files,
+    const std::vector<std::pair<FieldId, DataType>>& fields_for_stats,
+    const std::string& debug_key);
 
 }  // namespace milvus::segcore

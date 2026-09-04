@@ -336,4 +336,18 @@ TEST(ConjunctExprTest, MarkNullRejectingStopsAtNonConjunctNodes) {
     EXPECT_FALSE(hidden_and->IsNullRejecting());
 }
 
+TEST(ConjunctExprTest, SkippedChunkValidityRequirement) {
+    // A skipped nullable chunk must stay in the prefetch list whenever a
+    // consumer can still observe UNKNOWN. Non-nullable columns have no
+    // validity to fetch, and a null-rejecting consumer treats UNKNOWN as FALSE.
+    EXPECT_FALSE(SkippedChunkNeedsValidity(/*is_nullable=*/false,
+                                           /*null_rejecting=*/false));
+    EXPECT_FALSE(SkippedChunkNeedsValidity(/*is_nullable=*/false,
+                                           /*null_rejecting=*/true));
+    EXPECT_TRUE(SkippedChunkNeedsValidity(/*is_nullable=*/true,
+                                          /*null_rejecting=*/false));
+    EXPECT_FALSE(SkippedChunkNeedsValidity(/*is_nullable=*/true,
+                                           /*null_rejecting=*/true));
+}
+
 }  // namespace milvus::exec

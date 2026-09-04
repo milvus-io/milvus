@@ -38,6 +38,7 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/skipindex_stats/SkipIndexStats.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -455,6 +456,65 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     if (use_mmap && std::filesystem::exists(temp_dir)) {
         std::filesystem::remove_all(temp_dir);
     }
+}
+
+TEST_P(GroupChunkTranslatorTest,
+       SkipMetricsAreGroupOwnedAndRequireExactCellAlignment) {
+    auto temp_dir =
+        std::filesystem::path(TestLocalPath) / "gctt_skip_metrics_alignment";
+    std::filesystem::create_directory(temp_dir);
+    auto field_metas = schema_->get_fields();
+    const auto field_id = field_metas.begin()->first;
+
+    auto build_translator = [&](int64_t metric_count_delta) {
+        auto metadata =
+            LoadGroupChunkMetadata(paths_, {}, "test_group_skip_metrics");
+        size_t total_row_groups = 0;
+        for (const auto& file_metadata : metadata.row_group_meta_list) {
+            total_row_groups += file_metadata.size();
+        }
+        AssertInfo(total_row_groups > 0,
+                   "skip metrics test requires at least one row group");
+
+        const auto metric_count = static_cast<size_t>(
+            static_cast<int64_t>(total_row_groups) + metric_count_delta);
+        SkipMetricsByField metrics_by_field;
+        auto& metrics = metrics_by_field[field_id.get()];
+        metrics.reserve(metric_count);
+        for (size_t i = 0; i < metric_count; ++i) {
+            metrics.push_back(std::make_shared<index::NoneFieldChunkMetrics>());
+        }
+
+        auto translator = std::make_unique<GroupChunkTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            field_metas,
+            FieldDataInfo(0, 3000, temp_dir.string()),
+            paths_,
+            std::move(metadata.row_group_meta_list),
+            GetParam(),
+            true,
+            schema_->get_field_ids().size(),
+            milvus::proto::common::LoadPriority::LOW,
+            /* warmup_policy */ "",
+            MmapChunkWritebackMode::Disabled,
+            /* force_one_row_group_per_cell */ true,
+            std::move(metrics_by_field));
+        return std::make_pair(std::move(translator), total_row_groups);
+    };
+
+    auto [aligned, total_row_groups] = build_translator(0);
+    ASSERT_EQ(aligned->num_cells(), total_row_groups);
+    auto aligned_meta = static_cast<GroupCTMeta*>(aligned->meta());
+    auto aligned_it = aligned_meta->skip_metrics_by_field_.find(field_id.get());
+    ASSERT_NE(aligned_it, aligned_meta->skip_metrics_by_field_.end());
+    EXPECT_EQ(aligned_it->second.size(), aligned->num_cells());
+
+    auto [mismatched, mismatched_total_row_groups] = build_translator(-1);
+    EXPECT_EQ(mismatched->num_cells(), mismatched_total_row_groups);
+    auto mismatched_meta = static_cast<GroupCTMeta*>(mismatched->meta());
+    EXPECT_EQ(mismatched_meta->skip_metrics_by_field_.count(field_id.get()), 0)
+        << "a partial positional vector must disable pruning for the field";
 }
 
 INSTANTIATE_TEST_SUITE_P(GroupChunkTranslatorTest,

@@ -24,6 +24,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <parquet/arrow/reader.h>
+#include <parquet/schema.h>
+#include <parquet/statistics.h>
+#include <parquet/types.h>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -36,6 +39,7 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
+#include "index/SkipIndex.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
 #include "storage/Event.h"
 #include "storage/PayloadReader.h"
@@ -76,10 +80,17 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatches) {
         ASSERT_NE(metrics, nullptr);
         EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::BOOLEAN);
 
-        std::vector<Metrics> query_true = {true, false};
-        std::vector<Metrics> query_false = {false, true};
-        EXPECT_TRUE(metrics->CanSkipIn(query_true));
-        EXPECT_FALSE(metrics->CanSkipIn(query_false));
+        // Chunk is all-false. CanSkipIn takes the IN-list as a value list
+        // (each entry is one queried value), so a chunk can be skipped only
+        // when none of the listed values can be present.
+        std::vector<Metrics> in_true = {true};  // IN(true): absent -> skip
+        std::vector<Metrics> in_false = {
+            false};  // IN(false): present -> no skip
+        std::vector<Metrics> in_both = {true,
+                                        false};  // false present -> no skip
+        EXPECT_TRUE(metrics->CanSkipIn(in_true));
+        EXPECT_FALSE(metrics->CanSkipIn(in_false));
+        EXPECT_FALSE(metrics->CanSkipIn(in_both));
     }
 
     // INT8
@@ -304,335 +315,6 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatches) {
     }
 }
 
-TEST_F(SkipIndexStatsBuilderTest, BuildFromChunk) {
-    // BOOL
-    {
-        FixedVector<bool> data = {true, true, true, true};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::BOOL, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::BOOL,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::BOOL, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::BOOLEAN);
-
-        std::vector<Metrics> query_true = {true, false};
-        std::vector<Metrics> query_false = {false, true};
-        EXPECT_FALSE(metrics->CanSkipIn(query_true));
-        EXPECT_TRUE(metrics->CanSkipIn(query_false));
-    }
-
-    // INT8
-    {
-        FixedVector<int8_t> data = {-50, -25, 0, 25, 50};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::INT8, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::INT8,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::INT8, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::INT);
-        EXPECT_TRUE(metrics->CanSkipUnaryRange(OpType::LessThan, int8_t(-51)));
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int8_t(0)));
-    }
-
-    // INT16
-    {
-        FixedVector<int16_t> data;
-        for (int16_t i = 0; i < 100; ++i) {
-            data.push_back(i * 10);
-        }
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::INT16, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::INT16,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::INT16, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::INT);
-        EXPECT_TRUE(
-            metrics->CanSkipUnaryRange(OpType::GreaterThan, int16_t(1000)));
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int16_t(50)));
-    }
-
-    // INT32
-    {
-        FixedVector<int32_t> data;
-        for (int32_t i = 0; i < 1000; ++i) {
-            data.push_back(i);
-        }
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::INT32, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::INT32,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::INT32, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::INT);
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int32_t(500)));
-        EXPECT_TRUE(metrics->CanSkipUnaryRange(OpType::Equal, int32_t(2000)));
-    }
-
-    // INT64
-    {
-        FixedVector<int64_t> data = {-1145141919810, 0, 1145141919810};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::INT64, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::INT64,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::INT64, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::INT);
-        EXPECT_TRUE(metrics->CanSkipUnaryRange(OpType::Equal, int64_t(114514)));
-    }
-
-    // FLOAT
-    {
-        FixedVector<float> data = {-3.14f, -1.0f, 0.0f, 1.0f, 2.718f};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::FLOAT, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::FLOAT,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::FLOAT, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::FLOAT);
-        EXPECT_TRUE(metrics->CanSkipUnaryRange(OpType::GreaterThan, 3.0f));
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, 0.0f));
-    }
-
-    // DOUBLE
-    {
-        FixedVector<double> data = {-3.141592653589793, 0.0, 2.718281828459045};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::DOUBLE, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::DOUBLE,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::DOUBLE, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::FLOAT);
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, 0.0));
-    }
-
-    // VARCHAR
-    {
-        FixedVector<std::string> data = {
-            "apple", "banana", "cherry", "date", "elderberry"};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::VARCHAR, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::STRING,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::VARCHAR, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::STRING);
-        EXPECT_FALSE(
-            metrics->CanSkipUnaryRange(OpType::Equal, std::string("banana")));
-        EXPECT_TRUE(
-            metrics->CanSkipUnaryRange(OpType::Equal, std::string("xyz")));
-        EXPECT_TRUE(
-            metrics->CanSkipUnaryRange(OpType::LessThan, std::string("aaa")));
-        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::LessThan,
-                                                std::string("cherry")));
-    }
-}
-
 TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatch_InQuery) {
     // Test INT64
     {
@@ -718,6 +400,16 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatch_InQuery) {
         std::vector<Metrics> in_values6 = {};
         ASSERT_FALSE(metrics->CanSkipIn(in_values6));
     }
+}
+
+TEST_F(SkipIndexStatsBuilderTest, StringInKeepsEmptyStringInQueryHull) {
+    // The chunk range includes the empty string. Treating empty() as an
+    // uninitialized sentinel collapses IN("", "zzz") to ["zzz", "zzz"]
+    // and incorrectly skips this chunk.
+    StringFieldChunkMetrics metrics(
+        "", "banana", /*bloom_filter=*/nullptr, /*ngram_bloom_filter=*/nullptr);
+    std::vector<Metrics> values = {std::string(""), std::string("zzz")};
+    EXPECT_FALSE(metrics.CanSkipIn(values));
 }
 
 TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatch_InQuery_Nullable) {
@@ -806,100 +498,6 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatch_InQuery_Nullable) {
 
         std::vector<Metrics> in_values6 = {};
         ASSERT_FALSE(metrics->CanSkipIn(in_values6));
-    }
-}
-
-TEST_F(SkipIndexStatsBuilderTest, BuildFromChunk_InQuery) {
-    // Test INT64
-    {
-        FixedVector<int64_t> data = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::INT64, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::INT64,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::INT64, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-
-        std::vector<Metrics> in_values1 = {
-            int64_t(50), int64_t(150), int64_t(200)};
-        ASSERT_FALSE(metrics->CanSkipIn(in_values1));
-
-        std::vector<Metrics> in_values2 = {int64_t(2), int64_t(3), int64_t(4)};
-        ASSERT_TRUE(metrics->CanSkipIn(in_values2));
-    }
-
-    // Test STRING
-    {
-        FixedVector<std::string> data = {
-            "apple", "banana", "cherry", "date", "elderberry"};
-        auto field_data = milvus::storage::CreateFieldData(
-            storage::DataType::VARCHAR, DataType::NONE);
-        field_data->FillFieldData(data.data(), data.size());
-
-        storage::InsertEventData event_data;
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        event_data.payload_reader = payload_reader;
-        auto ser_data = event_data.Serialize();
-        auto buffer = std::make_shared<arrow::io::BufferReader>(
-            ser_data.data() + 2 * sizeof(milvus::Timestamp),
-            ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-        parquet::arrow::FileReaderBuilder reader_builder;
-        ASSERT_TRUE(reader_builder.Open(buffer).ok());
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        ASSERT_TRUE(reader_builder.Build(&arrow_reader).ok());
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        ASSERT_TRUE(arrow_reader->GetRecordBatchReader(&rb_reader).ok());
-
-        FieldMeta field_meta(FieldName("a"),
-                             milvus::FieldId(1),
-                             DataType::STRING,
-                             false,
-                             std::nullopt);
-        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, array_vec);
-
-        auto metrics = builder_->Build(DataType::VARCHAR, chunk.get());
-        ASSERT_NE(metrics, nullptr);
-
-        std::vector<Metrics> in_values1 = {std::string("banana"),
-                                           std::string("zebra")};
-        ASSERT_FALSE(metrics->CanSkipIn(in_values1));
-
-        std::vector<Metrics> in_values2 = {std::string("aaa"),
-                                           std::string("aardvark")};
-        ASSERT_TRUE(metrics->CanSkipIn(in_values2));
-
-        std::vector<Metrics> in_values3 = {std::string("xyz"),
-                                           std::string("zzz")};
-        ASSERT_TRUE(metrics->CanSkipIn(in_values3));
     }
 }
 
@@ -1111,4 +709,126 @@ TEST_F(SkipIndexStatsBuilderTest,
         metrics->CanSkipUnaryRange(OpType::PostfixMatch, std::string("zzz")));
     ASSERT_TRUE(
         metrics->CanSkipUnaryRange(OpType::PostfixMatch, std::string("xyz")));
+}
+
+// A statistics object can exist (is_stats_set) yet report no usable min/max --
+// an all-null row group, or a float row group containing NaN. Reading min()/max()
+// then yields garbage bounds that would wrongly prune a matching cell. Build
+// must degrade to NONE metrics (never skips) -- and never crash on a null stats.
+TEST_F(SkipIndexStatsBuilderTest, BuildFromStatisticsWithoutMinMax) {
+    auto make_empty_stats =
+        [](parquet::Type::type physical_type,
+           const std::string& name) -> std::shared_ptr<parquet::Statistics> {
+        auto node = parquet::schema::PrimitiveNode::Make(
+            name, parquet::Repetition::OPTIONAL, physical_type);
+        // OPTIONAL leaf -> max definition level 1, max repetition level 0.
+        auto descr = std::make_shared<parquet::ColumnDescriptor>(
+            node, /*max_definition_level=*/1, /*max_repetition_level=*/0);
+        // No Update(): the statistics object exists but HasMinMax() == false,
+        // exactly as for an all-null or all-NaN row group.
+        return parquet::Statistics::Make(descr.get(),
+                                         arrow::default_memory_pool());
+    };
+
+    {
+        auto stats = make_empty_stats(parquet::Type::DOUBLE, "d");
+        ASSERT_FALSE(stats->HasMinMax());
+        auto metrics = builder_->Build(DataType::DOUBLE, stats);
+        ASSERT_NE(metrics, nullptr);
+        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
+        // Garbage bounds would (wrongly) skip; NONE must not prune anything.
+        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::GreaterThan, 5.0));
+        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::LessThan, -5.0));
+        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, 42.0));
+    }
+    {
+        auto stats = make_empty_stats(parquet::Type::INT64, "i");
+        ASSERT_FALSE(stats->HasMinMax());
+        auto metrics = builder_->Build(DataType::INT64, stats);
+        ASSERT_NE(metrics, nullptr);
+        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
+        EXPECT_FALSE(
+            metrics->CanSkipUnaryRange(OpType::GreaterThan, int64_t(1000)));
+        EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int64_t(7)));
+    }
+    {
+        auto stats = make_empty_stats(parquet::Type::BYTE_ARRAY, "s");
+        ASSERT_FALSE(stats->HasMinMax());
+        auto metrics = builder_->Build(DataType::VARCHAR, stats);
+        ASSERT_NE(metrics, nullptr);
+        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
+        EXPECT_FALSE(
+            metrics->CanSkipUnaryRange(OpType::Equal, std::string("abc")));
+    }
+    {
+        // Defensive: a null statistics pointer must also yield NONE, not crash.
+        auto metrics = builder_->Build(
+            DataType::INT64, std::shared_ptr<parquet::Statistics>(nullptr));
+        ASSERT_NE(metrics, nullptr);
+        EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
+    }
+}
+
+TEST_F(SkipIndexStatsBuilderTest,
+       BuildFromStatisticsWithWrongPhysicalTypeFallsBackToNone) {
+    auto node = parquet::schema::PrimitiveNode::Make(
+        "i64", parquet::Repetition::OPTIONAL, parquet::Type::INT64);
+    auto descriptor = std::make_shared<parquet::ColumnDescriptor>(
+        node, /*max_definition_level=*/1, /*max_repetition_level=*/0);
+    auto int64_stats = parquet::MakeStatistics<parquet::Int64Type>(
+        descriptor.get(), arrow::default_memory_pool());
+    const int64_t values[] = {10, 20};
+    int64_stats->Update(values, /*num_values=*/2, /*null_count=*/0);
+    ASSERT_TRUE(int64_stats->HasMinMax());
+
+    // INT32 expects parquet::Int32Type. A malformed/mismatched footer must not
+    // be dereferenced as that type or produce a bound that can drop rows.
+    auto metrics = builder_->Build(DataType::INT32, int64_stats);
+    ASSERT_NE(metrics, nullptr);
+    EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
+    EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int32_t(15)));
+}
+
+// A minimal FieldChunkMetricsProvider standing in for one immutable column
+// generation: it answers chunk 0 with its own bounds and fails open elsewhere.
+namespace {
+class SingleCellMetricsProvider : public milvus::FieldChunkMetricsProvider {
+ public:
+    SingleCellMetricsProvider(int64_t lower, int64_t upper)
+        : metrics_(lower, upper, nullptr) {
+    }
+
+    const FieldChunkMetrics*
+    GetSkipMetrics(int64_t chunk_id) const override {
+        return chunk_id == 0 ? &metrics_ : nullptr;
+    }
+
+ private:
+    IntFieldChunkMetrics<int64_t> metrics_;
+};
+}  // namespace
+
+TEST_F(SkipIndexStatsBuilderTest,
+       ColumnMetricsViewsKeepGenerationsIsolatedAndFailOpen) {
+    const FieldId field_id(101);
+    auto make_view = [&](int64_t lower, int64_t upper) {
+        auto skip_index = std::make_shared<SkipIndex>();
+        skip_index->LoadSkipSource(
+            field_id,
+            std::make_shared<SingleCellMetricsProvider>(lower, upper));
+        return skip_index;
+    };
+
+    auto old_generation = make_view(0, 10);
+    auto new_generation = make_view(100, 110);
+
+    // Each read view owns its resolver generation. Replacing the column cannot
+    // mutate a previously captured view, and a missing cell remains readable.
+    EXPECT_TRUE(old_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 0, OpType::Equal, int64_t(105)));
+    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 0, OpType::Equal, int64_t(105)));
+    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 1, OpType::Equal, int64_t(105)))
+        << "out-of-range chunk ids must conservatively remain readable";
 }

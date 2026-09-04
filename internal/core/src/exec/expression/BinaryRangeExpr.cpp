@@ -593,23 +593,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            if (lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, true);
-            } else if (lower_inclusive && !upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, false);
-            } else if (!lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, true);
-            } else {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, false);
-            }
-        };
+    auto skip_index_func = [val1, val2, lower_inclusive, upper_inclusive](
+                               const SkipIndex& skip_index,
+                               FieldId field_id,
+                               int64_t chunk_id) {
+        return skip_index.CanSkipBinaryRange<T>(
+            field_id, chunk_id, val1, val2, lower_inclusive, upper_inclusive);
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         if (expr_->column_.element_level_) {
@@ -1335,24 +1325,43 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
         std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
                            int64_t,
                            U>;
-    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
-    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
     auto skip_index = segment_->GetSkipIndex();
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipBinaryRange(field_id_,
-                                                   i,
-                                                   lower_val,
-                                                   upper_val,
-                                                   expr_->lower_inclusive_,
-                                                   expr_->upper_inclusive_);
-        if (!skip) {
+    auto prefetch = [&](const auto& lower_val, const auto& upper_val) {
+        using ValueType = std::decay_t<decltype(lower_val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
+            auto skip = skip_index->CanSkipBinaryRange<ValueType>(
+                field_id_,
+                i,
+                lower_val,
+                upper_val,
+                expr_->lower_inclusive_,
+                expr_->upper_inclusive_);
+            if (skip &&
+                !SkippedChunkNeedsValidity(is_nullable_, null_rejecting_)) {
+                continue;
+            }
             chunks_may_hit.push_back(i);
         }
-    }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
+    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Skip metrics use the field's physical type. Keep literals wide for
+        // the bounds check, then narrow only when they are representable;
+        // otherwise conservatively prefetch every cell.
+        if (query::out_of_range<T>(lower_val) ||
+            query::out_of_range<T>(upper_val)) {
+            SegmentExpr::PrefetchRawData(field_id_);
+            return;
+        }
+        prefetch(static_cast<T>(lower_val), static_cast<T>(upper_val));
+    } else {
+        prefetch(lower_val, upper_val);
+    }
 }
 }  // namespace exec
 }  // namespace milvus

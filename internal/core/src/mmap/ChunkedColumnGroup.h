@@ -183,6 +183,22 @@ class ChunkedColumnGroup {
         return meta->num_fields_;
     }
 
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(FieldId field_id, int64_t chunk_id) const {
+        if (chunk_id < 0 || static_cast<size_t>(chunk_id) >= num_chunks_) {
+            return nullptr;
+        }
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        auto it = meta->skip_metrics_by_field_.find(field_id.get());
+        if (it == meta->skip_metrics_by_field_.end() ||
+            static_cast<size_t>(chunk_id) >= it->second.size()) {
+            return nullptr;
+        }
+        return it->second[chunk_id].get();
+    }
+
     size_t
     memory_size() const {
         auto meta =
@@ -221,6 +237,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     ~ProxyChunkColumn() override {
         CancelWarmup();
+    }
+
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t chunk_id) const override {
+        return group_->GetSkipMetrics(field_id_, chunk_id);
     }
 
     bool

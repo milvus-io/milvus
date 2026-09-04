@@ -77,7 +77,9 @@ GroupChunkTranslator::GroupChunkTranslator(
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
     const std::string& warmup_policy,
-    MmapChunkWritebackMode writeback_mode)
+    MmapChunkWritebackMode writeback_mode,
+    bool force_one_row_group_per_cell,
+    SkipMetricsByField skip_metrics_by_field)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -168,8 +170,16 @@ GroupChunkTranslator::GroupChunkTranslator(
     // runtime-configurable target cell byte size so avg cell size ≈ target.
     const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     meta_.total_row_groups_ = total_row_groups;
+    // force_one_row_group_per_cell is the caller's single snapshot of the
+    // stats-skip-index flag for this load. When set, force exactly one row
+    // group per cell so the per-row-group footer statistics that back the skip
+    // index are 1:1 with cache cells: the skip check (which judges per cell)
+    // needs no cross-row-group aggregation and cannot produce a false negative.
+    // Trade-off: while enabled, cells are as fine as one row group.
     const size_t rgs_per_cell =
-        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
+        force_one_row_group_per_cell
+            ? 1
+            : ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
     size_t global_rg_offset = 0;
     for (const auto& rg_meta : row_group_meta_list_) {
         size_t file_rg_count = rg_meta.size();
@@ -184,6 +194,28 @@ GroupChunkTranslator::GroupChunkTranslator(
     }
 
     size_t num_cells = meta_.cell_row_group_ranges_.size();
+
+    // Publish footer metrics only when their positional layout exactly matches
+    // the group's cells. A mismatch disables pruning for the whole field; using
+    // a partial vector could associate bounds with the wrong cell and create a
+    // false negative.
+    for (auto it = skip_metrics_by_field.begin();
+         it != skip_metrics_by_field.end();) {
+        if (it->second.size() != num_cells) {
+            LOG_WARN(
+                "[StorageV2] skip metrics/cell count mismatch for translator "
+                "{}, field {}: {} metrics vs {} cells; disabling footer "
+                "pruning for this field",
+                key_,
+                it->first,
+                it->second.size(),
+                num_cells);
+            it = skip_metrics_by_field.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    meta_.skip_metrics_by_field_ = std::move(skip_metrics_by_field);
 
     // Merge row groups into group chunks(cache cells)
     meta_.num_rows_until_chunk_.reserve(num_cells + 1);
