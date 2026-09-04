@@ -185,7 +185,7 @@ PhyTermFilterExpr::CanSkipSegment() {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index->CanSkipBinaryRange<T>(
-                    op_ctx_, field_id_, i, min, max, true, true)) {
+                    field_id_, i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -1116,8 +1116,25 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             cached_str_set_elem_ =
                 dynamic_cast<SetElement<std::string>*>(arg_set_.get());
         }
-        // Cache element values for skip_index (avoids per-chunk copy)
-        cached_skip_elements_ = GetElementValues<T>(arg_set_);
+        // Cache element values for skip_index (avoids per-chunk copy). For a
+        // string column the scan template T is std::string_view and arg_set_ is
+        // a Flat/Set element of owned std::string, from which
+        // GetElementValues<string_view> extracts nothing (unrelated template
+        // types) -- which left the sealed VARCHAR IN skip inert. Build owned
+        // std::string skip values straight from the IN list instead, and decide
+        // via CanSkipInQuery<std::string> (see skip_index_func); the prefetch
+        // does the same so scan and prefetch stay decision-identical.
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            std::vector<std::string> skip_vals;
+            skip_vals.reserve(vals.size());
+            for (const auto& v : vals) {
+                skip_vals.emplace_back(v);
+            }
+            cached_skip_elements_ = std::move(skip_vals);
+        } else {
+            cached_skip_elements_ = GetElementValues<T>(arg_set_);
+        }
         arg_inited_ = true;
     }
 
@@ -1193,16 +1210,23 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
-            if (elements == nullptr) {
-                return false;
-            }
-            return skip_index.CanSkipInQuery<T>(
-                op_ctx, field_id, chunk_id, *elements);
-        };
+    // String columns decide via std::string (owned IN values), even though the
+    // scan template T is std::string_view, so the cached list is non-empty and
+    // the decision matches the prefetch (which also uses std::string).
+    using SkipT = std::conditional_t<std::is_same_v<T, std::string> ||
+                                         std::is_same_v<T, std::string_view>,
+                                     std::string,
+                                     T>;
+    auto skip_index_func = [&cached_elements = cached_skip_elements_](
+                               const SkipIndex& skip_index,
+                               FieldId field_id,
+                               int64_t chunk_id) {
+        auto* elements = std::any_cast<std::vector<SkipT>>(&cached_elements);
+        if (elements == nullptr) {
+            return false;
+        }
+        return skip_index.CanSkipInQuery<SkipT>(field_id, chunk_id, *elements);
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1350,14 +1374,11 @@ PhyTermFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                PrefetchRawData<std::string>();
-            } else {
-                PrefetchRawData<std::string_view>();
-            }
+            // Decide via owned std::string, matching the scan's skip_index_func
+            // (which also uses std::string for string columns), so a cell
+            // excluded from prefetch here is likewise skipped by the scan --
+            // otherwise the scan would fetch it back and no IO would be saved.
+            PrefetchRawData<std::string>();
             break;
         default:
             SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
@@ -1380,9 +1401,10 @@ PhyTermFilterExpr::PrefetchRawData() {
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
         auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
-        if (!skip) {
-            chunks_may_hit.push_back(i);
+        if (skip && !SkippedChunkNeedsValidity(is_nullable_, null_rejecting_)) {
+            continue;
         }
+        chunks_may_hit.push_back(i);
     }
 
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);

@@ -61,7 +61,6 @@
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "parquet/statistics.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
 #include "query/PlanImpl.h"
@@ -632,24 +631,14 @@ class SegmentInternalInterface : public SegmentInterface {
         return false;
     }
 
+    // Consistency contract for sealed segments: a caller that combines this
+    // snapshot with chunk layout/data access while Reopen may run must hold a
+    // SegmentReadLease for the whole operation. The production C API acquires
+    // that request lease before expression execution; publication then waits
+    // for the lease to drain, so independently captured skip-index and column
+    // snapshots cannot come from different generations.
     std::shared_ptr<const SkipIndex>
     GetSkipIndex() const;
-
-    void
-    LoadSkipIndex(FieldId field_id,
-                  DataType data_type,
-                  std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
-    }
-
-    void
-    LoadSkipIndexFromStatistics(
-        FieldId field_id,
-        DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_->LoadSkipFromStatistics(
-            get_segment_id(), field_id, data_type, statistics);
-    }
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;

@@ -25,13 +25,26 @@
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
+#include "index/FieldChunkMetricsProvider.h"
 namespace milvus {
+
+namespace index {
+class FieldChunkMetrics;
+}  // namespace index
 
 using namespace milvus::cachinglayer;
 
-class ChunkedColumnInterface {
+class ChunkedColumnInterface : public FieldChunkMetricsProvider {
  public:
-    virtual ~ChunkedColumnInterface() = default;
+    ~ChunkedColumnInterface() override = default;
+
+    // Optional per-cell skip metrics owned by this column's generation.
+    // Storage V2 proxy columns override this; ordinary V1 columns return
+    // nullptr and fail open (never skip).
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t) const override {
+        return nullptr;
+    }
 
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.

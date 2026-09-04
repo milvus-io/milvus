@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -26,7 +28,19 @@
 #include "cachinglayer/Translator.h"
 #include "segcore/CacheMetricAttribution.h"
 
+namespace milvus::index {
+class FieldChunkMetrics;
+}  // namespace milvus::index
+
 namespace milvus::segcore::storagev2translator {
+
+// Positional, deep-owning per-cell skip metrics. For Storage V2, the loader
+// keeps row groups and cells 1:1 whenever this map is non-empty, so index i is
+// both row group i and cache cell i. A missing/unsupported statistic is
+// represented by NoneFieldChunkMetrics and therefore always fails open.
+using SkipMetricsList =
+    std::vector<std::shared_ptr<const index::FieldChunkMetrics>>;
+using SkipMetricsByField = std::map<int64_t, SkipMetricsList>;
 
 // Target average byte size per storage-v2 cache cell. Parquet row groups
 // are packed into cells so that `rgs_per_cell * avg_row_group_size ≈ target`.
@@ -90,6 +104,10 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
     // Per-cell [start, end) row group range (global indices).
     // Cells never span files — each cell's row groups come from the same file.
     std::vector<std::pair<size_t, size_t>> cell_row_group_ranges_;
+    // Footer-derived metrics belong to the same immutable column-group
+    // generation as the row-group/cell mapping they describe. Keeping them in
+    // GroupCTMeta avoids a second segment-level field->metrics lifecycle.
+    SkipMetricsByField skip_metrics_by_field_;
 
     GroupCTMeta(size_t num_fields,
                 milvus::cachinglayer::StorageType storage_type,

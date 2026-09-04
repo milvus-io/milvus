@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -36,7 +37,6 @@
 #include "arrow/type_fwd.h"
 #include "cachinglayer/Utils.h"
 #include "common/BloomFilter.h"
-#include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
 #include "index/Utils.h"
@@ -201,11 +201,37 @@ class FieldChunkMetrics {
         cell_size_ = cell_size;
     }
 
+    enum class NullState : uint8_t {
+        Unknown,
+        NoNulls,
+        SomeNulls,
+        AllNulls,
+    };
+
+    NullState
+    GetNullState() const {
+        return null_state_;
+    }
+
+    void
+    SetNullState(NullState null_state) {
+        null_state_ = null_state;
+    }
+
     virtual nlohmann::json
     ToJson() const = 0;
 
  protected:
+    template <typename MetricsType>
+    std::unique_ptr<FieldChunkMetrics>
+    CloneWithMetadata(std::unique_ptr<MetricsType> clone) const {
+        clone->SetNullState(null_state_);
+        clone->SetCellSize(cell_size_);
+        return clone;
+    }
+
     bool has_value_{false};
+    NullState null_state_{NullState::Unknown};
     cachinglayer::ResourceUsage cell_size_ = {0, 0};
 };
 
@@ -216,7 +242,7 @@ class NoneFieldChunkMetrics : public FieldChunkMetrics {
 
     std::unique_ptr<FieldChunkMetrics>
     Clone() const override {
-        return std::make_unique<NoneFieldChunkMetrics>();
+        return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
     }
 
     FieldChunkMetricsType
@@ -261,10 +287,10 @@ class BooleanFieldChunkMetrics : public FieldChunkMetrics {
     std::unique_ptr<FieldChunkMetrics>
     Clone() const override {
         if (!this->has_value_) {
-            return std::make_unique<NoneFieldChunkMetrics>();
+            return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
         }
-        return std::make_unique<BooleanFieldChunkMetrics>(has_true_,
-                                                          has_false_);
+        return CloneWithMetadata(
+            std::make_unique<BooleanFieldChunkMetrics>(has_true_, has_false_));
     }
 
     bool
@@ -280,19 +306,23 @@ class BooleanFieldChunkMetrics : public FieldChunkMetrics {
         return false;
     }
 
+    // `values` is the IN list itself — each entry is one queried bool value,
+    // as produced by SetElement<bool>::GetElements() and the TermExpr
+    // prefetch ({true}, {false} or {true, false} after dedup). The chunk may
+    // be skipped only when NONE of the listed values can be present in it;
+    // any unexpected entry degrades to "cannot skip" (conservative).
     bool
     CanSkipIn(const std::vector<Metrics>& values) const override {
-        if (!this->has_value_ || values.size() != 2) {
+        if (!this->has_value_ || values.empty()) {
             return false;
         }
-        if (!std::holds_alternative<bool>(values[0]) ||
-            !std::holds_alternative<bool>(values[1])) {
-            return false;
-        }
-        bool contains_true = std::get<bool>(values[0]);
-        bool contains_false = std::get<bool>(values[1]);
-        if ((contains_true && has_true_) || (contains_false && has_false_)) {
-            return false;
+        for (const auto& v : values) {
+            if (!std::holds_alternative<bool>(v)) {
+                return false;
+            }
+            if (std::get<bool>(v) ? has_true_ : has_false_) {
+                return false;
+            }
         }
         return true;
     }
@@ -328,9 +358,10 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
     std::unique_ptr<FieldChunkMetrics>
     Clone() const override {
         if (!this->has_value_) {
-            return std::make_unique<NoneFieldChunkMetrics>();
+            return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
         }
-        return std::make_unique<FloatFieldChunkMetrics<T>>(min_, max_);
+        return CloneWithMetadata(
+            std::make_unique<FloatFieldChunkMetrics<T>>(min_, max_));
     }
 
     bool
@@ -424,10 +455,10 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
     std::unique_ptr<FieldChunkMetrics>
     Clone() const override {
         if (!this->has_value_) {
-            return std::make_unique<NoneFieldChunkMetrics>();
+            return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
         }
-        return std::make_unique<IntFieldChunkMetrics>(
-            min_, max_, bloom_filter_);
+        return CloneWithMetadata(
+            std::make_unique<IntFieldChunkMetrics>(min_, max_, bloom_filter_));
     }
 
     FieldChunkMetricsType
@@ -549,10 +580,10 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
     std::unique_ptr<FieldChunkMetrics>
     Clone() const override {
         if (!this->has_value_) {
-            return std::make_unique<NoneFieldChunkMetrics>();
+            return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
         }
-        return std::make_unique<StringFieldChunkMetrics>(
-            min_, max_, bloom_filter_, ngram_bloom_filter_);
+        return CloneWithMetadata(std::make_unique<StringFieldChunkMetrics>(
+            min_, max_, bloom_filter_, ngram_bloom_filter_));
     }
 
     FieldChunkMetricsType
@@ -628,12 +659,21 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
             string_values.push_back(*sv);
         }
         if (!bloom_filter_) {
-            std::string_view min, max;
-            for (auto v : string_values) {
-                if (min.empty() || v < min) {
+            // Seed the IN-list hull from the first value and fold in the rest.
+            // Do NOT use string_view::empty() as an "unset" sentinel here: the
+            // empty string "" is a legitimate queried value, so seeding with a
+            // default-constructed (empty) view would let "" masquerade as the
+            // current min/max and collapse the hull (e.g. IN("", "zzz") would
+            // otherwise reduce to ["zzz","zzz"] and wrongly skip a chunk that
+            // spans ["", "b"]). string_values is guaranteed non-empty here.
+            std::string_view min = string_values[0];
+            std::string_view max = string_values[0];
+            for (size_t i = 1; i < string_values.size(); ++i) {
+                const auto v = string_values[i];
+                if (v < min) {
                     min = v;
                 }
-                if (max.empty() || v > max) {
+                if (v > max) {
                     max = v;
                 }
             }
@@ -732,10 +772,18 @@ class SkipIndexStatsBuilder {
           int col_idx,
           arrow::Type::type data_type) const;
 
-    std::unique_ptr<FieldChunkMetrics>
-    Build(DataType data_type, const Chunk* chunk) const;
-
  private:
+    static FieldChunkMetrics::NullState
+    NullStateFromCounts(int64_t total_rows, int64_t null_count) {
+        if (null_count == 0) {
+            return FieldChunkMetrics::NullState::NoNulls;
+        }
+        if (null_count == total_rows) {
+            return FieldChunkMetrics::NullState::AllNulls;
+        }
+        return FieldChunkMetrics::NullState::SomeNulls;
+    }
+
     template <typename T>
     struct metricsInfo {
         int64_t total_rows_ = 0;
@@ -752,28 +800,53 @@ class SkipIndexStatsBuilder {
     };
 
     template <typename ParquetType, typename T>
-    metricsInfo<T>
+    std::optional<metricsInfo<T>>
     ProcessFieldMetrics(
         const std::shared_ptr<parquet::Statistics>& statistics) const {
         auto typed_statistics =
             std::dynamic_pointer_cast<parquet::TypedStatistics<ParquetType>>(
                 statistics);
+        if (typed_statistics == nullptr) {
+            // The statistics' physical type does not match what the field's
+            // data type requires; the caller degrades to NONE metrics.
+            return std::nullopt;
+        }
         MetricsDataType<T> min;
         MetricsDataType<T> max;
         if constexpr (std::is_same_v<T, std::string>) {
             min = std::string_view(typed_statistics->min());
             max = std::string_view(typed_statistics->max());
         } else {
-            min = static_cast<T>(typed_statistics->min());
-            max = static_cast<T>(typed_statistics->max());
+            using SourceType = ParquetType::c_type;
+            const auto min_value = typed_statistics->min();
+            const auto max_value = typed_statistics->max();
+            // INT8/INT16 are stored as INT32 physical columns in parquet, so
+            // their min/max arrive as int32_t. If the footer is corrupt or was
+            // written without the Int(8)/Int(16) annotation, a value can fall
+            // outside T's range; the narrowing cast below would silently wrap
+            // (e.g. static_cast<int8_t>(300) == 44) and turn a valid range into
+            // a false-prune. Degrade to NONE metrics instead of narrowing an
+            // out-of-range bound.
+            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+                if (min_value < static_cast<SourceType>(
+                                    std::numeric_limits<T>::lowest()) ||
+                    max_value > static_cast<SourceType>(
+                                    std::numeric_limits<T>::max())) {
+                    return std::nullopt;
+                }
+            }
+            min = static_cast<T>(min_value);
+            max = static_cast<T>(max_value);
         }
-        return {typed_statistics->num_values(),
-                typed_statistics->null_count(),
-                min,
-                max,
-                false,
-                false,
-                {}};
+        const auto null_count = typed_statistics->HasNullCount()
+                                    ? typed_statistics->null_count()
+                                    : int64_t{0};
+        const auto total_rows =
+            typed_statistics->HasNullCount()
+                ? typed_statistics->num_values() + null_count
+                : typed_statistics->num_values();
+        return metricsInfo<T>{
+            total_rows, null_count, min, max, false, false, {}};
     }
 
     template <typename T, typename ArrayType>
@@ -890,120 +963,30 @@ class SkipIndexStatsBuilder {
     }
 
     template <typename T>
-    metricsInfo<T>
-    ProcessFieldMetrics(const T* data,
-                        ValidityView validity,
-                        int64_t count) const {
-        bool has_first_valid = false;
-        T min{}, max{};
-        int64_t total_rows = count;
-        int64_t null_count = 0;
-        bool contains_true = false;
-        bool contains_false = false;
-        ankerl::unordered_dense::set<T> unique_values;
-
-        for (int64_t i = 0; i < count; i++) {
-            T value = data[i];
-            if (validity && !validity[i]) {
-                null_count++;
-                continue;
-            }
-            if constexpr (std::is_same_v<T, bool>) {
-                if (value) {
-                    contains_true = true;
-                } else {
-                    contains_false = true;
-                }
-                continue;
-            }
-            if (!has_first_valid) {
-                min = value;
-                max = value;
-                has_first_valid = true;
-            } else {
-                if (value < min) {
-                    min = value;
-                }
-                if (value > max) {
-                    max = value;
-                }
-            }
-            if (!enable_bloom_filter_) {
-                continue;
-            }
-            if constexpr (std::is_integral_v<T>) {
-                unique_values.insert(value);
-            }
-        }
-        return {total_rows,
-                null_count,
-                min,
-                max,
-                contains_true,
-                contains_false,
-                std::move(unique_values)};
-    }
-
-    metricsInfo<std::string>
-    ProcessStringFieldMetrics(const StringChunk* chunk) const {
-        // all captured by reference
-        bool has_first_valid = false;
-        int64_t total_rows = chunk->RowNums();
-        int64_t null_count = 0;
-        std::string_view min;
-        std::string_view max;
-        ankerl::unordered_dense::set<std::string_view> unique_values;
-        ankerl::unordered_dense::set<std::string> ngram_values;
-
-        for (int64_t i = 0; i < total_rows; ++i) {
-            bool is_valid = chunk->isValid(i);
-            if (!is_valid) {
-                null_count++;
-                continue;
-            }
-            auto value = chunk->operator[](i);
-            if (!has_first_valid) {
-                min = value;
-                max = value;
-                has_first_valid = true;
-            } else {
-                if (value < min) {
-                    min = value;
-                }
-                if (value > max) {
-                    max = value;
-                }
-            }
-            if (!enable_bloom_filter_ ||
-                unique_values.find(value) != unique_values.end()) {
-                continue;
-            }
-            unique_values.insert(value);
-            ExtractNgrams(
-                ngram_values, value, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
-        }
-        return {total_rows,
-                null_count,
-                min,
-                max,
-                false,
-                false,
-                std::move(unique_values),
-                std::move(ngram_values)};
+    std::unique_ptr<FieldChunkMetrics>
+    WithNullState(const metricsInfo<T>& info,
+                  std::unique_ptr<FieldChunkMetrics> metrics) const {
+        metrics->SetNullState(
+            NullStateFromCounts(info.total_rows_, info.null_count_));
+        return metrics;
     }
 
     template <typename T>
     std::unique_ptr<FieldChunkMetrics>
     LoadMetrics(const metricsInfo<T>& info) const {
         if (info.total_rows_ - info.null_count_ == 0) {
-            return std::make_unique<NoneFieldChunkMetrics>();
+            return WithNullState(info,
+                                 std::make_unique<NoneFieldChunkMetrics>());
         }
         if constexpr (std::is_same_v<T, bool>) {
             if (info.contains_true_ && info.contains_false_) {
-                return std::make_unique<NoneFieldChunkMetrics>();
+                return WithNullState(info,
+                                     std::make_unique<NoneFieldChunkMetrics>());
             }
-            return std::make_unique<BooleanFieldChunkMetrics>(
-                info.contains_true_, info.contains_false_);
+            return WithNullState(
+                info,
+                std::make_unique<BooleanFieldChunkMetrics>(
+                    info.contains_true_, info.contains_false_));
         } else {
             T min, max;
             if constexpr (std::is_same_v<T, std::string>) {
@@ -1014,15 +997,20 @@ class SkipIndexStatsBuilder {
                 max = info.max_;
             }
             if constexpr (std::is_floating_point_v<T>) {
-                return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
+                return WithNullState(
+                    info,
+                    std::make_unique<FloatFieldChunkMetrics<T>>(min, max));
             }
             if (!enable_bloom_filter_) {
                 if constexpr (std::is_same_v<T, std::string>) {
-                    return std::make_unique<StringFieldChunkMetrics>(
-                        min, max, nullptr, nullptr);
+                    return WithNullState(
+                        info,
+                        std::make_unique<StringFieldChunkMetrics>(
+                            min, max, nullptr, nullptr));
                 }
-                return std::make_unique<IntFieldChunkMetrics<T>>(
-                    min, max, nullptr);
+                return WithNullState(info,
+                                     std::make_unique<IntFieldChunkMetrics<T>>(
+                                         min, max, nullptr));
             }
             BloomFilterPtr bloom_filter =
                 NewBloomFilterWithType(info.unique_values_.size(),
@@ -1033,8 +1021,10 @@ class SkipIndexStatsBuilder {
                     bloom_filter->Add(val);
                 }
                 if (info.ngram_values_.empty()) {
-                    return std::make_unique<StringFieldChunkMetrics>(
-                        min, max, std::move(bloom_filter), nullptr);
+                    return WithNullState(
+                        info,
+                        std::make_unique<StringFieldChunkMetrics>(
+                            min, max, std::move(bloom_filter), nullptr));
                 }
                 BloomFilterPtr ngram_bloom_filter = NewBloomFilterWithType(
                     info.ngram_values_.size(),
@@ -1043,19 +1033,21 @@ class SkipIndexStatsBuilder {
                 for (const auto& ngram : info.ngram_values_) {
                     ngram_bloom_filter->Add(std::string_view(ngram));
                 }
-                return std::make_unique<StringFieldChunkMetrics>(
-                    min,
-                    max,
-                    std::move(bloom_filter),
-                    std::move(ngram_bloom_filter));
+                return WithNullState(info,
+                                     std::make_unique<StringFieldChunkMetrics>(
+                                         min,
+                                         max,
+                                         std::move(bloom_filter),
+                                         std::move(ngram_bloom_filter)));
             }
 
             for (const auto& val : info.unique_values_) {
                 bloom_filter->Add(reinterpret_cast<const uint8_t*>(&val),
                                   sizeof(val));
             }
-            return std::make_unique<IntFieldChunkMetrics<T>>(
-                min, max, std::move(bloom_filter));
+            return WithNullState(info,
+                                 std::make_unique<IntFieldChunkMetrics<T>>(
+                                     min, max, std::move(bloom_filter)));
         }
     }
 

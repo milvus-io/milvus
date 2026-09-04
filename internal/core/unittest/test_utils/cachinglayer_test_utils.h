@@ -118,7 +118,9 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     TestGroupChunkTranslator(size_t num_fields,
                              std::vector<int64_t> num_rows_per_chunk,
                              std::string key,
-                             std::vector<std::unique_ptr<GroupChunk>>&& chunks)
+                             std::vector<std::unique_ptr<GroupChunk>>&& chunks,
+                             segcore::storagev2translator::SkipMetricsByField
+                                 skip_metrics_by_field = {})
         : Translator<milvus::GroupChunk>(),
           num_cells_(num_rows_per_chunk.size()),
           chunks_(std::move(chunks)),
@@ -135,6 +137,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
             meta_.num_rows_until_chunk_.push_back(
                 meta_.num_rows_until_chunk_[i] + num_rows_per_chunk[i]);
         }
+        meta_.skip_metrics_by_field_ = std::move(skip_metrics_by_field);
         key_ = key;
     }
     ~TestGroupChunkTranslator() override {

@@ -59,6 +59,15 @@ enum class ExprExecPath {
     JsonStats,    // segment_->GetJsonStats
 };
 
+// SkipIndex can rule out every non-null value in a chunk, but SQL NULL still
+// has to remain UNKNOWN when result validity is observable (for example below
+// NOT). Such a chunk therefore still has to be materialized for its validity
+// bitmap; every other case is fetch-free.
+inline constexpr bool
+SkippedChunkNeedsValidity(bool is_nullable, bool null_rejecting) {
+    return is_nullable && !null_rejecting;
+}
+
 inline std::vector<PinWrapper<const index::IndexBase*>>
 PinIndex(milvus::OpContext* op_ctx,
          const segcore::SegmentInternalInterface* segment,
@@ -353,6 +362,7 @@ class SegmentExpr : public Expr {
         auto schema = segment_->get_schema_snapshot();
         auto& field_meta = (*schema)[field_id_];
         field_type_ = field_meta.get_data_type();
+        is_nullable_ = field_meta.is_nullable();
 
         if (schema->get_primary_field_id().has_value() &&
             schema->get_primary_field_id().value() == field_id_ &&
@@ -384,6 +394,18 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    // A null-rejecting consumer (top-level filter, or AND/OR above -- see
+    // Expr::MarkNullRejecting) folds a NULL row into the excluded set and never
+    // distinguishes NULL from FALSE, so result validity is never observed. When
+    // our output feeds such a consumer, a chunk skipped by SkipIndex needs no
+    // validity even for a nullable column, which lets it skip the validity
+    // fetch (and thus materializing the row group) entirely. As a leaf we only
+    // capture the mark; we do not propagate it.
+    void
+    MarkNullRejecting() override {
+        null_rejecting_ = true;
     }
 
     // Pin the scalar index cell. Called by DetermineExecPath() only after the
@@ -924,6 +946,32 @@ class SegmentExpr : public Expr {
                     ++input_pos;
                 }
 
+                // Decide before fetching. Offset input is used by the
+                // iterative-filter path, so fetching the run first would
+                // materialize a cell that the skip index already ruled out. A
+                // nullable cell is still fetched when its validity remains
+                // observable, matching the sequential path.
+                const bool skip =
+                    skip_func &&
+                    skip_func(*skip_index, field_id_, run_chunk_id);
+                if (skip &&
+                    !SkippedChunkNeedsValidity(is_nullable_, null_rejecting_)) {
+                    // Drive the callback once per row so callbacks with a
+                    // batch-local cursor remain aligned.
+                    for (size_t i = 0; i < batch_offsets.size(); ++i) {
+                        evaluate_batch.template operator()<FilterType::random>(
+                            nullptr,
+                            ValidityView{},
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
+                        ++processed_size;
+                    }
+                    continue;
+                }
+
                 auto pw = segment_->chunk_views_by_offsets<ViewType>(
                     op_ctx_, field_id_, run_chunk_id, batch_offsets);
                 const auto& [data_vec, valid_data] = pw.get();
@@ -932,9 +980,6 @@ class SegmentExpr : public Expr {
                            data_vec.size(),
                            batch_offsets.size());
 
-                const bool skip =
-                    skip_func &&
-                    skip_func(*skip_index, field_id_, run_chunk_id);
                 for (size_t i = 0; i < batch_offsets.size(); ++i) {
                     const auto validity =
                         valid_data.empty()
@@ -1040,18 +1085,28 @@ class SegmentExpr : public Expr {
                 auto [chunk_id, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
                 if (chunk_id != cached_chunk_id) {
-                    pw.emplace(
-                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
-                    auto chunk = pw->get();
-                    chunk_base = chunk.data();
-                    chunk_validity = chunk.validity();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
-                    // chunk instead of once per row.
+                    // chunk instead of once per row, and before pinning. A
+                    // nullable cell is still fetched when its validity remains
+                    // observable, matching the sequential path.
                     cached_skip = skip_func &&
                                   skip_func(*skip_index, field_id_, chunk_id);
+                    if (!cached_skip || SkippedChunkNeedsValidity(
+                                            is_nullable_, null_rejecting_)) {
+                        pw.emplace(segment_->chunk_data<T>(
+                            op_ctx_, field_id_, chunk_id));
+                        auto chunk = pw->get();
+                        chunk_base = chunk.data();
+                        chunk_validity = chunk.validity();
+                    } else {
+                        pw.reset();
+                        chunk_base = nullptr;
+                        chunk_validity = ValidityView{};
+                    }
                     cached_chunk_id = chunk_id;
                 }
-                const T* data = chunk_base + chunk_offset;
+                const T* data =
+                    chunk_base != nullptr ? chunk_base + chunk_offset : nullptr;
                 const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
@@ -1762,11 +1817,22 @@ class SegmentExpr : public Expr {
                    "chunked segment data processing requires a sealed segment");
         int64_t processed_size = 0;
 
-        // prefetch chunks to reduce cache miss latency
+        // Prefetch chunks to reduce cache miss latency, minus the ones the scan
+        // can avoid materializing. A skipped nullable chunk stays in this list
+        // when its validity is observable. The driver-level prefetch only runs
+        // when common.enableDriverPrefetch is on, so this fallback must use the
+        // same materialization decision as the scan below.
         if (!prefetched_) {
+            auto skip_index = segment_->GetSkipIndex();
             std::vector<int64_t> pf_chunk_ids;
             pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
             for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+                const bool skip =
+                    skip_func && skip_func(*skip_index, field_id_, i);
+                if (skip &&
+                    !SkippedChunkNeedsValidity(is_nullable_, null_rejecting_)) {
+                    continue;
+                }
                 pf_chunk_ids.push_back(i);
             }
             segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
@@ -1857,29 +1923,43 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped by SkipIndex.
-                // We still need to:
-                // 1. Apply valid_data to handle nullable fields
+                // Chunk is skipped by SkipIndex: it cannot contain a matching
+                // row, so its whole result is all-false. We must still:
+                // 1. For nullable columns whose validity is observed, apply
+                //    valid_data so valid_res is nulled where the row is null
+                //    (three-valued logic / NOT correctness).
                 // 2. Call func with nullptr to update internal cursors
-                //    (e.g., processed_cursor for bitmap_input indexing)
-                if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView> ||
-                              std::is_same_v<T, ArrayValueView> ||
-                              std::is_same_v<T, VectorArrayView>) {
-                    auto pw = segment_->get_batch_views<T>(
-                        op_ctx_, field_id_, i, data_pos, size);
-                    ApplyValidData(pw.get().second,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
-                } else {
-                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    ApplyValidData(chunk.validity().Subview(data_pos),
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
+                //    (e.g., processed_cursor for bitmap_input indexing).
+                // For a non-nullable column valid_data would be null and
+                // ApplyValidData a no-op, so we skip pinning/materializing the
+                // chunk entirely -- this is what lets a skipped cell avoid its
+                // page-in / decode (real IO saving, paired with the skip-aware
+                // prefetch). When the consumer is null-rejecting (no NOT above),
+                // result validity is never observed either -- min/max already
+                // excluded every non-null row and null rows are folded into the
+                // excluded set -- so a nullable chunk needs no validity here and
+                // we skip the fetch too.
+                if (SkippedChunkNeedsValidity(is_nullable_, null_rejecting_)) {
+                    if constexpr (std::is_same_v<T, std::string_view> ||
+                                  std::is_same_v<T, Json> ||
+                                  std::is_same_v<T, ArrayView> ||
+                                  std::is_same_v<T, ArrayValueView> ||
+                                  std::is_same_v<T, VectorArrayView>) {
+                        auto pw = segment_->get_batch_views<T>(
+                            op_ctx_, field_id_, i, data_pos, size);
+                        ApplyValidData(pw.get().second,
+                                       res + processed_size,
+                                       valid_res + processed_size,
+                                       size);
+                    } else {
+                        auto pw =
+                            segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                        auto chunk = pw.get();
+                        ApplyValidData(chunk.validity().Subview(data_pos),
+                                       res + processed_size,
+                                       valid_res + processed_size,
+                                       size);
+                    }
                 }
                 // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
@@ -3017,6 +3097,14 @@ class SegmentExpr : public Expr {
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};
+    // Whether the column carries a validity (null) bitmap. When false, a chunk
+    // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
+    // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
+    bool is_nullable_{false};
+    // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
+    // this expr's output, so result validity (valid_res) is never observed and
+    // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
+    bool null_rejecting_{false};
     DataType pk_type_;
     int64_t batch_size_;
 

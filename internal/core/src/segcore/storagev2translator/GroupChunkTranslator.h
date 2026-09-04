@@ -49,7 +49,13 @@ class GroupChunkTranslator
         milvus::proto::common::LoadPriority load_priority,
         const std::string& warmup_policy,
         MmapChunkWritebackMode writeback_mode =
-            MmapChunkWritebackMode::Disabled);
+            MmapChunkWritebackMode::Disabled,
+        // When set, force exactly one parquet row group per cache cell so the
+        // per-row-group footer statistics that back the stats skip index line
+        // up 1:1 with cells (see the .cpp for why). Off by default: a group
+        // with no skippable field keeps target-size packing.
+        bool force_one_row_group_per_cell = false,
+        SkipMetricsByField skip_metrics_by_field = {});
 
     ~GroupChunkTranslator() override;
 
