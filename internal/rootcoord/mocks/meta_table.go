@@ -7,6 +7,7 @@ import (
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	model "github.com/milvus-io/milvus/internal/metastore/model"
+	rlsutil "github.com/milvus-io/milvus/internal/util/rlsutil"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -402,6 +403,196 @@ func (_c *IMetaTable_AlterRole_Call) Return(_a0 error) *IMetaTable_AlterRole_Cal
 }
 
 func (_c *IMetaTable_AlterRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ApplyAlterRLSPolicy provides a mock function with given fields: ctx, policy
+func (_m *IMetaTable) ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	ret := _m.Called(ctx, policy)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyAlterRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSPolicy) error); ok {
+		r0 = rf(ctx, policy)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ApplyAlterRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyAlterRLSPolicy'
+type IMetaTable_ApplyAlterRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// ApplyAlterRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - policy *model.RLSPolicy
+func (_e *IMetaTable_Expecter) ApplyAlterRLSPolicy(ctx interface{}, policy interface{}) *IMetaTable_ApplyAlterRLSPolicy_Call {
+	return &IMetaTable_ApplyAlterRLSPolicy_Call{Call: _e.mock.On("ApplyAlterRLSPolicy", ctx, policy)}
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPolicy_Call) Run(run func(ctx context.Context, policy *model.RLSPolicy)) *IMetaTable_ApplyAlterRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.RLSPolicy))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPolicy_Call) Return(_a0 error) *IMetaTable_ApplyAlterRLSPolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPolicy_Call) RunAndReturn(run func(context.Context, *model.RLSPolicy) error) *IMetaTable_ApplyAlterRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ApplyAlterRLSPrincipal provides a mock function with given fields: ctx, principal
+func (_m *IMetaTable) ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
+	ret := _m.Called(ctx, principal)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyAlterRLSPrincipal")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSPrincipal) error); ok {
+		r0 = rf(ctx, principal)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ApplyAlterRLSPrincipal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyAlterRLSPrincipal'
+type IMetaTable_ApplyAlterRLSPrincipal_Call struct {
+	*mock.Call
+}
+
+// ApplyAlterRLSPrincipal is a helper method to define mock.On call
+//   - ctx context.Context
+//   - principal *model.RLSPrincipal
+func (_e *IMetaTable_Expecter) ApplyAlterRLSPrincipal(ctx interface{}, principal interface{}) *IMetaTable_ApplyAlterRLSPrincipal_Call {
+	return &IMetaTable_ApplyAlterRLSPrincipal_Call{Call: _e.mock.On("ApplyAlterRLSPrincipal", ctx, principal)}
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPrincipal_Call) Run(run func(ctx context.Context, principal *model.RLSPrincipal)) *IMetaTable_ApplyAlterRLSPrincipal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.RLSPrincipal))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPrincipal_Call) Return(_a0 error) *IMetaTable_ApplyAlterRLSPrincipal_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ApplyAlterRLSPrincipal_Call) RunAndReturn(run func(context.Context, *model.RLSPrincipal) error) *IMetaTable_ApplyAlterRLSPrincipal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ApplyDropRLSPolicy provides a mock function with given fields: ctx, collectionID, policyName
+func (_m *IMetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error {
+	ret := _m.Called(ctx, collectionID, policyName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyDropRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
+		r0 = rf(ctx, collectionID, policyName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ApplyDropRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyDropRLSPolicy'
+type IMetaTable_ApplyDropRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// ApplyDropRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - policyName string
+func (_e *IMetaTable_Expecter) ApplyDropRLSPolicy(ctx interface{}, collectionID interface{}, policyName interface{}) *IMetaTable_ApplyDropRLSPolicy_Call {
+	return &IMetaTable_ApplyDropRLSPolicy_Call{Call: _e.mock.On("ApplyDropRLSPolicy", ctx, collectionID, policyName)}
+}
+
+func (_c *IMetaTable_ApplyDropRLSPolicy_Call) Run(run func(ctx context.Context, collectionID int64, policyName string)) *IMetaTable_ApplyDropRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ApplyDropRLSPolicy_Call) Return(_a0 error) *IMetaTable_ApplyDropRLSPolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ApplyDropRLSPolicy_Call) RunAndReturn(run func(context.Context, int64, string) error) *IMetaTable_ApplyDropRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ApplyDropRLSPrincipal provides a mock function with given fields: ctx, collectionID, principalName
+func (_m *IMetaTable) ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
+	ret := _m.Called(ctx, collectionID, principalName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyDropRLSPrincipal")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
+		r0 = rf(ctx, collectionID, principalName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ApplyDropRLSPrincipal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyDropRLSPrincipal'
+type IMetaTable_ApplyDropRLSPrincipal_Call struct {
+	*mock.Call
+}
+
+// ApplyDropRLSPrincipal is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - principalName string
+func (_e *IMetaTable_Expecter) ApplyDropRLSPrincipal(ctx interface{}, collectionID interface{}, principalName interface{}) *IMetaTable_ApplyDropRLSPrincipal_Call {
+	return &IMetaTable_ApplyDropRLSPrincipal_Call{Call: _e.mock.On("ApplyDropRLSPrincipal", ctx, collectionID, principalName)}
+}
+
+func (_c *IMetaTable_ApplyDropRLSPrincipal_Call) Run(run func(ctx context.Context, collectionID int64, principalName string)) *IMetaTable_ApplyDropRLSPrincipal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ApplyDropRLSPrincipal_Call) Return(_a0 error) *IMetaTable_ApplyDropRLSPrincipal_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ApplyDropRLSPrincipal_Call) RunAndReturn(run func(context.Context, int64, string) error) *IMetaTable_ApplyDropRLSPrincipal_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2743,6 +2934,65 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetRLSPrincipalTags provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPrincipalTags")
+	}
+
+	var r0 map[string]rlsutil.TagValue
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) map[string]rlsutil.TagValue); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]rlsutil.TagValue)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSPrincipalTags'
+type IMetaTable_GetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// GetRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.GetRLSPrincipalTagsRequest
+func (_e *IMetaTable_Expecter) GetRLSPrincipalTags(ctx interface{}, req interface{}) *IMetaTable_GetRLSPrincipalTags_Call {
+	return &IMetaTable_GetRLSPrincipalTags_Call{Call: _e.mock.On("GetRLSPrincipalTags", ctx, req)}
+}
+
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) Run(run func(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest)) *IMetaTable_GetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.GetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) Return(_a0 map[string]rlsutil.TagValue, _a1 error) *IMetaTable_GetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)) *IMetaTable_GetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IncFileResourceRefCnt provides a mock function with given fields: ids
 func (_m *IMetaTable) IncFileResourceRefCnt(ids []int64) error {
 	ret := _m.Called(ids)
@@ -3547,6 +3797,124 @@ func (_c *IMetaTable_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ListRLSPolicies provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPolicies")
+	}
+
+	var r0 []*rlsutil.RowPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.ListRowPoliciesRequest) []*rlsutil.RowPolicy); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*rlsutil.RowPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.ListRowPoliciesRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListRLSPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPolicies'
+type IMetaTable_ListRLSPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRLSPolicies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.ListRowPoliciesRequest
+func (_e *IMetaTable_Expecter) ListRLSPolicies(ctx interface{}, req interface{}) *IMetaTable_ListRLSPolicies_Call {
+	return &IMetaTable_ListRLSPolicies_Call{Call: _e.mock.On("ListRLSPolicies", ctx, req)}
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) Run(run func(ctx context.Context, req *rlsutil.ListRowPoliciesRequest)) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.ListRowPoliciesRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) Return(_a0 []*rlsutil.RowPolicy, _a1 error) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) RunAndReturn(run func(context.Context, *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error)) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRLSPrincipals provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPrincipals")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.ListRLSPrincipalsRequest) ([]string, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.ListRLSPrincipalsRequest) []string); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.ListRLSPrincipalsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListRLSPrincipals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPrincipals'
+type IMetaTable_ListRLSPrincipals_Call struct {
+	*mock.Call
+}
+
+// ListRLSPrincipals is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.ListRLSPrincipalsRequest
+func (_e *IMetaTable_Expecter) ListRLSPrincipals(ctx interface{}, req interface{}) *IMetaTable_ListRLSPrincipals_Call {
+	return &IMetaTable_ListRLSPrincipals_Call{Call: _e.mock.On("ListRLSPrincipals", ctx, req)}
+}
+
+func (_c *IMetaTable_ListRLSPrincipals_Call) Run(run func(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest)) *IMetaTable_ListRLSPrincipals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.ListRLSPrincipalsRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPrincipals_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListRLSPrincipals_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPrincipals_Call) RunAndReturn(run func(context.Context, *rlsutil.ListRLSPrincipalsRequest) ([]string, error)) *IMetaTable_ListRLSPrincipals_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListUserRole provides a mock function with given fields: ctx, tenant
 func (_m *IMetaTable) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
 	ret := _m.Called(ctx, tenant)
@@ -3750,6 +4118,309 @@ func (_c *IMetaTable_OperateUserRole_Call) Return(_a0 error) *IMetaTable_Operate
 }
 
 func (_c *IMetaTable_OperateUserRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error) *IMetaTable_OperateUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PrepareCreateRLSPolicy provides a mock function with given fields: ctx, req, policyID
+func (_m *IMetaTable) PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64) (*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, req, policyID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareCreateRLSPolicy")
+	}
+
+	var r0 *model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest, int64) (*model.RLSPolicy, error)); ok {
+		return rf(ctx, req, policyID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest, int64) *model.RLSPolicy); ok {
+		r0 = rf(ctx, req, policyID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.CreateRowPolicyRequest, int64) error); ok {
+		r1 = rf(ctx, req, policyID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_PrepareCreateRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareCreateRLSPolicy'
+type IMetaTable_PrepareCreateRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// PrepareCreateRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.CreateRowPolicyRequest
+//   - policyID int64
+func (_e *IMetaTable_Expecter) PrepareCreateRLSPolicy(ctx interface{}, req interface{}, policyID interface{}) *IMetaTable_PrepareCreateRLSPolicy_Call {
+	return &IMetaTable_PrepareCreateRLSPolicy_Call{Call: _e.mock.On("PrepareCreateRLSPolicy", ctx, req, policyID)}
+}
+
+func (_c *IMetaTable_PrepareCreateRLSPolicy_Call) Run(run func(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64)) *IMetaTable_PrepareCreateRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.CreateRowPolicyRequest), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareCreateRLSPolicy_Call) Return(_a0 *model.RLSPolicy, _a1 error) *IMetaTable_PrepareCreateRLSPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareCreateRLSPolicy_Call) RunAndReturn(run func(context.Context, *rlsutil.CreateRowPolicyRequest, int64) (*model.RLSPolicy, error)) *IMetaTable_PrepareCreateRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PrepareDeleteRLSPrincipalTags provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareDeleteRLSPrincipalTags")
+	}
+
+	var r0 *model.RLSPrincipal
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.DeleteRLSPrincipalTagsRequest) *model.RLSPrincipal); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPrincipal)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.DeleteRLSPrincipalTagsRequest) bool); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, *rlsutil.DeleteRLSPrincipalTagsRequest) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// IMetaTable_PrepareDeleteRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareDeleteRLSPrincipalTags'
+type IMetaTable_PrepareDeleteRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// PrepareDeleteRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.DeleteRLSPrincipalTagsRequest
+func (_e *IMetaTable_Expecter) PrepareDeleteRLSPrincipalTags(ctx interface{}, req interface{}) *IMetaTable_PrepareDeleteRLSPrincipalTags_Call {
+	return &IMetaTable_PrepareDeleteRLSPrincipalTags_Call{Call: _e.mock.On("PrepareDeleteRLSPrincipalTags", ctx, req)}
+}
+
+func (_c *IMetaTable_PrepareDeleteRLSPrincipalTags_Call) Run(run func(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest)) *IMetaTable_PrepareDeleteRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.DeleteRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareDeleteRLSPrincipalTags_Call) Return(_a0 *model.RLSPrincipal, _a1 bool, _a2 error) *IMetaTable_PrepareDeleteRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareDeleteRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error)) *IMetaTable_PrepareDeleteRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PrepareDropRLSPolicy provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareDropRLSPolicy")
+	}
+
+	var r0 *model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.DropRowPolicyRequest) *model.RLSPolicy); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.DropRowPolicyRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_PrepareDropRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareDropRLSPolicy'
+type IMetaTable_PrepareDropRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// PrepareDropRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.DropRowPolicyRequest
+func (_e *IMetaTable_Expecter) PrepareDropRLSPolicy(ctx interface{}, req interface{}) *IMetaTable_PrepareDropRLSPolicy_Call {
+	return &IMetaTable_PrepareDropRLSPolicy_Call{Call: _e.mock.On("PrepareDropRLSPolicy", ctx, req)}
+}
+
+func (_c *IMetaTable_PrepareDropRLSPolicy_Call) Run(run func(ctx context.Context, req *rlsutil.DropRowPolicyRequest)) *IMetaTable_PrepareDropRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.DropRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareDropRLSPolicy_Call) Return(_a0 *model.RLSPolicy, _a1 error) *IMetaTable_PrepareDropRLSPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareDropRLSPolicy_Call) RunAndReturn(run func(context.Context, *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error)) *IMetaTable_PrepareDropRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PrepareSetRLSPrincipalTags provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareSetRLSPrincipalTags")
+	}
+
+	var r0 *model.RLSPrincipal
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.SetRLSPrincipalTagsRequest) *model.RLSPrincipal); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPrincipal)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.SetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_PrepareSetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareSetRLSPrincipalTags'
+type IMetaTable_PrepareSetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// PrepareSetRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.SetRLSPrincipalTagsRequest
+func (_e *IMetaTable_Expecter) PrepareSetRLSPrincipalTags(ctx interface{}, req interface{}) *IMetaTable_PrepareSetRLSPrincipalTags_Call {
+	return &IMetaTable_PrepareSetRLSPrincipalTags_Call{Call: _e.mock.On("PrepareSetRLSPrincipalTags", ctx, req)}
+}
+
+func (_c *IMetaTable_PrepareSetRLSPrincipalTags_Call) Run(run func(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest)) *IMetaTable_PrepareSetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.SetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareSetRLSPrincipalTags_Call) Return(_a0 *model.RLSPrincipal, _a1 error) *IMetaTable_PrepareSetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareSetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error)) *IMetaTable_PrepareSetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PrepareUpdateRLSPolicy provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareUpdateRLSPolicy")
+	}
+
+	var r0 *model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest) *model.RLSPolicy); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.CreateRowPolicyRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_PrepareUpdateRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareUpdateRLSPolicy'
+type IMetaTable_PrepareUpdateRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// PrepareUpdateRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *rlsutil.CreateRowPolicyRequest
+func (_e *IMetaTable_Expecter) PrepareUpdateRLSPolicy(ctx interface{}, req interface{}) *IMetaTable_PrepareUpdateRLSPolicy_Call {
+	return &IMetaTable_PrepareUpdateRLSPolicy_Call{Call: _e.mock.On("PrepareUpdateRLSPolicy", ctx, req)}
+}
+
+func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) Run(run func(ctx context.Context, req *rlsutil.CreateRowPolicyRequest)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rlsutil.CreateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) Return(_a0 *model.RLSPolicy, _a1 error) *IMetaTable_PrepareUpdateRLSPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) RunAndReturn(run func(context.Context, *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

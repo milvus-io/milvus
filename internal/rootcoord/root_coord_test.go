@@ -53,6 +53,7 @@ import (
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1777,6 +1778,211 @@ func TestCore_BackupRBAC(t *testing.T) {
 	resp, err = c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
 	assert.NoError(t, err)
 	assert.False(t, merr.Ok(resp.GetStatus()))
+}
+
+func TestCore_RLSAPIs(t *testing.T) {
+	ctx := context.Background()
+	meta := mockrootcoord.NewIMetaTable(t)
+	policyLock := mock_broadcaster.NewMockBroadcastAPI(t)
+	policyLock.EXPECT().Broadcast(mock.Anything, mock.MatchedBy(func(msg message.BroadcastMutableMessage) bool {
+		if msg.IsUnreplicable() {
+			return false
+		}
+		return msg.MessageType() == message.MessageTypeAlterRLSMetadata ||
+			msg.MessageType() == message.MessageTypeDropRLSMetadata
+	})).Return(nil, nil).Times(5)
+	policyLock.EXPECT().Close().Times(6)
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(policyLock, nil).Build()
+	defer lockMocker.UnPatch()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Times(5)
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(nil)
+	idAllocator := newMockIDAllocator()
+	allocations := 0
+	idAllocator.AllocOneF = func() (UniqueID, error) {
+		allocations++
+		return 123, nil
+	}
+	c := newTestCore(withHealthyCode(), withMeta(meta), withIDAllocator(idAllocator))
+
+	createReq := &rlsutil.CreateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+		PolicyType:     rlsutil.PolicyTypePermissive,
+		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:      "dept == $current_principal_tags['dept']",
+	}
+	meta.EXPECT().PrepareCreateRLSPolicy(mock.Anything, createReq, unallocatedRLSPolicyID).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     unallocatedRLSPolicyID,
+		PolicyName:   createReq.GetPolicyName(),
+		PolicyType:   createReq.GetPolicyType(),
+		Actions:      createReq.GetActions(),
+		UsingExpr:    createReq.GetUsingExpr(),
+	}, nil).Once()
+	status, err := c.CreateRowPolicy(ctx, createReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+	assert.Equal(t, 1, allocations)
+
+	meta.EXPECT().PrepareCreateRLSPolicy(mock.Anything, createReq, unallocatedRLSPolicyID).
+		Return(nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", createReq.GetPolicyName())).Once()
+	status, err = c.CreateRowPolicy(ctx, createReq)
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+	assert.Contains(t, status.GetReason(), "already exists")
+	assert.Equal(t, 1, allocations, "duplicate creates must not allocate another policy ID")
+
+	updateReq := &rlsutil.UpdateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+		PolicyType:     rlsutil.PolicyTypeRestrictive,
+		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionSearch},
+		UsingExpr:      "owner == $current_principal",
+	}
+	meta.EXPECT().PrepareUpdateRLSPolicy(mock.Anything, updateReq).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     123,
+		PolicyName:   updateReq.GetPolicyName(),
+		PolicyType:   updateReq.GetPolicyType(),
+		Actions:      updateReq.GetActions(),
+		UsingExpr:    updateReq.GetUsingExpr(),
+	}, nil).Once()
+	status, err = c.UpdateRowPolicy(ctx, updateReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	dropReq := &rlsutil.DropRowPolicyRequest{DbName: "db1", CollectionName: "coll1", PolicyName: "policy1"}
+	meta.EXPECT().PrepareDropRLSPolicy(mock.Anything, dropReq).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyName:   dropReq.GetPolicyName(),
+	}, nil).Once()
+	status, err = c.DropRowPolicy(ctx, dropReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	listReq := &rlsutil.ListRowPoliciesRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPolicies(mock.Anything, listReq).Return([]*rlsutil.RowPolicy{{PolicyName: "policy1"}}, nil).Once()
+	listResp, err := c.ListRowPolicies(ctx, listReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(listResp.Status))
+	require.Len(t, listResp.Policies, 1)
+	assert.Equal(t, "policy1", listResp.Policies[0].GetPolicyName())
+	assert.Equal(t, "db1", listResp.DbName)
+	assert.Equal(t, "coll1", listResp.CollectionName)
+
+	setTagsReq := &rlsutil.SetRLSPrincipalTagsRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PrincipalName:  "alice",
+		Tags:           map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")},
+	}
+	meta.EXPECT().PrepareSetRLSPrincipalTags(mock.Anything, setTagsReq).Return(&model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: setTagsReq.GetPrincipalName(),
+		Tags:          setTagsReq.GetTags(),
+	}, nil).Once()
+	status, err = c.SetRLSPrincipalTags(ctx, setTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	getTagsReq := &rlsutil.GetRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice"}
+	meta.EXPECT().GetRLSPrincipalTags(mock.Anything, getTagsReq).Return(map[string]rlsutil.TagValue{
+		"dept": rlsutil.NewStringTagValue("sales"),
+	}, nil).Once()
+	getTagsResp, err := c.GetRLSPrincipalTags(ctx, getTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(getTagsResp.Status))
+	assert.Equal(t, map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}, getTagsResp.Tags)
+	assert.Equal(t, "alice", getTagsResp.PrincipalName)
+
+	listPrincipalsReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listPrincipalsReq).Return([]string{"alice", "bob"}, nil).Once()
+	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, listPrincipalsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(listPrincipalsResp.Status))
+	assert.Equal(t, []string{"alice", "bob"}, listPrincipalsResp.PrincipalNames)
+
+	deleteTagsReq := &rlsutil.DeleteRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice", TagKeys: []string{"dept"}}
+	meta.EXPECT().PrepareDeleteRLSPrincipalTags(mock.Anything, deleteTagsReq).Return(&model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: deleteTagsReq.GetPrincipalName(),
+	}, true, nil).Once()
+	status, err = c.DeleteRLSPrincipalTags(ctx, deleteTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+}
+
+func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
+	ctx := context.Background()
+	c := newTestCore(withHealthyCode())
+
+	assertParameterInvalidStatus := func(t *testing.T, status *commonpb.Status) {
+		t.Helper()
+		require.NotNil(t, status)
+		require.True(t, errors.Is(merr.Error(status), merr.ErrParameterInvalid), status.GetReason())
+	}
+
+	status, err := c.CreateRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	status, err = c.UpdateRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	status, err = c.DropRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	listResp, err := c.ListRowPolicies(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, listResp.Status)
+
+	status, err = c.SetRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	getTagsResp, err := c.GetRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, getTagsResp.Status)
+
+	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, listPrincipalsResp.Status)
+
+	status, err = c.DeleteRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+}
+
+func TestCore_RLSPolicyMutationReturnsCollectionLockFailure(t *testing.T) {
+	lockErr := merr.WrapErrServiceUnavailableMsg("collection lock unavailable")
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(nil, lockErr).Build()
+	defer lockMocker.UnPatch()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	idAllocator := newMockIDAllocator()
+	idAllocator.AllocOneF = func() (UniqueID, error) {
+		return 123, nil
+	}
+	c := newTestCore(withHealthyCode(), withMeta(meta), withIDAllocator(idAllocator))
+	status, err := c.CreateRowPolicy(context.Background(), &rlsutil.CreateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(status), merr.ErrServiceUnavailable)
+	require.Contains(t, status.GetReason(), "collection lock unavailable")
 }
 
 func TestCore_getMetastorePrivilegeName(t *testing.T) {
