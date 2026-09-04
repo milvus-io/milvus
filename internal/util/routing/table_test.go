@@ -243,6 +243,26 @@ func TestDeriveCompatRefusesAShardOutsideTheChannelList(t *testing.T) {
 	assert.False(t, table.IsExplicit())
 }
 
+// A subset of the same length is not the same set. Without a duplicate check
+// [v0, v0] against [v0, v1] passes the compat branch's length comparison, and
+// on the explicit branch one vchannel could own two residue sets under two
+// entries, which NumShards would then count once.
+func TestDeriveRefusesADuplicatedShard(t *testing.T) {
+	_, err := Derive(0, []string{"v0", "v1"}, []Shard{{Vchannel: "v0"}, {Vchannel: "v0"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "appears twice")
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.False(t, merr.IsRetryableErr(err))
+
+	_, err = Derive(2, []string{"v0", "v1"}, []Shard{
+		{Vchannel: "v0", Buckets: []uint64{0}},
+		{Vchannel: "v0", Buckets: []uint64{1}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "appears twice")
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
 func TestDeriveRefusesAShardOutsideTheChannelList(t *testing.T) {
 	_, err := Derive(2, []string{"v0", "v1"}, []Shard{
 		{Vchannel: "v0", Buckets: []uint64{0}},
@@ -276,8 +296,12 @@ func TestParseShardBy(t *testing.T) {
 		{"", "", true}, // never declared: the primary key applies
 		{"hash(pk)", "pk", true},
 		{"hash($namespace_id)", NamespaceIDField, true},
-		{"hash(a)b)", "", false},     // bytes after the closing parenthesis
-		{"hash(pk", "", false},       // unterminated
+		{"hash(a)b)", "", false}, // bytes after the closing parenthesis
+		{"hash(pk", "", false},   // unterminated
+		{"hash(", "", false},     // truncated right after the parenthesis: must not panic
+		{"hash", "", false},
+		{"hash( a )", "", false}, // whitespace is never part of a field name
+		{"hash(a b)", "", false},
 		{"HASH(pk)", "", false},      // no case folding
 		{"hash (pk)", "", false},     // no space
 		{"hash('pk')", "'pk'", true}, // taken whole, not unquoted

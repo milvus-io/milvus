@@ -65,6 +65,10 @@ type Table struct {
 	// no placement; it is what lets a caller report which rule applied.
 	explicit bool
 
+	// owners is the number of vchannels that own at least one residue, computed
+	// once by Derive so NumShards does not walk the M slots per call.
+	owners int
+
 	// routingField is the field named by shard_by, empty when shard_by was not
 	// declared. pkField is the collection's primary key. RouteInsert hashes the
 	// primary key, so it is valid exactly when the two agree.
@@ -112,15 +116,25 @@ func ParseShardBy(expr string) (string, error) {
 		return "", merr.WrapErrServiceInternalMsg("shard_by %q is not a hash(<field>) expression", expr)
 	}
 	rest := expr[len(prefix):]
-	closing := strings.Index(rest, ")")
-	if closing != len(rest)-1 {
-		// Either no closing parenthesis, or bytes after it. Both mean the server
-		// emitted something this reader does not understand.
+	// The closing parenthesis must be the last byte, and the only one: an
+	// unterminated expression, bytes after the parenthesis, or a second one
+	// inside the field all mean the server emitted something this reader does
+	// not understand. HasSuffix rather than Index: on the input "hash(" the
+	// index of a missing parenthesis (-1) equals len(rest)-1, and slicing by
+	// it would panic.
+	if !strings.HasSuffix(rest, ")") || strings.Count(rest, ")") != 1 {
 		return "", merr.WrapErrServiceInternalMsg("shard_by %q is not a hash(<field>) expression", expr)
 	}
-	field := rest[:closing]
+	field := rest[:len(rest)-1]
 	if field == "" {
 		return "", merr.WrapErrServiceInternalMsg("shard_by %q names no field", expr)
+	}
+	// The field is taken whole, but whitespace is never part of a field name
+	// (user names are identifiers, the system name is $namespace_id), so a
+	// padded spelling is rejected here rather than accepted and failed later
+	// by RoutesByPrimaryKey, which would report it as a routing-field mismatch.
+	if strings.ContainsAny(field, " \t\r\n") {
+		return "", merr.WrapErrServiceInternalMsg("shard_by %q carries whitespace in its field", expr)
 	}
 	return field, nil
 }
@@ -223,6 +237,7 @@ func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (
 		return nil, err
 	}
 	t.residues, t.explicit = residues, true
+	t.owners = len(hashShards)
 	return t, nil
 }
 
@@ -241,16 +256,13 @@ func (t *Table) NumShards() int {
 		return len(t.channels)
 	}
 	// The vchannel list only ever grows: a split retires its source but keeps
-	// the name, so len(channels) counts shards that own no key. Count the ones
-	// that actually own residues instead -- that is the number a caller asking
-	// "how many shards does this collection route over" means.
-	owners := make(map[string]struct{}, len(t.channels))
-	for _, vchannel := range t.residues.slots {
-		if vchannel != "" {
-			owners[vchannel] = struct{}{}
-		}
-	}
-	return len(owners)
+	// the name, so len(channels) counts shards that own no key. Answer with the
+	// shards that actually own residues instead -- that is the number a caller
+	// asking "how many shards does this collection route over" means. Derive
+	// counted them: every shard it accepted owns at least one residue
+	// (DeriveHash refuses an empty residue set) and no vchannel appears twice
+	// (refuseShardsOutside refuses a duplicate).
+	return t.owners
 }
 
 // RoutesByPrimaryKey reports whether hashing a row's primary key yields its
@@ -302,11 +314,23 @@ func refuseShardsOutside(channels []string, shards []Shard) error {
 	for _, ch := range channels {
 		known[ch] = struct{}{}
 	}
+	seen := make(map[string]struct{}, len(shards))
 	for _, s := range shards {
 		if _, ok := known[s.Vchannel]; !ok {
 			return merr.WrapErrServiceInternalMsg(
 				"routing shard %q is not in the collection's vchannel list", s.Vchannel)
 		}
+		// A subset of the same length is not the same set: [v0, v0] against
+		// [v0, v1] would pass the length check on the compat branch and on the
+		// explicit branch would let one vchannel claim two residue sets under
+		// two entries. ShardsFromMeta cannot produce this, but Derive is exported
+		// and the check is what makes the compat-branch length comparison mean
+		// equality.
+		if _, dup := seen[s.Vchannel]; dup {
+			return merr.WrapErrServiceInternalMsg(
+				"routing shard %q appears twice in the collection's shard list", s.Vchannel)
+		}
+		seen[s.Vchannel] = struct{}{}
 	}
 	return nil
 }
