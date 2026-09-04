@@ -333,7 +333,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		assert.Empty(t, prepared.l1.inputFieldIDs)
 	})
 
-	t.Run("l1 rejects function not runnable at stage", func(t *testing.T) {
+	t.Run("l1 accepts xgboost", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
 			l1FunctionChainForTest(mapOpWithParamsForTest(
 				types.ScoreFieldName,
@@ -345,9 +345,10 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 			)),
 		}}
 
-		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support stage \"L1_rerank\"")
+		prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+		require.NoError(t, err)
+		require.NotNil(t, prepared.l1)
+		assert.Equal(t, []int64{101}, prepared.l1.inputFieldIDs)
 	})
 
 	t.Run("l1 internal system input is not readable", func(t *testing.T) {

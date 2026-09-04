@@ -5570,7 +5570,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 	}
 	newL0FunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain) {
 		request := newRequest()
-		chainPB := l0FunctionChain()
+		chainPB := l0FunctionChain(mapOp(chaintypes.ScoreFieldName, "xgboost", columnArg("pk")))
 		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
 		return request, chainPB
 	}
@@ -5582,7 +5582,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 	}
 	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain, *schemapb.FunctionChain) {
 		request := newRequest()
-		l0Chain := l0FunctionChain()
+		l0Chain := l0FunctionChain(mapOp(chaintypes.ScoreFieldName, "xgboost", columnArg("pk")))
 		l1Chain := l1FunctionChain(mapOp("$score", "expr", columnArg("$score")))
 		l2Chain := l2FunctionChain(mapOp("score1", "expr", columnArg("ts")), mapOp("$score", "expr", columnArg("score1"), columnArg("$score")))
 		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l1Chain, l2Chain}
@@ -5887,6 +5887,281 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
+	})
+}
+
+func TestSearchTask_HybridFunctionChainRerankMeta(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	schemaInfo := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_hybrid_function_chain_rerank_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "category", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "vec1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{FieldID: 104, Name: "vec2", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	})
+
+	placeholderGroup, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		}},
+	})
+	require.NoError(t, err)
+
+	newSubRequest := func(annsField, metricType string) *milvuspb.SubSearchRequest {
+		return &milvuspb.SubSearchRequest{
+			Nq:               1,
+			PlaceholderGroup: placeholderGroup,
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: metricType},
+				{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				{Key: AnnsFieldKey, Value: annsField},
+				{Key: TopKKey, Value: "10"},
+			},
+		}
+	}
+
+	mergeOp := &schemapb.FunctionChainOp{
+		Op: chaintypes.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			"strategy": chainStringParam("max"),
+		},
+	}
+	l0Chain := l0FunctionChain(&schemapb.FunctionChainOp{
+		Op:      chaintypes.OpTypeMap,
+		Outputs: []string{chaintypes.ScoreFieldName},
+		Expr: &schemapb.FunctionChainExpr{
+			Name: "xgboost",
+			Args: []*schemapb.FunctionChainExprArg{columnArg("ts")},
+			Params: map[string]*schemapb.FunctionParamValue{
+				"model_resource": chainStringParam("test-model"),
+			},
+		},
+	})
+	l1Chain := l1LimitFunctionChain(5)
+	firstSubRequest := newSubRequest("vec1", metric.IP)
+	firstSubRequest.FunctionChains = []*schemapb.FunctionChain{l0Chain, l1Chain}
+	task := &searchTask{
+		ctx:            ctx,
+		collectionName: "test_hybrid_function_chain_rerank_collection",
+		SearchRequest: &internalpb.SearchRequest{
+			CollectionID: 1,
+			PartitionIDs: []int64{1},
+		},
+		request: &milvuspb.SearchRequest{
+			CollectionName: "test_hybrid_function_chain_rerank_collection",
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: LimitKey, Value: "10"},
+				{Key: GroupByFieldKey, Value: "category"},
+				{Key: GroupSizeKey, Value: "2"},
+				// REST includes these empty legacy placeholders even when function_chains is used.
+				{Key: RankTypeKey, Value: ""},
+				{Key: ParamsKey, Value: "null"},
+			},
+			SubReqs: []*milvuspb.SubSearchRequest{
+				firstSubRequest,
+				newSubRequest("vec2", metric.COSINE),
+			},
+			FunctionChains: []*schemapb.FunctionChain{
+				l2FunctionChain(
+					mergeOp,
+					mapOp(chaintypes.ScoreFieldName, "expr", columnArg(chaintypes.ScoreFieldName), columnArg("ts")),
+				),
+			},
+		},
+		schema: schemaInfo,
+		tr:     timerecord.NewTimeRecorder("test"),
+	}
+
+	require.NoError(t, task.initAdvancedSearchRequest(ctx))
+	meta, ok := task.rerankMeta.(*functionChainRerankMeta)
+	require.True(t, ok)
+	assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+	assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	assert.True(t, task.needRequery)
+	assert.Equal(t, int64(102), task.GroupByFieldId)
+	assert.Equal(t, int64(2), task.GroupSize)
+
+	require.Len(t, task.GetSubReqs(), 2)
+	for index, subReq := range task.GetSubReqs() {
+		assert.Equal(t, int64(102), subReq.GetGroupByFieldId())
+		assert.Equal(t, int64(2), subReq.GetGroupSize())
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(subReq.GetSerializedExprPlan(), plan))
+		assert.Equal(t, []int64{101}, plan.GetOutputFieldIds())
+		if index == 0 {
+			require.Len(t, plan.GetQuerynodeFunctionChains(), 2)
+			assert.True(t, proto.Equal(l0Chain, plan.GetQuerynodeFunctionChains()[0]))
+			assert.True(t, proto.Equal(l1Chain, plan.GetQuerynodeFunctionChains()[1]))
+		} else {
+			assert.Empty(t, plan.GetQuerynodeFunctionChains())
+		}
+	}
+}
+
+func TestSearchTask_HybridSubSearchFunctionChains(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	schemaInfo := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_hybrid_sub_search_function_chains",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	})
+	placeholderGroup, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		}},
+	})
+	require.NoError(t, err)
+
+	newSubRequest := func() *milvuspb.SubSearchRequest {
+		return &milvuspb.SubSearchRequest{
+			Nq:               1,
+			PlaceholderGroup: placeholderGroup,
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: metric.COSINE},
+				{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				{Key: AnnsFieldKey, Value: "vec"},
+				{Key: TopKKey, Value: "10"},
+			},
+		}
+	}
+	newTask := func(chains [][]*schemapb.FunctionChain) *searchTask {
+		subReqs := []*milvuspb.SubSearchRequest{newSubRequest(), newSubRequest()}
+		for index, functionChains := range chains {
+			subReqs[index].FunctionChains = functionChains
+		}
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: "test_hybrid_sub_search_function_chains",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID: 1,
+				PartitionIDs: []int64{1},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_hybrid_sub_search_function_chains",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+				SubReqs: subReqs,
+			},
+			schema: schemaInfo,
+			tr:     timerecord.NewTimeRecorder("test"),
+		}
+	}
+
+	t.Run("routes by index and disables optimization only for chained sub-search", func(t *testing.T) {
+		l1Chain := l1LimitFunctionChain(5)
+		task := newTask([][]*schemapb.FunctionChain{{l1Chain}, nil})
+		task.request.FunctionChains = []*schemapb.FunctionChain{
+			l2FunctionChain(&schemapb.FunctionChainOp{
+				Op: chaintypes.OpTypeMerge,
+				Params: map[string]*schemapb.FunctionParamValue{
+					"strategy": chainStringParam("max"),
+				},
+			}),
+		}
+
+		require.NoError(t, task.initAdvancedSearchRequest(ctx))
+		require.Len(t, task.GetSubReqs(), 2)
+		assert.Equal(t, internalpb.SearchType_DEFAULT, task.GetSubReqs()[0].GetSearchType())
+		assert.Equal(t, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, task.GetSubReqs()[1].GetSearchType())
+
+		firstPlan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.GetSubReqs()[0].GetSerializedExprPlan(), firstPlan))
+		require.Len(t, firstPlan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(l1Chain, firstPlan.GetQuerynodeFunctionChains()[0]))
+
+		secondPlan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.GetSubReqs()[1].GetSerializedExprPlan(), secondPlan))
+		assert.Empty(t, secondPlan.GetQuerynodeFunctionChains())
+	})
+
+	t.Run("keeps distinct chains for the same anns field by request index", func(t *testing.T) {
+		l0Chain := l0FunctionChain(mapOp(chaintypes.ScoreFieldName, "xgboost", columnArg("pk")))
+		l1Chain := l1LimitFunctionChain(3)
+		task := newTask([][]*schemapb.FunctionChain{{l0Chain}, {l1Chain}})
+
+		require.NoError(t, task.initAdvancedSearchRequest(ctx))
+		require.Len(t, task.GetSubReqs(), 2)
+		assert.Equal(t, internalpb.SearchType_DEFAULT, task.GetSubReqs()[0].GetSearchType())
+		assert.Equal(t, internalpb.SearchType_DEFAULT, task.GetSubReqs()[1].GetSearchType())
+
+		firstPlan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.GetSubReqs()[0].GetSerializedExprPlan(), firstPlan))
+		require.Len(t, firstPlan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(l0Chain, firstPlan.GetQuerynodeFunctionChains()[0]))
+
+		secondPlan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.GetSubReqs()[1].GetSerializedExprPlan(), secondPlan))
+		require.Len(t, secondPlan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(l1Chain, secondPlan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	for _, testCase := range []struct {
+		name          string
+		chain         *schemapb.FunctionChain
+		errorFragment string
+	}{
+		{
+			name:          "rejects nested l2 before plan generation",
+			chain:         l2FunctionChain(mapOp(chaintypes.ScoreFieldName, "decay", columnArg("pk"))),
+			errorFragment: "only support L0 and L1 stages",
+		},
+		{
+			name:          "rejects unspecified nested stage before plan generation",
+			chain:         &schemapb.FunctionChain{},
+			errorFragment: "stage FunctionChainStageUnspecified is not supported",
+		},
+		{
+			name:          "rejects empty nested l0 before plan generation",
+			chain:         l0FunctionChain(),
+			errorFragment: "must contain at least one op",
+		},
+		{
+			name:          "rejects empty nested l1 before plan generation",
+			chain:         l1FunctionChain(),
+			errorFragment: "must contain at least one op",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := newTask([][]*schemapb.FunctionChain{
+				nil,
+				{testCase.chain},
+			})
+
+			err := task.initAdvancedSearchRequest(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "sub-search[1]")
+			assert.Contains(t, err.Error(), testCase.errorFragment)
+			assert.Nil(t, task.GetSubReqs()[1])
+		})
+	}
+
+	t.Run("defers stage-valid semantic validation to querynode", func(t *testing.T) {
+		invalidL1Chain := l1FunctionChain(&schemapb.FunctionChainOp{Op: chaintypes.OpTypeMerge})
+		task := newTask([][]*schemapb.FunctionChain{
+			nil,
+			{invalidL1Chain},
+		})
+
+		require.NoError(t, task.initAdvancedSearchRequest(ctx))
+		require.Len(t, task.GetSubReqs(), 2)
+
+		secondPlan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.GetSubReqs()[1].GetSerializedExprPlan(), secondPlan))
+		require.Len(t, secondPlan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(invalidL1Chain, secondPlan.GetQuerynodeFunctionChains()[0]))
 	})
 }
 

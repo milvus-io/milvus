@@ -573,6 +573,57 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMerge() {
 	s.Greater(merged.GetScores()[1], merged.GetScores()[2])
 }
 
+func (s *SearchPipelineSuite) TestRerankOpFunctionChainOwnsFinalWindow() {
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(&schemapb.FunctionChainOp{
+		Op: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			chain.MergeParamStrategy: chainStringParam(string(chain.MergeStrategyMax)),
+		},
+	}))
+	s.Require().NoError(err)
+
+	result := func(scores []float32) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       3,
+				Topks:      []int64{3},
+				Ids:        testSearchResultIDs(1, 2, 3),
+				Scores:     scores,
+				ElementIndices: &schemapb.LongArray{
+					Data: []int64{10, 20, 30},
+				},
+			},
+		}
+	}
+
+	op := rerankOperator{
+		nq:           1,
+		topK:         2,
+		offset:       1,
+		roundDecimal: 1,
+		rerankMeta:   &functionChainRerankMeta{repr: repr},
+	}
+	outputs, err := op.run(
+		context.Background(),
+		s.span,
+		[]*milvuspb.SearchResults{
+			result([]float32{0.94, 0.84, 0.74}),
+			result([]float32{0.93, 0.83, 0.73}),
+		},
+		[]string{"IP", "COSINE"},
+	)
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	chainResult := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3}, chainResult.GetTopks())
+	s.Equal([]int64{1, 2, 3}, chainResult.GetIds().GetIntId().GetData())
+	s.Equal([]int64{10, 20, 30}, chainResult.GetElementIndices().GetData())
+	s.Equal([]float32{0.94, 0.84, 0.74}, chainResult.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMergeElementLevel() {
 	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
 		&schemapb.FunctionChainOp{
