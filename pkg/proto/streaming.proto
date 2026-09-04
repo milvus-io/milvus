@@ -27,9 +27,8 @@ enum PChannelAccessMode {
 // basic info of a pchannel. It's used in many rpc and meta, so keep it simple.
 message PChannelInfo {
     string name = 1;  // channel name
-    int64 term  = 2;  // A monotonic increasing term, every time the channel is
-                      // recovered or moved to another streamingnode, the term
-                      // will increase by meta server.
+    int64 term  = 2;  // PChannel write-link epoch. It increases when the
+                      // READWRITE write chain is opened or reopened.
     PChannelAccessMode access_mode = 3;  // access mode of the channel.
 }
 
@@ -40,6 +39,7 @@ message PChannelAssignmentLog {
     StreamingNodeInfo node =
         2;  // streaming node that the channel is assigned to.
     PChannelAccessMode access_mode = 3;  // access mode of the channel.
+    int64 assignment_epoch = 4; // WAL replica assignment epoch for same-term fencing.
 }
 
 // PChannelMetaState
@@ -53,6 +53,24 @@ enum PChannelMetaState {
         3;  // channel is assigned to a streaming node.
     PCHANNEL_META_STATE_UNAVAILABLE =
         4;  // channel is unavailable at this term.
+    PCHANNEL_META_STATE_DROPPING =
+        5;  // channel or WAL replica is being removed.
+}
+
+// WALReplicaAssignment is one serving replica assignment of a PChannel.
+// The backend WAL and authoritative recovery projection are still keyed by the
+// PChannel name. replica_id only distinguishes serving runtimes over that
+// shared WAL.
+message WALReplicaAssignment {
+    int64 replica_id = 1;
+    PChannelAccessMode access_mode = 2;
+    int64 assignment_epoch = 3;
+    string resource_group = 4;
+    StreamingNodeInfo active_node = 5;
+    StreamingNodeInfo target_node = 6;
+    PChannelMetaState state = 7;
+    repeated PChannelAssignmentLog histories = 8;
+    uint64 last_assign_timestamp_seconds = 9;
 }
 
 // PChannelMeta is the meta information of a pchannel, should only keep the data
@@ -65,6 +83,10 @@ message PChannelMeta {
     repeated PChannelAssignmentLog histories =
         4;  // keep the meta info assignment log that used to be assigned to.
     uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
+    // PrimaryReplicaID points to the single AccessModeRW WAL replica.
+    int64 primary_replica_id = 6;
+    int64 next_replica_id = 7;
+    repeated WALReplicaAssignment replicas = 8;
 }
 
 // CChannelMeta is the meta information of a control channel.
@@ -237,6 +259,8 @@ message AssignmentDiscoverRequest {
 message ReportAssignmentErrorRequest {
     PChannelInfo pchannel = 1;  // channel
     StreamingError err    = 2;  // error happend on log node
+    int64 wal_replica_id = 3; // WAL replica that reported the error. Zero is a valid replica ID.
+    int64 assignment_epoch = 4; // WAL replica assignment epoch, used to ignore stale reports.
 }
 
 // CloseAssignmentDiscoverRequest is the request to close the stream.
@@ -280,6 +304,18 @@ message StreamingNodeInfo {
 message StreamingNodeAssignment {
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
+    repeated WALReplicaInfo wal_replicas = 5;
+}
+
+// WALReplicaInfo is the explicit assignment discovery projection for one WAL replica.
+message WALReplicaInfo {
+    string pchannel = 1;
+    int64 wal_replica_id = 2;
+    PChannelAccessMode access_mode = 3;
+    string resource_group = 4;
+    int64 pchannel_write_term = 5;
+    PChannelMetaState state = 6;
+    int64 assignment_epoch = 7;
 }
 
 // DeliverPolicy is the policy to deliver message.
@@ -608,12 +644,16 @@ service StreamingNodeManagerService {
 // StreamingManagerAssignRequest is the request message of Assign RPC.
 message StreamingNodeManagerAssignRequest {
     PChannelInfo pchannel = 1;
+    int64 wal_replica_id = 2;
+    int64 assignment_epoch = 3;
 }
 
 message StreamingNodeManagerAssignResponse {}
 
 message StreamingNodeManagerRemoveRequest {
     PChannelInfo pchannel = 1;
+    int64 wal_replica_id = 2;
+    int64 assignment_epoch = 3;
 }
 
 message StreamingNodeManagerRemoveResponse {}

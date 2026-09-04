@@ -80,6 +80,30 @@ func newOpMarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo)
 	}
 }
 
+func newOpMarkWALReplicasAsUnavailable(ctx context.Context, replicas []types.ChannelID, assignmentEpoch int64) *request {
+	future := syncutil.NewFuture[response]()
+	return &request{
+		ctx: ctx,
+		apply: func(impl *balancerImpl) {
+			err := impl.channelMetaManager.MarkWALReplicasAsUnavailable(ctx, replicas, assignmentEpoch)
+			future.Set(response{err: err})
+		},
+		future: future,
+	}
+}
+
+func newOpMarkWALPrimaryReplicaAsUnavailable(ctx context.Context, replicaID types.ChannelID, assignmentEpoch int64) *request {
+	future := syncutil.NewFuture[response]()
+	return &request{
+		ctx: ctx,
+		apply: func(impl *balancerImpl) {
+			err := impl.channelMetaManager.MarkWALPrimaryReplicaAsUnavailable(ctx, replicaID, assignmentEpoch)
+			future.Set(response{err: err})
+		},
+		future: future,
+	}
+}
+
 // newOpTrigger is a operation to trigger a re-balance operation.
 func newOpTrigger(ctx context.Context) *request {
 	future := syncutil.NewFuture[response]()

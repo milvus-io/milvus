@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -29,7 +30,11 @@ const (
 	StreamingVersion300 = 3 // streaming version that since 3.0.0, schema-drop DDL is available.
 )
 
-var ErrChannelNotExist = errors.New("channel not exist")
+var (
+	ErrChannelNotExist            = errors.New("channel not exist")
+	ErrWALReplicaNotExist         = merr.WrapErrServiceInternal("wal replica not exist")
+	ErrWALReplicaOperationInvalid = merr.WrapErrServiceInternal("wal replica operation invalid")
+)
 
 type (
 	AllocVChannelParam struct {
@@ -43,6 +48,7 @@ type (
 		CChannelAssignment     *streamingpb.CChannelAssignment
 		PChannelView           *PChannelView
 		Relations              []types.PChannelInfoAssigned
+		WALReplicaRelations    []types.WALReplicaInfoAssigned
 		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
 	WatchChannelAssignmentsCallback func(param WatchChannelAssignmentsCallbackParam) error
@@ -504,6 +510,253 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []C
 	return nil
 }
 
+// CreateReadOnlyWALReplica creates a secondary WAL replica entry for the given PChannel.
+func (cm *ChannelManager) CreateReadOnlyWALReplica(ctx context.Context, pchannel string, resourceGroup string) (ChannelID, error) {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	pchannelMeta, ok := cm.channels[ChannelID{Name: pchannel}]
+	if !ok {
+		return ChannelID{}, ErrChannelNotExist
+	}
+	mutablePChannel := pchannelMeta.CopyForWrite()
+	replicaID := mutablePChannel.CreateReadOnlyWALReplica(resourceGroup)
+	if err := cm.updatePChannelMeta(ctx, []*streamingpb.PChannelMeta{mutablePChannel.IntoRawMeta()}); err != nil {
+		return ChannelID{}, err
+	}
+	return ChannelID{Name: pchannel, WALReplicaID: replicaID}, nil
+}
+
+// AssignWALReplicas prepares WAL replicas on target StreamingNodes.
+func (cm *ChannelManager) AssignWALReplicas(ctx context.Context, assignments map[ChannelID]types.StreamingNodeInfo) (map[ChannelID]*PChannelMeta, error) {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	modifiedKeys := make([]ChannelID, 0, len(assignments))
+	for id, node := range assignments {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return nil, ErrChannelNotExist
+		}
+		replica, ok := pchannel.WALReplica(id.WALReplicaID)
+		if !ok {
+			return nil, ErrWALReplicaNotExist
+		}
+		if id.WALReplicaID == pchannel.PrimaryReplicaID() ||
+			replica.GetAccessMode() != streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY {
+			return nil, ErrWALReplicaOperationInvalid
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+		if mutablePChannel.TryAssignWALReplicaToServerID(id.WALReplicaID, node) {
+			modifiedKeys = append(modifiedKeys, id)
+		}
+	}
+
+	if err := cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels)); err != nil {
+		return nil, err
+	}
+	updates := make(map[ChannelID]*PChannelMeta, len(modifiedKeys))
+	for _, id := range modifiedKeys {
+		updates[id] = cm.channels[ChannelID{Name: id.Name}]
+	}
+	return updates, nil
+}
+
+// AssignWALReplicasDone makes prepared WAL replica targets serviceable when the assignment epoch matches.
+func (cm *ChannelManager) AssignWALReplicasDone(ctx context.Context, replicas map[ChannelID]int64) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	for id, assignmentEpoch := range replicas {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return ErrChannelNotExist
+		}
+		if _, ok := pchannel.WALReplica(id.WALReplicaID); !ok {
+			return ErrWALReplicaNotExist
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+		}
+		if mutablePChannel.AssignWALReplicaToServerDone(id.WALReplicaID, assignmentEpoch) {
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+	}
+	return cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels))
+}
+
+// ClearWALReplicaHistories clears cleanup histories after old WAL replica runtimes are released.
+func (cm *ChannelManager) ClearWALReplicaHistories(ctx context.Context, replicas []ChannelID) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	for _, id := range replicas {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return ErrChannelNotExist
+		}
+		if _, ok := pchannel.WALReplica(id.WALReplicaID); !ok {
+			return ErrWALReplicaNotExist
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+		}
+		if mutablePChannel.ClearWALReplicaHistories(id.WALReplicaID) {
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+	}
+	return cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels))
+}
+
+// MarkWALReplicasAsUnavailable marks reported read-only WAL replicas as unavailable.
+func (cm *ChannelManager) MarkWALReplicasAsUnavailable(ctx context.Context, replicas []ChannelID, assignmentEpoch int64) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	for _, id := range replicas {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return ErrChannelNotExist
+		}
+		if _, ok := pchannel.WALReplica(id.WALReplicaID); !ok {
+			return ErrWALReplicaNotExist
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+		}
+		if mutablePChannel.MarkWALReplicaAsUnavailable(id.WALReplicaID, assignmentEpoch) {
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+	}
+	return cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels))
+}
+
+// MarkWALPrimaryReplicaAsUnavailable marks a failed primary WAL replica open as unavailable.
+func (cm *ChannelManager) MarkWALPrimaryReplicaAsUnavailable(ctx context.Context, replicaID ChannelID, assignmentEpoch int64) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	pchannel, ok := cm.channels[ChannelID{Name: replicaID.Name}]
+	if !ok {
+		return ErrChannelNotExist
+	}
+	if _, ok := pchannel.WALReplica(replicaID.WALReplicaID); !ok {
+		return ErrWALReplicaNotExist
+	}
+	mutablePChannel := pchannel.CopyForWrite()
+	if !mutablePChannel.MarkPrimaryWALReplicaAsUnavailable(replicaID.WALReplicaID, assignmentEpoch) {
+		return ErrWALReplicaOperationInvalid
+	}
+	return cm.updatePChannelMeta(ctx, []*streamingpb.PChannelMeta{mutablePChannel.IntoRawMeta()})
+}
+
+// SwitchWALPrimaryReplica promotes a serviceable read-only replica as the PChannel primary writer.
+func (cm *ChannelManager) SwitchWALPrimaryReplica(ctx context.Context, pchannel string, targetReplicaID int64) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	pchannelMeta, ok := cm.channels[ChannelID{Name: pchannel}]
+	if !ok {
+		return ErrChannelNotExist
+	}
+	if _, ok := pchannelMeta.WALReplica(targetReplicaID); !ok {
+		return ErrWALReplicaNotExist
+	}
+	if pchannelMeta.PrimaryReplicaID() == targetReplicaID {
+		target, _ := pchannelMeta.WALReplica(targetReplicaID)
+		if target.GetAccessMode() == streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE {
+			switch target.GetState() {
+			case streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING,
+				streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED:
+				return nil
+			}
+		}
+		return ErrWALReplicaOperationInvalid
+	}
+	mutablePChannel := pchannelMeta.CopyForWrite()
+	if !mutablePChannel.SwitchPrimaryWALReplica(targetReplicaID) {
+		return ErrWALReplicaOperationInvalid
+	}
+	return cm.updatePChannelMeta(ctx, []*streamingpb.PChannelMeta{mutablePChannel.IntoRawMeta()})
+}
+
+// MarkWALReplicasAsDropping marks non-primary read-only WAL replicas as dropping.
+func (cm *ChannelManager) MarkWALReplicasAsDropping(ctx context.Context, replicas []ChannelID) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	for _, id := range replicas {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return ErrChannelNotExist
+		}
+		if _, ok := pchannel.WALReplica(id.WALReplicaID); !ok {
+			return ErrWALReplicaNotExist
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+		if !mutablePChannel.MarkWALReplicaAsDropping(id.WALReplicaID) {
+			return ErrWALReplicaOperationInvalid
+		}
+	}
+	return cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels))
+}
+
+// RemoveWALReplicas removes dropping WAL replica entries from PChannel meta.
+func (cm *ChannelManager) RemoveWALReplicas(ctx context.Context, replicas []ChannelID) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	mutablePChannels := make(map[ChannelID]*mutablePChannel)
+	for _, id := range replicas {
+		pchannelID := ChannelID{Name: id.Name}
+		pchannel, ok := cm.channels[pchannelID]
+		if !ok {
+			return ErrChannelNotExist
+		}
+		if _, ok := pchannel.WALReplica(id.WALReplicaID); !ok {
+			return ErrWALReplicaNotExist
+		}
+		mutablePChannel := mutablePChannels[pchannelID]
+		if mutablePChannel == nil {
+			mutablePChannel = pchannel.CopyForWrite()
+			mutablePChannels[pchannelID] = mutablePChannel
+		}
+		if !mutablePChannel.RemoveWALReplica(id.WALReplicaID) {
+			return ErrWALReplicaOperationInvalid
+		}
+	}
+	return cm.updatePChannelMeta(ctx, rawMetasFromMutablePChannels(mutablePChannels))
+}
+
+func rawMetasFromMutablePChannels(mutablePChannels map[ChannelID]*mutablePChannel) []*streamingpb.PChannelMeta {
+	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(mutablePChannels))
+	for _, mutablePChannel := range mutablePChannels {
+		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
+	}
+	return pChannelMetas
+}
+
 // MarkAsUnavailable mark the pchannels as unavailable.
 func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error {
 	cm.cond.LockAndBroadcast()
@@ -561,7 +814,7 @@ func (cm *ChannelManager) GetLatestWALLocated(ctx context.Context, pchannel stri
 	if !ok {
 		return 0, false
 	}
-	if pChannelMeta.IsAssignedOrAssigning() {
+	if pChannelMeta.IsAssigned() {
 		return pChannelMeta.CurrentServerID(), true
 	}
 	return 0, false
@@ -723,6 +976,7 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 			assignments = append(assignments, c.CurrentAssignment())
 		}
 	}
+	walReplicaAssignments := buildWALReplicaAssignments(cm.channels)
 	version := cm.version
 	cchannelAssignment := proto.Clone(cm.cchannelMeta).(*streamingpb.CChannelMeta)
 	pchannelViews := newPChannelView(cm.channels)
@@ -740,8 +994,57 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 		},
 		PChannelView:           pchannelViews,
 		Relations:              assignments,
+		WALReplicaRelations:    walReplicaAssignments,
 		ReplicateConfiguration: replicateConfig,
 	})
+}
+
+func buildWALReplicaAssignments(channels map[ChannelID]*PChannelMeta) []types.WALReplicaInfoAssigned {
+	assignments := make([]types.WALReplicaInfoAssigned, 0, len(channels))
+	for _, pchannelMeta := range channels {
+		for _, replica := range pchannelMeta.Replicas() {
+			if !isWALReplicaServiceableForDiscovery(replica) {
+				continue
+			}
+			assignments = append(assignments, types.WALReplicaInfoAssigned{
+				Replica: types.WALReplicaInfo{
+					ChannelID: types.ChannelID{
+						Name:         pchannelMeta.Name(),
+						WALReplicaID: replica.GetReplicaId(),
+					},
+					AccessMode:        types.AccessMode(replica.GetAccessMode()),
+					ResourceGroup:     replica.GetResourceGroup(),
+					PChannelWriteTerm: pchannelMeta.CurrentTerm(),
+					AssignmentEpoch:   replica.GetAssignmentEpoch(),
+					State:             replica.GetState(),
+				},
+				Node: types.NewStreamingNodeInfoFromProto(replica.GetActiveNode()),
+			})
+		}
+	}
+	sort.Slice(assignments, func(i, j int) bool {
+		left := assignments[i]
+		right := assignments[j]
+		if left.Replica.ChannelID != right.Replica.ChannelID {
+			return left.Replica.ChannelID.LT(right.Replica.ChannelID)
+		}
+		return left.Node.ServerID < right.Node.ServerID
+	})
+	return assignments
+}
+
+func isWALReplicaServiceableForDiscovery(replica *streamingpb.WALReplicaAssignment) bool {
+	if replica.GetActiveNode() == nil {
+		return false
+	}
+	switch replica.GetState() {
+	case streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED:
+		return true
+	case streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING:
+		return replica.GetAccessMode() == streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY
+	default:
+		return false
+	}
 }
 
 // waitChanges waits for the layout to be updated.
