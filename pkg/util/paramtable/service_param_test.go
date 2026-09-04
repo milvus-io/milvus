@@ -300,6 +300,42 @@ func TestServiceParam(t *testing.T) {
 			bt.Save(SParams.PulsarCfg.Address.Key, "")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
+
+		{
+			// derived from pulsar.address: single host is unchanged, a multi-host
+			// service url uses the first host, and IPv6 hosts are bracketed
+			webPort := SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				address  string
+				expected string
+			}{
+				{"pulsar://localhost:6650", "http://localhost:" + webPort},
+				{"pulsar://10.1.2.3:6650", "http://10.1.2.3:" + webPort},
+				{"pulsar+ssl://broker.example.com:6651", "http://broker.example.com:" + webPort},
+				{"pulsar://broker.example.com", "http://broker.example.com:" + webPort},
+				{"broker.example.com", "http://broker.example.com:" + webPort},
+				{"pulsar://user:pw@broker.example.com:6650", "http://broker.example.com:" + webPort},
+				{"pulsar://[::1]:6650", "http://[::1]:" + webPort},
+				{"pulsar://[fd00::1]", "http://[fd00::1]:" + webPort},
+				{"pulsar://broker-0.example.com:6650,broker-1.example.com:6650", "http://broker-0.example.com:" + webPort},
+				{"broker-0.example.com,broker-1.example.com", "http://broker-0.example.com:" + webPort},
+			} {
+				bt.Save(SParams.PulsarCfg.Address.Key, c.address)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.address)
+			}
+		}
+
+		{
+			// an explicitly configured web address is honored as is, whatever pulsar.address is
+			bt.Save(SParams.PulsarCfg.WebAddress.Key, "http://pulsar-web.example.com:8080")
+			for _, address := range []string{"pulsar://localhost:6650", "pulsar://broker-0.example.com:6650,broker-1.example.com:6650", ""} {
+				bt.Save(SParams.PulsarCfg.Address.Key, address)
+				assert.Equal(t, "http://pulsar-web.example.com:8080", SParams.PulsarCfg.WebAddress.GetValue(), address)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
+		bt.Save(SParams.PulsarCfg.Address.Key, "")
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {

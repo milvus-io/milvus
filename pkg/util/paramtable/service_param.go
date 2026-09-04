@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -1343,12 +1344,29 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Version:      "2.0.0",
 		DefaultValue: "",
 		Formatter: func(add string) string {
+			if add != "" {
+				// honor an explicitly configured web address
+				return add
+			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
 				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			// pulsar.address may be a multi-host service url such as
+			// pulsar://host1:6650,host2:6650, which url.Hostname() cannot handle.
+			// Derive the web address from the first host.
+			host := pulsarURL.Host
+			if idx := strings.Index(host, ","); idx >= 0 {
+				host = host[:idx]
+			}
+			if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+				host = hostOnly
+			} else {
+				// no port in the host; strip IPv6 brackets so that JoinHostPort adds them back
+				host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+			}
+			return "http://" + net.JoinHostPort(host, p.WebPort.GetValue())
 		},
 	}
 	p.WebAddress.Init(base.mgr)
