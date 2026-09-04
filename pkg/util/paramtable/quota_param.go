@@ -236,7 +236,7 @@ to reduce unnecessary proxy updates. Range: (0, 1]`,
 	}
 	p.DDLLimitEnabled.Init(base.mgr)
 
-	getLimitSwicher := func() (string, bool) {
+	getLimitSwitcher := func() (string, bool) {
 		if p.ForceDenyAllDDL.GetAsBool() {
 			return min, true
 		}
@@ -251,7 +251,7 @@ to reduce unnecessary proxy updates. Range: (0, 1]`,
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			switcher, ok := getLimitSwicher()
+			switcher, ok := getLimitSwitcher()
 			if ok {
 				return switcher
 			}
@@ -273,7 +273,7 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			switcher, ok := getLimitSwicher()
+			switcher, ok := getLimitSwitcher()
 			if ok {
 				return switcher
 			}
@@ -293,7 +293,7 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			switcher, ok := getLimitSwicher()
+			switcher, ok := getLimitSwitcher()
 			if ok {
 				return switcher
 			}
@@ -315,7 +315,7 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			switcher, ok := getLimitSwicher()
+			switcher, ok := getLimitSwitcher()
 			if ok {
 				return switcher
 			}
