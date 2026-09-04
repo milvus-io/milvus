@@ -277,13 +277,13 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
         // No offset input: reverse-look-up the contiguous global row range
         // [current_index_chunk_pos_, +real_batch_size) for this batch, without
         // materializing a per-batch OffsetVector.
-        processed_size = ProcessIndexLookupSequentialWithMask<T>(
-            execute_sub_batch,
-            current_index_chunk_pos_,
-            real_batch_size,
-            res,
-            valid_res,
-            bitmap_input);
+        processed_size =
+            ProcessIndexLookupSequentialWithMask<T>(execute_sub_batch,
+                                                    current_index_chunk_pos_,
+                                                    real_batch_size,
+                                                    res,
+                                                    valid_res,
+                                                    bitmap_input);
         // ProcessIndexLookupSequentialWithMask is stateless; advance the index
         // cursor for the next batch. MoveCursor() honors the has_offset_input_
         // guard and, on the ScalarIndex path with no raw data, advances only
