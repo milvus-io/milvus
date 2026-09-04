@@ -267,7 +267,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		}
 	}
 
-	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	broadcaster, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -279,6 +279,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 	if coll.EnableDynamicField == targetValue {
 		return errIgnoredAlterCollection
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
 	}
 
 	// Disable dynamic field: remove $meta field from schema.
@@ -304,7 +307,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 
 	schema := coll.ToCollectionSchemaPB()
 	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
 	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
@@ -367,7 +370,7 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 	schema.Fields = newFields
 	schema.EnableDynamicField = false
 	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}

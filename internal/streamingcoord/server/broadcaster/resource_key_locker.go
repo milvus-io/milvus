@@ -12,8 +12,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// errFastLockFailed is the error for fast lock failed.
-var errFastLockFailed = errors.New("fast lock failed")
+// ErrFastLockFailed marks a fast-lock contention: some resource key is held by
+// an in-flight broadcast. Exported so tests can construct it; classify with
+// IsFastLockFailed.
+var ErrFastLockFailed = errors.New("fast lock failed")
+
+// IsFastLockFailed reports whether the error came from a FastLock contention,
+// i.e. some resource key is held by an in-flight broadcast.
+func IsFastLockFailed(err error) bool {
+	return errors.Is(err, ErrFastLockFailed)
+}
 
 // newResourceKeyLocker creates a new resource key locker.
 func newResourceKeyLocker() *resourceKeyLocker {
@@ -100,7 +108,28 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 			continue
 		}
 		g.Unlock()
-		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", key.String())
+		return nil, merr.Wrapf(ErrFastLockFailed, "fast lock failed at resource key %s", key.String())
+	}
+	return g, nil
+}
+
+// FastLockExclusive fails fast only on exclusive keys; shared keys are acquired
+// blocking. Shared keys have no stuck-exclusive-holder hazard, while a shared
+// TryRLock would also fail on a merely WAITING exclusive locker, so trying them
+// only widens spurious contention. Keys are walked in the same global sorted
+// order as Lock, so mixing blocking and try acquisitions cannot deadlock.
+func (r *resourceKeyLocker) FastLockExclusive(keys ...message.ResourceKey) (*lockGuards, error) {
+	keys = uniqueSortResourceKeys(keys)
+
+	g := &lockGuards{}
+	for _, key := range keys {
+		if key.Shared {
+			r.inner.RLock(newResourceLockKey(key))
+		} else if !r.inner.TryLock(newResourceLockKey(key)) {
+			g.Unlock()
+			return nil, merr.Wrapf(ErrFastLockFailed, "fast lock failed at resource key %s", key.String())
+		}
+		g.append(&lockGuard{locker: r, key: key})
 	}
 	return g, nil
 }

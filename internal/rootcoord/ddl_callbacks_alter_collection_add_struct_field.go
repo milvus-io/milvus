@@ -39,7 +39,7 @@ import (
 
 // broadcastAlterCollectionForAddStructField broadcasts the put collection message for add struct field.
 func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -47,6 +47,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
 		return err
 	}
 
@@ -74,7 +77,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		field.FieldID = fieldIDStart + int64(i) + 1
 	}
 
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties

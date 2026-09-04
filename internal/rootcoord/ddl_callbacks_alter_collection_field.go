@@ -73,7 +73,7 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 }
 
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
-	broadcastAPI, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcastAPI, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -108,10 +108,13 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		// if there's no change, return nil directly to promise idempotent.
 		return errIgnoredAlterCollection
 	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
+	}
 
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	var targetField *schemapb.FieldSchema
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {

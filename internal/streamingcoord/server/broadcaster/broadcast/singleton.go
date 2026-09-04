@@ -26,9 +26,8 @@ func GetWithContext(ctx context.Context) (broadcaster.Broadcaster, error) {
 	return singleton.GetWithContext(ctx)
 }
 
-// StartBroadcastWithResourceKeys starts a broadcast with resource keys.
-// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
-func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+// getReadyBroadcaster returns the broadcaster once WAL-based DDL is ready.
+func getReadyBroadcaster(ctx context.Context) (broadcaster.Broadcaster, error) {
 	broadcaster, err := singleton.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
@@ -40,25 +39,38 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
 		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
-	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
+	return broadcaster, nil
+}
+
+// StartBroadcastWithResourceKeys starts a broadcast with resource keys.
+// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
+func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	b, err := getReadyBroadcaster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return b.WithResourceKeys(ctx, resourceKeys...)
+}
+
+// TryStartBroadcastWithResourceKeys is the fail-fast variant of
+// StartBroadcastWithResourceKeys; see Broadcaster.TryWithResourceKeys.
+func TryStartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	b, err := getReadyBroadcaster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return b.TryWithResourceKeys(ctx, resourceKeys...)
 }
 
 // StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive cluster resource key
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadcaster.BroadcastAPI, error) {
-	broadcaster, err := singleton.GetWithContext(ctx)
+	b, err := getReadyBroadcaster(ctx)
 	if err != nil {
 		return nil, err
 	}
-	b, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
-		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
-	}
-	return broadcaster.WithSecondaryClusterResourceKey(ctx)
+	return b.WithSecondaryClusterResourceKey(ctx)
 }
 
 // GetPendingSchemaFileResources returns pending schema file resource IDs

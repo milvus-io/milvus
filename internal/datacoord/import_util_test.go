@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -398,6 +399,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 				{Key: importutilv2.L0Import, Value: "true"},
 			},
 			Schema: &schemapb.CollectionSchema{
+				Version: 3,
 				Fields: []*schemapb.FieldSchema{
 					{
 						FieldID:      100,
@@ -461,11 +463,56 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	assert.NotNil(t, segment)
 	assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
 	assert.EqualValues(t, storage.StorageV2, segment.GetStorageVersion())
+	assert.EqualValues(t, 3, segment.GetSchemaVersion())
 
 	importReq, err := AssembleImportRequest(task, job, meta, alloc)
 	assert.NoError(t, err)
 	assert.EqualValues(t, storage.StorageV2, importReq.GetStorageVersion())
 	assert.False(t, importReq.GetUseLoonFfi())
+}
+
+func TestMigrateImportSegmentSchemaVersions(t *testing.T) {
+	ctx := context.Background()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			State:        internalpb.ImportJobState_IndexBuilding,
+			Schema:       &schemapb.CollectionSchema{Version: 3},
+		},
+	}
+	task := &importTask{}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            1,
+		SegmentIDs:       []int64{10},
+		SortedSegmentIDs: []int64{11},
+	})
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJobBy(mock.Anything, mock.Anything).Return([]ImportJob{job})
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1), mock.Anything).Return([]ImportTask{task})
+
+	// Segment 10 predates alloc-time stamping (version 0); segment 11 is already
+	// stamped and must be left alone.
+	segments := map[int64]*SegmentInfo{
+		10: NewSegmentInfo(&datapb.SegmentInfo{ID: 10, SchemaVersion: 0}),
+		11: NewSegmentInfo(&datapb.SegmentInfo{ID: 11, SchemaVersion: 3}),
+	}
+	getSeg := mockey.Mock((*meta).GetSegment).To(func(_ *meta, _ context.Context, segmentID int64) *SegmentInfo {
+		return segments[segmentID]
+	}).Build()
+	defer getSeg.UnPatch()
+
+	updated := make([]int64, 0)
+	updSeg := mockey.Mock((*meta).UpdateSegment).To(func(_ *meta, segmentID int64, _ ...SegmentOperator) error {
+		updated = append(updated, segmentID)
+		return nil
+	}).Build()
+	defer updSeg.UnPatch()
+
+	migrateImportSegmentSchemaVersions(ctx, importMeta, &meta{})
+	assert.Equal(t, []int64{10}, updated)
 }
 
 func TestImportUtil_RegroupImportFiles(t *testing.T) {

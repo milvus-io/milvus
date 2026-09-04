@@ -700,6 +700,26 @@ func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ..
 	return wrapInner(ErrCollectionPartialUpdateConflict, formatMsg(format, args...), err)
 }
 
+// WrapErrCollectionDDLImportConflict wraps ErrCollectionDDLImportConflict with collection
+func WrapErrCollectionDDLImportConflict(collection any, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionDDLImportConflict, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
+// WrapErrCollectionDDLImportBusy wraps ErrCollectionDDLImportBusy with collection
+func WrapErrCollectionDDLImportBusy(collection any, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionDDLImportBusy, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),

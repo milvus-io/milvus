@@ -214,7 +214,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return nil, merr.WrapErrServiceUnavailable("broadcast failed")
 		}).Build()
@@ -280,7 +280,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
@@ -354,7 +354,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 
 	// Capture the dbName passed to broadcastImport
 	var capturedDbName string
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			// Check if default db name resource key is used
 			for _, key := range keys {
