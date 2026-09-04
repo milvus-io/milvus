@@ -46,7 +46,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
 		ctx,
 		req.GetReplicaNumber(),
 		req.GetResourceGroups(),
@@ -62,11 +62,14 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	// A request that speaks only for the resource groups it names leaves the
-	// placement of the others alone; natively it states the whole placement and
-	// this returns what AssignReplica just produced.
+	// A request that names resource groups speaks only for those and leaves the
+	// placement of the others alone; a request that names none states the whole
+	// placement, which is the native behavior, and this returns what
+	// AssignReplica just produced. The scoping list comes from the same call
+	// that resolved the configuration, so both are decided from one reading of
+	// it.
 	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
-		ctx, req.GetCollectionID(), resourceGroups, expectedReplicasNumber, currentLoadConfig)
+		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, currentLoadConfig)
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
@@ -94,7 +97,28 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	return err
 }
 
-func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, bool, error) {
+// getLoadReplicaConfigForRequest resolves the replica configuration a load
+// request runs with. It returns, in order: the replica number, the resource
+// groups to assign replicas in (defaulted, which is what AssignReplica needs),
+// the resource groups the REQUEST itself speaks for, and whether the caller
+// named a replica number.
+//
+// The third return value is the scoping decision, and it is the raw list off
+// the request, taken before the defaulting below rewrites an empty one to the
+// default resource group. A request naming no group is a request about the
+// collection, not a request about the default group: reading the defaulted list
+// instead would turn every bare load into a request scoped to
+// __default_resource_group, carry every other group's replicas through it, and
+// so add a replica nobody asked for to a load_collection and refuse a
+// load_partitions for "changing the replica number" of a group the caller never
+// mentioned.
+//
+// Empty means "this request states the whole placement". A cluster-level force
+// override states it by definition -- it replaces both the replica number and
+// the resource groups of every load -- so it answers empty however the request
+// itself was written, and it is read exactly once here, so the two answers
+// cannot disagree with each other.
+func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, []string, bool, error) {
 	// If force override is enabled with a complete cluster-level load config,
 	// new load requests are interpreted as cluster-managed even when the request
 	// carries explicit replica/RG parameters.
@@ -104,14 +128,15 @@ func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumb
 			mlog.Int64("collectionID", collectionID),
 			mlog.Int32("replicaNumber", overrideReplicaNumber),
 			mlog.Strings("resourceGroups", overrideResourceGroups))
-		return overrideReplicaNumber, overrideResourceGroups, false, nil
+		return overrideReplicaNumber, overrideResourceGroups, nil, false, nil
 	}
+	scopedResourceGroups := resourceGroups
 
 	// If user specified the replica number in load request, load config changes
 	// won't be applied to the collection automatically.
 	userSpecifiedReplicaMode := replicaNumber > 0
 	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, replicaNumber, resourceGroups, collectionID)
-	return replicaNumber, resourceGroups, userSpecifiedReplicaMode, err
+	return replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err
 }
 
 func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
