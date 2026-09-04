@@ -401,14 +401,24 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	columns := make([]arrow.Array, len(b.fields))
+	for i, field := range b.fields {
+		columns[i] = rec.Column(field.FieldID)
+	}
+	return b.appendColumns(columns, start, end)
+}
+
+// appendColumns appends rows from source columns already resolved in builder
+// field order. MergeSort keeps these columns with each reader's current record
+// so the per-row output loop does not repeat Record.Column lookups.
+func (b *RecordBuilder) appendColumns(columns []arrow.Array, start, end int) error {
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
-			col := rec.Column(f.FieldID)
-			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
+			size, err := appendValueAt(builder, columns[i], offset, f, b.defaults[i])
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
