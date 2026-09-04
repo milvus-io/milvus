@@ -240,6 +240,10 @@ class VirtualPKTakeResult final : public TakeResult {
 ChunkedColumnInterface::ScanResult
 VirtualPKChunkedColumn::Scan(milvus::OpContext*,
                              const ScanOptions& options) const {
+    if (options.output != ScanOutput::Data ||
+        options.predicate != ScanPredicate::None) {
+        return nullptr;
+    }
     ValidateVirtualPKScanTargetType(options.target_type);
     return std::make_unique<VirtualPKScanCursor>(
         shifted_segment_id_,

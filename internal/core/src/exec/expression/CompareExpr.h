@@ -783,9 +783,9 @@ class PhyCompareFilterExpr : public Expr {
         if (left_data_scan_cursor_ == nullptr) {
             const auto pin_policy =
                 segcore::SegcoreConfig::default_config()
-                        .get_scan_pin_until_cell_exhausted()
-                    ? ChunkedColumnInterface::ScanPinPolicy::UntilCellExhausted
-                    : ChunkedColumnInterface::ScanPinPolicy::PerCall;
+                        .get_scan_cursor_owns_pin()
+                    ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
+                    : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
             auto left_cursor = left_data_column_->Scan(
                 op_ctx_,
                 ChunkedColumnInterface::ScanOptions::ForData(

@@ -773,6 +773,13 @@ class SegmentExpr : public Expr {
         return data_scan_cursor_.get();
     }
 
+    static bool
+    UsesLegacyChunkPrefetch(const ChunkedColumnInterface* column) {
+        return column == nullptr ||
+               column->GetLocalFormat() ==
+                   ChunkedColumnInterface::LocalFormat::Raw;
+    }
+
     static void
     ApplyScanValidity(const ChunkedColumnInterface::ScanBatch& batch,
                       int64_t batch_pos,
@@ -2047,7 +2054,10 @@ class SegmentExpr : public Expr {
         std::vector<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
 
-        EnsureRawDataPrefetched();
+        auto column = segment_->GetChunkedColumn(field_id_);
+        if (UsesLegacyChunkPrefetch(column.get())) {
+            EnsureRawDataPrefetched();
+        }
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -3481,6 +3491,13 @@ class SegmentExpr : public Expr {
             }
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
+                auto column = self->segment_->GetChunkedColumn(self->field_id_);
+                if (!self->UsesLegacyChunkPrefetch(column.get())) {
+                    // Non-raw formats own their cell selection and pinning.
+                    // Legacy chunk prefetch would eagerly load the full
+                    // column and defeat their cache policy.
+                    return;
+                }
                 if (self->ShouldPrefetchRawDataEagerly()) {
                     self->PrefetchRawData();
                     self->prefetched_ = true;

@@ -36,12 +36,19 @@ using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface {
  public:
+    enum class LocalFormat {
+        Raw,
+        Vortex,
+    };
+
     using TargetType = milvus::TargetType;
     using ValueView = milvus::ValueView;
     using ScanBatch = milvus::ScanBatch;
     using ScanReadMode = milvus::ScanReadMode;
     using ScanCursor = milvus::ScanCursor;
     using ScanPinPolicy = milvus::ScanPinPolicy;
+    using ScanOutput = milvus::ScanOutput;
+    using ScanPredicate = milvus::ScanPredicate;
     using ScanOptions = milvus::ScanOptions;
     using ScanResult = milvus::ScanResult;
     using OffsetView = milvus::OffsetView;
@@ -59,6 +66,16 @@ class ChunkedColumnInterface {
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool
     IsInMultiFieldColumnGroup() const {
+        return false;
+    }
+
+    virtual LocalFormat
+    GetLocalFormat() const {
+        return LocalFormat::Raw;
+    }
+
+    virtual bool
+    SupportsScanPushdown(const ScanOptions&) const {
         return false;
     }
 
