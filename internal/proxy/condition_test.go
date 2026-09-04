@@ -145,7 +145,7 @@ func TestTaskCondition_OnWaitError(t *testing.T) {
 
 		condition.Notify(errors.New("task failed"))
 		assert.Error(t, condition.WaitToFinish())
-		assert.Equal(t, int32(1), calls.Load())
+		assert.Zero(t, calls.Load())
 	})
 
 	t.Run("context canceled", func(t *testing.T) {

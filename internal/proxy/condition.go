@@ -45,22 +45,18 @@ type TaskCondition struct {
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
-	var err error
 	select {
 	case <-tc.ctx.Done():
-		err = errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
-	case err = <-tc.done:
-	}
-
-	if err != nil {
 		tc.onWaitErrorMu.RLock()
 		handler := tc.onWaitError
 		tc.onWaitErrorMu.RUnlock()
 		if handler != nil {
 			handler()
 		}
+		return errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
+	case err := <-tc.done:
+		return err
 	}
-	return err
 }
 
 // Notify sends a signal into the done channel
@@ -73,7 +69,7 @@ func (tc *TaskCondition) Ctx() context.Context {
 	return tc.ctx
 }
 
-// SetOnWaitError registers a handler invoked before WaitToFinish returns an error.
+// SetOnWaitError registers a handler invoked when WaitToFinish returns because its context is done.
 func (tc *TaskCondition) SetOnWaitError(handler func()) {
 	tc.onWaitErrorMu.Lock()
 	defer tc.onWaitErrorMu.Unlock()
