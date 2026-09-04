@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -159,6 +160,55 @@ func TestShardManagerCreateVChannel(t *testing.T) {
 	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-successor", 1, []int64{2}, 3000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"), ErrCollectionNotFound)
+}
+
+// A CreateVChannel body may carry the schema as the pre-2.6.1 serialized bytes
+// rather than the CollectionSchema message: the interceptor admits either form.
+// The shard manager must resolve both exactly as CreateCollection does, or the
+// target is registered with a nil schema and every versioned insert to it fails
+// with ErrCollectionSchemaNotFound until a restart rebuilds the entry from the
+// persisted meta, which is the very "different before and after a restart"
+// case the interceptor's schema guard exists to prevent.
+func TestShardManagerCreateVChannelResolvesTheSchemaBytesForm(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
+	schema := &schemapb.CollectionSchema{Name: "col", Version: 3, Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	bs, err := proto.Marshal(schema)
+	require.NoError(t, err)
+
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel("v9").
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:         9,
+			PartitionIds:         []int64{10},
+			SplitTaskId:          100,
+			SplitSourceVchannels: []string{"v1"},
+			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
+			RoutingModulus:       2,
+		}).
+		WithBody(&message.CreateCollectionRequest{Schema: bs}).
+		MustBuildMutable().
+		WithTimeTick(2000).
+		WithLastConfirmedUseMessageID()
+	m.CreateVChannel(message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3))))
+
+	version, err := m.CheckWritableAndSchemaVersion("v9", &message.InsertMessageHeader{CollectionId: 9, SchemaVersion: proto.Int32(3)})
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), version)
+
+	// the same body through CreateCollection resolves identically.
+	cmsg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v8").
+		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 8, PartitionIds: []int64{10}}).
+		WithBody(&message.CreateCollectionRequest{Schema: bs}).
+		MustBuildMutable().
+		WithTimeTick(2000).
+		WithLastConfirmedUseMessageID()
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(cmsg.IntoImmutableMessage(rmq.NewRmqID(4))))
+	version, err = m.CheckWritableAndSchemaVersion("v8", &message.InsertMessageHeader{CollectionId: 8, SchemaVersion: proto.Int32(3)})
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), version)
 }
 
 // TestShardManagerVChannelAdmissionChecks pins the three admission predicates

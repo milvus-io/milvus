@@ -232,15 +232,29 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
 	logger := m.Logger().With(mlog.FieldMessage(msg))
-	body := msg.MustBody()
-	schema := body.GetCollectionSchema()
-	if schema == nil && len(body.GetSchema()) > 0 {
-		schema = messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
-	}
+	schema := schemaOfCreateBody(msg.MustBody())
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
 		msg.TimeTick(), schema, logger)
+}
+
+// schemaOfCreateBody resolves the schema a CreateCollection-shaped body
+// carries, in either of its two forms: the CollectionSchema message, or the
+// pre-2.6.1 serialized Schema bytes. Nil when the body carries neither. Both
+// genesis messages (CreateCollection and CreateVChannel) share the body shape
+// and admit both forms, so both must resolve the schema the same way: a
+// registration that reads only one form registers a nil schema for the other,
+// and every versioned insert then fails with ErrCollectionSchemaNotFound until
+// a restart rebuilds the entry from the persisted meta.
+func schemaOfCreateBody(body *message.CreateCollectionRequest) *schemapb.CollectionSchema {
+	if schema := body.GetCollectionSchema(); schema != nil {
+		return schema
+	}
+	if len(body.GetSchema()) > 0 {
+		return messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
+	}
+	return nil
 }
 
 // CreateVChannel registers a shard split target vchannel. CreateVChannel is
@@ -269,7 +283,7 @@ func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMes
 		return
 	}
 	m.createCollectionLocked(collectionID, msg.Header().PartitionIds, msg.VChannel(),
-		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
+		msg.TimeTick(), schemaOfCreateBody(msg.MustBody()), logger)
 }
 
 // createCollectionLocked registers the collection and its partition managers on
