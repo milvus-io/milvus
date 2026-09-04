@@ -1,15 +1,18 @@
 package datacoord
 
 import (
+	"math"
 	"strconv"
 	"testing"
 
 	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -17,9 +20,8 @@ import (
 func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty: no QueryNode session, so this answers the coordinator's own
-	// compiled-in knowhere version instead of zero.
-	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetCurrentIndexEngineVersion())
+	// empty
+	assert.Zero(t, m.GetCurrentIndexEngineVersion())
 
 	// startup
 	m.Startup(map[string]*sessionutil.Session{
@@ -142,9 +144,8 @@ func Test_IndexEngineVersionManager_IndexStorePathVersionConfigGate(t *testing.T
 func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty: no QueryNode session, so this answers the coordinator's own
-	// compiled-in scalar engine version instead of zero.
-	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
+	// empty
+	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
 
 	// startup
 	m.Startup(map[string]*sessionutil.Session{
@@ -355,11 +356,8 @@ func Test_IndexEngineVersionManager_StartupWithEmptySession(t *testing.T) {
 	// Second startup with no nodes (all offline)
 	m.Startup(map[string]*sessionutil.Session{})
 
-	// With no QueryNode session, the current version falls back to the
-	// coordinator's own compiled-in version rather than zero; the minimal
-	// version is a compatibility floor that an empty set genuinely imposes
-	// none of, so it stays zero.
-	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetCurrentIndexEngineVersion())
+	// Should return default values when no nodes are online
+	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
 	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
 
 	vm := m.(*versionManagerImpl)
@@ -468,9 +466,8 @@ func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
 func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty - no QueryNode to bound the cluster, so the bound is what this
-	// coordinator's own image can load
-	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetMaximumIndexEngineVersion())
+	// empty - returns MaxInt32 (no upper bound)
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
 
 	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
 	m.Startup(map[string]*sessionutil.Session{
@@ -513,8 +510,8 @@ func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
 func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty - bounded by this coordinator's own compiled-in scalar version
-	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetMaximumScalarIndexEngineVersion())
+	// empty - returns MaxInt32
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
 
 	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
 	m.Startup(map[string]*sessionutil.Session{
@@ -841,14 +838,58 @@ func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T)
 	assert.False(t, exists, "offline node should be removed from sessionVersion map")
 }
 
-// An empty session set is the resting state and the versions come from this
-// process's own engine - the same values the absent query nodes, running this
-// same image, would have reported. Version zero here is what misroutes disk
-// indexes in knowhere, so the assertion pins non-zero as well as source
-// equality. The store-path gate keeps its native reading regardless: no
-// session means no evidence any reader is on an older layout, but the
-// coordinator's own engine version is not that evidence either.
+// formHook is the smallest thing a distribution can install: the version
+// manager only asks whether a hook is there, never what it does.
+type formHook struct{ hook.Hook }
+
+// installForm turns this test's binary into one a distribution has compiled
+// itself into, and turns it back into a stock binary when the test ends.
+func installForm(t *testing.T) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	ext.SetHook(formHook{})
+}
+
+// A stock binary with no QueryNode session answers exactly what master does:
+// version 0, no upper bound, and an operator override written through. The
+// current version is the MIN over every QueryNode's; with none registered
+// there is nothing to take it over, and a coordinator that came up first in a
+// rolling upgrade must not build indexes an older QueryNode cannot load.
+func TestAStockBinaryAnswersZeroWithNoSession(t *testing.T) {
+	paramtable.Init()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	m := newIndexEngineVersionManager()
+
+	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// With no upper bound, an override above what this image can load is
+	// written through - master's behavior, kept on a stock binary.
+	p := paramtable.Get()
+	compiledInVec := segcore.GetIndexEngineInfo().CurrentIndexVersion
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(compiledInVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+	assert.Equal(t, compiledInVec+5, m.ResolveVecIndexVersion(),
+		"with no session a stock binary writes an override through, as it always has")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion+5, m.ResolveScalarIndexVersion())
+}
+
+// With a form installed, an empty session set is the resting state and the
+// versions come from this process's own engine - the same values the absent
+// query nodes, running this same image, would have reported. Version zero here
+// is what misroutes disk indexes in knowhere, so the assertion pins non-zero
+// as well as source equality. The store-path gate keeps its native reading
+// regardless: no session means no evidence any reader is on an older layout,
+// but the coordinator's own engine version is not that evidence either.
 func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
+	installForm(t)
 	m := newIndexEngineVersionManager()
 
 	vec := m.GetCurrentIndexEngineVersion()
@@ -871,6 +912,7 @@ func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
 // the fallback is about an empty set, never about overriding a session that
 // exists.
 func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
+	installForm(t)
 	m := newIndexEngineVersionManager()
 	m.Startup(map[string]*sessionutil.Session{
 		"qn1": {SessionRaw: sessionutil.SessionRaw{
@@ -885,14 +927,16 @@ func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
 }
 
 // TestEmptySessionSetBoundsAnOverrideByThisBinary is the other half of the
-// no-session fallback. The clamp at the end of the resolve functions is what
-// stops dataCoord.targetVecIndexVersion from asking for an index nothing in
-// the cluster can load; with no QueryNode session the upper bound used to be
-// MaxInt32, so the clamp did nothing and the override was written through
-// whatever it said. The bound with no session is the same assumption the
-// current version already makes: a QueryNode started later runs this image.
+// form's no-session fallback. The clamp at the end of the resolve functions is
+// what stops dataCoord.targetVecIndexVersion from asking for an index nothing
+// in the cluster can load; with no QueryNode session the upper bound is
+// MaxInt32 on a stock binary, so the clamp does nothing and the override is
+// written through whatever it says. The bound with no session is the same
+// assumption the form's current version makes: a QueryNode started later runs
+// this image.
 func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
 	paramtable.Init()
+	installForm(t)
 	p := paramtable.Get()
 	m := newIndexEngineVersionManager()
 
@@ -916,6 +960,7 @@ func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
 // rewrite, and asking for an older index version is a legitimate thing to do.
 func TestEmptySessionSetLeavesAnOverrideBelowThisBinaryAlone(t *testing.T) {
 	paramtable.Init()
+	installForm(t)
 	p := paramtable.Get()
 	m := newIndexEngineVersionManager()
 
