@@ -73,7 +73,12 @@ func TextEmbeddingInputsCheck(name string, fields []*schemapb.FieldSchema) error
 		return merr.WrapErrParameterInvalidMsg("TextEmbedding function input field must be a VARCHAR/TEXT field") //nolint:staticcheck // starts with proper noun
 	}
 
-	if fields[0].Nullable {
+	// An externally-mapped input's nullability is source-driven, not an
+	// opt-outable user contract: parquet-style externals are force-set nullable
+	// during normalization, and a milvus-table target must mirror the source
+	// snapshot's nullability to pass identity validation. Either way the
+	// user-schema rule must not judge it.
+	if fields[0].Nullable && fields[0].GetExternalField() == "" {
 		return merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: function %s, field %s", name, fields[0].GetName())
 	}
 	return nil

@@ -591,7 +591,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                 ),
                 {
                     ct.err_code: 1100,
-                    ct.err_msg: "BM25 function input field must be a VARCHAR/TEXT field, got 1 field with type Int64",
+                    ct.err_msg: "BM25 function input field must be a VARCHAR/TEXT field, but got Int64",
                 },
             ),
             (
@@ -3238,7 +3238,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "minhash function output field 'mh' dim 256 does not match expected dim 512 "
+                    "minhash function output field 'mh' dim 256 does not match expected dim "
                     "(numHashes 16 * one minhash signature size of 32bit): invalid parameter"
                 ),
             },
