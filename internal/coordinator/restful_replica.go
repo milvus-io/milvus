@@ -55,9 +55,10 @@ type LoadConfigComplianceResponse struct {
 
 // HandleReplicaLoadConfigCompliance checks if all loaded collections meet the cluster-level replica configuration requirements.
 //
-// Optional query parameter "per_resource_group=true" switches the check from fail-fast to per-resource-group
-// reporting: every collection is still checked fully (no early return on the first violation) and the response
-// reports the compliance state of each involved resource group, including the reason for any not-ready one.
+// Optional query parameter "output=per_resource_group" (kubectl "-o" style) switches the check from fail-fast to
+// per-resource-group reporting: every collection is still checked fully (no early return on the first violation)
+// and the response reports the compliance state of each involved resource group, including the reason for any
+// not-ready one. The default output ("summary", or absent) keeps the fail-fast single-reason behavior.
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
@@ -67,9 +68,9 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	ctx := req.Context()
 	logger := mlog.With(mlog.String("handler", "ReplicaLoadConfigCompliance"))
 
-	// When enabled, keep checking all collections after a violation and report readiness per resource group
-	// instead of failing fast on the first violation.
-	perResourceGroup := req.URL.Query().Get("per_resource_group") == "true"
+	// When output=per_resource_group, keep checking all collections after a violation and report readiness per
+	// resource group instead of failing fast on the first violation.
+	perResourceGroup := req.URL.Query().Get("output") == "per_resource_group"
 
 	// Cluster-level check: WAL is fully migrated onto the configured primary resource group.
 	// Short-circuit before reading config / loading collections — a WAL-layout issue affects

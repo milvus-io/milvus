@@ -839,7 +839,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
 		defer mocker3.UnPatch()
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
 		w := httptest.NewRecorder()
 
 		coord.HandleReplicaLoadConfigCompliance(w, req)
@@ -906,7 +906,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
 		defer mocker3.UnPatch()
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
 		w := httptest.NewRecorder()
 
 		coord.HandleReplicaLoadConfigCompliance(w, req)
@@ -961,7 +961,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
 		defer mocker3.UnPatch()
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
 		w := httptest.NewRecorder()
 
 		coord.HandleReplicaLoadConfigCompliance(w, req)
@@ -1006,7 +1006,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
 		defer mocker3.UnPatch()
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
 		w := httptest.NewRecorder()
 
 		coord.HandleReplicaLoadConfigCompliance(w, req)
