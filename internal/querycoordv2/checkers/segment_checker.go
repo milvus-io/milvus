@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -544,7 +545,15 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// readable target version therefore never advances, the load sits at
 		// partial progress until it times out, and nothing reports why,
 		// because no task was ever created to fail.
-		if len(rwNodes) == 0 && streamingutil.IsStreamingServiceEnabled() {
+		//
+		// Only an installed form places segments there, the same gate the
+		// admission in utils.AssignReplica keys on: a stock deployment never
+		// admits a replica whose only compute is a streaming node, and if one
+		// did lose its last regular node its segments would stay on the
+		// streaming node's query node for good, since the balancers only walk
+		// GetRWNodes. A stock binary keeps the empty candidate set it always
+		// had.
+		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
 			rwNodes = replica.GetRWSQNodes()
 		}
 
