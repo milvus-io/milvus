@@ -3996,16 +3996,18 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
-	MaxReadConcurrency           ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
-	MaxGroupNQ                   ParamItem `refreshable:"true"`
-	NQMergeRatio                 ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
-	TopKMergeRatio               ParamItem `refreshable:"true"`
-	CPURatio                     ParamItem `refreshable:"true"`
-	GracefulStopTimeout          ParamItem `refreshable:"false"`
-	StandaloneMigrateDataTimeout ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize             ParamItem `refreshable:"true"`
+	MaxReadConcurrency               ParamItem `refreshable:"true"`
+	SchedulerMemProtectionEnabled    ParamItem `refreshable:"true"`
+	SchedulerMemProtectionWaterLevel ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency            ParamItem `refreshable:"false"`
+	MaxGroupNQ                       ParamItem `refreshable:"true"`
+	NQMergeRatio                     ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap              ParamItem `refreshable:"true"`
+	TopKMergeRatio                   ParamItem `refreshable:"true"`
+	CPURatio                         ParamItem `refreshable:"true"`
+	GracefulStopTimeout              ParamItem `refreshable:"false"`
+	StandaloneMigrateDataTimeout     ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4988,6 +4990,24 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	p.SchedulerMemProtectionEnabled = ParamItem{
+		Key:          "queryNode.scheduler.memProtection.enabled",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "When true, new search/query tasks are rejected with a retriable error while process memory usage is above memProtection.waterLevel, instead of queueing toward OOM.",
+		Export:       true,
+	}
+	p.SchedulerMemProtectionEnabled.Init(base.mgr)
+
+	p.SchedulerMemProtectionWaterLevel = ParamItem{
+		Key:          "queryNode.scheduler.memProtection.waterLevel",
+		Version:      "2.6.14",
+		DefaultValue: "0.9",
+		Doc:          "Fraction (0, 1] of total memory (container-limit aware) above which read tasks are rejected; values outside the range disable the protection.",
+		Export:       true,
+	}
+	p.SchedulerMemProtectionWaterLevel.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",

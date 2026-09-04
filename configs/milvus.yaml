@@ -687,6 +687,9 @@ queryNode:
     # Max read concurrency must greater than or equal to 1, and less than or equal to hardware.GetCPUNum * 100.
     # (0, 100]
     maxReadConcurrentRatio: 1
+    memProtection:
+      enabled: false # When true, new search/query tasks are rejected with a retriable error while process memory usage is above memProtection.waterLevel, instead of queueing toward OOM.
+      waterLevel: 0.9 # Fraction (0, 1] of total memory (container-limit aware) above which read tasks are rejected; values outside the range disable the protection.
     cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
     scheduleReadPolicy:
