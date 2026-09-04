@@ -407,7 +407,7 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 			fence := impl.shardManager.GetSplitFence(collectionID, msg.VChannel())
 			return nil, status.NewShardFenced(msg.VChannel(), fence.TimeTick, fence.TaskID)
 		}
-		return nil, status.NewUnrecoverableError(err.Error())
+		return nil, status.NewUnrecoverableError("%s", err.Error())
 	}
 	// Auto-flush every growing segment of the vchannel as of the fence time
 	// tick and embed the sealed segment ids into the message header, exactly
@@ -424,7 +424,7 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 	// premature flush, never correctness.
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		return nil, status.NewUnrecoverableError("%s", err.Error())
 	}
 	header.FlushedSegmentIds = segmentIDs
 	splitShardMsg.OverwriteHeader(header)
