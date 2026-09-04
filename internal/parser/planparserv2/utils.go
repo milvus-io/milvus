@@ -203,6 +203,11 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 			return schemapb.DataType_Timestamptz, nil
 		}
 	}
+	if typeutil.IsDecimalType(lDataType) {
+		if typeutil.IsDecimalType(rDataType) || typeutil.IsIntegerType(rDataType) || typeutil.IsFloatingType(rDataType) {
+			return schemapb.DataType_Decimal, nil
+		}
+	}
 	if typeutil.IsFloatingType(lDataType) {
 		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
 			return schemapb.DataType_Double, nil
@@ -261,6 +266,22 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 	return left.expr.GetColumnExpr().GetInfo()
 }
 
+// decimalArithColumnInfo resolves the underlying Decimal column referenced by expr,
+// whether expr is a direct column reference or a BinaryArithExpr wrapping one operand
+// as a column and the other as a literal (the only shape Decimal arithmetic supports).
+func decimalArithColumnInfo(expr *ExprWithType) *planpb.ColumnInfo {
+	if info := toColumnInfo(expr); info != nil {
+		return info
+	}
+	if arith := expr.expr.GetBinaryArithExpr(); arith != nil {
+		if info := arith.GetLeft().GetColumnExpr().GetInfo(); info != nil {
+			return info
+		}
+		return arith.GetRight().GetColumnExpr().GetInfo()
+	}
+	return nil
+}
+
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	// A raw-bytes value has exactly one consumer family — the membership filter
 	// blob argument of membership_match — each
@@ -283,6 +304,10 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 	if typeutil.IsTimestamptzType(dataType) {
+		return value, nil
+	}
+
+	if typeutil.IsDecimalType(dataType) && IsInteger(value) {
 		return value, nil
 	}
 
@@ -527,6 +552,8 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return true
+	case schemapb.DataType_Decimal:
+		return typeutil.IsDecimalType(right)
 	case schemapb.DataType_Timestamptz:
 		// Same type only. Mixed TIMESTAMPTZ vs INT64 stays unsupported even
 		// though both dispatch to int64_t in the C++ compare path.
@@ -680,6 +707,8 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return typeutil.IsArithmetic(right)
+	case schemapb.DataType_Decimal:
+		return typeutil.IsDecimalType(right) || typeutil.IsIntegerType(right) || typeutil.IsFloatingType(right)
 	default:
 		return false
 	}

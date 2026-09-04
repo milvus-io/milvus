@@ -2088,3 +2088,112 @@ func TestAddInsertData_NonNullableArrayOfVector(t *testing.T) {
 	fd := insertData.Data[100].(*VectorArrayFieldData)
 	assert.Equal(t, 1, len(fd.Data))
 }
+
+// TestInsertCodecDecimalRoundTrip covers the flush-and-reload path for Decimal:
+// InsertData -> binlog blobs -> InsertData. Before GetDataFromPayload learned
+// about Decimal, serialization succeeded but deserialization failed with
+// "unknown type", so flushed Decimal data could never be reloaded or compacted.
+func TestInsertCodecDecimalRoundTrip(t *testing.T) {
+	const decimalField = 200
+
+	meta := &etcdpb.CollectionMeta{
+		ID:            CollectionID,
+		CreateTime:    1,
+		SegmentIDs:    []int64{SegmentID},
+		PartitionTags: []string{"partition_0"},
+		Schema: &schemapb.CollectionSchema{
+			Name: "decimal_schema",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: TimestampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+				{
+					FieldID:  decimalField,
+					Name:     "field_decimal",
+					DataType: schemapb.DataType_Decimal,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.PrecisionKey, Value: "18"},
+						{Key: common.ScaleKey, Value: "4"},
+					},
+				},
+			},
+		},
+	}
+
+	insertCodec := NewInsertCodecWithSchema(meta)
+	// Unscaled values: 19.99, -19.99 and 0 at scale 4.
+	want := []int64{199900, -199900, 0}
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField:     &Int64FieldData{Data: []int64{1, 2, 3}},
+			TimestampField: &Int64FieldData{Data: []int64{1, 2, 3}},
+			decimalField:   &DecimalFieldData{Data: want},
+		},
+	}
+
+	blobs, err := insertCodec.Serialize(PartitionID, SegmentID, insertData)
+	assert.NoError(t, err)
+
+	_, _, _, resultData, err := insertCodec.DeserializeAll(blobs)
+	assert.NoError(t, err)
+
+	got, ok := resultData.Data[decimalField].(*DecimalFieldData)
+	assert.True(t, ok, "decimal field must deserialize back into DecimalFieldData")
+	assert.Equal(t, want, got.Data)
+}
+
+// TestInsertCodecDecimalNullableRoundTrip is the same round-trip for a nullable
+// column: null rows must come back marked in ValidData rather than being lost
+// or mistaken for the legal value 0.
+func TestInsertCodecDecimalNullableRoundTrip(t *testing.T) {
+	const decimalField = 201
+
+	meta := &etcdpb.CollectionMeta{
+		ID:            CollectionID,
+		CreateTime:    1,
+		SegmentIDs:    []int64{SegmentID},
+		PartitionTags: []string{"partition_0"},
+		Schema: &schemapb.CollectionSchema{
+			Name: "decimal_nullable_schema",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: TimestampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+				{
+					FieldID:  decimalField,
+					Name:     "field_decimal",
+					DataType: schemapb.DataType_Decimal,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.PrecisionKey, Value: "18"},
+						{Key: common.ScaleKey, Value: "4"},
+					},
+				},
+			},
+		},
+	}
+
+	insertCodec := NewInsertCodecWithSchema(meta)
+	wantData := []int64{199900, 0, -50}
+	wantValid := []bool{true, false, true}
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField:     &Int64FieldData{Data: []int64{1, 2, 3}},
+			TimestampField: &Int64FieldData{Data: []int64{1, 2, 3}},
+			decimalField: &DecimalFieldData{
+				Data:      wantData,
+				ValidData: wantValid,
+				Nullable:  true,
+			},
+		},
+	}
+
+	blobs, err := insertCodec.Serialize(PartitionID, SegmentID, insertData)
+	assert.NoError(t, err)
+
+	_, _, _, resultData, err := insertCodec.DeserializeAll(blobs)
+	assert.NoError(t, err)
+
+	got, ok := resultData.Data[decimalField].(*DecimalFieldData)
+	assert.True(t, ok)
+	assert.Equal(t, wantData, got.Data)
+	assert.Equal(t, wantValid, got.ValidData)
+}

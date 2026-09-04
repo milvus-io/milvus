@@ -354,6 +354,15 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			data.ValidData = make([]bool, 0, cap)
 		}
 		return data, nil
+	case schemapb.DataType_Decimal:
+		data := &DecimalFieldData{
+			Data:     make([]int64, 0, cap),
+			Nullable: fieldSchema.GetNullable(),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 	case schemapb.DataType_JSON:
 		data := &JSONFieldData{
 			Data:     make([][]byte, 0, cap),
@@ -466,6 +475,14 @@ type JSONFieldData struct {
 	Nullable  bool
 }
 type TimestamptzFieldData struct {
+	Data      []int64
+	ValidData []bool
+	Nullable  bool
+}
+
+// DecimalFieldData stores Decimal values as their unscaled int64 representation
+// (e.g. "19.99" at scale 4 -> 199900). Never the original decimal-literal text.
+type DecimalFieldData struct {
 	Data      []int64
 	ValidData []bool
 	Nullable  bool
@@ -630,10 +647,12 @@ func (data *Int64FieldData) RowNum() int       { return len(data.Data) }
 func (data *FloatFieldData) RowNum() int       { return len(data.Data) }
 func (data *DoubleFieldData) RowNum() int      { return len(data.Data) }
 func (data *TimestamptzFieldData) RowNum() int { return len(data.Data) }
-func (data *StringFieldData) RowNum() int      { return len(data.Data) }
-func (data *ArrayFieldData) RowNum() int       { return len(data.Data) }
-func (data *JSONFieldData) RowNum() int        { return len(data.Data) }
-func (data *GeometryFieldData) RowNum() int    { return len(data.Data) }
+
+func (data *DecimalFieldData) RowNum() int  { return len(data.Data) }
+func (data *StringFieldData) RowNum() int   { return len(data.Data) }
+func (data *ArrayFieldData) RowNum() int    { return len(data.Data) }
+func (data *JSONFieldData) RowNum() int     { return len(data.Data) }
+func (data *GeometryFieldData) RowNum() int { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int {
 	if data.Nullable {
 		return len(data.ValidData)
@@ -717,6 +736,13 @@ func (data *Int64FieldData) GetRow(i int) any {
 }
 
 func (data *TimestamptzFieldData) GetRow(i int) any {
+	if data.GetNullable() && !data.ValidData[i] {
+		return nil
+	}
+	return data.Data[i]
+}
+
+func (data *DecimalFieldData) GetRow(i int) any {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
@@ -846,6 +872,7 @@ func (data *Int64FieldData) GetDataRows() any             { return data.Data }
 func (data *FloatFieldData) GetDataRows() any             { return data.Data }
 func (data *DoubleFieldData) GetDataRows() any            { return data.Data }
 func (data *TimestamptzFieldData) GetDataRows() any       { return data.Data }
+func (data *DecimalFieldData) GetDataRows() any           { return data.Data }
 func (data *StringFieldData) GetDataRows() any            { return data.Data }
 func (data *ArrayFieldData) GetDataRows() any             { return data.Data }
 func (data *JSONFieldData) GetDataRows() any              { return data.Data }
@@ -987,6 +1014,23 @@ func (data *TimestamptzFieldData) AppendRow(row interface{}) error {
 	v, ok := row.(int64)
 	if !ok {
 		return merr.WrapErrParameterInvalid("timestamptz", row, "Wrong row type")
+	}
+	if data.GetNullable() {
+		data.ValidData = append(data.ValidData, true)
+	}
+	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *DecimalFieldData) AppendRow(row interface{}) error {
+	if data.GetNullable() && row == nil {
+		data.Data = append(data.Data, make([]int64, 1)...)
+		data.ValidData = append(data.ValidData, false)
+		return nil
+	}
+	v, ok := row.(int64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("decimal", row, "Wrong row type")
 	}
 	if data.GetNullable() {
 		data.ValidData = append(data.ValidData, true)
@@ -1262,6 +1306,14 @@ func (data *TimestamptzFieldData) AppendRows(dataRows interface{}, validDataRows
 	return data.AppendValidDataRows(validDataRows)
 }
 
+func (data *DecimalFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
+	err := data.AppendDataRows(dataRows)
+	if err != nil {
+		return err
+	}
+	return data.AppendValidDataRows(validDataRows)
+}
+
 func (data *StringFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	err := data.AppendDataRows(dataRows)
 	if err != nil {
@@ -1345,7 +1397,7 @@ func (data *FloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1409,7 +1461,7 @@ func (data *Int8VectorFieldData) AppendRows(dataRows interface{}, validDataRows 
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1499,6 +1551,15 @@ func (data *TimestamptzFieldData) AppendDataRows(rows interface{}) error {
 	return nil
 }
 
+func (data *DecimalFieldData) AppendDataRows(rows interface{}) error {
+	v, ok := rows.([]int64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]decimal", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
 func (data *StringFieldData) AppendDataRows(rows interface{}) error {
 	v, ok := rows.([]string)
 	if !ok {
@@ -1559,7 +1620,7 @@ func (data *FloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
@@ -1609,7 +1670,7 @@ func (data *Int8VectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
@@ -1710,6 +1771,18 @@ func (data *DoubleFieldData) AppendValidDataRows(rows interface{}) error {
 }
 
 func (data *TimestamptzFieldData) AppendValidDataRows(rows interface{}) error {
+	if rows == nil {
+		return nil
+	}
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.ValidData = append(data.ValidData, v...)
+	return nil
+}
+
+func (data *DecimalFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows == nil {
 		return nil
 	}
@@ -1914,6 +1987,10 @@ func (data *TimestamptzFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
+func (data *DecimalFieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData) + binary.Size(data.Nullable)
+}
+
 func (data *BinaryVectorFieldData) GetMemorySize() int {
 	// Data + ValidData + Dim(4) + Nullable(1) + L2PMapping
 	return binary.Size(data.Data) + binary.Size(data.ValidData) + 4 + 1 + data.L2PMapping.GetMemorySize()
@@ -1981,6 +2058,10 @@ func (data *FloatFieldData) GetDataType() schemapb.DataType  { return schemapb.D
 func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_Double }
 func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Timestamptz
+}
+
+func (data *DecimalFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Decimal
 }
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
@@ -2099,6 +2180,7 @@ func (data *Int64FieldData) GetRowSize(i int) int       { return 8 }
 func (data *FloatFieldData) GetRowSize(i int) int       { return 4 }
 func (data *DoubleFieldData) GetRowSize(i int) int      { return 8 }
 func (data *TimestamptzFieldData) GetRowSize(i int) int { return 8 }
+func (data *DecimalFieldData) GetRowSize(i int) int     { return 8 }
 func (data *BinaryVectorFieldData) GetRowSize(i int) int {
 	if data.GetNullable() && !data.ValidData[i] {
 		return 0
@@ -2184,6 +2266,10 @@ func (data *TimestamptzFieldData) GetNullable() bool {
 	return data.Nullable
 }
 
+func (data *DecimalFieldData) GetNullable() bool {
+	return data.Nullable
+}
+
 func (data *BFloat16VectorFieldData) GetNullable() bool {
 	return data.Nullable
 }
@@ -2236,6 +2322,7 @@ func (data *Int64FieldData) GetValidData() []bool             { return data.Vali
 func (data *FloatFieldData) GetValidData() []bool             { return data.ValidData }
 func (data *DoubleFieldData) GetValidData() []bool            { return data.ValidData }
 func (data *TimestamptzFieldData) GetValidData() []bool       { return data.ValidData }
+func (data *DecimalFieldData) GetValidData() []bool           { return data.ValidData }
 func (data *StringFieldData) GetValidData() []bool            { return data.ValidData }
 func (data *ArrayFieldData) GetValidData() []bool             { return data.ValidData }
 func (data *JSONFieldData) GetValidData() []bool              { return data.ValidData }

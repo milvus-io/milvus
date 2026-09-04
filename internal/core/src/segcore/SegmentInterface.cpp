@@ -932,6 +932,20 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::DECIMAL: {
+                // The default value is already stored as the canonical 8-byte
+                // little-endian unscaled int64 (the same wire form query
+                // results use), so this is a direct copy, not text.
+                auto dst = result->mutable_scalars()
+                               ->mutable_bytes_data()
+                               ->mutable_data();
+                const auto& canonical_bytes =
+                    field_meta.default_value()->bytes_data();
+                for (int64_t i = 0; i < count; ++i) {
+                    dst->at(i) = canonical_bytes;
+                }
+                break;
+            }
             case DataType::VARCHAR: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()

@@ -54,6 +54,12 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		if dataType == schemapb.DataType_Array {
 			newField.ElementType = schemapb.DataType_Int64
 		}
+		if dataType == schemapb.DataType_Decimal {
+			newField.TypeParams = []*commonpb.KeyValuePair{
+				{Key: common.PrecisionKey, Value: "18"},
+				{Key: common.ScaleKey, Value: "4"},
+			}
+		}
 		fields = append(fields, newField)
 	}
 	if EnableDynamicField {

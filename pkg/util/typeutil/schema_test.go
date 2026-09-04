@@ -7232,6 +7232,138 @@ func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
 	assert.Len(t, GetAllFieldSchemas(schema), 4)
 }
 
+// decimalFieldData builds a Decimal FieldData carrying canonical 8-byte
+// little-endian unscaled values.
+func decimalFieldData(fieldID int64, unscaled ...int64) *schemapb.FieldData {
+	data := make([][]byte, 0, len(unscaled))
+	for _, v := range unscaled {
+		b := make([]byte, 8)
+		binary.LittleEndian.PutUint64(b, uint64(v))
+		data = append(data, b)
+	}
+	return &schemapb.FieldData{
+		Type:    schemapb.DataType_Decimal,
+		FieldId: fieldID,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{Data: data},
+				},
+			},
+		},
+	}
+}
+
+// TestAppendFieldDataDecimal covers query/search result reduction for Decimal.
+// Without a BytesData case in AppendFieldData the destination stays empty, so
+// a Decimal output field comes back with no values and no error.
+func TestAppendFieldDataDecimal(t *testing.T) {
+	const fieldID = 101
+	src := []*schemapb.FieldData{decimalFieldData(fieldID, 199900, -199900, 0)}
+	dst := []*schemapb.FieldData{decimalFieldData(fieldID)}
+
+	// Reduction appends row-by-row, in whatever order rows were selected.
+	appendSize := AppendFieldData(dst, src, 2)
+	appendSize += AppendFieldData(dst, src, 0)
+
+	got := dst[0].GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 2, "decimal rows must be copied into the result")
+	assert.Equal(t, src[0].GetScalars().GetBytesData().GetData()[2], got[0])
+	assert.Equal(t, src[0].GetScalars().GetBytesData().GetData()[0], got[1])
+	assert.EqualValues(t, 16, appendSize, "two 8-byte decimal values")
+}
+
+// TestAppendFieldDataByColumnDecimal covers the column-wise path used by
+// upsert row merging; without it the Decimal column is dropped.
+func TestAppendFieldDataByColumnDecimal(t *testing.T) {
+	const fieldID = 102
+	src := decimalFieldData(fieldID, 199900, -199900, 0)
+	dst := decimalFieldData(fieldID)
+
+	AppendFieldDataByColumn(dst, src, []int64{0, 2})
+
+	got := dst.GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 2)
+	assert.Equal(t, src.GetScalars().GetBytesData().GetData()[0], got[0])
+	assert.Equal(t, src.GetScalars().GetBytesData().GetData()[2], got[1])
+}
+
+// TestScalarDataLenAndGetDataDecimal pins the two generic accessors, which
+// silently reported -1/nil for Decimal before.
+func TestScalarDataLenAndGetDataDecimal(t *testing.T) {
+	const fieldID = 103
+	field := decimalFieldData(fieldID, 199900, -199900)
+
+	assert.Equal(t, 2, getScalarDataLen(field))
+
+	raw, ok := getData(field, 1).([]byte)
+	assert.True(t, ok, "decimal element must be returned as its canonical bytes")
+	assert.EqualValues(t, -199900, int64(binary.LittleEndian.Uint64(raw)))
+}
+
+func encodeDecimalLE(v int64) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, uint64(v))
+	return b
+}
+
+func TestDeleteFieldDataDecimal(t *testing.T) {
+	const fieldID = 104
+	dst := []*schemapb.FieldData{decimalFieldData(fieldID, 199900, -199900, 0)}
+
+	DeleteFieldData(dst)
+
+	got := dst[0].GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 2, "last element must be deleted")
+	assert.Equal(t, encodeDecimalLE(199900), got[0])
+	assert.Equal(t, encodeDecimalLE(-199900), got[1])
+}
+
+func TestUpdateFieldDataDecimal(t *testing.T) {
+	const fieldID = 105
+	base := decimalFieldData(fieldID, 100, 200, 300)
+	update := decimalFieldData(fieldID, 999)
+
+	err := UpdateFieldData([]*schemapb.FieldData{base}, []*schemapb.FieldData{update}, 1, 0)
+	assert.NoError(t, err)
+
+	got := base.GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 3)
+	assert.Equal(t, encodeDecimalLE(100), got[0])
+	assert.Equal(t, encodeDecimalLE(999), got[1])
+	assert.Equal(t, encodeDecimalLE(300), got[2])
+}
+
+func TestUpdateFieldDataByColumnDecimal(t *testing.T) {
+	const fieldID = 106
+	base := decimalFieldData(fieldID, 100, 200, 300)
+	update := decimalFieldData(fieldID, 888, 999)
+
+	UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+
+	got := base.GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 3)
+	assert.Equal(t, encodeDecimalLE(888), got[0])
+	assert.Equal(t, encodeDecimalLE(200), got[1])
+	assert.Equal(t, encodeDecimalLE(999), got[2])
+}
+
+func TestMergeFieldDataDecimal(t *testing.T) {
+	const fieldID = 107
+	dst := []*schemapb.FieldData{decimalFieldData(fieldID, 100, 200)}
+	src := []*schemapb.FieldData{decimalFieldData(fieldID, 300, 400)}
+
+	err := MergeFieldData(dst, src)
+	assert.NoError(t, err)
+
+	got := dst[0].GetScalars().GetBytesData().GetData()
+	assert.Len(t, got, 4)
+	assert.Equal(t, encodeDecimalLE(100), got[0])
+	assert.Equal(t, encodeDecimalLE(200), got[1])
+	assert.Equal(t, encodeDecimalLE(300), got[2])
+	assert.Equal(t, encodeDecimalLE(400), got[3])
+}
+
 // Decoding a dynamic field into map[string]interface{} rounds every number to
 // float64, so a partial update of one key silently rewrote the others.
 func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {

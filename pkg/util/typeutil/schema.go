@@ -280,6 +280,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetGeometryData().GetData() {
 			res += len(str)
 		}
+	case schemapb.DataType_Decimal:
+		for _, b := range column.GetScalars().GetBytesData().GetData() {
+			res += len(b)
+		}
 	default:
 		panic("Unknown data type:" + column.Type.String())
 	}
@@ -745,6 +749,11 @@ func IsArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Array
 }
 
+// IsDecimalType returns true if input is a fixed-point exact numeric type, otherwise false
+func IsDecimalType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Decimal
+}
+
 // IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -801,7 +810,7 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType) || IsDecimalType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce
@@ -844,6 +853,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				scalar.Scalars.Data = &schemapb.ScalarField_TimestamptzData{
 					TimestamptzData: &schemapb.TimestamptzArray{
 						Data: make([]int64, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_BytesData:
+				scalar.Scalars.Data = &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: make([][]byte, 0, topK),
 					},
 				}
 			case *schemapb.ScalarField_FloatData:
@@ -1200,6 +1215,20 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.TimestamptzData.Data[idx]))
+			case *schemapb.ScalarField_BytesData:
+				// Decimal values ride in bytes_data as the canonical 8-byte
+				// unscaled int64; without this case a Decimal output field
+				// would come back empty from query/search reduction.
+				if dstScalar.GetBytesData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_BytesData{
+						BytesData: &schemapb.BytesArray{
+							Data: [][]byte{srcScalar.BytesData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data[idx])
+				}
+				appendSize += int64(len(srcScalar.BytesData.Data[idx]))
 			case *schemapb.ScalarField_GeometryData:
 				if dstScalar.GetGeometryData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_GeometryData{
@@ -1495,6 +1524,18 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			for _, idx := range dataIndices {
 				dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
 			}
+		case *schemapb.ScalarField_BytesData:
+			// Decimal values ride in bytes_data as the canonical 8-byte
+			// unscaled int64; without this case upsert row merging would drop
+			// the Decimal column entirely.
+			if dstScalar.GetBytesData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data[idx])
+			}
 		}
 	case *schemapb.FieldData_Vectors:
 		dim := srcField.Vectors.Dim
@@ -1660,6 +1701,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
 				dstScalar.GetGeometryData().Data = dstScalar.GetGeometryData().Data[:len(dstScalar.GetGeometryData().Data)-1]
+			case *schemapb.ScalarField_BytesData:
+				dstScalar.GetBytesData().Data = dstScalar.GetBytesData().Data[:len(dstScalar.GetBytesData().Data)-1]
 			}
 		case *schemapb.FieldData_Vectors:
 			if dst[i] == nil || dst[i].GetVectors() == nil {
@@ -1804,6 +1847,13 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			case *schemapb.ScalarField_GeometryWktData:
 				updateData := updateScalar.GetGeometryWktData()
 				baseData := baseScalar.GetGeometryWktData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_BytesData:
+				updateData := updateScalar.GetBytesData()
+				baseData := baseScalar.GetBytesData()
 				if updateData != nil && baseData != nil &&
 					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
 					baseData.Data[baseIdx] = updateData.Data[updateIdx]
@@ -2062,6 +2112,12 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 		case *schemapb.ScalarField_TimestamptzData:
 			baseData := baseScalar.GetTimestamptzData().Data
 			updateData := updateScalar.GetTimestamptzData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_BytesData:
+			baseData := baseScalar.GetBytesData().Data
+			updateData := updateScalar.GetBytesData().Data
 			for i, baseIdx := range baseIndices {
 				baseData[baseIdx] = updateData[updateIndices[i]]
 			}
@@ -3612,6 +3668,8 @@ func getScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetDoubleData().GetData())
 	case schemapb.DataType_Timestamptz:
 		return len(field.GetScalars().GetTimestamptzData().GetData())
+	case schemapb.DataType_Decimal:
+		return len(field.GetScalars().GetBytesData().GetData())
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return len(field.GetScalars().GetStringData().GetData())
 	}
@@ -3632,6 +3690,8 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetDoubleData().GetData()[idx]
 	case schemapb.DataType_Timestamptz:
 		return field.GetScalars().GetTimestamptzData().GetData()[idx]
+	case schemapb.DataType_Decimal:
+		return field.GetScalars().GetBytesData().GetData()[idx]
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
 	case schemapb.DataType_FloatVector:
@@ -3737,7 +3797,7 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	for i, cursor := range cursors {
 		// if cursor has run out of all results from one result and this result has more matched results
 		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && results[i].GetHasMoreResult() {
 			drainResult = true
 			continue
 		}
@@ -3781,7 +3841,7 @@ func SelectMinPKWithTimestamp[T interface {
 		timestamps := results[i].GetTimestamps()
 		// if cursor has run out of all results from one result and this result has more matched results
 		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && results[i].GetHasMoreResult() {
 			drainResult = true
 			continue
 		}

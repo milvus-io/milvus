@@ -224,6 +224,68 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		defer r.ReleasePayloadReader()
 	})
 
+	t.Run("TestDecimal", func(t *testing.T) {
+		// Decimal is persisted as its unscaled int64 (e.g. "19.99" at scale 4 ->
+		// 199900), so the binlog round-trip is an int64 round-trip. Without a
+		// Decimal case in GetDataFromPayload this data could be written but never
+		// read back, breaking reload and compaction.
+		w, err := NewPayloadWriter(schemapb.DataType_Decimal)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddDecimalToPayload([]int64{199900, -199900, 0}, nil)
+		assert.NoError(t, err)
+		err = w.AddDataToPayloadForUT([]int64{199900, -199900, 0}, nil)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 6, length)
+		defer w.ReleasePayloadWriter()
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Decimal, buffer, false)
+		require.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 6)
+
+		decimals, valids, err := r.GetDecimalFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{199900, -199900, 0, 199900, -199900, 0}, decimals)
+		assert.Nil(t, valids)
+
+		// The generic entry point is what deserialization actually calls.
+		idecimals, valids, _, err := r.GetDataFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{199900, -199900, 0, 199900, -199900, 0}, idecimals.([]int64))
+		assert.Nil(t, valids)
+		defer r.ReleasePayloadReader()
+	})
+
+	t.Run("TestDecimalRejectsWrongColumnType", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Int64)
+		require.Nil(t, err)
+		err = w.AddInt64ToPayload([]int64{1, 2, 3}, nil)
+		assert.NoError(t, err)
+		assert.NoError(t, w.FinishPayloadWriter())
+		defer w.ReleasePayloadWriter()
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Int64, buffer, false)
+		require.Nil(t, err)
+		defer r.ReleasePayloadReader()
+
+		_, _, err = r.GetDecimalFromPayload()
+		assert.Error(t, err)
+	})
+
 	t.Run("TestFloat32", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Float)
 		require.Nil(t, err)
@@ -2017,6 +2079,48 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		int64s = iint64s.([]int64)
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{1, 0, 3, 1, 0, 3}, int64s)
+		assert.Equal(t, []bool{true, false, true, true, false, true}, valids)
+		defer r.ReleasePayloadReader()
+	})
+
+	t.Run("TestDecimal", func(t *testing.T) {
+		// A nullable Decimal column must survive the binlog round-trip with its
+		// validity mask intact: null rows read back as the zero unscaled value
+		// and are identified only by valid_data, never by their stored value
+		// (0 is also a perfectly legal Decimal).
+		w, err := NewPayloadWriter(schemapb.DataType_Decimal, WithNullable(true))
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddDecimalToPayload([]int64{199900, 0, -50}, []bool{true, false, true})
+		assert.NoError(t, err)
+		err = w.AddDataToPayloadForUT([]int64{199900, 0, -50}, []bool{true, false, true})
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 6, length)
+		defer w.ReleasePayloadWriter()
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Decimal, buffer, true)
+		require.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 6)
+
+		decimals, valids, err := r.GetDecimalFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{199900, 0, -50, 199900, 0, -50}, decimals)
+		assert.Equal(t, []bool{true, false, true, true, false, true}, valids)
+
+		idecimals, valids, _, err := r.GetDataFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{199900, 0, -50, 199900, 0, -50}, idecimals.([]int64))
 		assert.Equal(t, []bool{true, false, true, true, false, true}, valids)
 		defer r.ReleasePayloadReader()
 	})

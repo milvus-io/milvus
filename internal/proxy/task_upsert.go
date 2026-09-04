@@ -808,6 +808,20 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				sd.TimestamptzData.Data = ret
 			}
 
+		case *schemapb.ScalarField_BytesData:
+			validRowNum := getValidNumber(validData)
+			if validRowNum == 0 {
+				sd.BytesData.Data = make([][]byte, 0)
+			} else {
+				ret := make([][]byte, 0, validRowNum)
+				for i, valid := range validData {
+					if valid {
+						ret = append(ret, sd.BytesData.Data[i])
+					}
+				}
+				sd.BytesData.Data = ret
+			}
+
 		case *schemapb.ScalarField_GeometryWktData:
 			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
