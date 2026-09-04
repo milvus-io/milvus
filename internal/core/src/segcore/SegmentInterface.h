@@ -183,13 +183,8 @@ class SegmentInterface {
     virtual int64_t
     get_row_count() const = 0;
 
-    virtual const Schema&
-    get_schema() const = 0;
-
     virtual SchemaPtr
-    get_schema_snapshot() const {
-        return std::make_shared<Schema>(get_schema());
-    }
+    get_schema_snapshot() const = 0;
 
     virtual int64_t
     get_deleted_count() const = 0;

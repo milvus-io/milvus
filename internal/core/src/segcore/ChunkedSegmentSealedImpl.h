@@ -442,9 +442,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    : 0;
     }
 
-    const Schema&
-    get_schema() const override;
-
     SchemaPtr
     get_schema_snapshot() const override {
         return CaptureSchemaSnapshot();

@@ -3597,11 +3597,6 @@ ChunkedSegmentSealedImpl::get_deleted_count() const {
     return deleted_record_.size();
 }
 
-const Schema&
-ChunkedSegmentSealedImpl::get_schema() const {
-    return *CapturePublishedState()->schema;
-}
-
 void
 ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                            int64_t ins_barrier,
