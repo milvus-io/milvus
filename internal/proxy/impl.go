@@ -4791,7 +4791,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 // GetReplicas gets replica info
 func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicas")
 	defer sp.End()
@@ -4940,7 +4940,7 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushState")
 	defer sp.End()
@@ -4987,7 +4987,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
@@ -5216,7 +5216,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateCredential")
 	defer sp.End()
@@ -5274,7 +5274,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 }
 
 func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredential")
 	defer sp.End()
@@ -5357,7 +5357,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 }
 
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DeleteCredential")
 	defer sp.End()
@@ -5386,7 +5386,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 }
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListCredUsers")
 	defer sp.End()
@@ -5417,7 +5417,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 }
 
 func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateRole")
 	defer sp.End()
@@ -5453,7 +5453,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 }
 
 func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterRole")
 	defer sp.End()
@@ -5486,7 +5486,7 @@ func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest
 }
 
 func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropRole")
 	defer sp.End()
@@ -5518,7 +5518,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 }
 
 func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperateUserRole")
 	defer sp.End()
@@ -5547,7 +5547,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 }
 
 func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectRole")
 	defer sp.End()
@@ -5580,7 +5580,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 }
 
 func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectUser")
 	defer sp.End()
@@ -5670,7 +5670,7 @@ func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivile
 }
 
 func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilegeV2")
 	defer sp.End()
@@ -5742,7 +5742,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 }
 
 func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilege")
 	defer sp.End()
@@ -5830,7 +5830,7 @@ func (node *Proxy) validGrantParams(req *milvuspb.SelectGrantRequest) error {
 }
 
 func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectGrant")
 	defer sp.End()
@@ -5877,7 +5877,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 }
 
 func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-BackupRBAC")
 	defer sp.End()
@@ -5898,7 +5898,7 @@ func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaR
 }
 
 func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
@@ -6504,7 +6504,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 }
 
 func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	return &milvuspb.ReplicateMessageResponse{
 		Status: merr.Status(merr.WrapErrServiceUnavailable("not supported in streaming mode")),
@@ -6557,7 +6557,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
-	// Extension seam, see extension_seam.go. Import is in the DML table
+	// Extension seam, see internal/util/hookutil. Import is in the DML table
 	// because it is bulk INSERT: a form that refuses streaming writes and
 	// left this open would simply have taught its tenants a slower syntax
 	// for the same forbidden write. Import (v1) funnels through here.
@@ -6749,7 +6749,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 }
 
 func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreatePrivilegeGroup")
 	defer sp.End()
@@ -6778,7 +6778,7 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 }
 
 func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropPrivilegeGroup")
 	defer sp.End()
@@ -6807,7 +6807,7 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 }
 
 func (node *Proxy) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListPrivilegeGroups")
 	defer sp.End()
@@ -6835,7 +6835,7 @@ func (node *Proxy) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPr
 }
 
 func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilegeGroup")
 	defer sp.End()
@@ -7080,7 +7080,7 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 
 // UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
 func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateReplicateConfiguration")
 	defer sp.End()
@@ -7100,7 +7100,7 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 
 // GetReplicateConfiguration returns the current cross-cluster replication configuration.
 func (node *Proxy) GetReplicateConfiguration(ctx context.Context, req *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateConfiguration")
 	defer sp.End()
@@ -7131,7 +7131,7 @@ func (node *Proxy) GetReplicateConfiguration(ctx context.Context, req *milvuspb.
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
 // TODO: sheep, only get target checkpoint
 func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (resp *milvuspb.GetReplicateInfoResponse, err error) {
-	// Extension seam, see extension_seam.go: a form may withhold this RPC
+	// Extension seam, see internal/util/hookutil: a form may withhold this RPC
 	// from tenants; with none installed the answer is nil and nothing changes.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateInfo")
 	defer sp.End()
