@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -60,6 +61,10 @@ type queryTrafficRouteResult struct {
 }
 
 func newQueryTrafficRouter(configProvider queryTrafficConfigProvider, labelProvider QueryTrafficLabelProvider) *queryTrafficRouter {
+	// The default empty rules config is valid, and a router whose config is
+	// never evaluated (for example while the feature stays disabled) must not
+	// report its config as invalid.
+	reportQueryTrafficRoutingConfigValid(nil)
 	return &queryTrafficRouter{
 		configProvider: configProvider,
 		labelProvider:  labelProvider,
@@ -130,6 +135,7 @@ func (r *queryTrafficRouter) getPolicy() (*querytraffic.Policy, error) {
 		r.policy = policy
 		r.err = err
 		r.mut.Unlock()
+		reportQueryTrafficRoutingConfigValid(err)
 		return policy, err
 	}
 	// Cache the failure too: a bad config hot-loaded via config alter must
@@ -139,7 +145,18 @@ func (r *queryTrafficRouter) getPolicy() (*querytraffic.Policy, error) {
 	r.policy = nil
 	r.err = err
 	r.mut.Unlock()
+	reportQueryTrafficRoutingConfigValid(err)
 	return nil, err
+}
+
+// reportQueryTrafficRoutingConfigValid records whether the latest evaluated
+// rules config is valid. The default empty config counts as valid.
+func reportQueryTrafficRoutingConfigValid(err error) {
+	if err != nil {
+		metrics.ProxyQueryTrafficRoutingConfigValid.Set(0)
+		return
+	}
+	metrics.ProxyQueryTrafficRoutingConfigValid.Set(1)
 }
 
 type paramtableQueryTrafficConfig struct{}

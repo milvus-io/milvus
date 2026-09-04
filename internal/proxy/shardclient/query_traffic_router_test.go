@@ -21,11 +21,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
 
 func TestSessionQueryTrafficLabelProviderNilSession(t *testing.T) {
@@ -125,4 +127,35 @@ func TestGetPolicyCachesParseError(t *testing.T) {
 	_, err = r.getPolicy()
 	require.Error(t, err)
 	require.Equal(t, calls+1, cfg.calls.Load())
+}
+
+// TestQueryTrafficRoutingConfigValidGauge pins the config-valid state gauge:
+// it is 1 for a valid config (including the default empty config), flips to 0
+// when the config becomes invalid, and back to 1 after the config is fixed.
+func TestQueryTrafficRoutingConfigValidGauge(t *testing.T) {
+	const validRules = `[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`
+	const invalidRules = `[{"name":"local",}` // malformed JSON
+
+	cfg := &countingRulesConfig{}
+	cfg.raw.Store(validRules)
+	r := newQueryTrafficRouter(cfg, staticQueryTrafficLabelProvider{})
+
+	_, err := r.getPolicy()
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingConfigValid),
+		"valid config must report the config-valid gauge as 1")
+
+	// A hot-loaded bad config flips the gauge to 0.
+	cfg.raw.Store(invalidRules)
+	_, err = r.getPolicy()
+	require.Error(t, err)
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingConfigValid),
+		"invalid config must report the config-valid gauge as 0")
+
+	// Fixing the config flips the gauge back to 1.
+	cfg.raw.Store(validRules)
+	_, err = r.getPolicy()
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingConfigValid),
+		"fixed config must report the config-valid gauge back to 1")
 }

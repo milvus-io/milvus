@@ -432,3 +432,17 @@ set. It is recorded even when the matched rule has a name, because the decision
 outcome is the fallback, not the rule hit.
 
 Arbitrary Session label keys and values must not be used as metric labels.
+
+A separate state gauge reports whether the current `rules` config is usable:
+
+```text
+milvus_proxy_query_traffic_routing_config_valid
+```
+
+`1` means the latest evaluated config parsed and compiled (the default empty
+config counts as valid), `0` means the latest evaluation failed. It is a gauge,
+not a counter: it is updated only when the `rules` value changes and is
+re-evaluated, and stays `1` by default so a config that was never evaluated
+(e.g. while the feature is disabled) is not reported invalid. Unlike
+`__error` on the decision counter, which also covers transient Session/etcd
+label-fetch failures, this gauge is specific to a malformed `rules` config.

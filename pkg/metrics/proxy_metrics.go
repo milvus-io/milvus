@@ -457,6 +457,20 @@ var (
 			Help:      "counter of query traffic routing decisions by selected rule name",
 		}, []string{ruleNameLabelName})
 
+	// ProxyQueryTrafficRoutingConfigValid is a state gauge reporting whether
+	// the current proxy.queryTrafficRouting.rules value parses and compiles:
+	// 1 means the latest evaluated config is valid (the default empty config
+	// counts as valid), 0 means the latest evaluation failed. It is updated
+	// only when the rules value changes and is re-evaluated, and stays at 1
+	// by default so a never-evaluated config is not reported invalid.
+	ProxyQueryTrafficRoutingConfigValid = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "query_traffic_routing_config_valid",
+			Help:      "whether the current query traffic routing rules config parses and compiles (1 valid, 0 invalid)",
+		})
+
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -555,6 +569,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
 	registry.MustRegister(ProxyQueueTaskNum)
 	registry.MustRegister(ProxyQueryTrafficRoutingDecisionCount)
+	registry.MustRegister(ProxyQueryTrafficRoutingConfigValid)
 
 	registry.MustRegister(ProxyParseExpressionLatency)
 
