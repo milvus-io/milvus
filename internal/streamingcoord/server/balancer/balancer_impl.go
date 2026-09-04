@@ -640,8 +640,16 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 	}
 
 	// clean up the freeze node that has been removed from session.
+	// Use the full session view (all resource groups) instead of nodeStatus:
+	// nodeStatus only contains nodes of the primary/fallback resource group
+	// (see filterStreamingNodeStatusByResourceGroupHint), so a frozen node in
+	// another resource group would otherwise be wrongly unfrozen.
+	allNodes, err := b.GetAllStreamingNodes(ctx)
+	if err != nil {
+		return nil, merr.Wrap(err, "fail to get all streaming nodes for freeze cleanup")
+	}
 	b.freezeNodes.Range(func(serverID int64) bool {
-		if _, ok := nodeStatus[serverID]; !ok {
+		if _, ok := allNodes[serverID]; !ok {
 			b.Logger().Info(ctx, "freeze node has been removed from session", mlog.Int64("serverID", serverID))
 			b.freezeNodes.Remove(serverID)
 		}
