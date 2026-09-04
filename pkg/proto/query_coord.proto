@@ -419,6 +419,11 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+
+    // text_log_v2 carries Text Log V2 artifacts for non-manifest storage. For
+    // Storage V3, QueryNode resolves equivalent load metadata from the LOON
+    // manifest before resource estimation and segment publication.
+    repeated data.FieldBinlog text_log_v2 = 31;
 }
 
 message FieldIndexInfo {

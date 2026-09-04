@@ -727,6 +727,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.EnableSegmentFilter.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
+		assert.True(t, Params.MmapTextLogV2.GetAsBool())
+		params.Save(Params.MmapTextLogV2.Key, "false")
+		assert.False(t, Params.MmapTextLogV2.GetAsBool())
+		params.Reset(Params.MmapTextLogV2.Key)
+		assert.Equal(t, 32.0, Params.TextLogV2GrowingTrieExpansionFactor.GetAsFloat())
+		params.Save(Params.TextLogV2GrowingTrieExpansionFactor.Key, "16.0")
+		assert.Equal(t, 16.0, Params.TextLogV2GrowingTrieExpansionFactor.GetAsFloat())
+		params.Save(Params.TextLogV2GrowingTrieExpansionFactor.Key, "0.5")
+		assert.Equal(t, 1.0, Params.TextLogV2GrowingTrieExpansionFactor.GetAsFloat())
+		params.Reset(Params.TextLogV2GrowingTrieExpansionFactor.Key)
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
 
 		assert.Equal(t, 1.0, Params.PartialResultRequiredDataRatio.GetAsFloat())

@@ -3,6 +3,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -898,6 +900,82 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	err := segment.Reopen(context.Background(), newLoadInfo)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
+}
+
+func TestLocalSegmentReopenWithTextTermsSwapsOnlyAfterSuccess(t *testing.T) {
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	collection := &Collection{}
+	collection.setSchema(schema, 1, 100, 101)
+
+	newSegment := func(t *testing.T, reopenErr error) (*LocalSegment, string) {
+		oldCacheDir := filepath.Join(t.TempDir(), "old-cache")
+		require.NoError(t, os.MkdirAll(oldCacheDir, 0o700))
+		csegment := mock_segcore.NewMockCSegment(t)
+		csegment.EXPECT().
+			Reopen(mock.Anything, mock.AnythingOfType("*segcore.ReopenRequest")).
+			Return(reopenErr)
+		loadInfo := &querypb.SegmentLoadInfo{CollectionID: 10, SegmentID: 20, DataVersion: 1}
+		dictionary := newSegmentTextTermDictionary(nil)
+		dictionary.loaded = &loadedTextTermDictionary{
+			readers:  make(map[int64][]*textindex.FstReader),
+			cacheDir: oldCacheDir,
+		}
+		return &LocalSegment{
+			baseSegment: baseSegment{
+				collection:         collection,
+				loadInfo:           atomic.NewPointer(loadInfo),
+				version:            atomic.NewInt64(0),
+				resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+				needUpdatedVersion: atomic.NewInt64(0),
+			},
+			ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+			csegment:       csegment,
+			fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+			fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+			textTerms:      dictionary,
+		}, oldCacheDir
+	}
+
+	t.Run("failure preserves old dictionary", func(t *testing.T) {
+		reopenErr := merr.WrapErrCollectionSchemaVersionNotReady("collection_v1", 0, 1)
+		segment, oldCacheDir := newSegment(t, reopenErr)
+		newCacheDir := filepath.Join(t.TempDir(), "new-cache")
+		require.NoError(t, os.MkdirAll(newCacheDir, 0o700))
+		oldLoaded := segment.textTerms.loaded
+		newLoaded := &loadedTextTermDictionary{
+			readers:  make(map[int64][]*textindex.FstReader),
+			cacheDir: newCacheDir,
+		}
+
+		err := segment.reopenWithTextTerms(context.Background(), &querypb.SegmentLoadInfo{
+			CollectionID: 10, SegmentID: 20, DataVersion: 2,
+		}, newLoaded)
+		require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+		assert.Same(t, oldLoaded, segment.textTerms.loaded)
+		require.DirExists(t, oldCacheDir)
+		_, err = os.Stat(newCacheDir)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("success swaps and closes old dictionary", func(t *testing.T) {
+		segment, oldCacheDir := newSegment(t, nil)
+		newCacheDir := filepath.Join(t.TempDir(), "new-cache")
+		require.NoError(t, os.MkdirAll(newCacheDir, 0o700))
+		newLoaded := &loadedTextTermDictionary{
+			readers:  make(map[int64][]*textindex.FstReader),
+			cacheDir: newCacheDir,
+		}
+
+		require.NoError(t, segment.reopenWithTextTerms(context.Background(), &querypb.SegmentLoadInfo{
+			CollectionID: 10, SegmentID: 20, DataVersion: 2,
+		}, newLoaded))
+		assert.Same(t, newLoaded, segment.textTerms.loaded)
+		assert.Equal(t, int32(2), segment.LoadInfo().GetDataVersion())
+		_, err := os.Stat(oldCacheDir)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+		require.DirExists(t, newCacheDir)
+	})
 }
 
 // TestLocalSegmentReopenInjectsDiskIndexLoadParams reproduces issue #51249:

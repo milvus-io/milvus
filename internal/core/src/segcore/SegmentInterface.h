@@ -68,6 +68,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+#include "textindex/segment_text_term_dictionary.h"
 
 namespace milvus::exec {
 class SimpleGeometryCache;
@@ -380,6 +381,16 @@ class SegmentInternalInterface : public SegmentInterface {
     uint64_t
     segment_instance_uid() const {
         return segment_instance_uid_;
+    }
+
+    textindex::SegmentTextTermDictionary&
+    GetTextTermDictionary() {
+        return text_term_dictionary_;
+    }
+
+    const textindex::SegmentTextTermDictionary&
+    GetTextTermDictionary() const {
+        return text_term_dictionary_;
     }
 
     // Growing segments use the process-level cache manager. Sealed segments
@@ -940,6 +951,11 @@ class SegmentInternalInterface : public SegmentInterface {
 
     std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
+
+    // Mutable field vocabularies for growing fuzzy term expansion. Immutable
+    // FST fragments keep their QueryNode-managed mmap/cache lifecycle and are
+    // supplied to this dictionary when expansion runs.
+    textindex::SegmentTextTermDictionary text_term_dictionary_;
 
     // Assigned once per constructed object; never reused within a process.
     const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();

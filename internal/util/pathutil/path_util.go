@@ -18,6 +18,7 @@ const (
 	RootCachePath
 	FileResourcePath
 	ExprCachePath
+	TextLogV2Path
 )
 
 const (
@@ -27,6 +28,7 @@ const (
 	BM25PathPrefix         = "bm25"
 	FileResourcePathPrefix = "file_resource"
 	ExprCachePathPrefix    = "expr_cache"
+	TextLogV2PathPrefix    = "text_log_v2"
 )
 
 func GetPath(pathType PathType, nodeID int64) string {
@@ -44,6 +46,8 @@ func GetPath(pathType PathType, nodeID int64) string {
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), FileResourcePathPrefix)
 	case ExprCachePath:
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), ExprCachePathPrefix)
+	case TextLogV2Path:
+		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), TextLogV2PathPrefix)
 	case RootCachePath:
 	}
 	mlog.Info(context.TODO(), "Get path for", mlog.Any("pathType", pathType), mlog.FieldNodeID(nodeID), mlog.String("path", path))

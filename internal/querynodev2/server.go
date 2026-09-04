@@ -424,6 +424,7 @@ func (node *QueryNode) Init() error {
 		node.RegisterSegcoreConfigWatcher()
 
 		cleanupOrphanedSpilloverFiles(node.GetNodeID())
+		cleanupOrphanedTextTermFiles(node.ctx, node.GetNodeID())
 
 		mlog.Info(node.ctx, "query node init successfully",
 			mlog.Int64("queryNodeID", node.GetNodeID()),
@@ -447,6 +448,7 @@ func (node *QueryNode) Start() error {
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
 		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapTextLogV2 := paramtable.Get().QueryNodeCfg.MmapTextLogV2.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -465,6 +467,7 @@ func (node *QueryNode) Start() error {
 			mlog.Bool("mmapVectorField", mmapVectorField),
 			mlog.Bool("mmapScalarIndex", mmapScalarIndex),
 			mlog.Bool("mmapScalarField", mmapScalarField),
+			mlog.Bool("mmapTextLogV2", mmapTextLogV2),
 		)
 	})
 
@@ -711,4 +714,19 @@ func cleanupOrphanedSpilloverFiles(nodeID int64) {
 
 	mlog.Info(context.TODO(), "orphaned TEXT LOB spillover files cleaned up",
 		mlog.String("path", spilloverDir))
+}
+
+func cleanupOrphanedTextTermFiles(ctx context.Context, nodeID int64) {
+	cacheDir := pathutil.GetPath(pathutil.TextLogV2Path, nodeID)
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return
+	}
+	if err := os.RemoveAll(cacheDir); err != nil {
+		mlog.Warn(ctx, "failed to clean up orphaned text-log-v2 files",
+			mlog.String("path", cacheDir),
+			mlog.Err(err))
+		return
+	}
+	mlog.Info(ctx, "orphaned text-log-v2 files cleaned up",
+		mlog.String("path", cacheDir))
 }

@@ -186,6 +186,13 @@ func TestStatsResolverLegacy(t *testing.T) {
 			},
 		},
 	}
+	textLogV2 := []*datapb.FieldBinlog{
+		{
+			FieldID: 60,
+			Format:  "milvus_text_fst_v1",
+			Binlogs: []*datapb.Binlog{{LogPath: "text-term/60/10", TimestampTo: 500}},
+		},
+	}
 	textStats := map[int64]*datapb.TextIndexStats{
 		10: {FieldID: 10, Version: 1, Files: []string{"text/10/f1"}},
 	}
@@ -198,6 +205,7 @@ func TestStatsResolverLegacy(t *testing.T) {
 		WithBM25Logs(bm25Logs).
 		WithTextStatsLogs(textStats).
 		WithJSONKeyStats(jsonStats)
+	resolver.textLogV2 = textLogV2
 
 	t.Run("isManifest", func(t *testing.T) {
 		assert.False(t, resolver.isManifest())
@@ -231,6 +239,12 @@ func TestStatsResolverLegacy(t *testing.T) {
 		paths, err := resolver.BM25StatsPaths()
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"bm25/50/10"}, paths[50])
+	})
+
+	t.Run("TextLogV2", func(t *testing.T) {
+		logs, err := resolver.TextLogV2()
+		require.NoError(t, err)
+		assert.Equal(t, textLogV2, logs)
 	})
 
 	t.Run("TextAndJSONIndexStats", func(t *testing.T) {
@@ -267,6 +281,8 @@ func TestStatsResolverManifest(t *testing.T) {
 	bfPath := filepath.Join(bp, "_stats/bloom_filter.100/42")
 	bm25Path := filepath.Join(bp, "_stats/bm25.200/43")
 	jsonPath := filepath.Join(bp, "_stats/json_stats.300/shared_key_index/.managed.json_0")
+	textTermPath1 := filepath.Join(bp, "_stats/text_log_v2.400/44.fst")
+	textTermPath2 := filepath.Join(bp, "_stats/text_log_v2.400/45.fst")
 	newManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
 		{
 			Key:      "bloom_filter.100",
@@ -286,6 +302,16 @@ func TestStatsResolverManifest(t *testing.T) {
 				"log_size":                   "1024",
 				"memory_size":                "2048",
 				"json_key_stats_data_format": "3",
+			},
+		},
+		{
+			Key:   "text_log_v2.400",
+			Files: []string{textTermPath1, textTermPath2},
+			Metadata: map[string]string{
+				"format":             "milvus_text_fst_v1",
+				"log_size":           "3072",
+				"memory_size":        "4096",
+				"coverage_timestamp": "12345",
 			},
 		},
 	})
@@ -319,6 +345,23 @@ func TestStatsResolverManifest(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(paths[200]))
 		assert.Equal(t, bm25Path, paths[200][0])
+	})
+
+	t.Run("TextLogV2 reconstructs manifest metadata", func(t *testing.T) {
+		logs, err := resolver.TextLogV2()
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		assert.EqualValues(t, 400, logs[0].GetFieldID())
+		assert.Equal(t, "milvus_text_fst_v1", logs[0].GetFormat())
+		require.Len(t, logs[0].GetBinlogs(), 2)
+		assert.Equal(t, []string{textTermPath1, textTermPath2}, []string{
+			logs[0].GetBinlogs()[0].GetLogPath(),
+			logs[0].GetBinlogs()[1].GetLogPath(),
+		})
+		assert.EqualValues(t, 3072, logs[0].GetBinlogs()[0].GetLogSize())
+		assert.EqualValues(t, 4096, logs[0].GetBinlogs()[0].GetMemorySize())
+		assert.EqualValues(t, 12345, logs[0].GetBinlogs()[0].GetTimestampTo())
+		assert.EqualValues(t, 12345, logs[0].GetBinlogs()[1].GetTimestampTo())
 	})
 
 	t.Run("TextAndJSONIndexStatsWithBasePaths hides json stats without metadata placeholder", func(t *testing.T) {

@@ -23,6 +23,7 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 
 #include "common/EasyAssert.h"
 #include "textindex/fst/text_fst.h"
@@ -148,6 +149,90 @@ BuildTextFst(const uint8_t* encoded_terms, int64_t encoded_size) {
             milvus::UnexpectedError, "unknown text FST build failure");
     }
     return result;
+}
+
+namespace {
+
+CTextFstLoadResult
+MakeTextFstLoadResult(std::unique_ptr<TextFst> fst) {
+    CTextFstLoadResult result{};
+    if (fst->DataSize() >
+            static_cast<size_t>(std::numeric_limits<int64_t>::max()) ||
+        fst->TermCount() >
+            static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+        throw std::runtime_error("loaded text FST metadata overflows int64");
+    }
+    result.data_size = static_cast<int64_t>(fst->DataSize());
+    result.term_count = static_cast<int64_t>(fst->TermCount());
+    result.is_memory_mapped = fst->IsMemoryMapped();
+    result.handle = fst.release();
+    result.status = milvus::SuccessCStatus();
+    return result;
+}
+
+CTextFstLoadResult
+TextFstLoadFailure(milvus::ErrorCode code,
+                   const std::exception& e,
+                   bool is_data_integrity_error = false) {
+    CTextFstLoadResult result{};
+    result.status = milvus::FailureCStatus(code, e.what());
+    result.is_data_integrity_error = is_data_integrity_error;
+    return result;
+}
+
+CTextFstLoadResult
+TextFstUnknownFailure(const char* message) {
+    CTextFstLoadResult result{};
+    result.status = milvus::FailureCStatus(milvus::UnexpectedError, message);
+    return result;
+}
+
+}  // namespace
+
+CTextFstLoadResult
+LoadTextFstBytes(const uint8_t* data, int64_t data_size) {
+    try {
+        if (data_size < 0 ||
+            static_cast<uint64_t>(data_size) >
+                static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+            (data_size > 0 && data == nullptr)) {
+            return TextFstUnknownFailure("invalid text FST byte buffer");
+        }
+        auto fst = std::make_unique<TextFst>();
+        fst->LoadBytes(
+            std::span<const uint8_t>(data, static_cast<size_t>(data_size)));
+        return MakeTextFstLoadResult(std::move(fst));
+    } catch (const std::bad_alloc& e) {
+        return TextFstLoadFailure(milvus::MemAllocateFailed, e);
+    } catch (const std::exception& e) {
+        // Bytes have already crossed the object-storage boundary. Any format,
+        // checksum or metadata failure below this point is persisted-data
+        // corruption, not a transient loader failure.
+        return TextFstLoadFailure(milvus::DataFormatBroken, e, true);
+    } catch (...) {
+        return TextFstUnknownFailure("unknown text FST byte load failure");
+    }
+}
+
+CTextFstLoadResult
+LoadTextFstFile(const char* path, bool memory_mapped) {
+    try {
+        if (path == nullptr || path[0] == '\0') {
+            return TextFstUnknownFailure("text FST path is empty");
+        }
+        auto fst = std::make_unique<TextFst>();
+        fst->LoadFile(path, memory_mapped);
+        return MakeTextFstLoadResult(std::move(fst));
+    } catch (const std::bad_alloc& e) {
+        return TextFstLoadFailure(milvus::MemAllocateFailed, e);
+    } catch (const std::system_error& e) {
+        return TextFstLoadFailure(
+            memory_mapped ? milvus::MmapError : milvus::FileReadFailed, e);
+    } catch (const std::exception& e) {
+        return TextFstLoadFailure(milvus::DataFormatBroken, e, true);
+    } catch (...) {
+        return TextFstUnknownFailure("unknown text FST file load failure");
+    }
 }
 
 void

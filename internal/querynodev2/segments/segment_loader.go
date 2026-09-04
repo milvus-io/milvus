@@ -141,16 +141,17 @@ func (r *LoadResource) IsZero() bool {
 }
 
 type resourceEstimateFactor struct {
-	memoryUsageFactor               float64
-	memoryIndexUsageFactor          float64
-	EnableInterminSegmentIndex      bool
-	tempSegmentIndexFactor          float64
-	deltaDataExpansionFactor        float64
-	jsonKeyStatsExpansionFactor     float64
-	textIndexExpansionFactor        float64
-	TieredEvictionEnabled           bool
-	TieredEvictableMemoryCacheRatio float64
-	TieredEvictableDiskCacheRatio   float64
+	memoryUsageFactor                   float64
+	memoryIndexUsageFactor              float64
+	EnableInterminSegmentIndex          bool
+	tempSegmentIndexFactor              float64
+	deltaDataExpansionFactor            float64
+	jsonKeyStatsExpansionFactor         float64
+	textIndexExpansionFactor            float64
+	textLogV2GrowingTrieExpansionFactor float64
+	TieredEvictionEnabled               bool
+	TieredEvictableMemoryCacheRatio     float64
+	TieredEvictableDiskCacheRatio       float64
 	// externalRawDataFactor is the peak-memory safety factor for external
 	// segments when tiered eviction is disabled. With tiered eviction enabled,
 	// the caching layer reserves transient loading overhead from the sampled
@@ -245,6 +246,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
+	if err := loader.resolveTextLogV2(ctx, collection.Schema(), infos); err != nil {
+		return nil, err
+	}
 
 	// continue to wait other task done
 	mlog.Info(context.TODO(), "start loading...", mlog.Int("segmentNum", len(segments)), mlog.Int("afterFilter", len(infos)))
@@ -254,7 +258,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	// Check memory & storage limit
 	// no need to check resource for lazy load here
-	requestResourceResult, err = loader.requestResource(ctx, infos...)
+	requestResourceResult, err = loader.requestResourceForSegmentType(ctx, segmentType, infos...)
 	if err != nil {
 		mlog.Warn(context.TODO(), "request resource failed", mlog.Err(err))
 		return nil, err
@@ -467,6 +471,40 @@ func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schema
 	loadInfo.UseTakeForOutput = paramtable.Get().QueryNodeCfg.InternalCollectionUseTakeForOutput.GetAsBool()
 }
 
+func (loader *segmentLoader) resolveTextLogV2(
+	ctx context.Context,
+	schema *schemapb.CollectionSchema,
+	infos []*querypb.SegmentLoadInfo,
+) error {
+	enabled := fuzzyBM25FieldIDs(schema)
+	if len(enabled) == 0 {
+		return nil
+	}
+	for _, info := range infos {
+		if info.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		if info.GetManifestPath() == "" {
+			if _, err := validateTextTermLoadMetadata(enabled, info); err != nil {
+				return err
+			}
+		} else {
+			logs, err := packed.NewStatsResolverFromLoadInfo(info).TextLogV2()
+			if err != nil {
+				return merr.Wrapf(err, "resolve text-log-v2 metadata for segment %d", info.GetSegmentID())
+			}
+			info.TextLogV2 = logs
+			mlog.Debug(ctx, "resolved text-log-v2 metadata from manifest",
+				mlog.FieldSegmentID(info.GetSegmentID()),
+				mlog.Int("fieldCount", len(logs)))
+			if _, err := validateTextTermLoadMetadata(enabled, info); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 	for i := range segments {
 		result, ok := loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
@@ -488,6 +526,14 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+	return loader.requestResourceForSegmentType(ctx, SegmentTypeSealed, infos...)
+}
+
+func (loader *segmentLoader) requestResourceForSegmentType(
+	ctx context.Context,
+	segmentType SegmentType,
+	infos ...*querypb.SegmentLoadInfo,
+) (requestResourceResult, error) {
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -502,7 +548,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		mlog.Int64s("segmentIDs", segmentIDs),
 	)
 
-	loadingUsage, maxSegmentSize, err := loader.estimateSegmentLoadingResourceUsage(ctx, infos...)
+	loadingUsage, maxSegmentSize, err := loader.estimateSegmentLoadingResourceUsageForType(ctx, segmentType, infos...)
 	if err != nil {
 		logger.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
 		return requestResourceResult{}, err
@@ -1149,7 +1195,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			segment.UpdateBM25Stats(bm25Stats)
 		}
 	}
-	return nil
+	loadedTextTerms, err := loader.buildLoadedTextTermDictionary(ctx, collection.Schema(), loadInfo)
+	if err != nil {
+		return err
+	}
+	return segment.installLoadedTextTerms(loadedTextTerms)
 }
 
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
@@ -1759,7 +1809,11 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	return predictLogicalMemUsage - logicalMemUsage, predictLogicalDiskUsage - logicalDiskUsage, nil
 }
 
-func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Context, segmentLoadInfos ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
+func (loader *segmentLoader) estimateSegmentLoadingResourceUsageForType(
+	ctx context.Context,
+	segmentType SegmentType,
+	segmentLoadInfos ...*querypb.SegmentLoadInfo,
+) (*ResourceUsage, uint64, error) {
 	if len(segmentLoadInfos) == 0 {
 		return &ResourceUsage{}, 0, nil
 	}
@@ -1769,15 +1823,16 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Con
 	)
 
 	maxFactor := resourceEstimateFactor{
-		memoryUsageFactor:           paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:      paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex:  paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
-		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
-		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		externalRawDataFactor:       paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
+		memoryUsageFactor:                   paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
+		memoryIndexUsageFactor:              paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
+		EnableInterminSegmentIndex:          paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
+		tempSegmentIndexFactor:              paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
+		deltaDataExpansionFactor:            paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		jsonKeyStatsExpansionFactor:         paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		textIndexExpansionFactor:            paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
+		textLogV2GrowingTrieExpansionFactor: paramtable.Get().QueryNodeCfg.TextLogV2GrowingTrieExpansionFactor.GetAsFloat(),
+		TieredEvictionEnabled:               paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		externalRawDataFactor:               paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := uint64(0)
@@ -1786,7 +1841,8 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Con
 	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
-		loadingUsage, err := estimateLoadingResourceUsageOfSegment(collection.Schema(), loadInfo, maxFactor)
+		loadingUsage, err := estimateLoadingResourceUsageOfSegmentForType(
+			collection.Schema(), loadInfo, segmentType, maxFactor)
 		if err != nil {
 			logger.Warn(ctx, "failed to estimate max resource usage of segment",
 				mlog.Int64("collectionID", loadInfo.GetCollectionID()),
@@ -2130,6 +2186,16 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 	}
 
+	// PART 6: calculate logical resource usage of text-log-v2 FSTs. These
+	// dictionaries are required for exact fuzzy BM25 while the segment is
+	// readable, so they are not part of the generic stats or tiered cache.
+	textLogV2Size, textTermMemorySize := textLogV2Sizes(schema, loadInfo)
+	if paramtable.Get().QueryNodeCfg.MmapTextLogV2.GetAsBool() {
+		segmentInevictableDiskSize += uint64(textLogV2Size)
+	} else {
+		segmentInevictableMemorySize += uint64(textTermMemorySize)
+	}
+
 	mlog.Debug(context.TODO(), "estimate logical resoure usage result",
 		mlog.Int64("segmentID", loadInfo.GetSegmentID()),
 		mlog.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
@@ -2149,7 +2215,12 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 //   - when tiered eviction is enabled, the result is the max resource usage of the segment that cannot be managed by caching layer,
 //     which should be a subset of the segment inevictable part
 //   - when tiered eviction is disabled, the result is the max resource usage of both the segment evictable and inevictable part
-func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
+func estimateLoadingResourceUsageOfSegmentForType(
+	schema *schemapb.CollectionSchema,
+	loadInfo *querypb.SegmentLoadInfo,
+	segmentType SegmentType,
+	multiplyFactor resourceEstimateFactor,
+) (usage *ResourceUsage, err error) {
 	var segMemoryLoadingSize, segDiskLoadingSize uint64
 	var indexMemorySize uint64
 	var mmapFieldCount int
@@ -2436,6 +2507,31 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 	}
 
+	// PART 8: sealed segments retain text-log-v2 FSTs. Growing segments load
+	// the FSTs temporarily, stream all terms into one heap Trie, then release
+	// the readers. Account for both representations while recovery overlaps.
+	textLogV2Size, textTermMemorySize := textLogV2Sizes(schema, loadInfo)
+	if textLogV2Size < 0 || textTermMemorySize < 0 {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"segment %d has invalid text-log-v2 resource metadata",
+			loadInfo.GetSegmentID())
+	}
+	if segmentType == SegmentTypeGrowing {
+		trieMemory := float64(textTermMemorySize) * multiplyFactor.textLogV2GrowingTrieExpansionFactor
+		if trieMemory >= float64(math.MaxUint64) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"growing segment %d text term Trie resource estimate overflows",
+				loadInfo.GetSegmentID())
+		}
+		segMemoryLoadingSize += uint64(trieMemory)
+	}
+	if paramtable.Get().QueryNodeCfg.MmapTextLogV2.GetAsBool() {
+		segDiskLoadingSize += uint64(textLogV2Size)
+	} else {
+		segMemoryLoadingSize += uint64(textTermMemorySize)
+		segMemoryLoadingSize += uint64(textTermHeapTransientBytes(schema, loadInfo))
+	}
+
 	return &ResourceUsage{
 		MemorySize:         segMemoryLoadingSize + indexMemorySize + structArrayOffsetsSize,
 		DiskSize:           segDiskLoadingSize,
@@ -2503,6 +2599,16 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
+	for _, info := range infos {
+		collection := loader.manager.Collection.Get(info.GetCollectionID())
+		if collection == nil {
+			return merr.WrapErrCollectionNotFound(info.GetCollectionID())
+		}
+		configureUseTakeForOutput(info, collection.Schema())
+		if err := loader.resolveTextLogV2(ctx, collection.Schema(), []*querypb.SegmentLoadInfo{info}); err != nil {
+			return err
+		}
+	}
 
 	// use full resource in case of whole segment reopen
 	// TODO use calculated resource from segcore after supported
@@ -2519,12 +2625,20 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			mlog.Warn(context.TODO(), "failed to reopen segment, segment not loaded", mlog.Int64("segmentID", info.GetSegmentID()))
 			continue
 		}
+		localSegment, ok := segment.(*LocalSegment)
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("segment %d does not support text-log-v2 reopen", info.GetSegmentID())
+		}
 		collection := loader.manager.Collection.Get(info.GetCollectionID())
-		if collection != nil {
-			configureUseTakeForOutput(info, collection.Schema())
+		if collection == nil {
+			return merr.WrapErrCollectionNotFound(info.GetCollectionID())
+		}
+		loadedTextTerms, err := loader.buildLoadedTextTermDictionary(ctx, collection.Schema(), info)
+		if err != nil {
+			return err
 		}
 
-		err := segment.Reopen(ctx, info)
+		err = localSegment.reopenWithTextTerms(ctx, info, loadedTextTerms)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err

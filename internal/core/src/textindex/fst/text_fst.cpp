@@ -24,12 +24,16 @@
 
 #include "textindex/fst/text_fst.h"
 
+#include "levenshtein_dfa.h"
+#include "mapped_file.h"
+
 #include "crc32c/crc32c.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -65,49 +69,6 @@ constexpr auto kCommonInputIndexes = [] {
     }
     return indexes;
 }();
-
-void
-ValidateUtf8(std::string_view text) {
-    for (std::size_t i = 0; i < text.size();) {
-        const auto first = static_cast<std::uint8_t>(text[i]);
-        std::uint32_t value = 0;
-        std::uint32_t minimum = 0;
-        std::size_t length = 0;
-        if (first < 0x80) {
-            value = first;
-            length = 1;
-        } else if ((first & 0xE0U) == 0xC0U) {
-            value = first & 0x1FU;
-            minimum = 0x80;
-            length = 2;
-        } else if ((first & 0xF0U) == 0xE0U) {
-            value = first & 0x0FU;
-            minimum = 0x800;
-            length = 3;
-        } else if ((first & 0xF8U) == 0xF0U) {
-            value = first & 0x07U;
-            minimum = 0x10000;
-            length = 4;
-        } else {
-            throw std::invalid_argument("invalid UTF-8 leading byte");
-        }
-        if (i + length > text.size()) {
-            throw std::invalid_argument("truncated UTF-8 sequence");
-        }
-        for (std::size_t offset = 1; offset < length; ++offset) {
-            const auto byte = static_cast<std::uint8_t>(text[i + offset]);
-            if ((byte & 0xC0U) != 0x80U) {
-                throw std::invalid_argument("invalid UTF-8 continuation byte");
-            }
-            value = (value << 6) | (byte & 0x3FU);
-        }
-        if ((length != 1 && value < minimum) || value > 0x10FFFF ||
-            (value >= 0xD800 && value <= 0xDFFF)) {
-            throw std::invalid_argument("invalid UTF-8 code point");
-        }
-        i += length;
-    }
-}
 
 void
 WriteU32(std::vector<std::uint8_t>& data, std::uint32_t value) {
@@ -936,10 +897,105 @@ struct NodeView {
     }
 };
 
+TextFstSearchResult
+IntersectLevenshteinDfa(std::span<const std::uint8_t> data,
+                        Address root_address,
+                        const LevenshteinDfa& dfa) {
+    TextFstSearchResult result;
+    std::string term;
+    struct Frame {
+        NodeView node;
+        std::uint32_t dfa_state = 0;
+        std::size_t next_transition = 0;
+        bool entered = false;
+    };
+    std::vector<Frame> stack;
+    stack.push_back(Frame{
+        .node = NodeView::Read(data, root_address),
+        .dfa_state = dfa.InitialState(),
+    });
+    while (!stack.empty()) {
+        auto& frame = stack.back();
+        if (!frame.entered) {
+            frame.entered = true;
+            if (frame.node.is_final && dfa.IsMatch(frame.dfa_state)) {
+                result.matches.push_back(TextFstMatch{
+                    term,
+                    dfa.Distance(frame.dfa_state),
+                });
+            }
+        }
+        if (frame.next_transition >= frame.node.transition_count) {
+            stack.pop_back();
+            if (!stack.empty()) {
+                term.pop_back();
+            }
+            continue;
+        }
+        const auto index = frame.next_transition++;
+        {
+            ++result.work_used;
+            const auto input = frame.node.Input(index);
+            const auto next_dfa_state = dfa.Transition(frame.dfa_state, input);
+
+            // This is a Levenshtein-DFA-specific traversal. Its sink state
+            // cannot recover and it has no EOF transition, so reject the arc
+            // before decoding the target address, output and node.
+            if (!dfa.CanMatch(next_dfa_state)) {
+                continue;
+            }
+
+            term.push_back(static_cast<char>(input));
+            stack.push_back(Frame{
+                .node =
+                    NodeView::Read(data, frame.node.TransitionAddress(index)),
+                .dfa_state = next_dfa_state,
+            });
+        }
+    }
+    return result;
+}
+
+template <typename Visitor>
+void
+VisitTermsIterative(std::span<const std::uint8_t> data,
+                    Address root_address,
+                    const Visitor& visitor) {
+    std::string term;
+    struct Frame {
+        NodeView node;
+        std::size_t next_transition = 0;
+        bool entered = false;
+    };
+    std::vector<Frame> stack;
+    stack.push_back(Frame{.node = NodeView::Read(data, root_address)});
+    while (!stack.empty()) {
+        auto& frame = stack.back();
+        if (!frame.entered) {
+            frame.entered = true;
+            if (frame.node.is_final) {
+                visitor(term);
+            }
+        }
+        if (frame.next_transition >= frame.node.transition_count) {
+            stack.pop_back();
+            if (!stack.empty()) {
+                term.pop_back();
+            }
+            continue;
+        }
+        const auto index = frame.next_transition++;
+        term.push_back(static_cast<char>(frame.node.Input(index)));
+        stack.push_back(Frame{
+            .node = NodeView::Read(data, frame.node.TransitionAddress(index)),
+        });
+    }
+}
 }  // namespace
 
 struct TextFst::Impl {
     std::vector<std::uint8_t> owned_data;
+    MappedFile mapped_data;
     std::span<const std::uint8_t> data;
     Metadata metadata;
 };
@@ -967,9 +1023,66 @@ TextFst::Build(const TextFstTermReader& reader) {
 
     auto owned_data = builder.Finish();
     const auto metadata = ReadMetadata(owned_data);
+    impl_->mapped_data.Reset();
     impl_->owned_data = std::move(owned_data);
     impl_->data = impl_->owned_data;
     impl_->metadata = metadata;
+}
+
+bool
+Contains(std::span<const std::uint8_t> data,
+         Address root_address,
+         std::string_view term) {
+    if (data.empty()) {
+        return false;
+    }
+    auto node = NodeView::Read(data, root_address);
+    for (const unsigned char byte : term) {
+        const auto index = node.FindInput(byte);
+        if (!index.has_value()) {
+            return false;
+        }
+        const auto transition = node.FullTransition(*index);
+        node = NodeView::Read(data, transition.address);
+    }
+    return node.is_final;
+}
+
+TextFstSearchResult
+TextFst::FuzzySearch(std::string_view query,
+                     std::uint32_t max_edit_distance,
+                     std::size_t max_expansions) const {
+    if (max_edit_distance > 2) {
+        throw std::invalid_argument(
+            "text FST fuzzy distance must be in [0, 2]");
+    }
+    TextFstSearchResult result;
+    if (max_expansions == 0 || impl_->data.empty()) {
+        return result;
+    }
+    if (max_edit_distance == 0) {
+        ValidateUtf8(query);
+        if (Contains(impl_->data, impl_->metadata.root_address, query)) {
+            result.matches.push_back(TextFstMatch{std::string(query), 0});
+        }
+        return result;
+    }
+
+    auto dfa = BuildLevenshteinDfa(query, max_edit_distance);
+    result =
+        IntersectLevenshteinDfa(impl_->data, impl_->metadata.root_address, dfa);
+    std::sort(result.matches.begin(),
+              result.matches.end(),
+              [](const TextFstMatch& left, const TextFstMatch& right) {
+                  if (left.edit_distance != right.edit_distance) {
+                      return left.edit_distance < right.edit_distance;
+                  }
+                  return left.term < right.term;
+              });
+    if (result.matches.size() > max_expansions) {
+        result.matches.resize(max_expansions);
+    }
+    return result;
 }
 
 std::size_t
@@ -980,6 +1093,70 @@ TextFst::TermCount() const {
 std::size_t
 TextFst::DataSize() const {
     return impl_->data.size();
+}
+
+void
+TextFst::LoadFile(const std::string& path, bool memory_mapped) {
+    impl_->owned_data.clear();
+    impl_->owned_data.shrink_to_fit();
+    impl_->mapped_data.Reset();
+    if (memory_mapped) {
+        impl_->mapped_data.Map(path);
+        impl_->data = impl_->mapped_data.Bytes();
+    } else {
+        std::ifstream stream(path, std::ios::binary | std::ios::ate);
+        if (!stream) {
+            throw std::ios_base::failure("failed to open text FST: " + path);
+        }
+        const auto end = stream.tellg();
+        if (end < 0 || static_cast<std::uint64_t>(end) >
+                           static_cast<std::uint64_t>(
+                               std::numeric_limits<std::streamsize>::max())) {
+            throw std::runtime_error("invalid text FST size: " + path);
+        }
+        impl_->owned_data.resize(static_cast<std::size_t>(end));
+        stream.seekg(0, std::ios::beg);
+        if (!impl_->owned_data.empty()) {
+            stream.read(reinterpret_cast<char*>(impl_->owned_data.data()),
+                        static_cast<std::streamsize>(impl_->owned_data.size()));
+        }
+        if (!stream) {
+            throw std::ios_base::failure("failed to read text FST: " + path);
+        }
+        impl_->data = impl_->owned_data;
+    }
+    impl_->metadata = ReadMetadata(impl_->data);
+    static_cast<void>(
+        NodeView::Read(impl_->data, impl_->metadata.root_address));
+    if (!VerifyChecksum()) {
+        throw std::runtime_error("text FST checksum mismatch: " + path);
+    }
+}
+
+void
+TextFst::LoadBytes(std::span<const std::uint8_t> bytes) {
+    impl_->mapped_data.Reset();
+    impl_->owned_data.assign(bytes.begin(), bytes.end());
+    impl_->data = impl_->owned_data;
+    impl_->metadata = ReadMetadata(impl_->data);
+    static_cast<void>(
+        NodeView::Read(impl_->data, impl_->metadata.root_address));
+    if (!VerifyChecksum()) {
+        throw std::runtime_error("text FST checksum mismatch");
+    }
+}
+
+void
+TextFst::VisitTerms(const TextFstTermVisitor& visitor) const {
+    if (impl_->data.empty()) {
+        return;
+    }
+    VisitTermsIterative(impl_->data, impl_->metadata.root_address, visitor);
+}
+
+bool
+TextFst::IsMemoryMapped() const {
+    return impl_->mapped_data.IsMapped();
 }
 
 std::span<const std::uint8_t>
