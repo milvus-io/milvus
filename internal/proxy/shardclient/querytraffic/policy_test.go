@@ -17,6 +17,7 @@
 package querytraffic
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -251,4 +252,70 @@ func TestPolicyIgnoresZeroWeightRoutes(t *testing.T) {
 	})
 	require.Equal(t, "no_candidate", result.FallbackReason)
 	require.Empty(t, result.Candidates)
+}
+
+func TestCompileRejectsInvalidRuleNames(t *testing.T) {
+	validRoute := func() []RouteConfig {
+		return []RouteConfig{
+			{
+				Name:              "any",
+				Weight:            100,
+				DestinationLabels: MatcherConfig{Any: true},
+			},
+		}
+	}
+
+	t.Run("empty name", func(t *testing.T) {
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{{Name: "", Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}, Routes: validRoute()}}})
+		require.Error(t, err)
+	})
+
+	t.Run("duplicate name", func(t *testing.T) {
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{
+			{Name: "dup", Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}, Routes: validRoute()},
+			{Name: "dup", Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}, Routes: validRoute()},
+		}})
+		require.Error(t, err)
+	})
+
+	t.Run("unsupported characters", func(t *testing.T) {
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{{Name: "bad name!", Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}, Routes: validRoute()}}})
+		require.Error(t, err)
+	})
+
+	t.Run("too long", func(t *testing.T) {
+		name := strings.Repeat("a", maxRuleNameLength+1)
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{{Name: name, Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}, Routes: validRoute()}}})
+		require.Error(t, err)
+	})
+}
+
+func TestCompileRejectsRulesWithoutRoutes(t *testing.T) {
+	_, err := Compile(PolicyConfig{Rules: []RuleConfig{
+		{Name: "empty-rule", Match: RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}}},
+	}})
+	require.Error(t, err)
+}
+
+func TestCompileRejectsEmptyMatchers(t *testing.T) {
+	t.Run("empty source labels matcher", func(t *testing.T) {
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{
+			{
+				Name:   "no-source-match",
+				Routes: []RouteConfig{{Name: "any", Weight: 100, DestinationLabels: MatcherConfig{Any: true}}},
+			},
+		}})
+		require.Error(t, err)
+	})
+
+	t.Run("empty destination labels matcher", func(t *testing.T) {
+		_, err := Compile(PolicyConfig{Rules: []RuleConfig{
+			{
+				Name:   "no-dest-match",
+				Match:  RuleMatchConfig{SourceLabels: MatcherConfig{Any: true}},
+				Routes: []RouteConfig{{Name: "any", Weight: 100}},
+			},
+		}})
+		require.Error(t, err)
+	})
 }

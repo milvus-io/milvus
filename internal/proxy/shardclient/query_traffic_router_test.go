@@ -18,6 +18,7 @@ package shardclient
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,4 +65,64 @@ func TestCollectQueryTrafficNodeLabels(t *testing.T) {
 
 	assert.Empty(t, collectQueryTrafficNodeLabels(nil, []int64{1}))
 	assert.Empty(t, collectQueryTrafficNodeLabels(sessions, nil))
+}
+
+// countingRulesConfig returns a rules string that can be switched between
+// calls, and counts every Rules() read.
+type countingRulesConfig struct {
+	raw   atomic.Value // string
+	calls atomic.Int64
+}
+
+func (c *countingRulesConfig) Enabled() bool { return true }
+
+func (c *countingRulesConfig) Rules() string {
+	c.calls.Add(1)
+	v, _ := c.raw.Load().(string)
+	return v
+}
+
+// TestGetPolicyCachesBadConfig pins the M4 fix: a config that fails to parse
+// or compile is cached together with its error, so a hot-loaded bad config is
+// not re-parsed and re-compiled on every request.
+func TestGetPolicyCachesBadConfig(t *testing.T) {
+	cfg := &countingRulesConfig{}
+	cfg.raw.Store(`[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`)
+	r := newQueryTrafficRouter(cfg, staticQueryTrafficLabelProvider{})
+
+	policy, err := r.getPolicy()
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+
+	// Same raw: policy is served from cache, no re-parse.
+	_, err = r.getPolicy()
+	require.NoError(t, err)
+	require.Equal(t, int64(2), cfg.calls.Load(), "each getPolicy reads the raw once")
+
+	// A bad config is cached including its error: repeated calls do not
+	// re-parse or re-compile, they just return the cached error.
+	cfg.raw.Store(`[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ"}}}]}]`)
+	callsBefore := cfg.calls.Load()
+	_, err = r.getPolicy()
+	require.Error(t, err)
+	_, err = r.getPolicy()
+	require.Error(t, err)
+	require.Equal(t, callsBefore+2, cfg.calls.Load(), "each getPolicy reads the raw once even for a bad config")
+}
+
+// TestGetPolicyCachesParseError verifies the parse-error path caches the
+// error, so a bad-config request storm parses the malformed input once.
+func TestGetPolicyCachesParseError(t *testing.T) {
+	cfg := &countingRulesConfig{}
+	cfg.raw.Store(`[{"name":"local",}`) // malformed JSON: array parse fails
+	r := newQueryTrafficRouter(cfg, staticQueryTrafficLabelProvider{})
+
+	_, err := r.getPolicy()
+	require.Error(t, err)
+
+	// The error is cached: the second call must not re-parse, only re-read the raw.
+	calls := cfg.calls.Load()
+	_, err = r.getPolicy()
+	require.Error(t, err)
+	require.Equal(t, calls+1, cfg.calls.Load())
 }

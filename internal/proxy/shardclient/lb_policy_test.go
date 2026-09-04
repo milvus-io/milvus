@@ -73,6 +73,10 @@ type staticQueryTrafficLabelProvider struct {
 	nodes  map[int64]querytraffic.Labels
 }
 
+func (p staticQueryTrafficLabelProvider) Enabled() bool {
+	return true
+}
+
 func (p staticQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
 	return p.source, nil
 }
@@ -84,6 +88,10 @@ func (p staticQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, node
 // errorQueryTrafficLabelProvider fails label resolution to exercise the
 // __error metric branch of query traffic routing.
 type errorQueryTrafficLabelProvider struct{}
+
+func (errorQueryTrafficLabelProvider) Enabled() bool {
+	return true
+}
 
 func (errorQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
 	return nil, errors.New("fake label resolution error")
@@ -109,6 +117,18 @@ func (b *captureWeightedBalancer) SelectNode(ctx context.Context, availableNodes
 func (b *captureWeightedBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error) {
 	b.weightedNodes = append([]WeightedNode(nil), availableNodes...)
 	return availableNodes[0].NodeID, nil
+}
+
+// unreachableWeightedBalancer simulates a routed subset whose nodes are all
+// marked unreachable by the proxy-side health check: weighted selection fails
+// with ErrServiceUnavailable while plain selection still works.
+type unreachableWeightedBalancer struct {
+	captureWeightedBalancer
+}
+
+func (b *unreachableWeightedBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error) {
+	b.weightedNodes = append([]WeightedNode(nil), availableNodes...)
+	return -1, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 }
 
 func (b *captureWeightedBalancer) CancelWorkload(node int64, nq int64) {}
@@ -332,6 +352,53 @@ func (s *LBPolicySuite) TestSelectNodeAppliesQueryTrafficRoutingBeforeBalancer()
 		{NodeID: 3, Weight: 100},
 	}, weightedBalancer.weightedNodes)
 	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(ruleName))
+	s.Equal(before+1, after)
+}
+
+// TestSelectNodeFallsBackToOriginalCandidatesWhenRoutedSubsetUnreachable
+// verifies the availability-first behavior: when the routed subset is fully
+// unreachable from the proxy's health-check perspective, selectNode falls back
+// to the original candidate set instead of propagating the error, and records
+// the decision as __no_candidate.
+func (s *LBPolicySuite) TestSelectNodeFallsBackToOriginalCandidatesWhenRoutedSubsetUnreachable() {
+	ctx := context.Background()
+	balancer := &unreachableWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+		{NodeID: 3, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"local-az-test-metric","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{"AZ": "az1"},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoCandidate))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	// Routing produced the az1 subset, weighted selection failed with
+	// ErrServiceUnavailable, and selection succeeded on the original set.
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2, 3}, targetNode.NodeID)
+	s.ElementsMatch([]WeightedNode{
+		{NodeID: 1, Weight: 100},
+		{NodeID: 3, Weight: 100},
+	}, balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoCandidate))
 	s.Equal(before+1, after)
 }
 

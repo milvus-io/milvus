@@ -189,8 +189,8 @@ func (b *LookAsideBalancer) SelectNodeWithWeights(ctx context.Context, available
 		return targetNode, nil
 	}
 
-	minScore := int64(math.MaxInt64)
-	maxScore := int64(0)
+	minScore := math.MaxFloat64
+	maxScore := float64(0)
 	nowTs := time.Now().UnixMilli()
 	for _, node := range availableNodes {
 		if node.Weight <= 0 {
@@ -208,7 +208,12 @@ func (b *LookAsideBalancer) SelectNodeWithWeights(ctx context.Context, available
 				score = b.calculateScore(node.NodeID, metrics.cost.Load(), executingNQ)
 			}
 		}
-		weightedScore := score / int64(node.Weight)
+		// Score per unit of weight, kept as a ratio instead of an integer
+		// division: with weights like 100, score/weight truncates every
+		// difference below the weight to zero and makes
+		// workloadToleranceFactor meaningless (a backlogged node would score
+		// the same as an idle one).
+		weightedScore := float64(score) / float64(node.Weight)
 		if weightedScore < minScore || targetNode == -1 {
 			minScore = weightedScore
 			targetNode = node.NodeID
@@ -222,7 +227,7 @@ func (b *LookAsideBalancer) SelectNodeWithWeights(ctx context.Context, available
 		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 	}
 
-	if minScore <= 0 || float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
+	if minScore <= 0 || (maxScore-minScore)/minScore <= b.workloadToleranceFactor {
 		var err error
 		targetNode, err = b.selectReachableWeightedRoundRobin(availableNodes, idx)
 		if err != nil {

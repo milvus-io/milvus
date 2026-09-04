@@ -17,8 +17,11 @@
 package querytraffic
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func ParseRules(raw string) ([]RuleConfig, error) {
@@ -27,14 +30,31 @@ func ParseRules(raw string) ([]RuleConfig, error) {
 		return nil, nil
 	}
 
-	var rules []RuleConfig
-	if err := json.Unmarshal([]byte(raw), &rules); err == nil {
-		return rules, nil
+	// Reject unknown fields so a typo such as `destinationLabel` or `notIn`
+	// fails loudly instead of being silently dropped and compiling into a
+	// matcher that matches every candidate.
+	decodeStrict := func(v any) error {
+		decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
+		decoder.DisallowUnknownFields()
+		return decoder.Decode(v)
 	}
 
-	var policy PolicyConfig
-	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
-		return nil, err
+	// Dispatch on the first non-space character so a malformed array input
+	// reports the array error instead of a misleading object-parse error.
+	switch raw[0] {
+	case '[':
+		var rules []RuleConfig
+		if err := decodeStrict(&rules); err != nil {
+			return nil, err
+		}
+		return rules, nil
+	case '{':
+		var policy PolicyConfig
+		if err := decodeStrict(&policy); err != nil {
+			return nil, err
+		}
+		return policy.Rules, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("rules config must be a JSON array or an object with a rules field, got %q", raw)
 	}
-	return policy.Rules, nil
 }

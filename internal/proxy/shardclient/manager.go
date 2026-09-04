@@ -216,7 +216,16 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		return nil, err
 	}
 
-	nodeLabels := m.getQueryTrafficNodeLabels(ctx, resp.GetShards())
+	nodeLabels, err := m.getQueryTrafficNodeLabels(ctx, resp.GetShards())
+	if err != nil {
+		// Do not cache label-less shard leaders on a transient label-fetch
+		// failure: the cache is rebuilt only on invalidation or a failed
+		// request, so label-less entries would silently degrade routing for a
+		// long time. Keep the previous cache and let the caller retry.
+		log.Warn(ctx, "failed to get query node labels for query traffic routing, keep previous shard leader cache",
+			mlog.Err(err))
+		return nil, err
+	}
 	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards(), nodeLabels)
 
 	// convert shards map to string for logging
@@ -245,20 +254,23 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	return newShardLeaders, nil
 }
 
-func (m *shardClientMgrImpl) getQueryTrafficNodeLabels(ctx context.Context, shardLeaders []*querypb.ShardLeadersList) map[int64]querytraffic.Labels {
-	if m.queryTrafficLabelProvider == nil {
-		return nil
+func (m *shardClientMgrImpl) getQueryTrafficNodeLabels(ctx context.Context, shardLeaders []*querypb.ShardLeadersList) (map[int64]querytraffic.Labels, error) {
+	// Gate on both the provider being present and the feature being enabled:
+	// with the default enabled=false, label resolution must not pay an
+	// uncached etcd prefix scan of all QueryNode sessions on every
+	// shard-leader cache refresh.
+	if m.queryTrafficLabelProvider == nil || !m.queryTrafficLabelProvider.Enabled() {
+		return nil, nil
 	}
 	nodeIDs := collectShardLeaderNodeIDs(shardLeaders)
 	if len(nodeIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	nodeLabels, err := m.queryTrafficLabelProvider.GetNodeLabels(ctx, nodeIDs)
 	if err != nil {
-		mlog.Warn(ctx, "failed to get query node labels for query traffic routing", mlog.Err(err))
-		return nil
+		return nil, err
 	}
-	return nodeLabels
+	return nodeLabels, nil
 }
 
 func collectShardLeaderNodeIDs(shardLeaders []*querypb.ShardLeadersList) []int64 {

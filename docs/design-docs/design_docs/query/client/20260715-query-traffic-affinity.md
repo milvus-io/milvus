@@ -380,6 +380,13 @@ The router falls back to the original candidate set only in these cases:
 3. no matching rule can produce candidates;
 4. Session labels cannot be resolved.
 
+Availability keeps priority over routing after selection too: routing input only
+sees QueryCoord `Serviceable` plus `excludeNodes`, so a routed subset whose
+nodes are all marked unreachable by the proxy-side health check (for example
+`look_aside` timing out every routed node while QueryCoord still reports them
+serviceable) falls back to the original candidate set instead of failing the
+request. This fallback is recorded as `__no_candidate` (see §9).
+
 The feature is disabled by default. When disabled, query routing behavior is
 unchanged.
 
@@ -409,5 +416,11 @@ __no_policy
 __no_matching_rule
 __no_candidate
 ```
+
+`__no_candidate` covers every decision where a matched rule produced no
+reachable candidate: either its routes matched no candidate, or the routed
+subset was fully unreachable and selection fell back to the original candidate
+set. It is recorded even when the matched rule has a name, because the decision
+outcome is the fallback, not the rule hit.
 
 Arbitrary Session label keys and values must not be used as metric labels.

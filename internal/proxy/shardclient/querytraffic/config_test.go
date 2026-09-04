@@ -57,3 +57,21 @@ func TestParseRulesEmptyValueDisablesPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, rules)
 }
+
+func TestParseRulesRejectsUnknownFields(t *testing.T) {
+	// A typo in a matcher field must fail loudly instead of being silently
+	// dropped and compiling into a matcher that matches every candidate.
+	_, err := ParseRules(`[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"notIn":{"AZ":"az1"}}}]}]`)
+	require.Error(t, err)
+
+	_, err = ParseRules(`[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabel":{"eq":{"AZ":"az1"}}}]}]`)
+	require.Error(t, err)
+}
+
+func TestParseRulesReportsArrayErrorForMalformedArray(t *testing.T) {
+	// A malformed array must report the array parse error, not a misleading
+	// object-parse error from the fallback path.
+	_, err := ParseRules(`[{"name":"local",}`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid character")
+}

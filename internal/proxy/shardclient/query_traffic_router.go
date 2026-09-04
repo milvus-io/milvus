@@ -32,6 +32,10 @@ type queryTrafficConfigProvider interface {
 }
 
 type QueryTrafficLabelProvider interface {
+	// Enabled reports whether query traffic routing is enabled. Consumers
+	// skip label resolution entirely when it returns false, so a disabled
+	// feature (the default) does not pay the Session discovery cost.
+	Enabled() bool
 	GetSourceLabels(ctx context.Context) (querytraffic.Labels, error)
 	GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error)
 }
@@ -40,9 +44,10 @@ type queryTrafficRouter struct {
 	configProvider queryTrafficConfigProvider
 	labelProvider  QueryTrafficLabelProvider
 
-	mut    sync.Mutex
+	mut    sync.RWMutex
 	raw    string
 	policy *querytraffic.Policy
+	err    error
 }
 
 type queryTrafficRouteResult struct {
@@ -107,27 +112,34 @@ func (r *queryTrafficRouter) route(ctx context.Context, nodes []NodeInfo) (query
 func (r *queryTrafficRouter) getPolicy() (*querytraffic.Policy, error) {
 	raw := r.configProvider.Rules()
 
-	r.mut.Lock()
-	defer r.mut.Unlock()
+	r.mut.RLock()
 	if raw == r.raw {
-		return r.policy, nil
+		policy, err := r.policy, r.err
+		r.mut.RUnlock()
+		return policy, err
 	}
+	r.mut.RUnlock()
+
+	// Compile outside the lock; only the result cache is guarded.
 	rules, err := querytraffic.ParseRules(raw)
-	if err != nil {
-		return nil, err
-	}
-	if len(rules) == 0 {
+	if err == nil && len(rules) > 0 {
+		var policy *querytraffic.Policy
+		policy, err = querytraffic.Compile(querytraffic.PolicyConfig{Rules: rules})
+		r.mut.Lock()
 		r.raw = raw
-		r.policy = nil
-		return nil, nil
+		r.policy = policy
+		r.err = err
+		r.mut.Unlock()
+		return policy, err
 	}
-	policy, err := querytraffic.Compile(querytraffic.PolicyConfig{Rules: rules})
-	if err != nil {
-		return nil, err
-	}
+	// Cache the failure too: a bad config hot-loaded via config alter must
+	// not be re-parsed and re-compiled on every request.
+	r.mut.Lock()
 	r.raw = raw
-	r.policy = policy
-	return policy, nil
+	r.policy = nil
+	r.err = err
+	r.mut.Unlock()
+	return nil, err
 }
 
 type paramtableQueryTrafficConfig struct{}
@@ -148,6 +160,10 @@ func NewSessionQueryTrafficLabelProvider(session *sessionutil.Session) QueryTraf
 	return &sessionQueryTrafficLabelProvider{
 		session: session,
 	}
+}
+
+func (p *sessionQueryTrafficLabelProvider) Enabled() bool {
+	return paramtable.Get().ProxyCfg.QueryTrafficRoutingEnabled.GetAsBool()
 }
 
 func (p *sessionQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {

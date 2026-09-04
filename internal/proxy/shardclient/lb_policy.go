@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
@@ -234,12 +235,19 @@ func recordQueryTrafficRoutingDecision(routeResult queryTrafficRouteResult, rout
 	}
 
 	ruleName := routeResult.ruleName
-	if ruleName == "" {
+	switch {
+	case routeResult.fallbackReason == "no_candidate":
+		// A matched rule produced no reachable candidates: either the rule's
+		// routes matched no candidate (nameless rule, or a rule that matched
+		// nothing), or the routed subset was fully unreachable and selection
+		// fell back to the original candidate set. Both are the same decision
+		// outcome, so record it under the reserved __no_candidate label even
+		// when the matched rule has a name.
+		ruleName = queryTrafficRoutingRuleNameNoCandidate
+	case ruleName == "":
 		switch routeResult.fallbackReason {
 		case "no_policy":
 			ruleName = queryTrafficRoutingRuleNameNoPolicy
-		case "no_candidate":
-			ruleName = queryTrafficRoutingRuleNameNoCandidate
 		default:
 			ruleName = queryTrafficRoutingRuleNameNoMatchingRule
 		}
@@ -370,15 +378,35 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		availableNodeIDs := lo.Keys(selectableNodes)
 		routeResult, routeErr := lb.queryTrafficRouter.route(ctx, lo.Values(selectableNodes))
 		if routeErr != nil {
-			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
+			// A bad config (e.g. invalid JSON or regex) fails every route call,
+			// so the warning must be rate-limited to avoid log flooding.
+			mlog.RatedWarn(ctx, rate.Limit(1.0/60.0),
+				"failed to apply query traffic routing, fallback to original candidates",
+				mlog.Int64("collectionID", workload.CollectionID),
+				mlog.String("channelName", workload.Channel),
 				mlog.Err(routeErr))
 		}
-		recordQueryTrafficRoutingDecision(routeResult, routeErr)
 		if routeResult.routed {
 			targetNodeID, err = selectWeightedNode(ctx, balancer, routeResult.weightedNodes, workload.Nq)
+			if err != nil && errors.Is(err, merr.ErrServiceUnavailable) {
+				// The routed subset is fully unreachable from the proxy's
+				// health-check perspective (e.g. look_aside marks every routed
+				// node unavailable) even though QueryCoord still reports them
+				// serviceable. Routing input only sees QueryCoord Serviceable
+				// plus excludeNodes, so availability takes priority here:
+				// fall back to the original candidate set instead of failing
+				// the request, and record the decision as no_candidate.
+				log.Warn(ctx, "query traffic routing candidates are unreachable, fallback to original candidates",
+					mlog.Int("routedCandidateCount", len(routeResult.weightedNodes)),
+					mlog.Err(err))
+				routeResult.routed = false
+				routeResult.fallbackReason = "no_candidate"
+				targetNodeID, err = balancer.SelectNode(ctx, availableNodeIDs, workload.Nq)
+			}
 		} else {
 			targetNodeID, err = balancer.SelectNode(ctx, availableNodeIDs, workload.Nq)
 		}
+		recordQueryTrafficRoutingDecision(routeResult, routeErr)
 		if err != nil {
 			return NodeInfo{}, false, err
 		}

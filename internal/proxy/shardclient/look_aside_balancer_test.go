@@ -88,6 +88,87 @@ func (suite *LookAsideBalancerSuite) TestSelectNodeWithWeightsUsesWeightedRoundR
 	suite.Equal(2, counts[2])
 }
 
+// TestSelectNodeWithWeightsScoringPrefersLowestWorkload forces the scoring
+// path (idx % checkWorkloadRequestNum == 0) and verifies that a clearly less
+// loaded node at the same weight is always preferred. This is a regression
+// test for the weighted-score computation: with weight 100, score/weight
+// integer division collapses any score difference below 100 to zero, making
+// workloadToleranceFactor meaningless.
+func (suite *LookAsideBalancerSuite) TestSelectNodeWithWeightsScoringPrefersLowestWorkload() {
+	suite.balancer.UpdateCostMetrics(1, &internalpb.CostAggregation{
+		ResponseTime: 5,
+		ServiceTime:  1,
+		TotalNQ:      0,
+	})
+	suite.balancer.UpdateCostMetrics(2, &internalpb.CostAggregation{
+		ResponseTime: 5,
+		ServiceTime:  1,
+		TotalNQ:      0,
+	})
+	metrics1, _ := suite.balancer.metricsMap.Get(int64(1))
+	metrics2, _ := suite.balancer.metricsMap.Get(int64(2))
+	metrics1.executingNQ.Store(0)
+	metrics2.executingNQ.Store(4)
+	// score(node1) = 5, score(node2) = 64; as a ratio at weight 100 the two
+	// differ far beyond the 10% tolerance, so node 1 must be picked.
+	suite.balancer.idx.Store(0)
+
+	nodes := []WeightedNode{
+		{NodeID: 1, Weight: 100},
+		{NodeID: 2, Weight: 100},
+	}
+	for i := 0; i < 5; i++ {
+		nodeID, err := suite.balancer.SelectNodeWithWeights(context.Background(), nodes, 1)
+		suite.NoError(err)
+		suite.Equal(int64(1), nodeID)
+		suite.balancer.CancelWorkload(nodeID, 1)
+	}
+}
+
+// TestSelectNodeWithWeightsScoringAllUnavailable verifies the scoring path
+// returns ErrServiceUnavailable when every candidate is marked unreachable by
+// the health check, which is the error the query traffic routing fallback
+// relies on.
+func (suite *LookAsideBalancerSuite) TestSelectNodeWithWeightsScoringAllUnavailable() {
+	for _, node := range []int64{1, 2} {
+		suite.balancer.UpdateCostMetrics(node, &internalpb.CostAggregation{})
+		metrics, _ := suite.balancer.metricsMap.Get(node)
+		metrics.unavailable.Store(true)
+	}
+	suite.balancer.idx.Store(0) // force scoring path
+
+	nodes := []WeightedNode{
+		{NodeID: 1, Weight: 100},
+		{NodeID: 2, Weight: 100},
+	}
+	nodeID, err := suite.balancer.SelectNodeWithWeights(context.Background(), nodes, 1)
+	suite.ErrorIs(err, merr.ErrServiceUnavailable)
+	suite.Equal(int64(-1), nodeID)
+}
+
+// TestSelectNodeWithWeightsScoringFallsBackToWeightedRoundRobin verifies that
+// after the scoring pass (zero scores, no metrics yet), requests are
+// distributed by weight through the round-robin fallback instead of all
+// landing on a single node.
+func (suite *LookAsideBalancerSuite) TestSelectNodeWithWeightsScoringFallsBackToWeightedRoundRobin() {
+	suite.balancer.idx.Store(0) // force scoring path
+
+	nodes := []WeightedNode{
+		{NodeID: 1, Weight: 2},
+		{NodeID: 2, Weight: 1},
+	}
+	counts := map[int64]int{}
+	for i := 0; i < 6; i++ {
+		nodeID, err := suite.balancer.SelectNodeWithWeights(context.Background(), nodes, 1)
+		suite.NoError(err)
+		counts[nodeID]++
+		suite.balancer.CancelWorkload(nodeID, 1)
+	}
+
+	suite.Equal(4, counts[1])
+	suite.Equal(2, counts[2])
+}
+
 func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	costMetrics1 := &internalpb.CostAggregation{
 		ResponseTime: 5,

@@ -16,7 +16,18 @@
 
 package querytraffic
 
-import "github.com/milvus-io/milvus/pkg/v3/util/merr"
+import (
+	"regexp"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+// maxRuleNameLength bounds rule names so the rule_name metric label stays
+// bounded under repeated hot reloads.
+const maxRuleNameLength = 64
+
+// ruleNameCharset restricts rule names to metric-label-friendly characters.
+var ruleNameCharset = regexp.MustCompile(`^[0-9A-Za-z_.-]+$`)
 
 type Policy struct {
 	rules []rule
@@ -38,10 +49,21 @@ func Compile(cfg PolicyConfig) (*Policy, error) {
 	p := &Policy{
 		rules: make([]rule, 0, len(cfg.Rules)),
 	}
+	seenRuleNames := make(map[string]struct{}, len(cfg.Rules))
 	for _, ruleCfg := range cfg.Rules {
+		if err := validateRuleName(ruleCfg.Name, seenRuleNames); err != nil {
+			return nil, err
+		}
+		seenRuleNames[ruleCfg.Name] = struct{}{}
+		if len(ruleCfg.Routes) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("rule %q has no routes", ruleCfg.Name)
+		}
 		sourceLabelsMatch, err := CompileMatcher(ruleCfg.Match.SourceLabels)
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalidErr(err, "compile rule %q source labels", ruleCfg.Name)
+		}
+		if !sourceLabelsMatch.any && !hasMatcherConditions(ruleCfg.Match.SourceLabels) {
+			return nil, merr.WrapErrParameterInvalidMsg("rule %q source labels matcher has no conditions, use any: true to match all sources", ruleCfg.Name)
 		}
 		r := rule{
 			name:              ruleCfg.Name,
@@ -56,6 +78,9 @@ func Compile(cfg PolicyConfig) (*Policy, error) {
 			if err != nil {
 				return nil, merr.WrapErrParameterInvalidErr(err, "compile route %q destination labels", routeCfg.Name)
 			}
+			if !destinationLabelsMatch.any && !hasMatcherConditions(routeCfg.DestinationLabels) {
+				return nil, merr.WrapErrParameterInvalidMsg("route %q destination labels matcher has no conditions, use any: true to match all candidates", routeCfg.Name)
+			}
 			r.routes = append(r.routes, route{
 				name:                   routeCfg.Name,
 				weight:                 routeCfg.Weight,
@@ -65,6 +90,25 @@ func Compile(cfg PolicyConfig) (*Policy, error) {
 		p.rules = append(p.rules, r)
 	}
 	return p, nil
+}
+
+// validateRuleName enforces the constraints that keep the rule_name metric
+// label bounded and unambiguous: names must be non-empty, unique, length
+// bounded and restricted to metric-label-friendly characters.
+func validateRuleName(name string, seen map[string]struct{}) error {
+	if name == "" {
+		return merr.WrapErrParameterInvalidMsg("rule name must not be empty")
+	}
+	if len(name) > maxRuleNameLength {
+		return merr.WrapErrParameterInvalidMsg("rule name %q exceeds max length %d", name, maxRuleNameLength)
+	}
+	if !ruleNameCharset.MatchString(name) {
+		return merr.WrapErrParameterInvalidMsg("rule name %q contains unsupported characters, allowed: [0-9A-Za-z_.-]", name)
+	}
+	if _, ok := seen[name]; ok {
+		return merr.WrapErrParameterInvalidMsg("duplicate rule name %q", name)
+	}
+	return nil
 }
 
 func (p *Policy) Route(source Labels, candidates []Candidate) []WeightedCandidate {
