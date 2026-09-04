@@ -8978,44 +8978,17 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     bool used_take = TryTakeForSearch(
         plan, results.seg_offsets_.data(), size, results, op_ctx);
 
-    std::unique_ptr<DataArray> field_data;
-    // Per-call OpContext keeps storage_usage scoped to this segment;
-    // sharing op_ctx across segments would double-count bytes. See
-    // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
-    milvus::OpContext local_ctx;
-    if (op_ctx != nullptr) {
-        local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
-    }
+    std::vector<FieldId> fields_to_fetch;
+    fields_to_fetch.reserve(plan->target_entries_.size());
     for (auto field_id : plan->target_entries_) {
         // Skip fields already filled by take
         if (used_take && results.output_fields_data_.count(field_id) > 0) {
             continue;
         }
-        segcore::CheckCancellation(
-            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
-        auto& field_meta = plan->schema_->operator[](field_id);
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&local_ctx,
-                                        field_id,
-                                        results.seg_offsets_.data(),
-                                        size,
-                                        target_dynamic_fields);
-        } else if (!is_field_exist(field_id)) {
-            field_data = bulk_subscript_not_exist_field(field_meta, size);
-        } else {
-            field_data = bulk_subscript(
-                &local_ctx, field_id, results.seg_offsets_.data(), size);
-        }
-        results.output_fields_data_[field_id] = std::move(field_data);
+        fields_to_fetch.push_back(field_id);
     }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
-    results.search_storage_cost_.scanned_total_bytes +=
-        local_ctx.storage_usage.scanned_total_bytes.load();
+
+    FillSearchResultOutputFields(plan, fields_to_fetch, results, op_ctx);
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----

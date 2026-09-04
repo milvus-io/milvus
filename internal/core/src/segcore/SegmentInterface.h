@@ -806,6 +806,15 @@ class SegmentInternalInterface : public SegmentInterface {
                                    int64_t count) const;
 
  protected:
+    // Fetch independent search output fields concurrently, then publish them
+    // to SearchResult on the caller thread. Futures are drained before return,
+    // and each fetch has its own OpContext for race-free storage accounting.
+    void
+    FillSearchResultOutputFields(const query::Plan* plan,
+                                 const std::vector<FieldId>& field_ids,
+                                 SearchResult& results,
+                                 milvus::OpContext* op_ctx) const;
+
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
     virtual PinWrapper<SpanBase>
