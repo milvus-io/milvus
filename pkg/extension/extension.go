@@ -45,6 +45,12 @@ type (
 // SetHook installs a compiled-in request hook. hookutil prefers it over
 // proxy.soPath and refuses a deployment that configures both. Call it before
 // milvus starts; a nil hook leaves the stock behavior in place.
+//
+// The hook is also the mark of an installed form: FormInstalled answers true
+// once it is set, and the coordinators read that mark too (see FormInstalled).
+// A distribution must therefore install its hook in EVERY process and role it
+// runs - the query coordinator and the data coordinator as much as the proxy -
+// or those roles behave as a stock binary.
 func SetHook(h hook.Hook) {
 	installedHook.Store(&hookBox{hook: h})
 }
@@ -55,6 +61,21 @@ func InstalledHook() hook.Hook {
 		return b.hook
 	}
 	return nil
+}
+
+// FormInstalled reports whether a distribution has compiled itself into this
+// binary, which is exactly "a hook is installed".
+//
+// A few behaviors in the coordinators exist for the deployment shape such a
+// distribution runs - a resource group whose only compute is a streaming node,
+// a load that names the resource groups it speaks for, an index engine version
+// answered before any QueryNode registers - and are switched on by this
+// answer alone. It is consulted in the query coordinator and the data
+// coordinator, not only in the proxy, so a distribution has to install its
+// hook in every role (see SetHook). A stock binary answers false everywhere and
+// keeps the behavior it always had.
+func FormInstalled() bool {
+	return InstalledHook() != nil
 }
 
 // SetCoordinatorEngine installs the engine the coordinator starts when it
