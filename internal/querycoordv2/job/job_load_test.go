@@ -457,6 +457,7 @@ type IncrementalExpansionSuite struct {
 	catalog *mocks.QueryCoordCatalog
 	meta    *meta.Meta
 	dist    *meta.DistributionManager
+	nodeMgr *session.NodeManager
 	broker  *meta.MockBroker
 	nextID  int64
 }
@@ -491,12 +492,12 @@ func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.catalog.On("ReleaseCollection", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	suite.nextID = 9000
-	nodeMgr := session.NewNodeManager()
+	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(func() (int64, error) {
 		suite.nextID++
 		return suite.nextID, nil
-	}, suite.catalog, nodeMgr)
-	suite.dist = meta.NewDistributionManager(nodeMgr)
+	}, suite.catalog, suite.nodeMgr)
+	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
@@ -894,7 +895,7 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 
 	targetObserver := &observers.TargetObserver{}
 	collectionObserver := observers.NewCollectionObserver(suite.dist, suite.meta, targetMgr,
-		targetObserver, &checkers.CheckerController{}, nil)
+		targetObserver, &checkers.CheckerController{}, nil, suite.nodeMgr)
 
 	result := suite.buildExpansionRequest(replicaConfig(1, rgA), replicaConfig(2, rgB))
 	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta, suite.broker,
