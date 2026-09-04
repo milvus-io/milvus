@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -203,19 +204,7 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
-		// With no QueryNode session, version 0 is read by knowhere as "only
-		// DISKANN loads off disk" and misroutes other disk indexes onto the
-		// in-memory path, so this answers the version compiled into the
-		// coordinator itself.
-		//
-		// The assumption is that a QueryNode started later runs the same image
-		// as the coordinator, and it is stated in one more place: the ceiling
-		// with no session (getMaximumVersionFrom) is this same version, so an
-		// operator override above it is clamped rather than written into index
-		// builds nothing can load. If that assumption is wrong -- a QueryNode
-		// on an older image joins -- its session replaces both figures the
-		// moment it registers, and the answers become cluster-wide again.
-		return segcore.GetIndexEngineInfo().CurrentIndexVersion
+		return noSessionVersion(segcore.GetIndexEngineInfo().CurrentIndexVersion)
 	}
 
 	current := int32(math.MaxInt32)
@@ -257,9 +246,7 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
-		// See getCurrentVersion: with no QueryNode session, this answers the
-		// scalar engine version compiled into the coordinator itself.
-		return common.CurrentScalarIndexEngineVersion
+		return noSessionVersion(common.CurrentScalarIndexEngineVersion)
 	}
 
 	current := int32(math.MaxInt32)
@@ -314,21 +301,54 @@ func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
 	return getMaximumVersionFrom(m.scalarIndexVersions, common.CurrentScalarIndexEngineVersion)
 }
 
-// getMaximumVersionFrom returns the highest index version every registered
-// QueryNode can load. compiledIn is the answer when none is registered: the
-// version this coordinator's own image can load.
+// noSessionVersion is the current index engine version with no QueryNode
+// session registered, given the version compiled into this coordinator.
 //
-// That bound is the same assumption getCurrentVersion makes with no session --
-// a QueryNode started later runs this image -- and it has a consequence worth
+// A stock binary answers 0, as it always has. The current version is the MIN
+// over every QueryNode's, the highest version all of them can load, and with
+// none registered there is nothing to take a minimum of: datacoord coming up
+// before any QueryNode is ordinary during a full restart or a rolling upgrade,
+// and an index or compaction output built in that window with this
+// coordinator's own version could not be loaded by an older QueryNode that
+// registers afterwards. Zero is the answer that assumes nothing.
+//
+// With a form installed (extension.FormInstalled) the answer is the version
+// compiled into the coordinator. Such a deployment rolls every role from one
+// image, so a QueryNode started later runs this same version, and it loads
+// collections on demand, where version 0 costs it something: knowhere reads 0
+// as "only DISKANN loads off disk" and misroutes other disk indexes onto the
+// in-memory path. The same assumption sets the ceiling with no session
+// (getMaximumVersionFrom), so an operator override above it is clamped rather
+// than written into index builds nothing can load. If the assumption is wrong
+// - a QueryNode on an older image joins - its session replaces both figures
+// the moment it registers, and the answers become cluster-wide again.
+func noSessionVersion(compiledIn int32) int32 {
+	if extension.FormInstalled() {
+		return compiledIn
+	}
+	return 0
+}
+
+// getMaximumVersionFrom returns the highest index version every registered
+// QueryNode can load. compiledIn is the answer when none is registered and a
+// form is installed: the version this coordinator's own image can load. A
+// stock binary keeps the unbounded MaxInt32 it always had.
+//
+// The bound is the same assumption noSessionVersion makes with no session -- a
+// QueryNode started later runs this image -- and it has a consequence worth
 // stating, because it is the whole point of returning it here. This is the
 // ceiling clampVersion applies to dataCoord.targetVecIndexVersion and
 // dataCoord.targetScalarIndexVersion, so an operator override above what this
 // image can load is clamped down to it (with the rate-limited warning) instead
-// of being written into index builds unchecked. An unbounded MaxInt32 made the
-// clamp a no-op precisely when there is no QueryNode to disprove the override.
+// of being written into index builds unchecked. An unbounded MaxInt32 makes
+// the clamp a no-op precisely when there is no QueryNode to disprove the
+// override, which is what a stock binary does and keeps doing.
 func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion, compiledIn int32) int32 {
 	if len(versions) == 0 {
-		return compiledIn
+		if extension.FormInstalled() {
+			return compiledIn
+		}
+		return math.MaxInt32
 	}
 
 	maximum := int32(math.MaxInt32)
