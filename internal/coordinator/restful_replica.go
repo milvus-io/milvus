@@ -104,30 +104,35 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		return
 	}
 
-	// Per-resource-group mode state: reasons why each resource group is not ready yet, and the set of
+	// Per-resource-group mode state: the first reason why each resource group is not ready yet, and the set of
 	// resource groups to report (configured ones plus any that actually host replicas).
-	resourceGroupErrors := make(map[string][]string)
+	resourceGroupErrors := make(map[string]string)
 	resourceGroups := make(map[string]struct{})
 	for _, rg := range clusterResourceGroups {
 		resourceGroups[rg] = struct{}{}
 	}
-	var globalReasons []string
+	// globalReason keeps the first violation that cannot be attributed to any specific resource group.
+	var globalReason string
 
 	// handleFailure records a violation. In fail-fast mode it writes the NotReady response and returns true so
-	// the caller stops; in per-resource-group mode it attributes the reason to the given resource groups (or to
-	// the top-level reason when no resource group applies) and returns false so checking continues.
+	// the caller stops; in per-resource-group mode it keeps only the first reason per resource group (or as the
+	// global reason when no resource group applies) and returns false so checking continues.
 	handleFailure := func(rgs []string, reason string) bool {
 		if !perResourceGroup {
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 			return true
 		}
 		if len(rgs) == 0 {
-			globalReasons = append(globalReasons, reason)
+			if globalReason == "" {
+				globalReason = reason
+			}
 			return false
 		}
 		for _, rg := range rgs {
 			resourceGroups[rg] = struct{}{}
-			resourceGroupErrors[rg] = append(resourceGroupErrors[rg], reason)
+			if _, ok := resourceGroupErrors[rg]; !ok {
+				resourceGroupErrors[rg] = reason
+			}
 		}
 		return false
 	}
@@ -213,7 +218,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	}
 
 	if perResourceGroup {
-		s.writePerResourceGroupComplianceResponse(w, resourceGroups, resourceGroupErrors, globalReasons)
+		s.writePerResourceGroupComplianceResponse(w, resourceGroups, resourceGroupErrors, globalReason)
 		return
 	}
 
@@ -223,8 +228,10 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 }
 
 // writePerResourceGroupComplianceResponse writes the per-resource-group compliance response: one entry per
-// involved resource group with its Ready/NotReady state and, when not ready, the reasons collected for it.
-func (s *mixCoordImpl) writePerResourceGroupComplianceResponse(w http.ResponseWriter, resourceGroups map[string]struct{}, resourceGroupErrors map[string][]string, globalReasons []string) {
+// involved resource group with its Ready/NotReady state and, when not ready, the first reason collected for it.
+// The top-level reason is likewise the first violation encountered (either the global one or the first
+// not-ready resource group), keeping the response compact.
+func (s *mixCoordImpl) writePerResourceGroupComplianceResponse(w http.ResponseWriter, resourceGroups map[string]struct{}, resourceGroupErrors map[string]string, globalReason string) {
 	rgs := make([]string, 0, len(resourceGroups))
 	for rg := range resourceGroups {
 		rgs = append(rgs, rg)
@@ -232,16 +239,17 @@ func (s *mixCoordImpl) writePerResourceGroupComplianceResponse(w http.ResponseWr
 	sort.Strings(rgs)
 
 	state := LoadConfigComplianceStateReady
-	var reasons []string
-	reasons = append(reasons, globalReasons...)
+	firstReason := globalReason
 	rgStates := make([]ResourceGroupComplianceState, 0, len(rgs))
 	for _, rg := range rgs {
 		rgState := ResourceGroupComplianceState{ResourceGroup: rg, State: LoadConfigComplianceStateReady}
-		if errs := resourceGroupErrors[rg]; len(errs) > 0 {
+		if reason, ok := resourceGroupErrors[rg]; ok {
 			rgState.State = LoadConfigComplianceStateNotReady
-			rgState.Reason = strings.Join(errs, "; ")
+			rgState.Reason = reason
 			state = LoadConfigComplianceStateNotReady
-			reasons = append(reasons, fmt.Sprintf("resource group %s: %s", rg, rgState.Reason))
+			if firstReason == "" {
+				firstReason = reason
+			}
 		}
 		rgStates = append(rgStates, rgState)
 	}
@@ -250,8 +258,8 @@ func (s *mixCoordImpl) writePerResourceGroupComplianceResponse(w http.ResponseWr
 		State:          state,
 		ResourceGroups: rgStates,
 	}
-	if len(reasons) > 0 {
-		resp.Reason = strings.Join(reasons, "; ")
+	if firstReason != "" {
+		resp.Reason = firstReason
 	}
 	writeJSONResponse(w, http.StatusOK, resp)
 }
