@@ -1311,23 +1311,40 @@ func TestResolveMilvusTableSnapshotMetadataPathRejectsNonJSONPath(t *testing.T) 
 	spec := `{"format":"milvus-table"}`
 
 	t.Run("accepts snapshot metadata JSON path", func(t *testing.T) {
-		metadataPath, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket/snapshots/100/metadata/200.json", spec)
+		externalSource := "s3://bucket/snapshots/100/metadata/200.json"
+		metadataPath, err := resolveMilvusTableSnapshotMetadataPath(externalSource, spec)
 		require.NoError(t, err)
-		assert.Equal(t, "s3://bucket/snapshots/100/metadata/200.json", metadataPath)
+		assert.Equal(t, externalSource, metadataPath)
 	})
 
-	t.Run("rejects base path", func(t *testing.T) {
-		_, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket", spec)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		// The refresh classifier in createTasksForJob keys off the merr error
-		// type, so the origin must keep its InputError classification through
-		// any wrapping. Assert it here so a future merr.Wrap that drops the
-		// type is caught at the source instead of silently turning the refresh
-		// terminal error back into a retryable one.
-		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
-		assert.Contains(t, err.Error(), "snapshot metadata JSON path")
+	t.Run("accepts encoded JSON extension", func(t *testing.T) {
+		externalSource := "s3://bucket/snapshots/100/metadata/200%2Ejson"
+		metadataPath, err := resolveMilvusTableSnapshotMetadataPath(externalSource, spec)
+		require.NoError(t, err)
+		assert.Equal(t, externalSource, metadataPath)
 	})
+
+	for name, externalSource := range map[string]string{
+		"base path":                          "s3://bucket",
+		"query masquerading as extension":    "s3://bucket/snapshots/100/metadata/200?marker=.json",
+		"fragment masquerading as extension": "s3://bucket/snapshots/100/metadata/200#.json",
+		"query on JSON path":                 "s3://bucket/snapshots/100/metadata/200.json?version=1",
+		"fragment on JSON path":              "s3://bucket/snapshots/100/metadata/200.json#latest",
+		"malformed URL":                      "s3://bucket/snapshots/100/metadata/%zz.json",
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			_, err := resolveMilvusTableSnapshotMetadataPath(externalSource, spec)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			// The refresh classifier in createTasksForJob keys off the merr error
+			// type, so the origin must keep its InputError classification through
+			// any wrapping. Assert it here so a future merr.Wrap that drops the
+			// type is caught at the source instead of silently turning the refresh
+			// terminal error back into a retryable one.
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+			assert.Contains(t, err.Error(), "snapshot metadata JSON path")
+		})
+	}
 }
 
 // ==================== ReadFileInfosFromManifestPath Tests ====================

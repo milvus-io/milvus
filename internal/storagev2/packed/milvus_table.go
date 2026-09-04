@@ -91,10 +91,16 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	if _, err := externalspec.ParseExternalSpec(externalSpec); err != nil {
 		return "", err
 	}
-	if strings.HasSuffix(strings.ToLower(externalSource), ".json") {
+	sourceURL, err := url.Parse(externalSource)
+	if err == nil &&
+		sourceURL.RawQuery == "" &&
+		!sourceURL.ForceQuery &&
+		sourceURL.Fragment == "" &&
+		!strings.Contains(externalSource, "#") &&
+		strings.HasSuffix(strings.ToLower(sourceURL.Path), ".json") {
 		return externalSource, nil
 	}
-	return "", merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
+	return "", merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path without query or fragment components")
 }
 
 // buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into

@@ -518,6 +518,14 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                 "vector",
             ],
         )
+        rows_by_pk = {_row_value(row, "source_pk"): row for row in rows}
+        assert len(rows) == len(sample_ids), f"expected one row for each sample PK {sample_ids!r}, got {rows!r}"
+        assert set(rows_by_pk) == set(sample_ids), (
+            f"sample PK mismatch: expected {set(sample_ids)!r}, got {set(rows_by_pk)!r}"
+        )
+        for sample_id in sample_ids:
+            self._assert_core_row(rows_by_pk[sample_id], _core_row(sample_id))
+
         normalized_rows = sorted(
             (
                 _row_value(row, "source_pk"),
@@ -985,6 +993,8 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         self._refresh(client, target)
         self._index_and_load(client, target)
         assert self._count(client, target) == SMALL_ROWS
+        sample_ids = [0, 42, SMALL_ROWS - 1]
+        baseline_signature = self._core_signature(client, target, sample_ids)
 
         self.release_collection(client, target)
         self._refresh_expect_failure(
@@ -998,14 +1008,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert target_info["external_source"] == snapshot_a.external_source
         self.load_collection(client, target)
         assert self._count(client, target) == SMALL_ROWS
-        rows = self._query_source_pks(client, target, [42])
-        assert len(rows) == 1
-        self._assert_core_row(rows[0], _core_row(42))
-        # The collection must remain fully readable (not just queryable) from
-        # the old snapshot after a failed refresh: search still resolves the
-        # same nearest neighbor.
-        hits = self._search_core(client, target, _core_vector(42), limit=1)
-        assert _row_value(hits[0], "source_pk") == 42
+        assert self._core_signature(client, target, sample_ids) == baseline_signature
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -1088,6 +1091,8 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         self._refresh(client, valid_target)
         self._index_and_load(client, valid_target)
         assert self._count(client, valid_target) == SMALL_ROWS
+        sample_ids = [0, 42, SMALL_ROWS - 1]
+        baseline_signature = self._core_signature(client, valid_target, sample_ids)
 
         self.release_collection(client, valid_target)
         self._refresh_expect_failure(
@@ -1100,8 +1105,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert self.describe_collection(client, valid_target)[0]["external_source"] == snapshot.external_source
         self.load_collection(client, valid_target)
         assert self._count(client, valid_target) == SMALL_ROWS
-        hits = self._search_core(client, valid_target, _core_vector(42), limit=1)
-        assert _row_value(hits[0], "source_pk") == 42
+        assert self._core_signature(client, valid_target, sample_ids) == baseline_signature
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_table_rejects_external_snapshot_chaining(self, request):
@@ -1124,6 +1128,8 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         self._refresh(client, external_a)
         self._index_and_load(client, external_a)
         assert self._count(client, external_a) == 50
+        sample_ids = [0, 23, 49]
+        baseline_signature = self._core_signature(client, external_a, sample_ids)
         external_snapshot = self._create_snapshot_ref(client, external_a, cfg, suffix="chain_external")
 
         self.release_collection(client, external_a)
@@ -1137,8 +1143,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert self.describe_collection(client, external_a)[0]["external_source"] == source_snapshot.external_source
         self.load_collection(client, external_a)
         assert self._count(client, external_a) == 50
-        hits = self._search_core(client, external_a, _core_vector(42), limit=1)
-        assert _row_value(hits[0], "source_pk") == 42
+        assert self._core_signature(client, external_a, sample_ids) == baseline_signature
 
         schema_b = self._build_core_target_schema(client, external_snapshot, cfg, real_pk=True)
         if external_b not in self.tear_down_collection_names:
@@ -1554,16 +1559,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             # "Wrong row type" error). Only xfail when the failure matches this
             # known bug; any other failure (schema/API regression, or an
             # assertion below) must remain a real failure.
-            if any(
-                term in lowered
-                for term in (
-                    "52303",
-                    "wrong row type",
-                    "append field text_alias",
-                    "text lob",
-                    "materialize",
-                )
-            ):
+            if "append field text_alias" in lowered and "wrong row type" in lowered and "expected=string" in lowered:
                 pytest.xfail(f"known bug #52303: {reason}")
             raise AssertionError(f"refresh {job_id} failed for an unexpected reason: {reason}")
         assert _value(refresh_info, "state", "") == "RefreshCompleted", (
