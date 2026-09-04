@@ -106,6 +106,16 @@ func initHook() error {
 			return merr.Wrap(err, "fail to init configs for the compiled-in hook")
 		}
 		storeHook(compiled)
+		// A plug-in ships its hook.Extension as a second symbol; a compiled-in
+		// hook ships it, if at all, as the same value implementing both
+		// interfaces. Store it when it does, or every Report/ReportAction on
+		// the DML, DQL and authorization paths silently no-ops for the form
+		// while a plug-in's would be heard.
+		if reporter, ok := compiled.(hook.Extension); ok {
+			storeExtension(reporter)
+		} else {
+			mlog.Warn(context.TODO(), "the compiled-in hook implements no hook.Extension, reports are dropped")
+		}
 		// And it is reconfigured exactly as a plug-in is: a hook.* edit
 		// re-initializes whichever hook is installed. Skipping this for the
 		// compiled-in hook would leave it on the configuration it started with

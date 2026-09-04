@@ -19,6 +19,7 @@
 package hookutil
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -216,4 +217,48 @@ func TestAConfigChangeRefusedByTheCompiledInHookKeepsTheProxyUp(t *testing.T) {
 		"the refused edit must still have been offered to the hook")
 	assert.Same(t, h, GetHook(), "the hook that refused the new configuration stays installed")
 	h.failInitsWith(nil)
+}
+
+// reportingHook is a compiled-in hook that is also the form's hook.Extension,
+// which is how a compiled-in form ships the second half a plug-in exports as a
+// separate symbol.
+type reportingHook struct {
+	MockAPIHook
+	reports int
+}
+
+func (h *reportingHook) Report(any) int { h.reports++; return h.reports }
+
+func (h *reportingHook) ReportAction(context.Context, interface{}, interface{}, error, string, string) error {
+	h.reports++
+	return nil
+}
+
+var _ hook.Extension = (*reportingHook)(nil)
+
+// A compiled-in hook that implements hook.Extension is stored as the extension
+// too, so the DML, DQL and authorization paths' Report/ReportAction reach it
+// exactly as they reach a plug-in's MilvusExtension symbol.
+func TestInitHookStoresTheCompiledInHooksExtensionHalf(t *testing.T) {
+	paramtable.Init()
+	h := &reportingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	installHook(t, h)
+
+	require.NoError(t, initHook())
+
+	assert.Same(t, h, GetExtension(), "the compiled-in hook is the extension when it implements one")
+	GetExtension().Report(nil)
+	assert.Equal(t, 1, h.reports, "a report must reach the form, not a default that drops it")
+}
+
+// A compiled-in hook that is only a hook.Hook leaves the default extension in
+// place, which drops reports as a stock binary does.
+func TestInitHookWithoutAnExtensionKeepsTheDefault(t *testing.T) {
+	paramtable.Init()
+	installHook(t, MockAPIHook{User: "root"})
+
+	require.NoError(t, initHook())
+
+	_, isDefault := GetExtension().(DefaultExtension)
+	assert.True(t, isDefault)
 }
