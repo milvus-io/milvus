@@ -1,332 +1,297 @@
-# Milvus Row-Level Security (RLS) Design
+# Milvus Row Level Security (RLS) Design Document
 
-- **Feature DRI:** TBD
-- **Primary Approver:** TBD
-- **Independent Approver:** TBD
-- **Design Review:** TBD
+## ✨ Overview
 
-## Overview
+Row Level Security (RLS) provides fine-grained access control at the row level for collections in Milvus. By enabling RLS and defining policies based on user identity, roles, or dynamic tags, administrators can enforce data access restrictions without modifying application logic or data structures.
 
-Row-Level Security (RLS) restricts row-bearing operations on a collection by
-combining user requests with collection-scoped row policies. RLS is enabled per
-collection through the `rls.enabled` collection property. The optional
-`rls.force` collection property prevents request-scoped bypass when RLS is
-enabled.
+---
 
-The runtime caller supplies an `rls_principal` string on RLS-protected
-operations. The principal is an application-level identity and is deliberately
-not derived from the authenticated Milvus username. Policies can reference that
-principal and its collection-scoped tags to build a query/search/delete
-predicate or to validate inserted/upserted rows. A caller that omits the
-principal must request `skip_rls=true` and pass the corresponding privilege
-check; otherwise the operation is denied.
+## ⚙️ Core Capabilities
 
-## Collection Switch
+| Feature               | Description                                                  |
+|-----------------------|--------------------------------------------------------------|
+| Enable/Disable RLS    | Toggle RLS at the collection level with runtime control      |
+| Enforce RLS           | Enforce RLS even for superusers and administrators          |
+| Policy Definition     | Define policies based on user ID, roles, field values, or tags |
+| Multi-policy Support  | Support for multiple policies per action/role combination    |
+| User Tag Mechanism    | Use dynamic user metadata for flexible access filtering      |
+| Expression Language   | Rich expression syntax for complex access control rules      |
 
-RLS is disabled by default. Enable it when creating the collection:
+---
 
-```python
-client.create_collection(
-    collection_name="docs",
-    schema=schema,
-    properties={"rls.enabled": "true", "rls.force": "true"},
-)
-```
+## 🔖 User Tag Mechanism
 
-The initial release treats `rls.enabled` as immutable after collection creation.
-`alter_collection_properties` rejects setting, changing, or deleting it. RLS
-policy and principal management APIs are available only when the target
-collection was created with `rls.enabled=true`.
+RLS leverages runtime user context including `$current_user_name` and `$current_user_tags` to evaluate access policies dynamically.
 
-A future implementation may support disabling RLS dynamically. That transition
-must delete all policy and principal metadata for the collection and invalidate
-all Proxy RLS cache entries before the disabled state is reported as complete.
-If dynamic enabling is added later, it must synchronously load the collection's
-complete RLS metadata from MixCoord before the enabled state becomes visible to
-requests.
-
-When `rls.enabled=false`, row-bearing operations bypass RLS. When
-`rls.enabled=true`, the request must either provide `rls_principal` or set
-`skip_rls=true` with permission to bypass RLS.
-
-When `rls.force=true`, `skip_rls=true` is rejected and every row-bearing request
-must pass RLS. When `rls.force=false`, `skip_rls=true` bypasses RLS only when
-authorization is disabled or the current authenticated Milvus user has the
-`SkipRLS` privilege on the target collection.
-
-## Principal Tags
-
-Principal tags are collection-scoped metadata stored by RootCoord and synced to
-Proxy caches.
+### ✅ Setting User Tags
 
 ```python
-client.set_rls_principal_tags(
-    collection_name="docs",
-    principal_name="alice",
+client.set_user_tags(
+    user="user_abc",
     tags={
-        "tenant": "acme",
         "department": "engineering",
-    },
+        "region": "us-west-1",
+        "tenant": "customer_a",
+        "security_level": "confidential"
+    }
 )
 ```
 
-Supported principal tag APIs:
+### ✅ Tag Management APIs
 
-| API | Behavior |
-| --- | --- |
-| `set_rls_principal_tags` | Incrementally upsert a non-empty tag map for one principal. Supplied keys are added or overwritten, while unspecified tags are preserved; an empty map is rejected. |
-| `get_rls_principal_tags` | Return the tag map for one principal. |
-| `list_rls_principals` | List principals with tags on one collection. |
-| `delete_rls_principal_tags` | Delete selected tag keys. If no keys remain, delete the principal tag record. |
+| API                          | Description                                    |
+| ---------------------------- | ---------------------------------------------- |
+| `set_user_tags(user, tags)`  | Set or update user tags (overwrites existing) |
+| `delete_user_tag(user, key)` | Delete a specific tag key for a user          |
+| `get_user_tags(user)`        | Fetch all user tag information                 |
+| `list_users_with_tag(key, value)` | Find users with specific tag values           |
 
-Passing no tag keys deletes the complete principal tag record. A non-empty key
-list deletes only those tags, and the principal record is also deleted when no
-tags remain afterward. Deleting an already-missing principal succeeds as an
-idempotent retry. Repeated tag keys are deduplicated, and the number of distinct
-keys in one delete request is bounded
-by `proxy.rls.maxTagsPerPrincipal` before RootCoord broadcasts the mutation.
-The raw list is also subject to a separate fixed transport/work bound before
-deduplication.
+Tags can be referenced in policy expressions using the following syntax:
 
-One principal-tag request currently performs either incremental upserts or
-deletions, not both. Applications that need both changes issue separate
-requests and should revoke tags before granting new ones so a partial failure
-fails closed. A future atomic patch API may carry tag upserts and removals in
-one collection-serialized mutation.
+```python
+using_expr="region == $current_user_tags['region']"
+check_expr="security_level >= $current_user_tags['clearance']"
+```
 
-Policy expressions may reference:
+---
 
-| Variable | Meaning |
-| --- | --- |
-| `$current_principal` | The request `rls_principal` value. |
-| `$current_principal_tags['key']` | The tag value for `key` on the current principal. |
+## 🛠️ API Design
 
-Tag keys cannot contain a single quote because policy tag references use the
-single-quoted `$current_principal_tags['key']` syntax and do not support key
-escaping.
+### 1. Enable or Disable RLS
 
-If an enabled RLS policy references a missing principal tag at runtime, that
-policy predicate evaluates to false for the current request.
+```python
+# Enable RLS for a collection
+client.alter_collection_properties(
+    collection="my_collection",
+    properties={"rls.enabled": True}
+)
 
-## Row Policies
+# Disable RLS for a collection
+client.alter_collection_properties(
+    collection="my_collection", 
+    properties={"rls.enabled": False}
+)
+```
 
-Each policy belongs to one collection and has a unique `policy_name` in that
-collection. `CreateRowPolicy` rejects any existing policy with the same name,
-even when the requested definition is identical. `UpdateRowPolicy` updates an
-existing policy by name and preserves its internal `policy_id`.
+### 2. Enforce RLS (even for superusers)
+
+```python
+client.alter_collection_properties(
+    collection="my_collection",
+    properties={
+        "rls.enabled": True, 
+        "rls.force": True  # Applies to all users including superusers
+    }
+)
+```
+
+### 3. Create an RLS Policy
 
 ```python
 client.create_row_policy(
-    collection_name="docs",
-    policy_name="tenant_isolation",
-    policy_type="permissive",
-    actions=["query", "search", "delete", "insert", "upsert"],
-    using_expr="tenant == $current_principal_tags['tenant']",
-    check_expr="tenant == $current_principal_tags['tenant']",
-    description="Tenant scoped access",
+    collection="user_documents",
+    policy_name="limit_to_user",
+    actions=["query", "insert", "delete", "update"],
+    roles=["$current_user", "user_role"],
+    using_expr="user_id == $current_user_name",
+    check_expr="user_id == $current_user_name",
+    description="Restrict users to their own documents"
 )
 ```
 
-Supported policy APIs:
+**Policy Parameters:**
+- `collection`: Target collection name
+- `policy_name`: Unique identifier for the policy
+- `actions`: List of operations this policy applies to (`query`, `insert`, `delete`, `update`)
+- `roles`: List of roles this policy applies to (`$current_user`, `admin`, custom roles)
+- `using_expr`: Expression for filtering data during queries
+- `check_expr`: Expression for validating data during mutations
+- `description`: Optional human-readable description
 
-| API | Behavior |
-| --- | --- |
-| `create_row_policy` | Create a new named policy. Any existing policy with the same name causes the request to fail. |
-| `update_row_policy` | Replace an existing named policy while preserving its `policy_id`. |
-| `drop_row_policy` | Drop a named policy. Dropping a missing policy succeeds as an idempotent retry. |
-| `list_row_policies` | List policies on one collection. |
+### 4. Delete an RLS Policy
 
-Supported actions:
-
-| Action | Uses `using_expr` | Uses `check_expr` |
-| --- | --- | --- |
-| `query` | Yes | No |
-| `query_iterator` | Yes | No |
-| `search` | Yes | No |
-| `search_iterator` | Yes | No |
-| `hybrid_search` | Yes | No |
-| `delete` | Yes | No |
-| `insert` | No | Yes |
-| `upsert` | Yes, for existing rows | Yes, for written rows |
-
-`Get` is a client-side convenience over `Query`; it is not a separate RLS
-action.
-
-## Policy Evaluation
-
-RLS is deny-by-default when enabled. If an operation has no applicable policy
-for its action and required expression kind, the operation fails with a
-privilege error.
-
-Policies are combined by policy type:
-
-```text
-(permissive_policy_1 OR permissive_policy_2 OR ...)
-AND
-(restrictive_policy_1 AND restrictive_policy_2 AND ...)
+```python
+client.drop_row_policy(
+    collection="user_documents",
+    policy_name="limit_to_user"
+)
 ```
 
-At least one applicable permissive policy is required. If only restrictive
-policies match an action, the final predicate is false.
+### 5. List All RLS Policies
 
-`CreateRowPolicy` evaluates the prospective complete policy set and rejects it
-when any action's combined `using_expr` or `check_expr` exceeds the current
-`proxy.rls.maxCombinedExpressionLength`. `UpdateRowPolicy` does not apply this
-creation guard because an update may reduce an already oversized policy set.
-Proxy checks the complete expression whenever it compiles a runtime predicate,
-so an update or a refreshable limit reduction that leaves the set oversized
-causes later row-bearing requests to fail with a quota error until the policies
-or configuration are adjusted.
+```python
+policies = client.list_row_policies(collection="user_documents")
+# Example response:
+# [
+#   {
+#     "policy_name": "limit_to_user",
+#     "using_expr": "user_id == $current_user_name",
+#     "check_expr": "user_id == $current_user_name", 
+#     "roles": ["$current_user"],
+#     "actions": ["query", "insert", "delete"],
+#     "description": "Restrict users to their own documents",
+#     "created_at": "2024-01-15T10:30:00Z"
+#   }
+# ]
+```
 
-For query, search, and delete, the final `using_expr` predicate is merged into
-the request plan with logical AND. For insert, the final `check_expr` predicate
-is evaluated against each input row in Proxy. For upsert, existing rows must pass
-the `using_expr` check, and the final row written by the upsert must pass
-`check_expr`.
+### 6. Get Collection RLS Status
 
-Local insert and upsert checks use SQL three-valued logic, matching Segcore
-filter evaluation. Comparisons involving NULL produce UNKNOWN, boolean
-operators preserve UNKNOWN according to SQL semantics, and only a final TRUE
-result admits a row.
+```python
+status = client.get_collection_properties(
+    collection="user_documents",
+    properties=["rls.enabled", "rls.force"]
+)
+# Returns: {"rls.enabled": True, "rls.force": False}
+```
 
-## Expression Support
+---
 
-RLS expressions intentionally use a restricted subset of Milvus boolean
-expressions so Proxy can both merge predicates into plans and locally evaluate
-write checks.
+## ✅ Usage Examples
 
-Supported expression forms:
+### Example 1: Users Can Only Access Their Own Data
 
-- `true` / `false`
-- equality comparisons between a top-level scalar field and a literal or
-  supported template value
-- `in` with literal value lists
-- `array_contains`, `array_contains_all`, and `array_contains_any` on primitive
-  array fields
-- `$current_principal` and `$current_principal_tags['key']` as string template
-  values
+**Scenario:** A document management system where users should only see and modify their own documents.
 
-Each individual `using_expr` or `check_expr` must contain exactly one simple
-predicate. Inline `and`, `or`, and boolean `not` are rejected; policy authors
-compose predicates through multiple permissive or restrictive policies.
+**Collection Schema:**
+```python
+# Collection includes a user_id field
+{
+    "user_id": "string",
+    "document_name": "string", 
+    "content": "string",
+    "created_at": "timestamp"
+}
+```
 
-RLS pseudo variables follow the normal Milvus expression-template syntax: only
-unquoted variable tokens are converted to template variables. Identical text in
-normal or raw string literals remains literal data.
+**RLS Policy:**
+```python
+client.create_row_policy(
+    collection="user_documents",
+    policy_name="user_own_data",
+    actions=["query", "insert", "delete", "update"],
+    roles=["$current_user"],
+    using_expr="user_id == $current_user_name",
+    check_expr="user_id == $current_user_name",
+    description="Users can only access their own documents"
+)
+```
 
-Unsupported forms include vector fields, JSON fields, nested/element-level
-fields, system fields, inline boolean composition, ordered comparisons,
-field-to-field comparisons, and dynamic functions such as `now()`.
+---
 
-## Metadata And Sync
+### Example 2: Role-Based Access Control
 
-RootCoord owns RLS metadata. Policies and principal tags are persisted in etcd as
-separate records and cached in RootCoord collection metadata for collection
-cleanup. Persistent RLS records are addressed only by the globally unique
-collection ID; database ID and collection name are descriptive metadata and do
-not participate in identity.
+**Scenario:** Admins have full access, managers see department data, users see only their own data.
 
-RootCoord collection metadata stores row policies in a name-keyed map whose
-values are the complete policy records, including their internal policy IDs.
-Create, update, and drop validation therefore resolves a policy name from the
-in-memory collection metadata rather than scanning its etcd prefix. A policy
-drop resolves the internal ID from that map, releases the global collection
-metadata lock, and removes the single ID-keyed etcd record before deleting the
-matching map entry.
+**User Policy (restricted):**
+```python
+client.create_row_policy(
+    collection="employee_records",
+    policy_name="user_scope",
+    actions=["query", "insert", "delete", "update"],
+    roles=["$current_user"],
+    using_expr="employee_id == $current_user_name",
+    check_expr="employee_id == $current_user_name"
+)
+```
 
-Policy and principal-tag mutations use the same broadcast task mechanism and
-the same `SharedDBName + ExclusiveCollectionName` resource keys as collection
-DDL. After validation under that collection-scoped resource, RootCoord appends
-a CChannel-only message containing either the complete normalized post-image or
-the stable identity to drop. The ACK callback persists the mutation and updates
-the RootCoord collection cache before the resource is released. This serializes
-RLS validation and commit with CreateCollection, DropCollection, and schema
-changes, so collection lifecycle or schema dependencies cannot cross an RLS
-mutation.
+**Manager Policy (department scope):**
+```python
+client.create_row_policy(
+    collection="employee_records", 
+    policy_name="manager_scope",
+    actions=["query", "insert", "update"],
+    roles=["manager"],
+    using_expr="department == $current_user_tags['department']",
+    check_expr="department == $current_user_tags['department']"
+)
+```
 
-RLS catalog I/O does not hold RootCoord's global DDL or RBAC locks. The ACK
-callback performs catalog I/O first and holds the global collection metadata
-lock only briefly while replacing the cached policy or principal entry. The
-post-image and drop callbacks are idempotent, so broadcaster recovery can retry
-them safely after a coordinator restart.
+**Admin Policy (full access):**
+```python
+client.create_row_policy(
+    collection="employee_records",
+    policy_name="admin_full_access",
+    actions=["query", "insert", "delete", "update"],
+    roles=["admin"],
+    using_expr="true",
+    check_expr="true"
+)
+```
 
-Proxy maintains an in-memory RLS manager cache. RootCoord exposes an internal,
-collection-scoped `GetRLSMetadata` RPC that returns the collection identity,
-all row policies, and all principals with their complete tag maps in one
-response. Proxy startup only configures the RLS manager dependencies; it does
-not enumerate collections or preload metadata. Only a request that actually
-enforces RLS can establish or refresh a collection's RLS state.
+---
 
-Each RLS WAL message carries the affected collection's Proxy cache expiration.
-After applying the metadata post-image or drop, the ACK callback synchronously
-invalidates that collection's complete RLS state on every active Proxy, using
-the same callback and retry model as AlterCollection schema invalidation. A
-real Proxy notification failure keeps the callback pending; the broadcaster
-retries it with exponential backoff while the collection resource remains
-serialized. The Proxy invalidation is intentionally lightweight and does not
-fetch metadata inside the callback.
+### Example 3: Multi-Tenant Data Isolation
 
-The next RLS-enforced request observes the missing state and loads both policy
-and principal snapshots through one `GetRLSMetadata` call. There is no
-background reconciliation loop. On every RLS-enforced use, Proxy treats a
-snapshot whose last successful load is older than
-`proxy.rls.metaRefreshInterval` as stale and refreshes it synchronously. Thus a
-missed invalidation converges on the first request after the freshness window,
-while collections that are not accessed produce no metadata RPCs.
+**Scenario:** SaaS application with tenant-based data isolation using user tags.
 
-As with Proxy collection-schema cache fills, a per-collection read/write
-barrier orders RLS refreshes against invalidation. A refresh holds the read
-side across its singleflight lifecycle; invalidation takes the write side,
-waits for earlier refreshes to finish, and then deletes the state. A refresh
-also writes only to the collection-state incarnation captured before its RPC,
-so a detached result cannot recreate or overwrite a later incarnation.
-Snapshot version tokens continue to suppress out-of-order refreshes within one
-live incarnation; they are not treated as authoritative RootCoord metadata
-revisions.
+**Policy:**
+```python
+client.create_row_policy(
+    collection="customer_data",
+    policy_name="tenant_isolation",
+    actions=["query", "insert", "delete", "update"],
+    roles=["$current_user"],
+    using_expr="tenant_id == $current_user_tags['tenant']",
+    check_expr="tenant_id == $current_user_tags['tenant']"
+)
+```
 
-Every RLS-enforced request checks both policy and principal-tag snapshot
-freshness before evaluating a predicate. A missing or expired snapshot is
-refreshed synchronously through `GetRLSMetadata`. If the refresh fails, the
-request fails closed and the expired snapshot is not used for authorization.
-Concurrent request-path refreshes for the same collection are coalesced.
+**User Tag Setup:**
+```python
+client.set_user_tags(
+    user="user_123",
+    tags={"tenant": "acme_corp", "role": "analyst"}
+)
+```
 
-The manager-level lock protects only the collection-state map and dependency
-configuration. A recyclable keyed read/write lock provides the
-per-collection refresh/invalidation barrier without serializing unrelated
-collections. Invalidation deletes the current state pointer; refreshes write
-only to the incarnation captured before their RPC. Each collection state has
-its own read/write lock for snapshot
-versions, refresh timestamps, policies, principal tags, and compiled predicate
-state. MixCoord RPCs are always executed without the manager or state lock
-held; only the target collection's refresh read guard spans the RPC, so
-metadata work for one collection cannot serialize another collection.
-On a compiled-cache hit, predicate evaluation holds the collection read lock
-only long enough to capture the immutable compiled expression and principal-tag
-snapshot. Expression cloning, template instantiation, and rewriting happen after
-the lock is released. A cache miss compiles under that collection's write lock.
+---
 
-RLS policy and principal-tag broadcast messages are eligible for the generic
-CDC path and are not marked unreplicable. On a secondary, the replicated
-CChannel message rebuilds a replicated broadcast task and invokes the same
-idempotent ACK callback used on the primary, applying the complete metadata
-post-image or stable drop identity. This initial release has no pre-existing RLS
-metadata to bootstrap. Dedicated end-to-end RLS CDC compatibility and recovery
-validation remains follow-up work; the current implementation relies on the
-generic replicated-broadcast contract.
+### Example 4: Time-Based Access Control
 
-## Configuration
+**Scenario:** Documents are only accessible during business hours for non-admin users.
 
-| Config | Meaning |
-| --- | --- |
-| `proxy.rls.maxPoliciesPerCollection` | Maximum policies on one collection. |
-| `proxy.rls.maxPrincipalsPerCollection` | Maximum principals on one collection. Existing principals remain updatable if the limit is lowered. |
-| `proxy.rls.maxTagsPerPrincipal` | Maximum tags on one collection-scoped principal. |
-| `proxy.rls.maxExpressionLength` | Maximum length of one `using_expr` or `check_expr`. |
-| `proxy.rls.maxCombinedExpressionLength` | Maximum length of the final combined expression. |
-| `proxy.rls.maxPolicyNameLength` | Maximum policy name length. |
-| `proxy.rls.maxPolicyDescriptionLength` | Maximum policy description length in bytes. |
-| `proxy.rls.maxPrincipalNameLength` | Maximum principal name length. |
-| `proxy.rls.maxTagKeyLength` | Maximum principal tag key length. |
-| `proxy.rls.maxTagValueLength` | Maximum principal tag value length. |
-| `proxy.rls.maxArrayLiteralElements` | Maximum literal elements in `in` and `array_contains*` expressions. |
-| `proxy.rls.metaRefreshInterval` | Maximum age in seconds of cached policy and principal metadata before an RLS-enforced request refreshes it. |
+**Policy:**
+```python
+client.create_row_policy(
+    collection="sensitive_documents",
+    policy_name="business_hours_access",
+    actions=["query"],
+    roles=["$current_user"],
+    using_expr="(hour(now()) >= 9 AND hour(now()) <= 17) OR $current_user_tags['role'] == 'admin'",
+    check_expr="true"
+)
+```
+
+---
+
+## 🔒 Security Model Notes
+
+### Policy Evaluation
+- **OR Logic**: All policies for a user are OR-combined - if any policy grants access, the operation is allowed
+- **Action-Specific**: Policies are evaluated based on the specific action being performed
+- **Role Matching**: Users must have at least one role that matches the policy's role list
+
+### Access Control Levels
+- **Default Behavior**: RLS applies only to non-superusers
+- **Force Mode**: With `rls.force=True`, RLS applies to everyone including superusers and administrators
+- **Bypass Options**: Superusers can temporarily bypass RLS for maintenance operations
+
+### Expression Language
+- **Field References**: Use field names directly in expressions
+- **Variables**: `$current_user_name`, `$current_user_tags`, `$current_roles`
+- **Functions**: Support for common functions like `now()`, `hour()`, `date()`
+- **Operators**: Standard comparison and logical operators
+
+### Performance Considerations
+- **Index Usage**: RLS expressions should leverage indexed fields for optimal performance
+- **Expression Complexity**: Complex expressions may impact query performance
+- **Policy Count**: Large numbers of policies per collection may affect evaluation speed
+
+### Best Practices
+- **Principle of Least Privilege**: Start with restrictive policies and gradually expand access
+- **Regular Auditing**: Periodically review and test RLS policies
+- **Documentation**: Maintain clear documentation of policy purposes and effects
+- **Testing**: Test policies with various user roles and scenarios before production deployment
+
+
