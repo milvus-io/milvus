@@ -896,33 +896,46 @@ func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 }
 
 func TestTimeoutMiddlewareRejectsInvalidRequestTimeout(t *testing.T) {
-	for _, requestTimeout := range []string{"3.5", "abc"} {
-		t.Run(requestTimeout, func(t *testing.T) {
-			ginHandler := gin.New()
-			path := "/middleware/timeout/invalid"
-			called := make(chan struct{}, 1)
-			ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
-				called <- struct{}{}
-				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
-			}))
+	paramtable.Init()
+	projectionKey := paramtable.Get().HTTPCfg.StandardErrorStatus.Key
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("projection=%t", enabled), func(t *testing.T) {
+			paramtable.Get().Save(projectionKey, fmt.Sprintf("%t", enabled))
+			defer paramtable.Get().Reset(projectionKey)
 
-			req := httptest.NewRequest(http.MethodPost, path, nil)
-			req.Header.Set(mhttp.HTTPHeaderRequestTimeout, requestTimeout)
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
+			for _, requestTimeout := range []string{"3.5", "abc", "0", "-1", "9223372037"} {
+				t.Run(requestTimeout, func(t *testing.T) {
+					ginHandler := gin.New()
+					path := "/middleware/timeout/invalid"
+					called := make(chan struct{}, 1)
+					ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+						called <- struct{}{}
+						HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
+					}))
 
-			assert.Equal(t, http.StatusOK, w.Code)
-			returnBody := &ReturnErrMsg{}
-			err := json.Unmarshal(w.Body.Bytes(), returnBody)
-			assert.NoError(t, err)
-			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
-			assert.Contains(t, returnBody.Message, mhttp.HTTPHeaderRequestTimeout)
-			assert.Contains(t, returnBody.Message, requestTimeout)
+					req := httptest.NewRequest(http.MethodPost, path, nil)
+					req.Header.Set(mhttp.HTTPHeaderRequestTimeout, requestTimeout)
+					w := httptest.NewRecorder()
+					ginHandler.ServeHTTP(w, req)
 
-			select {
-			case <-called:
-				t.Fatal("handler was invoked for invalid Request-Timeout")
-			default:
+					expectedStatus := http.StatusOK
+					if enabled {
+						expectedStatus = http.StatusBadRequest
+					}
+					assert.Equal(t, expectedStatus, w.Code)
+					returnBody := &ReturnErrMsg{}
+					err := json.Unmarshal(w.Body.Bytes(), returnBody)
+					assert.NoError(t, err)
+					assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+					assert.Contains(t, returnBody.Message, mhttp.HTTPHeaderRequestTimeout)
+					assert.Contains(t, returnBody.Message, requestTimeout)
+
+					select {
+					case <-called:
+						t.Fatal("handler was invoked for invalid Request-Timeout")
+					default:
+					}
+				})
 			}
 		})
 	}

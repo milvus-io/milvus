@@ -4465,20 +4465,26 @@ func formatInt64(intArray []int64) []string {
 	return stringArray
 }
 
-func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent) (any, error) {
+// CheckLimiter returns limited=true only when the HTTP-layer limiter made an
+// explicit pre-execution rejection. Errors from acquiring or preparing the
+// limiter are infrastructure failures and return limited=false.
+func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent) (limited bool, err error) {
 	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		return nil, nil
+		return false, nil
 	}
 	// apply limiter for http/http2 server
 	limiter, err := pxy.GetRateLimiter()
 	if err != nil {
 		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
-		return nil, err
+		// GetRateLimiter historically reports an uninitialized limiter with a
+		// parameter-invalid sentinel, but at this boundary it is infrastructure,
+		// never a client input error.
+		return false, merr.WrapErrAsSysError(err)
 	}
 
 	request, ok := req.(proto.Message)
 	if !ok {
-		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterInvalidMsg("wrong req format when check limiter"))
+		return false, merr.WrapErrAsSysError(merr.WrapErrParameterInvalidMsg("wrong req format when check limiter"))
 	}
 
 	metaCache := getProxyMetaCache(pxy)
@@ -4491,19 +4497,19 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		// into unmetered traffic: hand it back as the server error it is.
 		if merr.GetErrorType(err) == merr.InputError {
 			mlog.RatedWarn(ctx, 1, "httpV1/V2 server fail to resolve request for limiter, proceed without rate check", mlog.Err(err))
-			return nil, nil
+			return false, nil
 		}
-		return nil, err
+		return false, err
 	}
 	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
 	if err != nil {
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
-		return proxy.GetFailedResponse(req, err), err
+		return true, err
 	}
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
-	return nil, nil
+	return false, nil
 }
 
 func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
