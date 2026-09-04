@@ -798,6 +798,174 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, LoadConfigComplianceStateReady, resp.State)
 	})
+
+	t.Run("per-resource-group mode reports each RG readiness", func(t *testing.T) {
+		// Set cluster config requiring 2 replicas spread over rg1 and rg2
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
+
+		// Collection 100: replica in rg1 is query-invisible, replica in rg2 is fine
+		rg1Replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet())
+		mutableReplica := rg1Replica.CopyForWrite()
+		mutableReplica.SetQueryInvisible(true)
+		rg1Replica = mutableReplica.IntoReplica()
+		replicasMap := map[int64][]*meta.Replica{
+			100: {
+				rg1Replica,
+				meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 100, ResourceGroup: "rg2"}, typeutil.NewUniqueSet()),
+			},
+		}
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).To(func(_ *querycoordv2.Server, ctx context.Context, collectionID int64) []*meta.Replica {
+			return replicasMap[collectionID]
+		}).Build()
+		defer mocker2.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Len(t, resp.ResourceGroups, 2)
+
+		byRG := map[string]ResourceGroupComplianceState{}
+		for _, rg := range resp.ResourceGroups {
+			byRG[rg.ResourceGroup] = rg
+		}
+		assert.Equal(t, LoadConfigComplianceStateNotReady, byRG["rg1"].State)
+		assert.Contains(t, byRG["rg1"].Reason, "not query visible")
+		assert.Equal(t, LoadConfigComplianceStateReady, byRG["rg2"].State)
+		assert.Empty(t, byRG["rg2"].Reason)
+	})
+
+	t.Run("per-resource-group mode continues past first failure", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
+
+		replicasMap := map[int64][]*meta.Replica{
+			100: {
+				meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+				meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+			},
+			200: {
+				meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 200, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+			},
+		}
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100, 200},
+			InMemoryPercentages: []int64{100, 100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).To(func(_ *querycoordv2.Server, ctx context.Context, collectionID int64) []*meta.Replica {
+			return replicasMap[collectionID]
+		}).Build()
+		defer mocker2.UnPatch()
+
+		// Collection 100 fails replica count check; collection 200 fails serviceability.
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).To(func(_ *querycoordv2.Server, ctx context.Context, collectionID int64) error {
+			if collectionID == 200 {
+				return fmt.Errorf("replica 3 (rg=rg1) channel c1 not serviceable")
+			}
+			return nil
+		}).Build()
+		defer mockerSvc.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Len(t, resp.ResourceGroups, 1)
+		// Both failures must be reported for rg1, proving no fast-fail happened.
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.ResourceGroups[0].State)
+		assert.Contains(t, resp.ResourceGroups[0].Reason, "replica count mismatch")
+		assert.Contains(t, resp.ResourceGroups[0].Reason, "collection 100")
+		assert.Contains(t, resp.ResourceGroups[0].Reason, "not serviceable")
+		assert.Contains(t, resp.ResourceGroups[0].Reason, "collection 200")
+	})
+
+	t.Run("per-resource-group mode all compliant returns Ready per RG", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
+
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+			meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 100, ResourceGroup: "rg2"}, typeutil.NewUniqueSet()),
+		}
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker2.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?per_resource_group=true", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateReady, resp.State)
+		assert.Len(t, resp.ResourceGroups, 2)
+		for _, rg := range resp.ResourceGroups {
+			assert.Equal(t, LoadConfigComplianceStateReady, rg.State)
+			assert.Empty(t, rg.Reason)
+		}
+	})
 }
 
 func TestValidateRGDistribution(t *testing.T) {
