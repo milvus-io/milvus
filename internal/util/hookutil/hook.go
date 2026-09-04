@@ -38,6 +38,7 @@ var (
 	hoo       atomic.Value // hook.Hook
 	extension atomic.Value // hook.Extension
 	initOnce  sync.Once
+	watchOnce sync.Once
 )
 
 // hookContainer is Container to wrap hook.Hook interface
@@ -94,6 +95,11 @@ func initHook() error {
 			return merr.Wrap(err, "fail to init configs for the compiled-in hook")
 		}
 		storeHook(compiled)
+		// And it is reconfigured exactly as a plug-in is: a hook.* edit
+		// re-initializes whichever hook is installed. Skipping this for the
+		// compiled-in hook would leave it on the configuration it started with
+		// while a plug-in picked the same edit up.
+		watchHookConfigReload()
 		mlog.Info(context.TODO(), "using the compiled-in hook")
 		return nil
 	}
@@ -112,18 +118,7 @@ func initHook() error {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
 	storeHook((hookVal))
-	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
-		go func() {
-			hookVal := GetHook()
-			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
-			if err = hookVal.Init(soConfig); err != nil {
-				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
-			}
-			storeHook(hookVal)
-		}()
-	})
+	watchHookConfigReload()
 
 	extVal, err := LoadPlugin[hook.Extension](path, "MilvusExtension")
 	if err != nil {
@@ -132,6 +127,52 @@ func initHook() error {
 	storeExtension(extVal)
 
 	return nil
+}
+
+// watchHookConfigReload re-initializes the installed hook whenever a hook.*
+// configuration key changes, which is how a hook is reconfigured without
+// restarting the proxy.
+//
+// It reads GetHook() rather than closing over one hook value, so it serves
+// whichever hook is installed - a plug-in loaded from proxy.soPath or a hook
+// compiled into this binary - and both branches register it for that reason.
+//
+// Registered at most once per process: the dispatcher appends handlers, and a
+// second registration would re-initialize the hook twice per config edit.
+func watchHookConfigReload() {
+	watchOnce.Do(func() {
+		paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
+			mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
+			go func() {
+				// The installed hook is reconfigured in place, and is not
+				// stored back afterwards: it is already the installed one, so
+				// storing it could only overwrite a hook installed while this
+				// goroutine was running.
+				hookVal := GetHook()
+				soConfig := paramtable.GetHookParams().SoConfig.GetValue()
+				mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
+				if err := hookVal.Init(soConfig); err != nil {
+					if ext.InstalledHook() != nil {
+						// A refusal at start-up is a deployment that does not
+						// start, which is the plug-in's rule too. A refusal
+						// HERE is different: the proxy is already serving, and
+						// the only thing that changed is a configuration edit
+						// an operator can make at any moment. Killing every
+						// proxy of a deployment over one bad value is a worse
+						// answer than keeping the configuration that was
+						// working and saying loudly that the new one was not
+						// taken.
+						mlog.Error(context.TODO(),
+							"fail to init configs for the compiled-in hook when refreshing, keeping the previous configuration",
+							mlog.Err(err))
+						return
+					}
+					// The plug-in path keeps the behavior it has always had.
+					mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
+				}
+			}()
+		})
+	})
 }
 
 func SetHook(connectionManager any) {
