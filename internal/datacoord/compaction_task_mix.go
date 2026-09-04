@@ -239,6 +239,15 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		}
 	}
 
+	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
+	// manifest versions advanced); schedule an asynchronous DataView snapshot
+	// reconciliation. The recompute runs on the latest SegmentMeta, so it
+	// observes both the output publish and the input retirement in one
+	// projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
+
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompaction failed to setState meta saved", mlog.Err(err))

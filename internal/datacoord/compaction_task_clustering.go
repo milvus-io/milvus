@@ -606,6 +606,13 @@ func (t *clusteringCompactionTask) completeTask() error {
 	if err = t.markInputSegmentsDropped(); err != nil {
 		mlog.Warn(context.TODO(), "mark input segments as Dropped failed, skip it and wait retry")
 	}
+	// The SegmentMeta mutation is committed (outputs visible, inputs dropped);
+	// schedule an asynchronous DataView snapshot reconciliation. The recompute
+	// runs on the latest SegmentMeta, so it observes both the visibility flip
+	// and the input retirement in one projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
 
 	return nil
 }

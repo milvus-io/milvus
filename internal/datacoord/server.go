@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -100,15 +101,17 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli        *clientv3.Client
-	tikvCli        *txnkv.Client
-	address        string
-	watchClient    kv.WatchKV
-	kv             kv.MetaKv
-	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
-	allocator      allocator.Allocator
+	etcdCli                             *clientv3.Client
+	tikvCli                             *txnkv.Client
+	address                             string
+	watchClient                         kv.WatchKV
+	kv                                  kv.MetaKv
+	metaRootPath                        string
+	meta                                *meta
+	dataViewManager                     DataViewManager
+	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	segmentManager                      Manager
+	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -396,7 +399,6 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
-	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
@@ -460,6 +462,10 @@ func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
 }
 
+func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.CollectionRecoveryValidator) {
+	s.dataViewCollectionRecoveryValidator = validator
+}
+
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
@@ -492,6 +498,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewGC:       s.dataViewManager,
 	})
 }
 
@@ -640,14 +647,33 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
+			return err
+		}
 
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
+		// RecoverManager performs the whole DataView recovery pass at
+		// construction: it loads persisted snapshots, injects the loadable
+		// SegmentMeta projection, reconciles every live recoverable Collection
+		// against it (SegmentMeta is the source of truth; a no-op when the
+		// snapshot already matches, which keeps the initMeta retry safe), and
+		// starts the async recompute worker.
+		collections := s.meta.GetCollections()
+		collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
+		collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
+			return c.ID, c.VChannelNames
+		})
+		s.dataViewManager, err = dataview.RecoverManager(
+			s.ctx,
+			catalog,
+			s.dataViewCollectionRecoveryValidator,
+			s.meta.loadableProjection,
+			collectionIDs,
+			collectionVChannels,
+		)
+		if err != nil {
+			return err
+		}
+		s.meta.dataViewManager = s.dataViewManager
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
@@ -736,6 +762,9 @@ func (s *Server) startServerLoop() {
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Start()
 	}
+
+	// The DataView recompute worker was already started at RecoverManager
+	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
 

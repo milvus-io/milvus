@@ -999,7 +999,7 @@ func (s *mockMixCoord) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	panic("implement me")
 }
 
-func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
 	panic("implement me")
 }
 

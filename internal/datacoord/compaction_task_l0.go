@@ -520,9 +520,28 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	)
 
 	if len(v3Deltalogs) > 0 {
-		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+		if err := t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...); err != nil {
+			return err
+		}
+		// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+		// the DataView snapshot is reconciled asynchronously from SegmentMeta.
+		if meta, ok := t.meta.(*meta); ok {
+			meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		}
+		return nil
 	}
-	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+	// the DataView snapshot is reconciled asynchronously from SegmentMeta. The
+	// recompute observes the new Manifest version, so the DataView advances
+	// compact_version even though membership is unchanged (L0 is a hard
+	// trigger: a Manifest-version change has no dedicated counter).
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
+	return nil
 }
 
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
