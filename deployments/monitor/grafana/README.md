@@ -2,7 +2,7 @@
 
 Milvus outputs a list of detailed time-series metrics during runtime. You can use [Prometheus](https://prometheus.io/) and [Grafana](https://grafana.com/) to visualize the metrics. This topic introduces the monitoring metrics displayed in the Grafana Milvus Dashboard.
 
-We recommend reading [Milvus monitoring framework overview](monitor_overview.md) to understand Prometheus metrics first.
+We recommend reading [Milvus monitoring framework overview](https://milvus.io/docs/monitor_overview.md) to understand Prometheus metrics first.
 
 > The time unit in this topic is millisecond. 
 >
