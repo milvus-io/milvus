@@ -1296,6 +1296,21 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		suite.NoError(err)
 	})
 
+	suite.Run("complete mutation rechecks protection after initial validation", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		suite.NoError(m.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		sm.SetSnapshotPending(100)
+
+		_, _, err := m.CompleteCompactionMutation(context.Background(), task, &datapb.CompactionPlanResult{})
+		suite.ErrorIs(err, merr.ErrCompactionBlocked)
+		suite.Equal(commonpb.SegmentState_Flushed, m.segments.GetSegment(1).GetState())
+	})
+
 	suite.Run("rejected when only middle segment is protected in multi-segment task", func() {
 		multiSegments := NewSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{

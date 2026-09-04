@@ -2794,7 +2794,34 @@ func (m *meta) completeMixCompactionMutation(
 func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
+	if err := m.validateCompactionProtectionLocked(t); err != nil {
+		return err
+	}
 
+	for _, segmentID := range t.GetInputSegments() {
+		segment := m.segments.GetSegment(segmentID)
+		if !isSegmentHealthy(segment) {
+			// SHOULD NOT HAPPEN: input segment was dropped.
+			// This indicates that compaction tasks, which should be mutually exclusive,
+			// may have executed concurrently.
+			mlog.Warn(m.ctx, "should not happen! input segment was dropped",
+				mlog.Int64("planID", t.GetPlanID()),
+				mlog.String("type", t.GetType().String()),
+				mlog.String("channel", t.GetChannel()),
+				mlog.Int64("partitionID", t.GetPartitionID()),
+				mlog.Int64("segmentID", segmentID),
+			)
+			return merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+		}
+	}
+	return nil
+}
+
+// validateCompactionProtectionLocked checks the snapshot admission gates at a
+// metadata serialization boundary. The caller must hold segMu for reading or
+// writing so snapshot creation either observes the pre- or post-compaction
+// segment set after this check.
+func (m *meta) validateCompactionProtectionLocked(t *datapb.CompactionTask) error {
 	// Snapshot compaction protection exists to keep the sealed-segment list stable during
 	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
@@ -2831,29 +2858,15 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 			}
 		}
 	}
-
-	for _, segmentID := range t.GetInputSegments() {
-		segment := m.segments.GetSegment(segmentID)
-		if !isSegmentHealthy(segment) {
-			// SHOULD NOT HAPPEN: input segment was dropped.
-			// This indicates that compaction tasks, which should be mutually exclusive,
-			// may have executed concurrently.
-			mlog.Warn(m.ctx, "should not happen! input segment was dropped",
-				mlog.Int64("planID", t.GetPlanID()),
-				mlog.String("type", t.GetType().String()),
-				mlog.String("channel", t.GetChannel()),
-				mlog.Int64("partitionID", t.GetPartitionID()),
-				mlog.Int64("segmentID", segmentID),
-			)
-			return merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
-		}
-	}
 	return nil
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+	if err := m.validateCompactionProtectionLocked(t); err != nil {
+		return nil, nil, err
+	}
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
 		return m.completeMixCompactionMutation(t, result)
