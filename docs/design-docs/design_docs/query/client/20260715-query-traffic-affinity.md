@@ -23,6 +23,14 @@ Query Traffic Routing does not depend on QueryCoord or shard leader metadata to
 carry labels. Proxy resolves labels for itself and for candidate QueryNodes from
 the Session discovery view.
 
+The proxy's own (source) labels are read live from the proxy Session on every
+routing decision, so a Session label update is observed immediately. Candidate
+QueryNode labels are resolved from the Session discovery view when the shard
+leader cache is refreshed and stored with the cache, so their freshness follows
+the shard leader cache refresh cycle. A label-fetch failure keeps the previous
+cache instead of caching label-less entries, so routing never silently degrades
+on a transient Session/etcd error.
+
 Missing labels are treated as an empty label set.
 
 ## 3. Routing Position
@@ -129,8 +137,8 @@ proxy.queryTrafficRouting.enabled
 proxy.queryTrafficRouting.rules
 ```
 
-`rules` is written as a YAML array in config files and is read from ParamTable
-as a JSON string.
+`rules` is a compact JSON string: the JSON array of rule objects, read from
+ParamTable as-is.
 
 Runtime update through `/management/config/alter` writes the same key-value
 form. Since the REST value is a string, `rules` is passed as a compact JSON
