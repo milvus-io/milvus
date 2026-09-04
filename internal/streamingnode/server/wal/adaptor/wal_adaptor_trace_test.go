@@ -478,7 +478,7 @@ func newTraceTestScannerAdaptor() *scannerAdaptorImpl {
 	return &scannerAdaptorImpl{
 		logger:          logger,
 		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
+		reorderBuffer:   utility.NewReOrderBuffer(false),
 		pendingQueue:    utility.NewPendingQueue(),
 		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
 		ScannerHelper:   helper.NewScannerHelper("trace-test"),

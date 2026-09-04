@@ -2,11 +2,13 @@ package recovery
 
 import (
 	"context"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -57,7 +59,9 @@ L:
 	if rs.Error() != nil {
 		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
 	}
-	snapshot = r.getSnapshot()
+	if snapshot, err = r.getSnapshot(ctx); err != nil {
+		return nil, err
+	}
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
@@ -79,7 +83,7 @@ L:
 // getSnapshot returns the snapshot of the recovery storage.
 // Use this function to get the snapshot after recovery is finished,
 // and use the snapshot to recover all write ahead components.
-func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
+func (r *recoveryStorageImpl) getSnapshot(ctx context.Context) (*RecoverySnapshot, error) {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
 	// Collect active vchannels and build a set of active partition IDs (globally unique).
@@ -130,5 +134,61 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		alterWALInfoCopy := *r.alterWALInfo
 		snapshot.AlterWALInfo = &alterWALInfoCopy
 	}
-	return snapshot
+	summaries, err := r.buildIdempotencySnapshots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.SummarySnapshots = summaries
+	return snapshot, nil
+}
+
+// buildIdempotencySnapshots reloads the idempotency window's durable state, one
+// snapshot per vchannel, for the interceptor to rebuild its dedup window from.
+//
+// The whole retained range is read. What bounds it is retention itself -- the
+// chunk set is already capped by the summary's byte budget -- and the window
+// applies its own byte cap when it loads them.
+//
+// A read failure fails the WAL open rather than yielding a partial window. A
+// window missing entries answers a retry of a write that DID land by appending
+// it again, which is a way to duplicate writes on a channel whose clients were
+// told they had idempotency.
+func (r *recoveryStorageImpl) buildIdempotencySnapshots(
+	ctx context.Context,
+) (map[string]*idempotencyview.Snapshot, error) {
+	if r.summaryManager == nil {
+		return nil, nil
+	}
+	// The vchannels come from the summary rather than the recovered write path:
+	// the write path's vchannels are collections and segments, a different
+	// question from which channels have a dedup history, and a pchannel holds
+	// records for vchannels the write path does not know about yet.
+	vchannels := r.summaryManager.IdempotencyVChannels()
+	if len(vchannels) == 0 {
+		return nil, nil
+	}
+	// One pass over the chunks for ALL vchannels: a chunk is a pchannel-wide
+	// object, so reading them one vchannel at a time would download each chunk
+	// once per vchannel and block the WAL open for as long as that takes.
+	allSections, err := r.summaryManager.ReadIdempotencyEntriesOfVChannels(ctx, vchannels, 0, math.MaxUint64)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read the idempotency summary")
+	}
+	snapshots := make(map[string]*idempotencyview.Snapshot, len(vchannels))
+	for _, vchannel := range vchannels {
+		sections, ok := allSections[vchannel]
+		if !ok || len(sections.Inserts) == 0 {
+			continue
+		}
+		records, err := idempotencyview.RecordsFromSections(sections.Idempotency, sections.Inserts)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to rebuild the idempotency window of vchannel %s", vchannel)
+		}
+		snapshots[vchannel] = &idempotencyview.Snapshot{
+			PChannel: r.channel.Name,
+			VChannel: vchannel,
+			Records:  records,
+		}
+	}
+	return snapshots, nil
 }

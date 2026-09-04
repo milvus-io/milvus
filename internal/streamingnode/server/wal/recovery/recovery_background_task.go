@@ -56,6 +56,24 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
 			return
 		}
+		rs.gcSummary(rs.backgroundTaskNotifier.Context())
+	}
+}
+
+// gcSummary releases the WAL summary chunks that are over a retention bound.
+//
+// Only GC rides this tick. The chunk write does NOT: it happens inside
+// persistDirtySnapshot, before the consume checkpoint that covers those records
+// is saved, so the summary never needs a schedule of its own.
+//
+// A failure is logged and dropped. The chunks stay retained until the next
+// tick, which costs storage; it never costs correctness.
+func (rs *recoveryStorageImpl) gcSummary(ctx context.Context) {
+	if rs.summaryManager == nil {
+		return
+	}
+	if err := rs.summaryManager.GCOnce(ctx); err != nil {
+		rs.Logger().Warn(ctx, "failed to gc the wal summary", mlog.Err(err))
 	}
 }
 
@@ -104,6 +122,19 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
 		logger.Warn(ctx, "failed to drop all virtual channels", mlog.Err(err))
 		return err
+	}
+
+	// The summary chunk covering this snapshot's range must be durable BEFORE
+	// the checkpoint covering the same range is saved. That ordering is what
+	// makes the checkpoint the boundary between what the summary store holds
+	// and what the WAL still holds -- no second position, no clamp, no rewind.
+	// A failure here fails the whole persist, so the checkpoint stays put and
+	// the records are still replayable from the WAL.
+	if rs.summaryManager != nil {
+		if err := rs.summaryManager.Persist(ctx); err != nil {
+			logger.Warn(ctx, "failed to persist the wal summary", mlog.Err(err))
+			return err
+		}
 	}
 
 	// The catalog persists the whole snapshot as a single compound write, with
