@@ -290,6 +290,78 @@ func TestCluster_Compaction(t *testing.T) {
 		assert.Equal(t, "files/insert_log/1/2/3/_delta/not-log-id-suffix", result.GetSegments()[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	})
 
+	for _, state := range []taskcommon.State{taskcommon.Finished, taskcommon.Failed} {
+		for _, tc := range []struct {
+			name    string
+			payload []byte
+		}{
+			{name: "nil", payload: nil},
+			{name: "empty slice", payload: []byte{}},
+		} {
+			t.Run("query terminal compaction without payload "+state.String()+"/"+tc.name, func(t *testing.T) {
+				mockNodeManager := NewMockNodeManager(t)
+				cluster := NewCluster(mockNodeManager)
+				mockClient := mocks.NewMockDataNodeClient(t)
+				mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+				properties := taskcommon.NewProperties(nil)
+				properties.AppendTaskState(state)
+				mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+					Status:     merr.Success(),
+					Properties: properties,
+					Payload:    tc.payload,
+				}, nil)
+				result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+				assert.Nil(t, result)
+				assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+				assert.ErrorContains(t, err, "task 10")
+			})
+		}
+	}
+
+	t.Run("query terminal compaction with invalid payload", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    []byte{0xff},
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "unmarshal")
+	})
+
+	t.Run("query terminal compaction payload without requested plan", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		payload, err := proto.Marshal(&datapb.CompactionStateResponse{
+			Results: []*datapb.CompactionPlanResult{{PlanID: 11}},
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "does not contain plan 10")
+	})
+
 	t.Run("drop compaction", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
 		cluster := NewCluster(mockNodeManager)

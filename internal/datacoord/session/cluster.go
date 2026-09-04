@@ -240,7 +240,8 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		result := &datapb.CompactionStateResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrDataIntegrity(err,
+				"failed to unmarshal compaction result payload for plan %d on node %d", in.GetPlanID(), nodeID)
 		}
 		var ret *datapb.CompactionPlanResult
 		for _, rst := range result.GetResults() {
@@ -250,22 +251,28 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 			ret = rst
 			break
 		}
-		return ret, err
+		if ret == nil {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"compaction result payload does not contain plan %d on node %d", in.GetPlanID(), nodeID)
+		}
+		return ret, nil
 	}
 
 	switch state {
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
-		panic("the compaction result payload must not be empty with Finished/Failed state")
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"compaction task %d on node %d returned %s without result payload",
+			in.GetPlanID(), nodeID, state.String())
 	default:
 		panic("should not happen")
 	}

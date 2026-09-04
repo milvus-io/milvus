@@ -118,10 +118,21 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 }
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
-		PlanID: t.GetTaskProto().GetPlanID(),
+	task := t.GetTaskProto()
+	result, err := cluster.QueryCompaction(task.GetNodeID(), &datapb.CompactionStateRequest{
+		PlanID: task.GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrDataIntegrity) {
+			if dropErr := cluster.DropCompaction(task.GetNodeID(), task.GetPlanID()); dropErr != nil {
+				mlog.Warn(context.TODO(), "mixCompactionTask failed to drop task with unavailable result",
+					mlog.Int64("planID", task.GetPlanID()),
+					mlog.Int64("nodeID", task.GetNodeID()),
+					mlog.Err(dropErr))
+				return
+			}
+		}
+
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to get compaction result", mlog.Err(err))
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))

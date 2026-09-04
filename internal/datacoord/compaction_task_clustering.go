@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -152,6 +153,14 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrDataIntegrity) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				mlog.Warn(context.TODO(), "clusteringCompactionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				// Keep querying this worker; retryOnError must not fail the task.
+				err = nil
+				return
+			}
+		}
 		mlog.Warn(context.TODO(), "clusteringCompactionTask failed to get compaction result", mlog.Err(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
