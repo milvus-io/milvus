@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -1263,7 +1264,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, queryutil.NewQueryResultSizeLimitExceededError(retSize, maxOutputSize)
 		}
 
 		cursors[sel]++
