@@ -90,10 +90,7 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to build compaction request", mlog.Err(err))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-		if err != nil {
-			log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-		}
+		classifyFailure(context.TODO(), "l0CompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 		return
 	}
 
@@ -106,10 +103,7 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		// Save segment meta with empty output segments (marks L0 input segments as dropped)
 		if err = t.saveSegmentMeta([]*datapb.CompactionSegment{}); err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask fast finish failed to save segment meta", mlog.Err(err))
-			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-			if err != nil {
-				log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-			}
+			classifyFailure(context.TODO(), "l0CompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			return
 		}
 
@@ -163,7 +157,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_completed:
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			classifyFailure(context.TODO(), "l0CompactionTask", t.GetTaskProto(), err, t.updateAndSaveTaskMeta)
 			return
 		}
 

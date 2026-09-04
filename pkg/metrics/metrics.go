@@ -111,6 +111,8 @@ const (
 	Pending   = "pending"
 	Executing = "executing"
 	Done      = "done"
+	Failed    = "failed"
+	Timeout   = "timeout"
 
 	ImportStagePending      = "pending"
 	ImportStagePreImport    = "preimport"

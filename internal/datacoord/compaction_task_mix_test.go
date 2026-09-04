@@ -317,3 +317,75 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
 }
+
+// TestQueryTaskOnWorkerRetriesRetryableValidationFailure exercises the classifyFailure wiring
+// end to end: a retryable ValidateSegmentStateBeforeCompleteCompactionMutation error must be
+// retried up to DataCoordCfg.CompactionMaxRetryTimes before the task is marked failed, instead
+// of failing on the very first occurrence (the pre-fix behavior).
+func (s *MixCompactionTaskSuite) TestQueryTaskOnWorkerRetriesRetryableValidationFailure() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key, "3")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key)
+
+	cluster := session.NewMockCluster(s.T())
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		StartTime:     time.Now().Unix(),
+		Channel:       "ch-1",
+		State:         datapb.CompactionTaskState_executing,
+		NodeID:        111,
+		InputSegments: []int64{100},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(
+		&datapb.CompactionPlanResult{
+			PlanID:   1,
+			State:    datapb.CompactionTaskState_completed,
+			Segments: []*datapb.CompactionSegment{{SegmentID: 200}},
+		}, nil)
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).
+		Return(merr.WrapErrServiceUnavailable("segment lock contention"))
+
+	// Attempts 1-3: retry_times goes 0 -> 1 -> 2 -> 3, task stays in its current state.
+	for i := int32(1); i <= 3; i++ {
+		task.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(i, task.GetTaskProto().GetRetryTimes())
+	}
+
+	// 4th attempt: retry_times(3) is no longer < max(3), so the task terminates.
+	task.QueryTaskOnWorker(cluster)
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(int32(3), task.GetTaskProto().GetRetryTimes())
+	s.NotEmpty(task.GetTaskProto().GetFailReason())
+}
+
+// TestQueryTaskOnWorkerNonRetryableValidationFailsImmediately confirms a non-retryable error
+// still fails on the first occurrence, exactly like the pre-fix behavior.
+func (s *MixCompactionTaskSuite) TestQueryTaskOnWorkerNonRetryableValidationFailsImmediately() {
+	cluster := session.NewMockCluster(s.T())
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:    1,
+		Type:      datapb.CompactionType_MixCompaction,
+		StartTime: time.Now().Unix(),
+		Channel:   "ch-1",
+		State:     datapb.CompactionTaskState_executing,
+		NodeID:    111,
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(
+		&datapb.CompactionPlanResult{
+			PlanID:   1,
+			State:    datapb.CompactionTaskState_completed,
+			Segments: []*datapb.CompactionSegment{{SegmentID: 200}},
+		}, nil).Once()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).
+		Return(merr.WrapErrIllegalCompactionPlan("segment already dropped")).Once()
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+}

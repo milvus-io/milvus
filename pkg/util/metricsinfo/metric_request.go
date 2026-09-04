@@ -72,6 +72,10 @@ const (
 	// CompactionTaskKey request for get compaction tasks from the datacoord
 	CompactionTaskKey = "compaction_tasks"
 
+	// CompactionTaskFailureKey request for the bounded history of terminally-failed/timed-out
+	// compaction tasks from the datacoord, retained past normal task meta cleanup
+	CompactionTaskFailureKey = "compaction_task_failures"
+
 	// BuildIndexTaskKey request for get building index tasks from the datacoord
 	BuildIndexTaskKey = "build_index_tasks"
 

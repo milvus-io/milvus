@@ -56,6 +56,16 @@ func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.Compaction
 	}
 }
 
+// terminalFailureHistorySize bounds the number of terminally-failed/timed-out compaction
+// tasks kept for diagnosis after their task meta has been dropped by cleanCompactionTaskMeta.
+const terminalFailureHistorySize = 256
+
+// terminalFailureHistoryTTL is deliberately longer than taskStats' TTL: taskStats is a
+// live debug snapshot of recent tasks of any outcome, while this history exists specifically
+// so a terminal failure remains queryable well after cleanCompactionTaskMeta has deleted the
+// task's own meta record (see compaction_inspector.go's CompactionDropToleranceInSeconds).
+const terminalFailureHistoryTTL = 24 * time.Hour
+
 type compactionTaskMeta struct {
 	sync.RWMutex
 	ctx     context.Context
@@ -63,6 +73,9 @@ type compactionTaskMeta struct {
 	// currently only clustering compaction task is stored in persist meta
 	compactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
 	taskStats       *expirable.LRU[UniqueID, *metricsinfo.CompactionTask]
+	// failureHistory retains terminally-failed/timed-out tasks (keyed by planID) past the
+	// point cleanCompactionTaskMeta deletes their normal task meta, for diagnosis.
+	failureHistory *expirable.LRU[UniqueID, *metricsinfo.CompactionTask]
 }
 
 func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTaskMeta, error) {
@@ -72,6 +85,7 @@ func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatal
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
 		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](512, nil, time.Minute*15),
+		failureHistory:  expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](terminalFailureHistorySize, nil, terminalFailureHistoryTTL),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err
@@ -199,6 +213,40 @@ func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *dat
 
 func (csm *compactionTaskMeta) TaskStatsJSON() string {
 	tasks := csm.taskStats.Values()
+	ret, err := json.Marshal(tasks)
+	if err != nil {
+		return ""
+	}
+	return string(ret)
+}
+
+// RecordTerminalFailure snapshots a task that just reached a terminal failed/timeout state,
+// so it stays queryable after cleanCompactionTaskMeta later deletes its regular task meta.
+// Safe to call for any task; callers are expected to only call it for failed/timeout tasks.
+//
+// The task's own EndTime is usually still unset here: updateAndSaveTaskMeta only stamps
+// EndTime when the task's state was ALREADY terminal before the save, but the save that
+// transitions a task INTO failed/timeout (classifyFailure, or the timeout branches in
+// QueryTaskOnWorker) runs while the prior state was still executing/pipelining -- so the
+// stamp only lands on the next save after that (Clean()'s failed/timeout -> cleaned
+// transition), which happens later and asynchronously, after this snapshot is taken. So
+// EndTime is backfilled with the current time here whenever it is still zero, rather than
+// recording a diagnostically useless blank timestamp.
+func (csm *compactionTaskMeta) RecordTerminalFailure(task *datapb.CompactionTask) {
+	csm.Lock()
+	defer csm.Unlock()
+	if task.GetEndTime() == 0 {
+		clone := proto.Clone(task).(*datapb.CompactionTask)
+		setEndTime(time.Now().Unix())(clone)
+		task = clone
+	}
+	csm.failureHistory.Add(task.GetPlanID(), newCompactionTaskStats(task))
+}
+
+// FailureHistoryJSON returns the bounded, recent history of terminally-failed/timed-out
+// compaction tasks as JSON, for diagnostic queries (see metricsinfo.CompactionTaskFailureKey).
+func (csm *compactionTaskMeta) FailureHistoryJSON() string {
+	tasks := csm.failureHistory.Values()
 	ret, err := json.Marshal(tasks)
 	if err != nil {
 		return ""

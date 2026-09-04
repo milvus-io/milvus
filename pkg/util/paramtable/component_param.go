@@ -5692,6 +5692,7 @@ type dataCoordConfig struct {
 	SegmentExpansionRate                       ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds                 ParamItem `refreshable:"true"` // deprecated
 	CompactionDropToleranceInSeconds           ParamItem `refreshable:"true"`
+	CompactionMaxRetryTimes                    ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds              ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds           ParamItem `refreshable:"false"` // deprecated
 	CompactionScheduleInterval                 ParamItem `refreshable:"false"`
@@ -6198,6 +6199,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CompactionDropToleranceInSeconds.Init(base.mgr)
+
+	p.CompactionMaxRetryTimes = ParamItem{
+		Key:          "dataCoord.compaction.maxRetryTimes",
+		Version:      "2.6.11",
+		Doc:          "Max number of times a compaction task retries a retryable failure before it is marked failed permanently.",
+		DefaultValue: "3",
+		Export:       true,
+	}
+	p.CompactionMaxRetryTimes.Init(base.mgr)
 
 	p.CompactionGCIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.gcInterval",
