@@ -16,6 +16,7 @@
 
 #include "textindex/fst/text_fst_c.h"
 
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <new>
@@ -113,10 +114,6 @@ BuildTextFst(const uint8_t* encoded_terms, int64_t encoded_size) {
         EncodedTermReader terms(encoded_terms, encoded_size);
         auto fst = std::make_unique<TextFst>();
         fst->Build([&]() { return terms.Next(); });
-        if (!fst->VerifyChecksum()) {
-            throw std::runtime_error(
-                "built text FST failed checksum verification");
-        }
         const auto bytes = fst->SerializedBytes();
         if (bytes.size() >
             static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
@@ -238,4 +235,17 @@ LoadTextFstFile(const char* path, bool memory_mapped) {
 void
 DeleteTextFst(CTextFstHandle handle) {
     delete static_cast<TextFst*>(handle);
+}
+
+void
+FreeTextFstFuzzyResult(CTextFstFuzzyResult* result) {
+    if (result == nullptr) {
+        return;
+    }
+    for (int64_t i = 0; i < result->match_count; ++i) {
+        std::free(result->matches[i].term);
+    }
+    std::free(result->matches);
+    result->matches = nullptr;
+    result->match_count = 0;
 }

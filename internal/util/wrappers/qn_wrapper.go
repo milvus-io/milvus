@@ -97,6 +97,10 @@ func (qn *qnServerWrapper) SearchSegments(ctx context.Context, in *querypb.Searc
 	return qn.QueryNode.SearchSegments(ctx, in)
 }
 
+func (qn *qnServerWrapper) ExpandTextTerms(ctx context.Context, in *querypb.ExpandTextTermsRequest, _ ...grpc.CallOption) (*querypb.ExpandTextTermsResponse, error) {
+	return qn.QueryNode.ExpandTextTerms(ctx, in)
+}
+
 func (qn *qnServerWrapper) Query(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
 	return qn.QueryNode.Query(ctx, in)
 }

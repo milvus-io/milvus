@@ -82,6 +82,37 @@ func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testi
 	require.False(t, task.resultSizeInsufficient)
 }
 
+func TestValidateFuzzyBM25OptionsRejectsIterator(t *testing.T) {
+	task := &searchTask{schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{100},
+			OutputFieldIds: []int64{101},
+			Params:         []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+		}},
+	})}
+
+	options, err := task.validateFuzzyBM25Options(
+		[]*commonpb.KeyValuePair{{Key: FuzzyBM25FuzzinessKey, Value: "1"}}, 101, false)
+	require.NoError(t, err)
+	require.NotNil(t, options)
+
+	_, err = task.validateFuzzyBM25Options(
+		[]*commonpb.KeyValuePair{{Key: FuzzyBM25FuzzinessKey, Value: "1"}}, 101, true)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "not supported with search iterator")
+
+	options, err = task.validateFuzzyBM25Options(
+		[]*commonpb.KeyValuePair{{Key: FuzzyBM25FuzzinessKey, Value: "0"}}, 101, true)
+	require.NoError(t, err)
+	assert.Nil(t, options)
+}
+
 func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	t.Cleanup(func() {

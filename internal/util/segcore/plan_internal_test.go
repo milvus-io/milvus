@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
@@ -123,4 +124,61 @@ func TestNewSearchRequestSkipsPlaceholderCleanupOnMetricMismatch(t *testing.T) {
 		require.Contains(t, err.Error(), "metric type not match")
 		require.Zero(t, cleaned.Load())
 	})
+}
+
+func TestValidateTextTermGenerations(t *testing.T) {
+	fuzzyOptions := &internalpb.FuzzyBM25SearchOptions{MaxEditDistance: 1, MaxExpansions: 50}
+
+	t.Run("requires fuzzy options", func(t *testing.T) {
+		_, err := validateTextTermGenerations(&querypb.SearchRequest{
+			TextTermGenerations: []*querypb.SegmentTextTermGeneration{{SegmentID: 10, Generation: 7}},
+		})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("requires every target generation", func(t *testing.T) {
+		_, err := validateTextTermGenerations(&querypb.SearchRequest{
+			Req:        &internalpb.SearchRequest{FuzzyBm25Options: fuzzyOptions},
+			SegmentIDs: []int64{10, 11},
+			TextTermGenerations: []*querypb.SegmentTextTermGeneration{
+				{SegmentID: 10, Generation: 7},
+			},
+		})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("rejects extra generations", func(t *testing.T) {
+		_, err := validateTextTermGenerations(&querypb.SearchRequest{
+			Req:        &internalpb.SearchRequest{FuzzyBm25Options: fuzzyOptions},
+			SegmentIDs: []int64{10},
+			TextTermGenerations: []*querypb.SegmentTextTermGeneration{
+				{SegmentID: 10, Generation: 7},
+				{SegmentID: 11, Generation: 8},
+			},
+		})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("accepts exact target coverage", func(t *testing.T) {
+		generations, err := validateTextTermGenerations(&querypb.SearchRequest{
+			Req:        &internalpb.SearchRequest{FuzzyBm25Options: fuzzyOptions},
+			SegmentIDs: []int64{10, 11},
+			TextTermGenerations: []*querypb.SegmentTextTermGeneration{
+				{SegmentID: 11, Generation: 8},
+				{SegmentID: 10, Generation: 7},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, map[int64]uint64{10: 7, 11: 8}, generations)
+	})
+}
+
+func TestSearchRequestValidateTextTermGenerationMismatchIsRetryable(t *testing.T) {
+	request := &SearchRequest{textTermGenerations: map[int64]uint64{10: 7}}
+	require.NoError(t, request.ValidateTextTermGeneration(10, 7))
+	require.NoError(t, request.ValidateTextTermGeneration(11, 9))
+
+	err := request.ValidateTextTermGeneration(10, 8)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.True(t, merr.IsRetryableErr(err))
 }

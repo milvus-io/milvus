@@ -221,6 +221,12 @@ func (c *Client) SearchSegments(ctx context.Context, req *querypb.SearchRequest,
 	})
 }
 
+func (c *Client) ExpandTextTerms(ctx context.Context, req *querypb.ExpandTextTermsRequest, _ ...grpc.CallOption) (*querypb.ExpandTextTermsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.ExpandTextTermsResponse, error) {
+		return client.ExpandTextTerms(ctx, req)
+	})
+}
+
 // Query performs replica query tasks in QueryNode.
 func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {

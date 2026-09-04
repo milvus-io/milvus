@@ -34,6 +34,13 @@ typedef struct CTextTermTrieUpdateResult {
     bool is_data_integrity_error;
 } CTextTermTrieUpdateResult;
 
+typedef void* CTextTermFuzzyQueryHandle;
+
+typedef struct CTextTermFuzzyQueryBuildResult {
+    CStatus status;
+    CTextTermFuzzyQueryHandle handle;
+} CTextTermFuzzyQueryBuildResult;
+
 // Adds one field's message-deduplicated terms to the mutable Trie owned by a
 // growing segcore segment. encoded_terms uses the same little-endian
 // count/length/bytes representation as BuildTextFst.
@@ -50,6 +57,25 @@ AddSegmentTextTermFstsToTrie(CSegmentInterface c_segment,
                              int64_t field_id,
                              const CTextFstHandle* fst_handles,
                              int64_t fst_count);
+
+// Builds the immutable query automaton once so it can be reused across all
+// segments and FST/Trie components served by one request.
+CTextTermFuzzyQueryBuildResult
+PrepareSegmentTextTermFuzzyQuery(const uint8_t* query,
+                                 int64_t query_size,
+                                 uint32_t max_edit_distance,
+                                 uint32_t prefix_length);
+
+void
+DeleteSegmentTextTermFuzzyQuery(CTextTermFuzzyQueryHandle handle);
+
+CTextFstFuzzyResult
+FuzzySearchSegmentTextTermsPrepared(CSegmentInterface c_segment,
+                                    int64_t field_id,
+                                    const CTextFstHandle* fst_handles,
+                                    int64_t fst_count,
+                                    CTextTermFuzzyQueryHandle query,
+                                    uint32_t max_expansions);
 
 #ifdef __cplusplus
 }

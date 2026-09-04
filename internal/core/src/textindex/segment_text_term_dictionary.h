@@ -27,10 +27,15 @@
 namespace milvus::textindex {
 
 class TextFst;
+struct PreparedLevenshteinQuery;
 
 struct TextTermMatch {
     std::string term;
     std::uint32_t edit_distance = 0;
+};
+
+struct TextTermFuzzySearchResult {
+    std::vector<TextTermMatch> matches;
 };
 
 struct TextTermTrieStats {
@@ -63,12 +68,11 @@ class SegmentTextTermDictionary {
     AddFstTerms(std::int64_t field_id,
                 std::span<const TextFst* const> immutable_fsts);
 
-    [[nodiscard]] std::vector<TextTermMatch>
-    FuzzySearch(std::int64_t field_id,
-                std::span<const TextFst* const> immutable_fsts,
-                std::string_view query,
-                std::uint32_t max_edit_distance,
-                std::size_t max_expansions) const;
+    [[nodiscard]] TextTermFuzzySearchResult
+    FuzzySearchPrepared(std::int64_t field_id,
+                        std::span<const TextFst* const> immutable_fsts,
+                        const PreparedLevenshteinQuery& query,
+                        std::size_t max_expansions) const;
 
     [[nodiscard]] TextTermTrieStats
     TrieStats() const;

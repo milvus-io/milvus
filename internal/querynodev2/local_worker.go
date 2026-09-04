@@ -85,6 +85,14 @@ func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchReq
 	return resp, nil
 }
 
+func (w *LocalWorker) ExpandTextTerms(ctx context.Context, req *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error) {
+	response, err := w.node.ExpandTextTerms(ctx, req)
+	if err := merr.CheckRPCCall(response, err); err != nil {
+		return response, err
+	}
+	return response, nil
+}
+
 func (w *LocalWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	return w.node.queryStreamSegments(ctx, req, srv)
 }

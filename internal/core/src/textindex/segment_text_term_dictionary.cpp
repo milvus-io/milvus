@@ -17,6 +17,8 @@
 #include "textindex/segment_text_term_dictionary.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -107,6 +109,7 @@ class MutableTermTrie {
         }
         Node* node = &root_;
         for (const unsigned char byte : term) {
+            std::unique_lock lock(MutexFor(node));
             auto position =
                 std::lower_bound(node->edges.begin(),
                                  node->edges.end(),
@@ -120,59 +123,89 @@ class MutableTermTrie {
                 position = node->edges.insert(
                     position,
                     Edge{static_cast<std::uint8_t>(byte), std::move(child)});
-                memory_bytes_ += sizeof(Node);
-                memory_bytes_ +=
-                    (node->edges.capacity() - old_capacity) * sizeof(Edge);
+                memory_bytes_.fetch_add(sizeof(Node),
+                                        std::memory_order_relaxed);
+                memory_bytes_.fetch_add(
+                    (node->edges.capacity() - old_capacity) * sizeof(Edge),
+                    std::memory_order_relaxed);
             }
             node = position->target.get();
         }
+        std::unique_lock lock(MutexFor(node));
         if (node->terminal) {
             return false;
         }
         node->terminal = true;
-        ++term_count_;
+        term_count_.fetch_add(1, std::memory_order_relaxed);
         return true;
     }
 
-    [[nodiscard]] std::vector<TextTermMatch>
-    FuzzySearch(std::string_view query,
-                std::uint32_t max_edit_distance,
+    [[nodiscard]] TextTermFuzzySearchResult
+    FuzzySearch(const PreparedLevenshteinQuery& query,
                 std::size_t max_expansions) const {
-        if (max_edit_distance > 2) {
-            throw std::invalid_argument(
-                "mutable text term trie edit distance must be in [0, 2]");
-        }
-        ValidateUtf8(query);
-        if (max_expansions == 0 || term_count_ == 0) {
+        if (max_expansions == 0 ||
+            term_count_.load(std::memory_order_relaxed) == 0) {
             return {};
         }
 
-        const auto dfa = BuildLevenshteinDfa(query, max_edit_distance);
+        TextTermFuzzySearchResult result;
+        const Node* start = &root_;
+        if (query.max_distance == 0) {
+            for (const unsigned char byte : query.query) {
+                start = FindChild(start, byte);
+                if (start == nullptr) {
+                    return result;
+                }
+            }
+            if (IsTerminal(start)) {
+                result.matches.push_back(TextTermMatch{
+                    .term = query.query,
+                    .edit_distance = 0,
+                });
+            }
+            return result;
+        }
+        if (!query.dfa.has_value()) {
+            throw std::invalid_argument(
+                "mutable text term trie requires a prepared fuzzy query");
+        }
+        for (const unsigned char byte : query.exact_prefix) {
+            start = FindChild(start, byte);
+            if (start == nullptr) {
+                return result;
+            }
+        }
+
+        const auto& dfa = *query.dfa;
         BoundedTextTermMatches matches(max_expansions);
-        std::string term;
+        std::string term(query.exact_prefix);
         struct Frame {
             const Node* node = nullptr;
             std::uint32_t dfa_state = 0;
-            std::size_t next_edge = 0;
+            // Edges are append-only but remain sorted. A label cursor cannot
+            // be shifted past an existing edge by a concurrent insertion.
+            std::uint16_t next_label = 0;
             bool entered = false;
         };
         std::vector<Frame> stack;
         stack.push_back(Frame{
-            .node = &root_,
+            .node = start,
             .dfa_state = dfa.InitialState(),
         });
         while (!stack.empty()) {
             auto& frame = stack.back();
             if (!frame.entered) {
                 frame.entered = true;
-                if (frame.node->terminal && dfa.IsMatch(frame.dfa_state)) {
+                if (IsTerminal(frame.node) && dfa.IsMatch(frame.dfa_state)) {
                     matches.Add(TextTermMatch{
                         .term = term,
                         .edit_distance = dfa.Distance(frame.dfa_state),
                     });
                 }
             }
-            if (frame.next_edge >= frame.node->edges.size()) {
+            std::uint8_t label = 0;
+            const Node* target = nullptr;
+            if (!NextChild(frame.node, frame.next_label, label, target)) {
                 stack.pop_back();
                 if (!stack.empty()) {
                     term.pop_back();
@@ -180,32 +213,85 @@ class MutableTermTrie {
                 continue;
             }
 
-            const auto& edge = frame.node->edges[frame.next_edge++];
-            const auto next_state = dfa.Transition(frame.dfa_state, edge.label);
+            const auto next_state = dfa.Transition(frame.dfa_state, label);
             if (!dfa.CanMatch(next_state)) {
                 continue;
             }
-            term.push_back(static_cast<char>(edge.label));
+            term.push_back(static_cast<char>(label));
             stack.push_back(Frame{
-                .node = edge.target.get(),
+                .node = target,
                 .dfa_state = next_state,
             });
         }
-        return matches.Take();
+        result.matches = matches.Take();
+        return result;
     }
 
     [[nodiscard]] TextTermTrieStats
     Stats() const {
         return TextTermTrieStats{
-            .term_count = term_count_,
-            .memory_bytes = memory_bytes_,
+            .term_count = term_count_.load(std::memory_order_relaxed),
+            .memory_bytes = memory_bytes_.load(std::memory_order_relaxed),
         };
     }
 
  private:
+    const Node*
+    FindChild(const Node* node, std::uint8_t label) const {
+        std::shared_lock lock(MutexFor(node));
+        const auto position =
+            std::lower_bound(node->edges.begin(),
+                             node->edges.end(),
+                             label,
+                             [](const Edge& edge, std::uint8_t value) {
+                                 return edge.label < value;
+                             });
+        return position == node->edges.end() || position->label != label
+                   ? nullptr
+                   : position->target.get();
+    }
+
+    bool
+    IsTerminal(const Node* node) const {
+        std::shared_lock lock(MutexFor(node));
+        return node->terminal;
+    }
+
+    bool
+    NextChild(const Node* node,
+              std::uint16_t& next_label,
+              std::uint8_t& label,
+              const Node*& target) const {
+        if (next_label > std::numeric_limits<std::uint8_t>::max()) {
+            return false;
+        }
+        std::shared_lock lock(MutexFor(node));
+        const auto position =
+            std::lower_bound(node->edges.begin(),
+                             node->edges.end(),
+                             static_cast<std::uint8_t>(next_label),
+                             [](const Edge& edge, std::uint8_t value) {
+                                 return edge.label < value;
+                             });
+        if (position == node->edges.end()) {
+            return false;
+        }
+        label = position->label;
+        target = position->target.get();
+        next_label = static_cast<std::uint16_t>(label) + 1;
+        return true;
+    }
+
+    std::shared_mutex&
+    MutexFor(const Node* node) const {
+        const auto address = reinterpret_cast<std::uintptr_t>(node);
+        return mutexes_[(address >> 4) % mutexes_.size()];
+    }
+
     Node root_;
-    std::size_t term_count_ = 0;
-    std::size_t memory_bytes_ = 0;
+    mutable std::array<std::shared_mutex, 64> mutexes_;
+    std::atomic<std::size_t> term_count_ = 0;
+    std::atomic<std::size_t> memory_bytes_ = 0;
 };
 
 }  // namespace
@@ -234,10 +320,14 @@ SegmentTextTermDictionary::AddTerms(std::int64_t field_id,
         return;
     }
 
-    std::unique_lock lock(impl_->mutex);
-    auto& trie = impl_->tries[field_id];
-    if (trie == nullptr) {
-        trie = std::make_unique<MutableTermTrie>();
+    MutableTermTrie* trie;
+    {
+        std::unique_lock lock(impl_->mutex);
+        auto& entry = impl_->tries[field_id];
+        if (entry == nullptr) {
+            entry = std::make_unique<MutableTermTrie>();
+        }
+        trie = entry.get();
     }
     for (const auto& term : terms) {
         trie->Insert(term);
@@ -251,10 +341,14 @@ SegmentTextTermDictionary::AddFstTerms(
         return;
     }
 
-    std::unique_lock lock(impl_->mutex);
-    auto& trie = impl_->tries[field_id];
-    if (trie == nullptr) {
-        trie = std::make_unique<MutableTermTrie>();
+    MutableTermTrie* trie;
+    {
+        std::unique_lock lock(impl_->mutex);
+        auto& entry = impl_->tries[field_id];
+        if (entry == nullptr) {
+            entry = std::make_unique<MutableTermTrie>();
+        }
+        trie = entry.get();
     }
     for (const auto* fst : immutable_fsts) {
         if (fst == nullptr) {
@@ -271,25 +365,20 @@ SegmentTextTermDictionary::AddFstTerms(
     }
 }
 
-std::vector<TextTermMatch>
-SegmentTextTermDictionary::FuzzySearch(
+TextTermFuzzySearchResult
+SegmentTextTermDictionary::FuzzySearchPrepared(
     std::int64_t field_id,
     std::span<const TextFst* const> immutable_fsts,
-    std::string_view query,
-    std::uint32_t max_edit_distance,
+    const PreparedLevenshteinQuery& query,
     std::size_t max_expansions) const {
-    if (max_edit_distance > 2) {
-        throw std::invalid_argument(
-            "text term edit distance must be in [0, 2]");
-    }
     if (max_expansions == 0) {
         throw std::invalid_argument(
             "text term max expansions must be positive");
     }
-    ValidateUtf8(query);
+    TextTermFuzzySearchResult result;
 
     std::unordered_map<std::string, std::uint32_t> merged;
-    const auto merge = [&merged](std::string term, std::uint32_t distance) {
+    const auto merge = [&](std::string term, std::uint32_t distance) {
         const auto [position, inserted] =
             merged.try_emplace(std::move(term), distance);
         if (!inserted && distance < position->second) {
@@ -297,41 +386,43 @@ SegmentTextTermDictionary::FuzzySearch(
         }
     };
 
-    // Each immutable FST and the mutable Trie currently applies
-    // max_expansions independently. Sharing one competitive top-N collector
-    // and automaton state across all components is a follow-up optimization.
+    // Each immutable FST and the mutable Trie applies max_expansions
+    // independently. They share the request-scoped query DFA but retain their
+    // own competitive top-N collectors.
     for (const auto* fst : immutable_fsts) {
         if (fst == nullptr) {
             throw std::invalid_argument("text term FST handle is null");
         }
-        auto result =
-            fst->FuzzySearch(query, max_edit_distance, max_expansions);
-        for (auto& match : result.matches) {
+        auto fuzzy = fst->FuzzySearchPrepared(query, max_expansions);
+        for (auto& match : fuzzy.matches) {
             merge(std::move(match.term), match.edit_distance);
         }
     }
 
+    const MutableTermTrie* trie = nullptr;
     {
         std::shared_lock lock(impl_->mutex);
-        if (const auto position = impl_->tries.find(field_id);
-            position != impl_->tries.end()) {
-            auto trie_matches = position->second->FuzzySearch(
-                query, max_edit_distance, max_expansions);
-            for (auto& match : trie_matches) {
-                merge(std::move(match.term), match.edit_distance);
-            }
+        const auto position = impl_->tries.find(field_id);
+        if (position != impl_->tries.end()) {
+            trie = position->second.get();
+        }
+    }
+    if (trie != nullptr) {
+        auto trie_result = trie->FuzzySearch(query, max_expansions);
+        for (auto& match : trie_result.matches) {
+            merge(std::move(match.term), match.edit_distance);
         }
     }
 
-    std::vector<TextTermMatch> result;
-    result.reserve(merged.size());
+    result.matches.reserve(merged.size());
     for (auto& [term, distance] : merged) {
-        result.push_back(TextTermMatch{
+        result.matches.push_back(TextTermMatch{
             .term = std::move(term),
             .edit_distance = distance,
         });
     }
-    std::sort(result.begin(), result.end(), TextTermMatchBetter{});
+    std::sort(
+        result.matches.begin(), result.matches.end(), TextTermMatchBetter{});
     return result;
 }
 

@@ -130,6 +130,13 @@ message SubSearchRequest {
   bool ignore_growing = 13;
   string analyzer_name = 14;
   SearchType search_type = 15;
+  FuzzyBM25SearchOptions fuzzy_bm25_options = 16;
+}
+
+message FuzzyBM25SearchOptions {
+  uint32 max_edit_distance = 1;
+  uint32 max_expansions = 2;
+  uint32 prefix_length = 3;
 }
 
 message SearchRequest {
@@ -170,6 +177,7 @@ message SearchRequest {
   int32 pk_filter = 32;
   SearchType search_type = 33;
   repeated int64 group_by_field_ids = 34;
+  FuzzyBM25SearchOptions fuzzy_bm25_options = 35;
 }
 
 message SubSearchResults {

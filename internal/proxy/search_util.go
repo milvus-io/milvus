@@ -163,6 +163,86 @@ type SearchInfo struct {
 	iterativeFilter bool
 }
 
+func parseFuzzyBM25SearchOptions(searchParamsPair []*commonpb.KeyValuePair) (*internalpb.FuzzyBM25SearchOptions, error) {
+	distanceValue, hasDistance, err := fuzzyBM25SearchOption(searchParamsPair, FuzzyBM25FuzzinessKey)
+	if err != nil {
+		return nil, err
+	}
+	expansionsValue, hasExpansions, err := fuzzyBM25SearchOption(searchParamsPair, FuzzyMaxExpansionsKey)
+	if err != nil {
+		return nil, err
+	}
+	prefixValue, hasPrefix, err := fuzzyBM25SearchOption(searchParamsPair, FuzzyPrefixLengthKey)
+	if err != nil {
+		return nil, err
+	}
+	if !hasDistance {
+		if hasExpansions {
+			return nil, merr.WrapErrParameterMissingMsg("%s is required when %s is set", FuzzyBM25FuzzinessKey, FuzzyMaxExpansionsKey)
+		}
+		if hasPrefix {
+			return nil, merr.WrapErrParameterMissingMsg("%s is required when %s is set", FuzzyBM25FuzzinessKey, FuzzyPrefixLengthKey)
+		}
+		return nil, nil
+	}
+	distance, err := strconv.ParseUint(distanceValue, 10, 32)
+	if err != nil || distance > 2 {
+		return nil, merr.WrapErrParameterInvalidMsg("%s must be an integer in [0, 2]", FuzzyBM25FuzzinessKey)
+	}
+	if distance == 0 {
+		return nil, nil
+	}
+	maxExpansions := uint64(50)
+	if hasExpansions {
+		maxExpansions, err = strconv.ParseUint(expansionsValue, 10, 32)
+		if err != nil || maxExpansions == 0 || maxExpansions > 1024 {
+			return nil, merr.WrapErrParameterInvalidMsg("%s must be an integer in [1, 1024]", FuzzyMaxExpansionsKey)
+		}
+	}
+	prefixLength := uint64(0)
+	if hasPrefix {
+		prefixLength, err = strconv.ParseUint(prefixValue, 10, 32)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("%s must be a non-negative integer", FuzzyPrefixLengthKey)
+		}
+	}
+	return &internalpb.FuzzyBM25SearchOptions{
+		MaxEditDistance: uint32(distance),
+		MaxExpansions:   uint32(maxExpansions),
+		PrefixLength:    uint32(prefixLength),
+	}, nil
+}
+
+// fuzzyBM25SearchOption accepts both the direct KV representation used by
+// older/low-level clients and the JSON object under params emitted by current
+// SDKs. Reject conflicting duplicates instead of silently selecting one.
+func fuzzyBM25SearchOption(searchParamsPair []*commonpb.KeyValuePair, key string) (string, bool, error) {
+	directValue, hasDirect := funcutil.TryGetAttrByKeyFromRepeatedKV(key, searchParamsPair)
+
+	var (
+		nestedValue string
+		hasNested   bool
+	)
+	if paramsValue, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(ParamsKey, searchParamsPair); ok && gjson.Valid(paramsValue) {
+		if value, exists := gjson.Parse(paramsValue).Map()[key]; exists {
+			nestedValue = value.String()
+			hasNested = true
+		}
+	}
+
+	if hasDirect && hasNested && directValue != nestedValue {
+		return "", false, merr.WrapErrParameterInvalidMsg(
+			"%s has conflicting values in the search parameter KVs and %s", key, ParamsKey)
+	}
+	if hasDirect {
+		return directValue, true, nil
+	}
+	if hasNested {
+		return nestedValue, true, nil
+	}
+	return "", false, nil
+}
+
 const (
 	orderByNullsFirst = "nulls_first"
 	orderByNullsLast  = "nulls_last"

@@ -40,6 +40,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestValidateFuzzyBM25SchemaEvolution(t *testing.T) {
+	fuzzyParam := []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}}
+	oldSchema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{
+		Name: "bm25", Type: schemapb.FunctionType_BM25,
+	}}}
+
+	enabled := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	enabled.Functions[0].Params = fuzzyParam
+	require.ErrorContains(t, validateFuzzyBM25SchemaEvolution(oldSchema, enabled), common.EnableFuzzyKey)
+
+	added := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	added.Functions = append(added.Functions, &schemapb.FunctionSchema{
+		Name: "new_bm25", Type: schemapb.FunctionType_BM25, Params: fuzzyParam,
+	})
+	require.ErrorContains(t, validateFuzzyBM25SchemaEvolution(oldSchema, added), common.EnableFuzzyKey)
+
+	require.NoError(t, validateFuzzyBM25SchemaEvolution(enabled, proto.Clone(enabled).(*schemapb.CollectionSchema)))
+	require.NoError(t, validateFuzzyBM25SchemaEvolution(enabled, &schemapb.CollectionSchema{}))
+}
+
 func TestDDLCallbacksSchemaEvolutionRejectsUnsafeAddCollectionFieldBeforeSideEffects(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -127,6 +147,56 @@ func TestDDLCallbacksSchemaEvolutionRejectsInPlaceFieldMutation(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "text", common.MaxLengthKey, "128")
+}
+
+func TestDDLCallbacksAddFieldCannotConvertFuzzyBM25CollectionToExternal(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	schemaBytes, err := proto.Marshal(&schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+				},
+			},
+			{Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+			Params:           []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+		}},
+	})
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName: dbName, CollectionName: collectionName, Schema: schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	externalFieldBytes, err := proto.Marshal(&schemapb.FieldSchema{
+		Name: "external_value", DataType: schemapb.DataType_Int64,
+		Nullable: true, ExternalField: "external_value",
+	})
+	require.NoError(t, err)
+	resp, err = core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName: dbName, CollectionName: collectionName, Schema: externalFieldBytes,
+	})
+	addErr := merr.CheckRPCCall(resp, err)
+	require.ErrorIs(t, addErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, addErr, common.EnableFuzzyKey)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertFieldNotExists(t, ctx, core, dbName, collectionName, "external_value")
 }
 
 func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDrop(t *testing.T) {

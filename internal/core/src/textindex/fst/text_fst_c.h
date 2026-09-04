@@ -45,6 +45,18 @@ typedef struct CTextFstLoadResult {
     bool is_data_integrity_error;
 } CTextFstLoadResult;
 
+typedef struct CTextFstMatch {
+    uint8_t* term;
+    int64_t term_size;
+    uint32_t edit_distance;
+} CTextFstMatch;
+
+typedef struct CTextFstFuzzyResult {
+    CStatus status;
+    CTextFstMatch* matches;
+    int64_t match_count;
+} CTextFstFuzzyResult;
+
 // BuildTextFst builds a Milvus text FST artifact.
 // encoded_terms is little-endian: u64 count followed by count repetitions of
 // u64 byte_length and the raw term bytes.
@@ -59,6 +71,9 @@ LoadTextFstFile(const char* path, bool memory_mapped);
 
 void
 DeleteTextFst(CTextFstHandle handle);
+
+void
+FreeTextFstFuzzyResult(CTextFstFuzzyResult* result);
 
 #ifdef __cplusplus
 }

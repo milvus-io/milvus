@@ -279,7 +279,6 @@ func (s *sealedBm25Stats) Remove() {
 func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 	s.RLock()
 	defer s.RUnlock()
-
 	if s.removed {
 		return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", s.segmentID)
 	}

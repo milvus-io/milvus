@@ -17,6 +17,7 @@
 package textindex
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +46,45 @@ func TestTextFstReaderHeapAndMmap(t *testing.T) {
 	defer mapped.Close()
 	assert.True(t, mapped.IsMemoryMapped())
 	assert.Equal(t, artifact.TermCount, mapped.TermCount())
+}
+
+func TestPrepareFuzzySearchTermsBuildsOneQueryPerSource(t *testing.T) {
+	prepared, err := PrepareFuzzySearchTerms(
+		[][]byte{[]byte("bok"), []byte("milvuz")}, 1, 0)
+	require.NoError(t, err)
+	require.Len(t, prepared, 2)
+	assert.NotEqual(t, prepared[0].handle, prepared[1].handle)
+	for _, query := range prepared {
+		require.NotNil(t, query.handle)
+		query.Close()
+		assert.Nil(t, query.handle)
+	}
+}
+
+func TestValidateFuzzySearchTermsBoundsDFAInput(t *testing.T) {
+	boundary := [][]byte{
+		bytes.Repeat([]byte("a"), maxFuzzySearchTermCodePoints),
+		bytes.Repeat([]byte("b"), maxFuzzySearchTotalCodePoints-maxFuzzySearchTermCodePoints),
+	}
+	require.NoError(t, ValidateFuzzySearchTerms(boundary))
+
+	tests := map[string][][]byte{
+		"term count": make([][]byte, maxFuzzySearchTermCount+1),
+		"term length": {
+			bytes.Repeat([]byte("a"), maxFuzzySearchTermCodePoints+1),
+		},
+		"total length": {
+			bytes.Repeat([]byte("a"), maxFuzzySearchTermCodePoints),
+			bytes.Repeat([]byte("b"), maxFuzzySearchTermCodePoints),
+			[]byte("c"),
+		},
+	}
+	for name, terms := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateFuzzySearchTerms(terms)
+			require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		})
+	}
 }
 
 func TestTextFstReaderRejectsCorruptChecksum(t *testing.T) {

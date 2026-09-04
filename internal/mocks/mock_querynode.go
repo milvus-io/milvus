@@ -262,6 +262,65 @@ func (_c *MockQueryNode_DeleteBatch_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// ExpandTextTerms provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNode) ExpandTextTerms(_a0 context.Context, _a1 *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExpandTextTerms")
+	}
+
+	var r0 *querypb.ExpandTextTermsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ExpandTextTermsRequest) *querypb.ExpandTextTermsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ExpandTextTermsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ExpandTextTermsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNode_ExpandTextTerms_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExpandTextTerms'
+type MockQueryNode_ExpandTextTerms_Call struct {
+	*mock.Call
+}
+
+// ExpandTextTerms is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ExpandTextTermsRequest
+func (_e *MockQueryNode_Expecter) ExpandTextTerms(_a0 interface{}, _a1 interface{}) *MockQueryNode_ExpandTextTerms_Call {
+	return &MockQueryNode_ExpandTextTerms_Call{Call: _e.mock.On("ExpandTextTerms", _a0, _a1)}
+}
+
+func (_c *MockQueryNode_ExpandTextTerms_Call) Run(run func(_a0 context.Context, _a1 *querypb.ExpandTextTermsRequest)) *MockQueryNode_ExpandTextTerms_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ExpandTextTermsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNode_ExpandTextTerms_Call) Return(_a0 *querypb.ExpandTextTermsResponse, _a1 error) *MockQueryNode_ExpandTextTerms_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNode_ExpandTextTerms_Call) RunAndReturn(run func(context.Context, *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error)) *MockQueryNode_ExpandTextTerms_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAddress provides a mock function with no fields
 func (_m *MockQueryNode) GetAddress() string {
 	ret := _m.Called()

@@ -50,6 +50,7 @@ func (d *loadedTextTermDictionary) close() {
 
 type segmentTextTermDictionary struct {
 	mu            sync.RWMutex
+	statsMu       sync.Mutex
 	nativeSegment unsafe.Pointer
 	loaded        *loadedTextTermDictionary
 	termCount     int64
@@ -66,8 +67,8 @@ func (d *segmentTextTermDictionary) add(batches []*msgpb.TextTermBatch) error {
 	if d == nil || len(batches) == 0 {
 		return nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	for _, batch := range batches {
 		if batch == nil {
 			continue
@@ -77,18 +78,18 @@ func (d *segmentTextTermDictionary) add(batches []*msgpb.TextTermBatch) error {
 			batch.GetInputFieldId(),
 			batch.GetTerms(),
 		)
+		d.statsMu.Lock()
+		if stats.TermCount >= d.termCount && stats.MemorySize >= d.memorySize {
+			d.termCount = stats.TermCount
+			d.memorySize = stats.MemorySize
+		}
+		d.statsMu.Unlock()
 		if err != nil {
 			// Native insertion can make partial monotonic progress before an
 			// allocation failure. Preserve any usable post-failure accounting;
 			// validation failures return zero values and leave the prior totals.
-			if stats.TermCount >= d.termCount && stats.MemorySize >= d.memorySize {
-				d.termCount = stats.TermCount
-				d.memorySize = stats.MemorySize
-			}
 			return err
 		}
-		d.termCount = stats.TermCount
-		d.memorySize = stats.MemorySize
 	}
 	return nil
 }
@@ -155,11 +156,48 @@ func (d *segmentTextTermDictionary) memoryBytes() int64 {
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	d.statsMu.Lock()
+	defer d.statsMu.Unlock()
 	result := d.memorySize
 	if d.loaded != nil {
 		result += d.loaded.heapBytes
 	}
 	return result
+}
+
+func (d *segmentTextTermDictionary) expandPrepared(
+	fieldID int64,
+	prepared []*textindex.PreparedFuzzySearch,
+	maxExpansions uint32,
+) ([][]textindex.FuzzyMatch, error) {
+	if d == nil {
+		return make([][]textindex.FuzzyMatch, len(prepared)), nil
+	}
+	if maxExpansions == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("fuzzy max expansions must be positive")
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var readers []*textindex.FstReader
+	if d.loaded != nil {
+		readers = d.loaded.readers[fieldID]
+	}
+	result := make([][]textindex.FuzzyMatch, len(prepared))
+	for sourceIndex, query := range prepared {
+		matches, err := textindex.FuzzySearchSegmentTextTermsPrepared(
+			d.nativeSegment,
+			fieldID,
+			readers,
+			query,
+			maxExpansions,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result[sourceIndex] = matches
+	}
+	return result, nil
 }
 
 func (d *segmentTextTermDictionary) close() {
