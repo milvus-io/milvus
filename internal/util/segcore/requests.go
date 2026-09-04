@@ -49,9 +49,10 @@ type LoadFieldDataRequest struct {
 }
 
 type LoadFieldDataInfo struct {
-	Field        *datapb.FieldBinlog
-	EnableMMap   bool
-	WarmupPolicy string // Per-field warmup policy: "disable", "sync", "async", or empty for default
+	Field           *datapb.FieldBinlog
+	EnableMMap      bool
+	SupportEviction bool
+	WarmupPolicy    string // Per-field warmup policy: "disable", "sync", "async", or empty for default
 }
 
 func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldDataRequest, err error) {
@@ -99,6 +100,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		}
 
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
+		C.SetFieldSupportEviction(cLoadFieldDataInfo, cFieldID, C.bool(field.SupportEviction))
 
 		// Set per-field warmup policy if specified
 		if len(field.WarmupPolicy) > 0 {

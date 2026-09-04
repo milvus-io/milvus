@@ -25,6 +25,7 @@ message LoadIndexInfo {
   int64 num_rows = 17;
   int32 current_scalar_index_version = 18;
   index.IndexStorePathVersion index_store_path_version = 19;
+  bool support_eviction = 20;
 }
 
 message IndexStats {

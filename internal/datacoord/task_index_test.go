@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -708,6 +709,80 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestFiltersRuntimeOnlyBuildParams() {
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	mt := &meta{
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	index := mt.indexMeta.indexes[s.collID][s.indexID]
+	index.TypeParams = []*commonpb.KeyValuePair{
+		{Key: common.DimKey, Value: "128"},
+		{Key: common.MmapEnabledKey, Value: "true"},
+		{Key: common.IndexOffsetCacheEnabledKey, Value: "true"},
+		{Key: common.WarmupKey, Value: common.WarmupDisable},
+		{Key: common.EvictableKey, Value: "false"},
+	}
+	index.IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "HNSW"},
+		{Key: common.MetricTypeKey, Value: "L2"},
+		{Key: "M", Value: "16"},
+		{Key: common.MmapEnabledKey, Value: "true"},
+		{Key: common.IndexOffsetCacheEnabledKey, Value: "true"},
+		{Key: common.WarmupKey, Value: common.WarmupDisable},
+		{Key: common.EvictableKey, Value: "false"},
+	}
+	index.UserIndexParams = []*commonpb.KeyValuePair{
+		{Key: common.EvictableKey, Value: "false"},
+	}
+
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:  s.fieldID,
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}}},
+		Partitions: []int64{s.partID},
+	}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root")
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+	req, err := it.prepareJobRequest(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           s.segID,
+		CollectionID: s.collID,
+		PartitionID:  s.partID,
+		NumOfRows:    100,
+	}}, segIndex, mt.indexMeta.GetIndexParams(s.collID, s.indexID), "HNSW")
+
+	s.NoError(err)
+	requestIndexParams := funcutil.KeyValuePair2Map(req.GetIndexParams())
+	requestTypeParams := funcutil.KeyValuePair2Map(req.GetTypeParams())
+	s.Equal("HNSW", requestIndexParams[common.IndexTypeKey])
+	s.Equal("L2", requestIndexParams[common.MetricTypeKey])
+	s.Equal("16", requestIndexParams["M"])
+	s.Contains(requestIndexParams, common.IndexNonEncoding)
+	s.Equal("128", requestTypeParams[common.DimKey])
+	for _, key := range []string{
+		common.MmapEnabledKey,
+		common.IndexOffsetCacheEnabledKey,
+		common.WarmupKey,
+		common.EvictableKey,
+	} {
+		s.NotContains(requestIndexParams, key)
+		s.NotContains(requestTypeParams, key)
+	}
+
+	s.Contains(funcutil.KeyValuePair2Map(index.IndexParams), common.EvictableKey)
+	s.Contains(funcutil.KeyValuePair2Map(index.TypeParams), common.EvictableKey)
+	s.Equal("false", funcutil.KeyValuePair2Map(index.UserIndexParams)[common.EvictableKey])
 }
 
 func (s *indexTaskSuite) TestQueryTaskOnWorker() {

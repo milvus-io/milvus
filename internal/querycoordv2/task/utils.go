@@ -283,7 +283,6 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 
 	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
-
 	// Index warmup is normally materialized into each IndexInfo by
 	// applyIndexWarmupSetting. No-index vector fields have no IndexInfo carrier,
 	// but segcore treats their raw data as the vector-index/search path until an

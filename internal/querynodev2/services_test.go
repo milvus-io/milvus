@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -1177,6 +1178,545 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesEvictable(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+			{Key: common.EvictableScalarIndexKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "scalar", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				Name:       "explicit_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				Name:       "explicit_struct",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, Name: "nested_scalar", DataType: schemapb.DataType_Int64},
+					{
+						FieldID:    12,
+						Name:       "explicit_nested_vector",
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+					},
+				},
+			},
+			{
+				FieldID: 20,
+				Name:    "collection_struct",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 21, Name: "collection_nested_scalar", DataType: schemapb.DataType_Int64},
+					{FieldID: 22, Name: "collection_nested_vector", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: schema,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				IndexInfos: []*querypb.FieldIndexInfo{
+					{FieldID: 1},
+					{FieldID: 2},
+					{FieldID: 11},
+					{FieldID: 12},
+					{
+						FieldID:     3,
+						IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+					},
+				},
+			},
+		},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	require.Same(t, req.GetSchema(), materialized.GetSchema(), "field policy normalization belongs to the Collection schema installation boundary")
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 1))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 2))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 11))
+	require.True(t, common.FieldHasEvictableKey(req.GetSchema(), 12))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 21))
+	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 22))
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[1].GetIndexParams())
+
+	// Index policies use the collection's index keys, independently of the raw
+	// field and struct-parent policies for the same field IDs.
+	for i, expected := range []bool{false, true, false, true, true} {
+		actual, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[i].GetIndexParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesUsesIndexUserParams(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarIndexKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, DataType: schemapb.DataType_Int64},
+			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: schema,
+		IndexInfoList: []*indexpb.IndexInfo{
+			{
+				FieldID:         1,
+				IndexID:         101,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				IndexParams:     []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			},
+			{
+				FieldID: 2,
+				IndexID: 102,
+				UserIndexParams: []*commonpb.KeyValuePair{
+					{Key: common.ParamsKey, Value: `{"evictable":"false"}`},
+				},
+			},
+			{FieldID: 1, IndexID: 103},
+			{FieldID: 2, IndexID: 104},
+		},
+		Infos: []*querypb.SegmentLoadInfo{{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:     1,
+					IndexID:     101,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				},
+				{FieldID: 2, IndexID: 102},
+				{
+					FieldID:     1,
+					IndexID:     103,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+				},
+				{FieldID: 2, IndexID: 104},
+			},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	for i, expected := range []bool{true, false, true, true} {
+		actual, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[i].GetIndexParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+	_, hasTypeValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetTypeParams()...)
+	assert.True(t, hasTypeValue)
+	_, hasIndexValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetIndexParams()...)
+	assert.True(t, hasIndexValue)
+	userValue, hasUserValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetUserIndexParams()...)
+	require.True(t, hasUserValue)
+	assert.True(t, userValue)
+
+	legacyValue, hasLegacyValue := common.IsEvictableEnabled(req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, hasLegacyValue)
+	assert.False(t, legacyValue)
+	_, originalTypeValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetTypeParams()...)
+	assert.True(t, originalTypeValue)
+	_, originalIndexValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetIndexParams()...)
+	assert.True(t, originalIndexValue)
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesUsesIndexUserParamsWithoutCollectionDefault(t *testing.T) {
+	binlog := &datapb.FieldBinlog{FieldID: 1}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			FieldID:         1,
+			IndexID:         101,
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			BinlogPaths: []*datapb.FieldBinlog{binlog},
+			IndexInfos:  []*querypb.FieldIndexInfo{{FieldID: 1, IndexID: 101}},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	value, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, exist)
+	assert.False(t, value)
+	assert.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
+	require.Same(t, binlog, materialized.GetInfos()[0].GetBinlogPaths()[0], "cache policy materialization must not deep-copy binlog metadata")
+	require.NotSame(t, req.GetInfos()[0].GetIndexInfos()[0], materialized.GetInfos()[0].GetIndexInfos()[0])
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesDoesNotUseFieldTypeParamsForIndexEvictable(t *testing.T) {
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.EvictableScalarIndexKey, Value: "true"}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			FieldID:    1,
+			IndexID:    101,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 1, IndexID: 101}},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	value, exists := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, exists)
+	assert.True(t, value, "field type params must not override the collection index policy")
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesWarmup(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.WarmupScalarFieldKey, Value: common.WarmupSync},
+			{Key: common.WarmupVectorFieldKey, Value: common.WarmupDisable},
+			{Key: common.WarmupScalarIndexKey, Value: common.WarmupAsync},
+			{Key: common.WarmupVectorIndexKey, Value: common.WarmupSync},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "scalar", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				Name:       "explicit_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				Name:       "explicit_struct",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupAsync}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, Name: "nested_scalar", DataType: schemapb.DataType_Int64},
+					{
+						FieldID:    12,
+						Name:       "explicit_nested_vector",
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+					},
+				},
+			},
+		},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: schema,
+		Infos: []*querypb.SegmentLoadInfo{{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{FieldID: 1},
+				{FieldID: 2},
+				{FieldID: 11},
+				{FieldID: 12},
+				{
+					FieldID:     3,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	require.False(t, common.FieldHasWarmupKey(req.GetSchema(), 1))
+	require.False(t, common.FieldHasWarmupKey(req.GetSchema(), 2))
+	require.False(t, common.FieldHasWarmupKey(req.GetSchema(), 11))
+	require.True(t, common.FieldHasWarmupKey(req.GetSchema(), 12))
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
+	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[1].GetIndexParams())
+
+	assertFieldWarmup := func(fieldID int64, expected string) {
+		helper, err := typeutil.CreateSchemaHelper(materialized.GetSchema())
+		require.NoError(t, err)
+		field, err := helper.GetFieldFromID(fieldID)
+		require.NoError(t, err)
+		actual, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+	assertFieldWarmup(1, common.WarmupSync)
+	assertFieldWarmup(2, common.WarmupDisable)
+	assertFieldWarmup(3, common.WarmupDisable)
+	assertFieldWarmup(11, common.WarmupAsync)
+	assertFieldWarmup(12, common.WarmupDisable)
+
+	for i, expected := range []string{
+		common.WarmupAsync,
+		common.WarmupSync,
+		common.WarmupAsync,
+		common.WarmupSync,
+		common.WarmupDisable,
+	} {
+		actual, exist := common.GetWarmupPolicy(materialized.GetInfos()[0].GetIndexInfos()[i].GetIndexParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesClonesLoaderMutableEnvelopes(t *testing.T) {
+	indexInfo := &querypb.FieldIndexInfo{
+		FieldID:     1,
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+	}
+	segmentInfo := &querypb.SegmentLoadInfo{
+		IndexInfos: []*querypb.FieldIndexInfo{indexInfo},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.WarmupScalarFieldKey, Value: common.WarmupDisable}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		Infos: []*querypb.SegmentLoadInfo{segmentInfo},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	require.NotSame(t, segmentInfo, materialized.GetInfos()[0])
+	require.NotSame(t, indexInfo, materialized.GetInfos()[0].GetIndexInfos()[0])
+
+	materialized.GetInfos()[0].UseTakeForOutput = true
+	materialized.GetInfos()[0].GetIndexInfos()[0].IndexParams = nil
+	assert.False(t, segmentInfo.GetUseTakeForOutput())
+	assert.NotEmpty(t, indexInfo.GetIndexParams())
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesSharesImmutableIndexMetadata(t *testing.T) {
+	indexParams := make([]*commonpb.KeyValuePair, 1, 4)
+	indexParams[0] = &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: "INVERTED"}
+	indexInfo := &querypb.FieldIndexInfo{
+		FieldID:        1,
+		IndexParams:    indexParams,
+		IndexFilePaths: []string{"index/1/part-0", "index/1/part-1"},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.WarmupScalarIndexKey, Value: common.WarmupSync}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		Infos: []*querypb.SegmentLoadInfo{{IndexInfos: []*querypb.FieldIndexInfo{indexInfo}}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+	materializedIndex := materialized.GetInfos()[0].GetIndexInfos()[0]
+
+	require.NotSame(t, indexInfo, materializedIndex)
+	require.NotEmpty(t, materializedIndex.GetIndexFilePaths())
+	assert.True(t,
+		&indexInfo.IndexFilePaths[0] == &materializedIndex.IndexFilePaths[0],
+		"immutable index-file metadata should keep its backing storage")
+	require.NotEmpty(t, materializedIndex.GetIndexParams())
+	assert.False(t,
+		&indexInfo.IndexParams[0] == &materializedIndex.IndexParams[0],
+		"the mutable index-parameter slice needs independent backing storage")
+	assert.Same(t, indexInfo.IndexParams[0], materializedIndex.IndexParams[0])
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesNoOp(t *testing.T) {
+	t.Run("no collection defaults", func(t *testing.T) {
+		req := &querypb.LoadSegmentsRequest{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+			},
+			Infos: []*querypb.SegmentLoadInfo{{
+				BinlogPaths: []*datapb.FieldBinlog{{FieldID: 1}},
+			}},
+		}
+
+		assert.Same(t, req, materializeLoadSegmentsCachePolicyOverrides(req))
+	})
+
+	t.Run("defaults already materialized", func(t *testing.T) {
+		req := &querypb.LoadSegmentsRequest{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.WarmupScalarFieldKey, Value: common.WarmupDisable},
+					{Key: common.WarmupScalarIndexKey, Value: common.WarmupSync},
+					{Key: common.EvictableScalarFieldKey, Value: "false"},
+					{Key: common.EvictableScalarIndexKey, Value: "true"},
+				},
+				Fields: []*schemapb.FieldSchema{{
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.WarmupKey, Value: common.WarmupDisable},
+						{Key: common.EvictableKey, Value: "false"},
+					},
+				}},
+			},
+			Infos: []*querypb.SegmentLoadInfo{{
+				IndexInfos: []*querypb.FieldIndexInfo{{
+					FieldID: 1,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.WarmupKey, Value: common.WarmupSync},
+						{Key: common.EvictableKey, Value: "true"},
+					},
+				}},
+			}},
+		}
+
+		assert.Same(t, req, materializeLoadSegmentsCachePolicyOverrides(req))
+	})
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesIgnoresUnmatchedEvictableMetadata(t *testing.T) {
+	req := &querypb.LoadSegmentsRequest{
+		LoadScope: querypb.LoadScope_Delta,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			IndexID:         101,
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			BinlogPaths: []*datapb.FieldBinlog{{FieldID: 1}},
+		}},
+	}
+
+	assert.Same(t, req, materializeLoadSegmentsCachePolicyOverrides(req))
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsLeavesLocalDefaultsUnmaterializedAtWorkerBoundary() {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: suite.collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
+	request := &querypb.LoadSegmentsRequest{
+		CollectionID:  suite.collectionID,
+		Schema:        schema,
+		LoadMeta:      &querypb.LoadMetaInfo{CollectionID: suite.collectionID},
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: []*indexpb.IndexInfo{{FieldID: 2}},
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     suite.validSegmentIDs[0],
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[0],
+				InsertChannel: suite.vchannel,
+				IndexInfos:    []*querypb.FieldIndexInfo{{FieldID: 2}},
+			},
+		},
+	}
+	original := typeutil.Clone(request)
+
+	oldScalarField := paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+	oldVectorField := paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
+	oldScalarIndex := paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
+	oldVectorIndex := paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue(oldScalarField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue(oldVectorField)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue(oldScalarIndex)
+	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue(oldVectorIndex)
+
+	collectionManager := segments.NewMockCollectionManager(suite.T())
+	loader := segments.NewMockLoader(suite.T())
+	originalManager := suite.node.manager.Collection
+	originalLoader := suite.node.loader
+	suite.node.manager.Collection = collectionManager
+	suite.node.loader = loader
+	defer func() {
+		suite.node.manager.Collection = originalManager
+		suite.node.loader = originalLoader
+	}()
+
+	collectionManager.EXPECT().PutOrRef(
+		suite.collectionID,
+		mock.MatchedBy(func(schema *schemapb.CollectionSchema) bool {
+			for _, field := range schema.GetFields() {
+				if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
+					return false
+				}
+				if _, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
+					return false
+				}
+			}
+			return true
+		}),
+		mock.Anything,
+		request.GetLoadMeta(),
+	).Return(nil).Once()
+	collectionManager.EXPECT().Unref(suite.collectionID, uint32(1)).Return(true).Once()
+	loader.EXPECT().ReopenSegments(mock.Anything, mock.MatchedBy(func(infos []*querypb.SegmentLoadInfo) bool {
+		indexParams := infos[0].GetIndexInfos()[0].GetIndexParams()
+		_, hasEvictable := common.IsEvictableEnabled(indexParams...)
+		_, hasWarmup := common.GetWarmupPolicy(indexParams...)
+		return !hasEvictable && !hasWarmup
+	})).Return(nil).Once()
+
+	status, err := suite.node.LoadSegments(ctx, request)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(status))
+	suite.True(proto.Equal(original, request), "worker materialization must not mutate the caller request")
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsTransferDoesNotMaterializeCachePolicyOverrides() {
+	ctx := context.Background()
+	channel := "transfer-before-materialize"
+	schema := &schemapb.CollectionSchema{
+		Name: suite.collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	request := &querypb.LoadSegmentsRequest{
+		Base:          &commonpb.MsgBase{},
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.GetNodeID(),
+		Schema:        schema,
+		NeedTransfer:  true,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: []*indexpb.IndexInfo{{FieldID: 1}},
+		Infos:         []*querypb.SegmentLoadInfo{{SegmentID: 1, CollectionID: suite.collectionID, InsertChannel: channel, IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 1}}}},
+	}
+
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	delegator.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(forwarded *querypb.LoadSegmentsRequest) bool {
+		fieldParams := forwarded.GetSchema().GetFields()[0].GetTypeParams()
+		indexParams := forwarded.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()
+		_, fieldHasEvictable := common.IsEvictableEnabled(fieldParams...)
+		_, fieldHasWarmup := common.GetWarmupPolicy(fieldParams...)
+		_, indexHasEvictable := common.IsEvictableEnabled(indexParams...)
+		_, indexHasWarmup := common.GetWarmupPolicy(indexParams...)
+		return !forwarded.GetNeedTransfer() &&
+			!fieldHasEvictable && !fieldHasWarmup &&
+			!indexHasEvictable && !indexHasWarmup
+	})).Return(nil).Once()
+	suite.node.delegators.Insert(channel, delegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	status, err := suite.node.LoadSegments(ctx, request)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(status))
 }
 
 func (suite *ServiceSuite) TestReleaseCollection_Normal() {

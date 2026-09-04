@@ -87,9 +87,13 @@ SealedIndexTranslator::SealedIndexTranslator(
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load
-          !(IsVectorDataType(load_index_info->field_type) &&
-            knowhere::IndexFactory::Instance().FeatureCheck(
-                index_info_.index_type, knowhere::feature::LAZY_LOAD)),
+          // TODO: Forward load_index_info->support_eviction to index
+          // implementations through an internal load config; the public
+          // "evictable" key must not reach Knowhere.
+          load_index_info->support_eviction &&
+              !(IsVectorDataType(load_index_info->field_type) &&
+                knowhere::IndexFactory::Instance().FeatureCheck(
+                    index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
     std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;

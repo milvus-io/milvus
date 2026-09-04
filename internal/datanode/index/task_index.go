@@ -189,19 +189,14 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	// type params can be removed
-	for _, kvPair := range it.req.GetTypeParams() {
+	for _, kvPair := range indexparams.FilterBuildParams(it.req.GetTypeParams()) {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		typeParams[key] = value
 		indexParams[key] = value
 	}
 
-	for _, kvPair := range it.req.GetIndexParams() {
+	for _, kvPair := range indexparams.FilterBuildParams(it.req.GetIndexParams()) {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		// knowhere would report error if encountered the unknown key,
-		// so skip this
-		if key == common.MmapEnabledKey {
-			continue
-		}
 		indexParams[key] = value
 	}
 	it.newTypeParams = typeParams

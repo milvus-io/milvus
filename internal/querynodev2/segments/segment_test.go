@@ -242,21 +242,33 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.Key)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key, "2.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
 
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{{
-			FieldID:  101,
-			Name:     "field_101",
-			DataType: schemapb.DataType_Int64,
+			FieldID:    101,
+			Name:       "field_101",
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
 		}},
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:      11,
 		PartitionID:    22,
 		CollectionID:   33,
+		NumOfRows:      100,
 		Level:          datapb.SegmentLevel_L1,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   "files/manifest",
@@ -269,7 +281,24 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 				}},
 			},
 		},
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			101: {FieldID: 101, MemorySize: 100},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, MemorySize: 50},
+		},
 	}
+	expectedUsage := uint64(4096 + 100*2 + 50*3)
+	expectedUsage += estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+
+	fallbackSegment := &baseSegment{
+		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
+		segmentType:        SegmentTypeSealed,
+		loadInfo:           atomic.NewPointer(typeutil.Clone(loadInfo)),
+		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+	}
+	assert.EqualValues(t, expectedUsage, fallbackSegment.ResourceUsageEstimate().MemorySize)
+
 	segment := &baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
 		segmentType:        SegmentTypeSealed,
@@ -283,9 +312,9 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	assert.Nil(t, segment.LoadInfo().GetStats())
 	cached := segment.resourceUsageCache.Load()
 	if assert.NotNil(t, cached) {
-		assert.EqualValues(t, 4096, cached.MemorySize)
+		assert.EqualValues(t, expectedUsage, cached.MemorySize)
 	}
-	assert.EqualValues(t, 4096, segment.ResourceUsageEstimate().MemorySize)
+	assert.EqualValues(t, expectedUsage, segment.ResourceUsageEstimate().MemorySize)
 }
 
 func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {

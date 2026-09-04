@@ -274,7 +274,22 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// Allocate or use provided index ID
+	// Validate the final request before the existing-index fast path. Runtime
+	// properties do not affect build identity, but malformed values must not be
+	// accepted as an idempotent retry.
+	typeParams := DeleteParams(req.GetTypeParams(), runtimeConfigTypeParamKeys())
+	index := &model.Index{
+		CollectionID:    req.GetCollectionID(),
+		FieldID:         req.GetFieldID(),
+		IndexName:       req.GetIndexName(),
+		TypeParams:      typeParams,
+		IndexParams:     req.GetIndexParams(),
+		CreateTime:      req.GetTimestamp(),
+		IsAutoIndex:     req.GetIsAutoIndex(),
+		UserIndexParams: req.GetUserIndexParams(),
+	}
+
+	// Allocate or use provided index ID.
 	var indexID int64
 	if req.GetPreserveIndexId() {
 		// For snapshot restore: use provided index ID instead of allocating a new one
@@ -287,7 +302,13 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		mlog.Info(ctx, "using preserved index ID for snapshot restore",
 			mlog.Int64("indexID", indexID))
-	} else {
+	}
+
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+		return nil, err
+	}
+
+	if !req.GetPreserveIndexId() {
 		// Normal path: allocate new index ID
 		var err error
 		_, err = s.allocator.AllocID(ctx)
@@ -320,25 +341,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-	// exclude the warmup policy param also, similar to mmap.enable param
-	typeParams = DeleteParams(typeParams, []string{common.WarmupKey})
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-	// Validate the index params.
-	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
-		return nil, err
-	}
+	index.IndexID = indexID
 
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
@@ -363,6 +366,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+func runtimeConfigTypeParamKeys() []string {
+	return []string{common.MmapEnabledKey, common.WarmupKey, common.EvictableKey}
+}
+
+func validateEvictableIndexParams(params []*commonpb.KeyValuePair) error {
+	for _, param := range params {
+		if param.GetKey() == common.EvictableKey {
+			return common.ValidateEvictableEnabled(param.GetValue())
+		}
+	}
+	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
@@ -445,6 +461,9 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	}
 
 	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
+	if err := validateEvictableIndexParams(req.GetParams()); err != nil {
+		return merr.Status(merr.Wrap(err, "invalid evictable index params")), nil
+	}
 
 	for _, index := range indexes {
 		if len(req.GetParams()) > 0 {

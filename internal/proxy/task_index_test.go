@@ -2117,6 +2117,43 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}, task.newExtraParams)
 	})
 
+	t.Run("runtime params are allowed with implicit AutoIndex", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "false"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
+			{Key: common.EvictableKey, Value: "false"},
+		}, task.newExtraParams)
+	})
+
+	t.Run("runtime params are allowed with explicit AutoIndex", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+					{Key: common.EvictableKey, Value: "true"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
+			{Key: common.EvictableKey, Value: "true"},
+		}, task.newExtraParams)
+	})
+
 	t.Run("case 4, duplicate and useless parameters passed", func(t *testing.T) {
 		task := &createIndexTask{
 			fieldSchema: fieldSchema,

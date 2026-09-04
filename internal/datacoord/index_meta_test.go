@@ -2207,6 +2207,72 @@ func TestCheckParams(t *testing.T) {
 		}
 		assert.True(t, checkParams(fieldIndex, req))
 	})
+
+	t.Run("evictable enabled should be ignored", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.EvictableKey, Value: "false"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("configurable user index params should be ignored symmetrically", func(t *testing.T) {
+		for _, key := range []string{
+			common.MmapEnabledKey,
+			common.WarmupKey,
+			common.IndexOffsetCacheEnabledKey,
+			common.EvictableKey,
+		} {
+			t.Run(key, func(t *testing.T) {
+				for _, test := range []struct {
+					name           string
+					storedValue    string
+					requestedValue string
+				}{
+					{name: "stored only", storedValue: "stored-value"},
+					{name: "request only", requestedValue: "requested-value"},
+					{name: "different values", storedValue: "stored-value", requestedValue: "requested-value"},
+				} {
+					t.Run(test.name, func(t *testing.T) {
+						storedParams := []*commonpb.KeyValuePair{
+							{Key: common.MetricTypeKey, Value: "L2"},
+							{Key: common.IndexTypeKey, Value: "HNSW"},
+						}
+						if test.storedValue != "" {
+							storedParams = append(storedParams, &commonpb.KeyValuePair{Key: key, Value: test.storedValue})
+						}
+
+						requestedParams := []*commonpb.KeyValuePair{
+							{Key: common.MetricTypeKey, Value: "L2"},
+							{Key: common.IndexTypeKey, Value: "HNSW"},
+						}
+						if test.requestedValue != "" {
+							requestedParams = append(requestedParams, &commonpb.KeyValuePair{Key: key, Value: test.requestedValue})
+						}
+
+						fieldIndex := &model.Index{UserIndexParams: storedParams}
+						req := &indexpb.CreateIndexRequest{UserIndexParams: requestedParams}
+						assert.True(t, checkParams(fieldIndex, req))
+					})
+				}
+			})
+		}
+	})
 }
 
 // TestStoredIndexFilesSizeMetric exercises the stored_index_files_size gauge
