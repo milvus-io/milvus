@@ -52,6 +52,7 @@ const (
 	ExtfsKeyGCPTargetServiceAccount = "gcp_target_service_account"
 	ExtfsKeyRegion                  = "region"
 	ExtfsKeyCloudProvider           = "cloud_provider"
+	ExtfsKeyEndpointURL             = "endpoint_url"
 	ExtfsKeyBucketName              = "bucket_name"
 	ExtfsKeyIAMEndpoint             = "iam_endpoint"
 	ExtfsKeyStorageType             = "storage_type"
@@ -147,6 +148,7 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeyUseVirtualHost:          true,
 	ExtfsKeyRegion:                  true,
 	ExtfsKeyCloudProvider:           true,
+	ExtfsKeyEndpointURL:             true,
 	ExtfsKeyIAMEndpoint:             true,
 	ExtfsKeyStorageType:             true,
 	ExtfsKeySSLCACert:               true,
