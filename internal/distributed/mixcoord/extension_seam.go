@@ -38,9 +38,48 @@ type activeNotifier interface {
 	OnActive(fn func())
 }
 
-// engineLifecycleMu orders an activation-time Start against a Stop, so a stop
-// during activation neither races nor leaves the engine running.
-var engineLifecycleMu sync.Mutex
+// engineLifecycle orders the engine's Start, which runs on activation, against
+// its Stop, which runs on shutdown. The lock guards nothing but the two flags:
+// it is never held across Start or Stop, so a shutdown that arrives during a
+// slow Start returns at once and the engine's own Stop is what interrupts the
+// Start (see extension.CoordinatorEngine). The flags decide three things:
+//
+//   - Stop before or without Start is a no-op. A standby is stopped without
+//     ever having been activated, and its engine was never started; the seam
+//     does not call Stop on it.
+//   - Stop before Start also cancels the Start: an activation that fires after
+//     shutdown began does not start an engine nothing will stop.
+//   - Start runs at most once, whatever fires it.
+type engineLifecycle struct {
+	mu      sync.Mutex
+	started bool
+	stopped bool
+}
+
+var lifecycle engineLifecycle
+
+// beginStart claims the one Start, and refuses it once Stop has been asked for.
+func (l *engineLifecycle) beginStart() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started || l.stopped {
+		return false
+	}
+	l.started = true
+	return true
+}
+
+// beginStop claims the one Stop, and reports whether there is a started engine
+// to stop.
+func (l *engineLifecycle) beginStop() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopped {
+		return false
+	}
+	l.stopped = true
+	return l.started
+}
 
 // startCoordinatorEngine starts the installed engine over the coordinator
 // client once this replica is ACTIVE. A start failure on activation is fatal:
@@ -52,6 +91,10 @@ func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent, 
 		return nil
 	}
 	start := func() error {
+		if !lifecycle.beginStart() {
+			mlog.Info(ctx, "coordinator engine not started: already started, or stopped before activation")
+			return nil
+		}
 		if err := engine.Start(ctx, client); err != nil {
 			return err
 		}
@@ -63,8 +106,6 @@ func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent, 
 		return start()
 	}
 	notifier.OnActive(func() {
-		engineLifecycleMu.Lock()
-		defer engineLifecycleMu.Unlock()
 		if err := start(); err != nil {
 			mlog.Panic(ctx, "coordinator engine failed to start on activation", mlog.Err(err))
 		}
@@ -72,15 +113,19 @@ func startCoordinatorEngine(ctx context.Context, coord types.MixCoordComponent, 
 	return nil
 }
 
-// stopCoordinatorEngine stops the installed engine; its error is logged, not
-// returned, because the coordinator shutdown must not hang on it.
+// stopCoordinatorEngine stops the installed engine if it was started; its
+// error is logged, not returned, because the coordinator shutdown must not hang
+// on it. It does not wait for a Start still in progress: the engine's Stop is
+// what ends that Start.
 func stopCoordinatorEngine(ctx context.Context) {
 	engine := coordinatorEngine()
 	if engine == nil {
 		return
 	}
-	engineLifecycleMu.Lock()
-	defer engineLifecycleMu.Unlock()
+	if !lifecycle.beginStop() {
+		mlog.Info(ctx, "coordinator engine not stopped: it was never started")
+		return
+	}
 	if err := engine.Stop(); err != nil {
 		mlog.Warn(ctx, "coordinator engine stop failed", mlog.Err(err))
 	}

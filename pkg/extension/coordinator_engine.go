@@ -37,6 +37,17 @@ type Coordinator interface {
 // coordinator process. The coordinator starts it once this replica becomes
 // ACTIVE (a standby never starts it) and stops it on shutdown; between the two
 // the engine drives the coordinator through coord.
+//
+// The lifecycle contract:
+//
+//   - Start is called at most once, and only on an ACTIVE replica.
+//   - Stop is called at most once, and only after Start was called. A standby
+//     that shuts down never had its engine started and does not have it
+//     stopped; an engine should nevertheless treat a Stop without a Start as
+//     a no-op, since nothing but ordering guarantees it.
+//   - Stop may be called while Start is still running, because a shutdown does
+//     not wait for a slow activation. Stop must then make Start return, and
+//     leave the engine stopped; the two run on different goroutines.
 type CoordinatorEngine interface {
 	Start(ctx context.Context, coord Coordinator) error
 	Stop() error
