@@ -57,6 +57,13 @@ var (
 	warmupPool atomic.Pointer[conc.Pool[any]]
 	warmupOnce sync.Once
 
+	// mutatePool serves the online write CGO path (segment Insert/Delete).
+	// It is isolated from the load/management work on DynamicPool so that a
+	// burst of segment loading (e.g. delta-log replay after compaction) cannot
+	// starve online insert/delete, which would otherwise stall tSafe advancement.
+	mutatePool     atomic.Pointer[conc.Pool[any]]
+	mutatePoolOnce sync.Once
+
 	deletePool     atomic.Pointer[conc.Pool[struct{}]]
 	deletePoolOnce sync.Once
 
@@ -70,6 +77,7 @@ var (
 	cgoTagSQ      = C.CString("CGO_SQ")
 	cgoTagLoad    = C.CString("CGO_LOAD")
 	cgoTagDynamic = C.CString("CGO_DYN")
+	cgoTagMutate  = C.CString("CGO_MUTATE")
 	cgoTagWarmup  = C.CString("CGO_WARMUP")
 )
 
@@ -95,9 +103,18 @@ func initSQPool() {
 	})
 }
 
+func dynamicPoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.DynamicPoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
 func initDynamicPool() {
 	dynOnce.Do(func() {
-		size := hardware.GetCPUNum()
+		pt := paramtable.Get()
+		size := dynamicPoolSize()
 		pool := conc.NewPool[any](
 			size,
 			conc.WithPreAlloc(false),
@@ -109,7 +126,40 @@ func initDynamicPool() {
 		)
 
 		dp.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, config.NewHandler("qn.dynamicpool.sizefactor", ResizeDynamicPool))
 		log.Info("init dynamicPool done", zap.Int("size", size))
+	})
+}
+
+func mutatePoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.MutatePoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
+// initMutatePool initializes the dedicated pool for the online-write CGO path
+// (segment Insert/Delete), isolated from segment loading on DynamicPool/LoadPool
+// so a post-compaction delta-replay burst cannot starve online writes and freeze
+// tSafe advancement (#49435).
+func initMutatePool() {
+	mutatePoolOnce.Do(func() {
+		pt := paramtable.Get()
+		size := mutatePoolSize()
+		pool := conc.NewPool[any](
+			size,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagMutate)
+			}), // lock os thread for cgo thread disposal
+		)
+
+		mutatePool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, config.NewHandler("qn.mutatepool.sizefactor", ResizeMutatePool))
+		log.Info("init mutatePool done", zap.Int("size", size))
 	})
 }
 
@@ -179,10 +229,22 @@ func initBFApplyPool() {
 	})
 }
 
+func deletePoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.DeletePoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
 func initDeletePool() {
 	deletePoolOnce.Do(func() {
-		pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+		pt := paramtable.Get()
+		size := deletePoolSize()
+		pool := conc.NewPool[struct{}](size)
 		deletePool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.DeletePoolSizeFactor.Key, config.NewHandler("qn.deletepool.sizefactor", ResizeDeletePool))
+		log.Info("init deletePool done", zap.Int("size", size))
 	})
 }
 
@@ -196,6 +258,13 @@ func GetSQPool() *conc.Pool[any] {
 func GetDynamicPool() *conc.Pool[any] {
 	initDynamicPool()
 	return dp.Load()
+}
+
+// GetMutatePool returns the singleton pool for online write cgo operations
+// (segment Insert/Delete).
+func GetMutatePool() *conc.Pool[any] {
+	initMutatePool()
+	return mutatePool.Load()
 }
 
 func GetLoadPool() *conc.Pool[any] {
@@ -265,6 +334,24 @@ func ResizeBM25LoadPool(evt *config.Event) {
 	}
 }
 
+func ResizeMutatePool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetMutatePool(), mutatePoolSize(), "MutatePool")
+	}
+}
+
+func ResizeDynamicPool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetDynamicPool(), dynamicPoolSize(), "DynamicPool")
+	}
+}
+
+func ResizeDeletePool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetDeletePool(), deletePoolSize(), "DeletePool")
+	}
+}
+
 // CollectPoolStats returns current stats for all goroutine pools.
 // Called by PoolMetricsCollector at Prometheus scrape time (pull model).
 func CollectPoolStats() []metrics.PoolStats {
@@ -280,6 +367,7 @@ func CollectPoolStats() []metrics.PoolStats {
 	refs := []poolRef{
 		{"SQPool", GetSQPool()},
 		{"DynamicPool", GetDynamicPool()},
+		{"MutatePool", GetMutatePool()},
 		{"LoadPool", GetLoadPool()},
 		{"WarmupPool", GetWarmupPool()},
 		{"BFApplyPool", GetBFApplyPool()},
@@ -299,7 +387,7 @@ func CollectPoolStats() []metrics.PoolStats {
 	return stats
 }
 
-func resizePool(pool *conc.Pool[any], newSize int, tag string) {
+func resizePool[T any](pool *conc.Pool[T], newSize int, tag string) {
 	log := log.Ctx(context.Background()).
 		With(
 			zap.String("poolTag", tag),
