@@ -49,33 +49,10 @@ const (
 	membershipRoaring
 )
 
-// membershipFilterSpec records the per-kind properties that control flow needs.
-// Everything else about a kind stays in its format validator; only behavior
-// switches belong here.
-type membershipFilterSpec struct {
-	kind membershipKind
-	// allowInDelete reports whether the kind is safe for delete expressions:
-	// false positives would remove rows outside the caller's set, so only the
-	// exact kinds are allowed (design doc 20260707-bloom-filter-expression).
-	allowInDelete bool
-}
-
-// membershipSpecByName covers the accepted surface name. The unified
-// entry has kind membershipUnknown: its kind comes from the blob magic at fill
-// time, and its allowInDelete default is the conservative answer for any code
-// path that must decide before the blob is inspected.
-var membershipSpecByName = map[string]membershipFilterSpec{
-	MembershipMatchFunctionName: {
-		kind:          membershipUnknown,
-		allowInDelete: false,
-	},
-}
-
 // isMembershipFunctionName reports whether name is the membership-filter
 // surface function handled by the unified skeleton.
 func isMembershipFunctionName(name string) bool {
-	_, ok := membershipSpecByName[name]
-	return ok
+	return name == MembershipMatchFunctionName
 }
 
 // sniffMembershipKind identifies the blob format from its magic header. Both
@@ -375,15 +352,8 @@ func hasDeleteUnsafeMembershipFilterExpr(expr *planpb.Expr) bool {
 		case *planpb.Expr_RoaringFilterExpr:
 			return false
 		case *planpb.Expr_CallExpr:
-			spec, ok := membershipSpecByName[e.CallExpr.GetFunctionName()]
-			if !ok {
-				return false
-			}
-			if spec.kind == membershipUnknown {
-				// Deferred unified call: kind unknown here, fail closed.
-				return true
-			}
-			return !spec.allowInDelete
+			// Deferred unified call: kind unknown here, fail closed.
+			return isMembershipFunctionName(e.CallExpr.GetFunctionName())
 		default:
 			return false
 		}
