@@ -875,7 +875,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, true, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}
@@ -1831,6 +1831,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 	}))
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
+	maxJSONStatsDataFormat := int64(1)
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 
@@ -1855,6 +1856,9 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
+			if fieldStats.GetJsonKeyStatsDataFormat() > maxJSONStatsDataFormat {
+				maxJSONStatsDataFormat = fieldStats.GetJsonKeyStatsDataFormat()
+			}
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := metautil.BuildJSONKeyStatsPrefix(gc.option.cli.RootPath(), fieldStats.GetJsonKeyStatsDataFormat(),
@@ -1892,44 +1896,47 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					return
 				}
 			}
+		}
+	}
 
-			// clear low data format version stats file
-			// for upgrade from old version to new version, we need to clear the old data format version stats file
-			for i := int64(1); i < fieldStats.GetJsonKeyStatsDataFormat(); i++ {
-				prefix := fmt.Sprintf("%s/%s/%d", gc.option.cli.RootPath(), common.JSONStatsPath, i)
-				futures := make([]*conc.Future[struct{}], 0)
+	// Clear files from older data formats once per global format prefix.
+	for dataFormat := int64(1); dataFormat < maxJSONStatsDataFormat; dataFormat++ {
+		if ctx.Err() != nil {
+			return
+		}
+		gc.ackSignal(signal)
+		prefix := fmt.Sprintf("%s/%s/%d", gc.option.cli.RootPath(), common.JSONStatsPath, dataFormat)
+		futures := make([]*conc.Future[struct{}], 0)
 
-				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
-					fileNum++
-					file := files.FilePath
+		err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+			fileNum++
+			file := files.FilePath
 
-					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(mlog.String("file", file))
-						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
+			future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+				log := mlog.With(mlog.String("file", file))
+				log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
 
-						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
-							return struct{}{}, err
-						}
-						deletedFilesNum.Inc()
-						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file success")
-						return struct{}{}, nil
-					})
-					futures = append(futures, future)
-					return true
-				})
-
-				// Wait for all remove tasks done.
-				if err := conc.BlockOnAll(futures...); err != nil {
-					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+				if err := gc.option.cli.Remove(ctx, file); err != nil {
+					log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
+					return struct{}{}, err
 				}
+				deletedFilesNum.Inc()
+				log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file success")
+				return struct{}{}, nil
+			})
+			futures = append(futures, future)
+			return true
+		})
 
-				if err != nil {
-					log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", mlog.Err(err))
-					return
-				}
-			}
+		// Wait for all remove tasks done.
+		if err := conc.BlockOnAll(futures...); err != nil {
+			// error is logged, and can be ignored here.
+			log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+		}
+
+		if err != nil {
+			log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", mlog.Err(err))
+			return
 		}
 	}
 	log.Info(ctx, "json stats files recycle done",

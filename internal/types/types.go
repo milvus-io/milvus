@@ -303,6 +303,9 @@ type MixCoord interface {
 
 	GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*DataCoordTopology, error)
 
+	// GetConnectedDataNodeMetrics collects metrics from DataNodes registered with DataCoord.
+	GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error)
+
 	GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*QueryCoordTopology, error)
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component

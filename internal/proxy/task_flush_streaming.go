@@ -44,7 +44,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "flushTaskByStreamingService.Execute", mlog.Int("collectionNum", len(t.CollectionNames)), mlog.Uint64("flushTs", flushTs))
 	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	for _, collName := range t.CollectionNames {
-		collID, err := t.getMetaCache().GetCollectionID(t.ctx, t.DbName, collName)
+		collID, err := t.GetMetaCache().GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
 			return err
 		}

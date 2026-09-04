@@ -85,7 +85,7 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 // as a readiness gate: until the proxy has published its meta cache (in
 // Proxy.Init), all requests are rejected with ServiceUnavailable, mirroring the
 // previous globalMetaCache == nil check that this PR's per-proxy cache removed.
-func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth.AuthFunc {
+func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		// The keys within metadata.MD are normalized to lowercase.
 		// See: https://godoc.org/google.golang.org/grpc/metadata#New
@@ -93,7 +93,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 		if !ok {
 			return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 		}
-		if getMetaCache() == nil {
+		if GetMetaCache() == nil {
 			return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 		}
 		// check rpc call from sdk

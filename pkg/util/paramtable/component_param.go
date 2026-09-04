@@ -4356,7 +4356,12 @@ It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), 
 eviction is necessary and the amount of data to evict from memory/disk.
 - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
   until the memory/disk usage is below the low watermark.
-- The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.`,
+- Disk watermark ratios are fractions of the effective local-storage disk capacity, not fractions of
+  queryNode.maxDiskUsagePercentage. They must satisfy diskLowWatermarkRatio <= diskHighWatermarkRatio <=
+  queryNode.maxDiskUsagePercentage / 100. When lowering queryNode.maxDiskUsagePercentage, adjust the
+  disk watermarks as needed to preserve this ordering.
+- The max amount of memory/disk that can be used for cache is controlled by
+  queryCoord.overloadedMemoryThresholdPercentage and queryNode.maxDiskUsagePercentage.`,
 		Export: true,
 	}
 	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
@@ -5135,6 +5140,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			return fmt.Sprintf("%f", getAsFloat(v)/100)
 		},
+		Doc:    "Maximum disk usage as a percentage of the effective local-storage disk capacity.",
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)

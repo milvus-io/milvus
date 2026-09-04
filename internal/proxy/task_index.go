@@ -529,7 +529,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) error {
-	schema, err := cit.getMetaCache().GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
+	schema, err := cit.GetMetaCache().GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
 	if err != nil {
 		mlog.Error(ctx, "failed to get collection schema", mlog.Err(err))
 		return merr.Wrap(err, "failed to get collection schema")
@@ -601,13 +601,13 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	collName := cit.req.GetCollectionName()
 
-	collID, err := cit.getMetaCache().GetCollectionID(ctx, cit.req.GetDbName(), collName)
+	collID, err := cit.GetMetaCache().GetCollectionID(ctx, cit.req.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
 	cit.collectionID = collID
 
-	collInfo, err := cit.getMetaCache().GetCollectionInfo(ctx, cit.req.GetDbName(), cit.req.GetCollectionName(), cit.collectionID)
+	collInfo, err := cit.GetMetaCache().GetCollectionInfo(ctx, cit.req.GetDbName(), cit.req.GetCollectionName(), cit.collectionID)
 	if err != nil {
 		return err
 	}
@@ -739,7 +739,7 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 	collName := t.req.GetCollectionName()
 
-	collection, err := t.getMetaCache().GetCollectionID(ctx, t.req.GetDbName(), collName)
+	collection, err := t.GetMetaCache().GetCollectionID(ctx, t.req.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
@@ -849,7 +849,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collID, err := dit.getMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
+	collID, err := dit.GetMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -858,7 +858,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *describeIndexTask) Execute(ctx context.Context) error {
-	schema, err := dit.getMetaCache().GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
+	schema, err := dit.GetMetaCache().GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		mlog.Error(ctx, "failed to get collection schema", mlog.Err(err))
 		return merr.Wrap(err, "failed to get collection schema")
@@ -989,7 +989,7 @@ func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collID, err := dit.getMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
+	collID, err := dit.GetMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -998,7 +998,7 @@ func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
-	schema, err := dit.getMetaCache().GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
+	schema, err := dit.GetMetaCache().GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		mlog.Error(ctx, "failed to get collection schema", mlog.String("collection_name", dit.GetCollectionName()), mlog.Err(err))
 		return merr.Wrap(err, "failed to get collection schema")
@@ -1097,7 +1097,7 @@ func (dit *dropIndexTask) OnEnqueue() error {
 }
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
-	collID, err := dit.getMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
+	collID, err := dit.GetMetaCache().GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -1193,7 +1193,7 @@ func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 
 func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	collectionName := gibpt.CollectionName
-	collectionID, err := gibpt.getMetaCache().GetCollectionID(ctx, gibpt.GetDbName(), collectionName)
+	collectionID, err := gibpt.GetMetaCache().GetCollectionID(ctx, gibpt.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -1280,7 +1280,7 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 }
 
 func (gist *getIndexStateTask) Execute(ctx context.Context) error {
-	collectionID, err := gist.getMetaCache().GetCollectionID(ctx, gist.GetDbName(), gist.CollectionName)
+	collectionID, err := gist.GetMetaCache().GetCollectionID(ctx, gist.GetDbName(), gist.CollectionName)
 	if err != nil {
 		return err
 	}

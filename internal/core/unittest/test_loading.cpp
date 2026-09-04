@@ -338,6 +338,24 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
 }
 
+TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
+    milvus::segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
+    load_index_info.element_type = milvus::DataType::NONE;
+    load_index_info.index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC},
+        {"metric_type", knowhere::metric::IP},
+    };
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_size = 1024 * 1024;
+    load_index_info.num_rows = 1024;
+
+    auto request = EstimateLoadIndexResource(&load_index_info);
+
+    EXPECT_TRUE(request.has_raw_data);
+}
+
 TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
     milvus::segcore::LoadIndexInfo loadIndexInfo;
     ASSERT_FALSE(loadIndexInfo.load_resource_request.has_value());
