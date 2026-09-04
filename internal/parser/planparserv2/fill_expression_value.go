@@ -1,13 +1,277 @@
 package planparserv2
 
 import (
+	"bytes"
+	"fmt"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// MembershipPreflightBudget carries the membership-filter preflight state that
+// must be shared by every expression in one request: the main predicate, each
+// hybrid sub-request predicate, and each function-scorer filter.
+//
+// Scope matters. proxy.maxMembershipFilterPlanSize is the per-request ceiling,
+// but plan construction parses one expression per sub-request plus one per
+// scorer. Threading one budget through the whole request rejects repeated blob
+// occurrences before materialization and avoids re-validating the same Roaring
+// template once per scorer or hybrid sub-request.
+//
+// A nil *MembershipPreflightBudget is not shared state; callers that parse a
+// standalone expression can pass nil and get single-expression scope.
+type MembershipPreflightBudget struct {
+	maxPlanSize           int64
+	budgetInitialized     bool
+	occurrenceBytes       int64
+	aggregateDecodedBytes uint64
+
+	// validated caches structural validation across parses within the request.
+	// Keyed by template name, but only reused when the bytes are identical:
+	// hybrid sub-requests carry independent template maps, so the same name can
+	// legitimately refer to different blobs.
+	validated map[string]validatedRoaringBitmapBlob
+}
+
+func NewMembershipPreflightBudget() *MembershipPreflightBudget {
+	return &MembershipPreflightBudget{}
+}
+
+func (b *MembershipPreflightBudget) lookup(name string, blob []byte) (validatedRoaringBitmapBlob, bool) {
+	if b == nil || b.validated == nil {
+		return validatedRoaringBitmapBlob{}, false
+	}
+	cached, ok := b.validated[name]
+	if !ok || !bytes.Equal(cached.blob, blob) {
+		return validatedRoaringBitmapBlob{}, false
+	}
+	return cached, true
+}
+
+func (b *MembershipPreflightBudget) store(name string, validated validatedRoaringBitmapBlob) {
+	if b == nil {
+		return
+	}
+	if b.validated == nil {
+		b.validated = make(map[string]validatedRoaringBitmapBlob)
+	}
+	b.validated[name] = validated
+}
+
 func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.GenericValue) error {
+	return FillExpressionValueWithBudget(expr, templateValues, nil)
+}
+
+// FillExpressionValueWithBudget is FillExpressionValue with an explicit
+// request-scoped budget. Pass nil for single-expression scope.
+func FillExpressionValueWithBudget(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+) error {
+	return fillExpressionValueWithBudgetAndSchema(expr, templateValues, budget, nil)
+}
+
+// fillExpressionValueWithBudgetAndSchema preserves the public fill API for
+// hand-assembled plans while allowing the parser path to recover a field name
+// from the schema for fill-time membership diagnostics.
+func fillExpressionValueWithBudgetAndSchema(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+	schema *typeutil.SchemaHelper,
+) error {
+	if budget == nil {
+		budget = NewMembershipPreflightBudget()
+	}
+	ctx, err := preflightMembershipFilterValues(expr, templateValues, budget)
+	if err != nil {
+		return err
+	}
+	ctx.schema = schema
+	return fillExpressionValue(expr, templateValues, ctx)
+}
+
+type fillExpressionContext struct {
+	validatedRoaringBlobs map[string]validatedRoaringBitmapBlob
+	schema                *typeutil.SchemaHelper
+}
+
+type roaringTemplateBlob struct {
+	name string
+	blob []byte
+}
+
+// validatedRoaringBlob returns the request-cached structural validation for a
+// roaring template when the same bytes were already validated under this name,
+// or validates them now. The cache is populated by
+// preflightMembershipFilterValues, which runs before any materialization; a
+// miss here re-validates as a belt-and-braces fallback rather than skipping an
+// admission gate.
+func (c *fillExpressionContext) validatedRoaringBlob(name string, blob []byte) (validatedRoaringBitmapBlob, error) {
+	if cached, ok := c.validatedRoaringBlobs[name]; ok && bytes.Equal(cached.blob, blob) {
+		return cached, nil
+	}
+	return validateRoaringBitmapBlob(blob)
+}
+
+func (c *fillExpressionContext) membershipFieldName(columnInfo *planpb.ColumnInfo) string {
+	if c != nil && c.schema != nil {
+		if field, err := c.schema.GetFieldFromID(columnInfo.GetFieldId()); err == nil {
+			name := field.GetName()
+			nestedPath := columnInfo.GetNestedPath()
+			if field.GetIsDynamic() && len(nestedPath) != 0 {
+				// An implicit dynamic key is represented by the $meta field ID
+				// with the caller-visible key as the first nested-path component.
+				name = nestedPath[0]
+				nestedPath = nestedPath[1:]
+			}
+			for _, path := range nestedPath {
+				name += fmt.Sprintf("[%q]", path)
+			}
+			return name
+		}
+	}
+	return fmt.Sprintf("field ID %d", columnInfo.GetFieldId())
+}
+
+// preflightMembershipFilterValues charges every deferred blob occurrence
+// before any Roaring body is validated or materialized. This makes a repeated
+// reference to one template cheap to reject and validates each unique Roaring
+// template exactly once.
+func preflightMembershipFilterValues(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+) (*fillExpressionContext, error) {
+	ctx := &fillExpressionContext{}
+	if expr == nil || !expr.GetIsTemplate() {
+		return ctx, nil
+	}
+
+	var seenRoaringTemplates map[string]struct{}
+	var roaringOccurrenceCounts map[string]uint64
+	var orderedRoaringTemplates []roaringTemplateBlob
+	var preflightErr error
+	walkExpr(expr, func(node *planpb.Expr) bool {
+		call := node.GetCallExpr()
+		if call == nil || !isMembershipFunctionName(call.GetFunctionName()) {
+			return false
+		}
+		params := call.GetFunctionParameters()
+		if (len(params) != 2 && len(params) != 3) || params[1] == nil || !params[1].GetIsTemplate() {
+			return false
+		}
+		templateName := params[1].GetValueExpr().GetTemplateVariableName()
+		if templateName == "" {
+			return false
+		}
+		value, ok := templateValues[templateName]
+		if !ok || value == nil {
+			return false
+		}
+		blobValue, ok := value.GetVal().(*planpb.GenericValue_BytesVal)
+		if !ok {
+			return false
+		}
+
+		if !budget.budgetInitialized {
+			budget.maxPlanSize = paramtable.Get().ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64()
+			budget.budgetInitialized = true
+		}
+
+		// membership_match resolves its kind from the blob magic. A blob whose magic
+		// cannot be resolved is left to the fill path, which reports it as a
+		// canonical input error.
+		kind, _ := sniffMembershipKind(blobValue.BytesVal)
+
+		// Charge the BODY, matching the per-blob gate this early check mirrors:
+		// both MBF1 and MRB1 allow their fixed 32-byte header on top of the
+		// body budget, so a whole-blob charge would silently halve the usable
+		// tier for a maximum-sized filter (a 64 MiB SBBF body arrives as
+		// 64 MiB + 32 bytes). An unresolvable kind charges the full length,
+		// conservatively.
+		chargeBytes := int64(len(blobValue.BytesVal))
+		switch kind {
+		case membershipBloom:
+			if chargeBytes > mbf1HeaderSize {
+				chargeBytes -= mbf1HeaderSize
+			}
+		case membershipRoaring:
+			if chargeBytes > roaringfilter.HeaderSize {
+				chargeBytes -= roaringfilter.HeaderSize
+			}
+		}
+		if budget.occurrenceBytes > budget.maxPlanSize || chargeBytes > budget.maxPlanSize-budget.occurrenceBytes {
+			preflightErr = merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"aggregate membership-filter template bytes exceed proxy.maxMembershipFilterPlanSize before plan materialization: %d + %d > %d bytes",
+				budget.occurrenceBytes, chargeBytes, budget.maxPlanSize))
+			return true
+		}
+		budget.occurrenceBytes += chargeBytes
+
+		if kind == membershipRoaring {
+			if seenRoaringTemplates == nil {
+				seenRoaringTemplates = make(map[string]struct{})
+				roaringOccurrenceCounts = make(map[string]uint64)
+			}
+			roaringOccurrenceCounts[templateName]++
+			if _, seen := seenRoaringTemplates[templateName]; !seen {
+				seenRoaringTemplates[templateName] = struct{}{}
+				orderedRoaringTemplates = append(orderedRoaringTemplates, roaringTemplateBlob{
+					name: templateName,
+					blob: blobValue.BytesVal,
+				})
+			}
+		}
+		return false
+	})
+	if preflightErr != nil {
+		return nil, preflightErr
+	}
+
+	if len(orderedRoaringTemplates) > 0 {
+		ctx.validatedRoaringBlobs = make(map[string]validatedRoaringBitmapBlob, len(orderedRoaringTemplates))
+	}
+	for _, template := range orderedRoaringTemplates {
+		// Structural validation is a pure function of the bytes, so a blob
+		// already validated earlier in this request (another sub-request, or
+		// another scorer filter) does not need a second linear pass.
+		validated, cached := budget.lookup(template.name, template.blob)
+		if !cached {
+			var err error
+			validated, err = validateRoaringBitmapBlob(template.blob)
+			if err != nil {
+				return nil, err
+			}
+			budget.store(template.name, validated)
+		}
+		occurrences := roaringOccurrenceCounts[template.name]
+		cost := validated.summary.EstimatedDecodedBytes
+		remaining := uint64(0)
+		if budget.aggregateDecodedBytes <= roaringfilter.MaxEstimatedDecodedBytes {
+			remaining = roaringfilter.MaxEstimatedDecodedBytes - budget.aggregateDecodedBytes
+		}
+		if cost != 0 && occurrences > remaining/cost {
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"aggregate membership_match roaring estimated decoded size exceeds maximum before plan materialization: %d + %d*%d > %d bytes",
+				budget.aggregateDecodedBytes, occurrences, cost, roaringfilter.MaxEstimatedDecodedBytes))
+		}
+		budget.aggregateDecodedBytes += occurrences * cost
+		ctx.validatedRoaringBlobs[template.name] = validated
+	}
+	return ctx, nil
+}
+
+func fillExpressionValue(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	ctx *fillExpressionContext,
+) error {
 	if !expr.GetIsTemplate() {
 		return nil
 	}
@@ -16,12 +280,12 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_TermExpr:
 		return FillTermExpressionValue(e.TermExpr, templateValues)
 	case *planpb.Expr_UnaryExpr:
-		return FillExpressionValue(e.UnaryExpr.GetChild(), templateValues)
+		return fillExpressionValue(e.UnaryExpr.GetChild(), templateValues, ctx)
 	case *planpb.Expr_BinaryExpr:
-		if err := FillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetLeft(), templateValues, ctx); err != nil {
 			return err
 		}
-		if err := FillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetRight(), templateValues, ctx); err != nil {
 			return err
 		}
 		switch e.BinaryExpr.GetOp() {
@@ -42,26 +306,36 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
 		return FillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues)
 	case *planpb.Expr_BinaryArithExpr:
-		if err := FillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues, ctx); err != nil {
 			return err
 		}
-		return FillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues)
+		return fillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues, ctx)
 	case *planpb.Expr_JsonContainsExpr:
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
-		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues, ctx)
 	case *planpb.Expr_GisfunctionFilterExpr:
 		return FillGISFunctionFilterExpressionValue(e.GisfunctionFilterExpr, templateValues)
 	case *planpb.Expr_ElementFilterExpr:
-		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
+		if err := fillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues, ctx); err != nil {
 			return err
 		}
 		if e.ElementFilterExpr.GetPredicate() != nil {
-			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
+			return fillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues, ctx)
 		}
 		return nil
 	case *planpb.Expr_MatchExpr:
-		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(e.MatchExpr.GetPredicate(), templateValues, ctx)
+	case *planpb.Expr_CallExpr:
+		// Only the deferred membership-filter calls carry IsTemplate today; once
+		// the template value is known, the client-built blob is validated and
+		// the call is materialized into its dedicated plan node here —
+		// BloomFilterExpr for the bloom kind, RoaringFilterExpr for roaring,
+		// selected by blob magic (with an optional explicit type consistency pin).
+		if isMembershipFunctionName(e.CallExpr.GetFunctionName()) {
+			return fillMembershipMatchExpressionValue(expr, e.CallExpr, templateValues, ctx)
+		}
+		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	default:
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
@@ -246,7 +520,13 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			}
 		}
 
+		if IsBytes(operand) {
+			return bytesTemplateValueError()
+		}
 		operandExpr := toValueExpr(operand)
+		if operandExpr == nil {
+			return merr.WrapErrQueryPlanMsg("unsupported arithmetic operand")
+		}
 		lDataType, rDataType := expr.GetColumnInfo().GetDataType(), operandExpr.dataType
 		if typeutil.IsArrayType(expr.GetColumnInfo().GetDataType()) {
 			lDataType = expr.GetColumnInfo().GetElementType()

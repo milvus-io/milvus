@@ -104,7 +104,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 		}
 		elementType = schemapb.DataType_JSON
 	default:
-		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
+		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type")
 	}
 	return &planpb.GenericValue{
 		Val: &planpb.GenericValue_ArrayVal{
@@ -148,6 +148,13 @@ func ConvertToGenericValue(templateName string, templateValue *schemapb.Template
 		}, nil
 	case *schemapb.TemplateValue_ArrayVal:
 		return convertArrayValue(templateName, templateValue.GetArrayVal())
+	case *schemapb.TemplateValue_BytesVal:
+		// Raw binary payload (e.g. a client pre-built membership-filter blob).
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_BytesVal{
+				BytesVal: templateValue.GetBytesVal(),
+			},
+		}, nil
 	default:
 		return nil, merr.WrapErrQueryPlanMsg("expression elements can only be scalars")
 	}

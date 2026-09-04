@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/BloomFilterEnvelope.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
@@ -30,6 +31,14 @@
 #include "pb/plan.pb.h"
 
 namespace milvus {
+
+// Only held by shared_ptr below, never dereferenced in this header. Keep it a
+// forward declaration: common/RoaringMembership.h pulls in <roaring/roaring.hh>,
+// whose portability.h unconditionally defines _GNU_SOURCE, and this header is
+// included nearly everywhere. On macOS that makes xsimd take its glibc path and
+// call ::exp10f, which the SDK does not provide.
+class RoaringMembership;
+
 namespace expr {
 
 // Collect information from expressions
@@ -949,6 +958,78 @@ class MatchExpr : public ITypeFilterExpr {
     std::string struct_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+};
+
+// RoaringFilterExpr: exact integer membership filter (`membership_match`, MRB1).
+// See docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md.
+//
+// membership_ holds the decoded, immutable bitmap. Unlike BloomFilterExpr —
+// whose physical expressions probe a zero-copy view of the raw blob — a Roaring
+// body must be decoded before it can be probed, so decoding happens once here,
+// at plan-proto parse time, and every per-segment physical expression shares
+// this one instance through the shared_ptr. Decoding per segment instead would
+// repeat the parse and hold one copy of a multi-megabyte bitmap per segment.
+class RoaringFilterExpr : public ITypeFilterExpr {
+ public:
+    RoaringFilterExpr(const ColumnInfo& column,
+                      std::shared_ptr<const RoaringMembership> membership)
+        : column_(column), membership_(std::move(membership)) {
+    }
+
+    // Defined out-of-line in exec/expression/RoaringFilterExpr.cpp: it
+    // dereferences RoaringMembership, which is only forward-declared here so
+    // that <roaring/roaring.hh> does not leak into every translation unit.
+    std::string
+    ToString() const override;
+
+ public:
+    const ColumnInfo column_;
+    const std::shared_ptr<const RoaringMembership> membership_;
+};
+
+// BloomFilterExpr: approximate membership filter (`membership_match`, MBF1).
+// See docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
+//
+// filter_blob_ owns the MBF1-enveloped parquet SBBF blob. Serialized
+// plan/scorer parsing moves the blob into this immutable shared string; direct
+// callers keep safe ownership through the string overload below.
+// Physical expressions hold this logical expr via shared_ptr, so their
+// zero-copy Bloom views remain valid for the query lifetime.
+class BloomFilterExpr : public ITypeFilterExpr {
+ public:
+    BloomFilterExpr(const ColumnInfo& column, std::string filter_blob)
+        : BloomFilterExpr(
+              column,
+              std::make_shared<const std::string>(std::move(filter_blob))) {
+    }
+
+    BloomFilterExpr(const ColumnInfo& column,
+                    std::shared_ptr<const std::string> filter_blob)
+        : column_(column), filter_blob_(std::move(filter_blob)) {
+        AssertInfo(filter_blob_ != nullptr,
+                   "BloomFilterExpr filter blob owner must not be null");
+    }
+
+    std::string
+    ToString() const override {
+        // A predicate containing bloom_match is excluded from the FilterBitsNode
+        // result cache (PhyBloomFilterExpr::IsCacheable() returns false), so this
+        // string never has to serve as a collision-resistant cache key — it is
+        // only a debug-log / error summary. Keep it cheap and never dump or hash
+        // the (up to 128 MiB) blob: report the blob length and the declared
+        // element count from the MBF1 header instead.
+        const uint64_t n_declared =
+            milvus::bloom_envelope::DecodeNDeclared(*filter_blob_);
+        return fmt::format(
+            "BloomFilterExpr:[Column: {}, BlobBytes: {}, DeclaredElements: {}]",
+            column_.ToString(),
+            filter_blob_->size(),
+            n_declared);
+    }
+
+ public:
+    const ColumnInfo column_;
+    const std::shared_ptr<const std::string> filter_blob_;
 };
 
 }  // namespace expr

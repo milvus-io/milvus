@@ -500,6 +500,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
+	var membershipFilterPlanSize int64
+	// Every hybrid sub-request is part of one client request. Share the parser's
+	// pre-materialization occurrence/decoded-memory budget across all of them;
+	// the serialized-plan gate below already shares membershipFilterPlanSize.
+	membershipPreflightBudget := planparserv2.NewMembershipPreflightBudget()
 	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
 		return err
 	}
@@ -558,7 +563,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(
+			subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues(), membershipPreflightBudget)
 		if err != nil {
 			return err
 		}
@@ -693,7 +699,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
+		internalSubReq.SerializedExprPlan, membershipFilterPlanSize, err = marshalPlanWithMembershipFilterSizeLimit(plan, membershipFilterPlanSize)
 		if err != nil {
 			return err
 		}
@@ -705,7 +711,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			mlog.Stringer("plan", plan)) // may be very large if large term passed.
+			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
@@ -883,7 +889,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	_, errGroupByFields := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, t.request.GetSearchParams())
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
-	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
+	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(
+		t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues(), nil)
 	if err != nil {
 		return err
 	}
@@ -1045,7 +1052,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		queryInfo.StrictGroupSize = true
 	}
 
-	t.SerializedExprPlan, err = proto.Marshal(plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithMembershipFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}
@@ -1128,7 +1135,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-		mlog.Stringer("plan", plan)) // may be very large if large term passed.
+		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 
 	return nil
 }
@@ -1149,7 +1156,12 @@ func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+func (t *searchTask) tryGeneratePlan(
+	params []*commonpb.KeyValuePair,
+	dsl string,
+	exprTemplateValues map[string]*schemapb.TemplateValue,
+	membershipBudget *planparserv2.MembershipPreflightBudget,
+) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
@@ -1186,17 +1198,27 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
+	plan, planErr := planparserv2.CreateSearchPlanArgs(
+		t.schema.SchemaHelper,
+		dsl,
+		annsFieldName,
+		searchInfo.planInfo,
+		exprTemplateValues,
+		t.request.GetFunctionScore(),
+		&planparserv2.ParserVisitorArgs{
+			Timezone:         t.resolvedTimezoneStr,
+			MembershipBudget: membershipBudget,
+		})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
-			mlog.String("dsl", dsl), // may be very large if large term passed.
+			mlog.Int("dsl_bytes", len(dsl)),
 			mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, wrapPlanCreationError(planErr, "failed to create query plan")
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	mlog.Debug(t.ctx, "create query plan",
-		mlog.String("dsl", t.request.Dsl), // may be very large if large term passed.
+		mlog.Int("dsl_bytes", len(dsl)),
 		mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, searchType, nil
 }

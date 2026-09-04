@@ -539,6 +539,37 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 	}
 }
 
+// redactExprParams returns a copy of params with every value replaced by
+// proxy.RedactedValue, leaving the placeholder names visible. A template value
+// is user payload -- a membership filter ships a multi-MiB blob through
+// exprParams -- and a trace log only needs to show which placeholders were
+// bound, not what they were bound to.
+//
+// The gRPC path redacts expr_template_values the same way, but its helper
+// switches on protobuf request types and so cannot recognize these RESTful
+// shapes; they are handled here instead.
+// hasExprParams reports whether any sub-request binds expression templates, so
+// the common case -- none do -- is logged without copying the request.
+func hasExprParams(subReqs []SubSearchReq) bool {
+	for _, sub := range subReqs {
+		if len(sub.ExprParams) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func redactExprParams(params map[string]interface{}) map[string]interface{} {
+	if len(params) == 0 {
+		return params
+	}
+	redacted := make(map[string]interface{}, len(params))
+	for name := range params {
+		redacted[name] = proxy.RedactedValue
+	}
+	return redacted
+}
+
 func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 	switch request := req.(type) {
 	case *CollectionReq:
@@ -582,6 +613,41 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		}
 		redactedReq := *request
 		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *QueryReqV2:
+		if request == nil || len(request.ExprParams) == 0 {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExprParams = redactExprParams(request.ExprParams)
+		return mlog.Any("request", &redactedReq)
+	case *CollectionFilterReq:
+		if request == nil || len(request.ExprParams) == 0 {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExprParams = redactExprParams(request.ExprParams)
+		return mlog.Any("request", &redactedReq)
+	case *SearchReqV2:
+		if request == nil || len(request.ExprParams) == 0 {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExprParams = redactExprParams(request.ExprParams)
+		return mlog.Any("request", &redactedReq)
+	case *HybridSearchReq:
+		if request == nil || !hasExprParams(request.Search) {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		// Search is a value slice, so a shallow struct copy still aliases the
+		// caller's sub-requests; copy it before redacting.
+		subReqs := make([]SubSearchReq, len(request.Search))
+		copy(subReqs, request.Search)
+		for i := range subReqs {
+			subReqs[i].ExprParams = redactExprParams(subReqs[i].ExprParams)
+		}
+		redactedReq.Search = subReqs
 		return mlog.Any("request", &redactedReq)
 	default:
 		return proxy.GetRequestFieldWithoutSensitiveInfo(req)
