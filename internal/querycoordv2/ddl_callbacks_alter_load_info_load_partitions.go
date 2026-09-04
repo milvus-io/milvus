@@ -39,7 +39,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		return err
 	}
 
-	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
 		ctx,
 		req.GetReplicaNumber(),
 		req.GetResourceGroups(),
@@ -55,14 +55,17 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
-	// A request that speaks only for the resource groups it names leaves the
+	// A request that names resource groups speaks only for those and leaves the
 	// placement of the others alone - same seam, same reason as the
 	// LoadCollection callback: without it a scoped LoadPartitions would be
 	// read as the whole placement and refused for "changing" the replica
-	// number of resource groups it never mentioned. Natively this returns
-	// what AssignReplica just produced.
+	// number of resource groups it never mentioned. A request that names none
+	// states the whole placement and this returns what AssignReplica just
+	// produced - reading the defaulted list here instead would refuse a bare
+	// load_partitions on a collection loaded in another resource group for
+	// exactly that reason.
 	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
-		ctx, req.GetCollectionID(), resourceGroups, expectedReplicasNumber, currentLoadConfig)
+		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, currentLoadConfig)
 	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	// add new incoming partitionIDs.
 	for _, partition := range req.PartitionIDs {
