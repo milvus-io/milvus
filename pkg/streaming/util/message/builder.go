@@ -292,6 +292,31 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 	return b
 }
 
+// WithIdempotencyKey creates a new builder carrying the idempotency key of an
+// idempotent write. A zero key is a no-op, so callers can pass the key
+// unconditionally without materializing an empty property.
+//
+// The parameter is an `IdempotencyKey` rather than a string because a key is
+// meaningless without the scope it deduplicates within: it is built by one of the
+// New*ScopedIdempotencyKey constructors, which is what keeps a caller from
+// shipping an accidentally unscoped key.
+//
+// The key is a property rather than a per-message-type header field so that every
+// producer and consumer reads it the same way (see `IdempotencyKeyOf`), and so
+// that a broadcast message carries it without any per-type schema change.
+//
+// A deduplicated broadcast returns the ORIGINAL broadcast's per-channel append
+// results, so a caller reading `BroadcastAppendResult.GetAppendResult(...)` needs no
+// special handling for the duplicate path. The one exception is an original that has
+// not finished being acked, which leaves the results nil; a caller that dereferences
+// them without a nil check would panic there — a branch no success-path test reaches.
+func (b *mutableMesasgeBuilder[H, B]) WithIdempotencyKey(key IdempotencyKey) *mutableMesasgeBuilder[H, B] {
+	if key != "" {
+		b.properties.Set(messageIdempotencyKey, string(key))
+	}
+	return b
+}
+
 // WithCipher creates a new builder with cipher property.
 func (b *mutableMesasgeBuilder[H, B]) WithCipher(cipherConfig *CipherConfig) *mutableMesasgeBuilder[H, B] {
 	b.cipherConfig = cipherConfig

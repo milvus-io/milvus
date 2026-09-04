@@ -92,6 +92,17 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
+//
+// All of this runs before the broadcaster's idempotency lookup, which cannot happen
+// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// these checks again before it can resolve to its original jobID, and not all of them
+// are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
+// ValidateBinlogImportRequest lists the backup files in object storage, and
+// validateImportReplication reads the replication topology. A retry sent while the job
+// limit is saturated -- by the original request among others -- or after the backup
+// files or the replication topology changed is rejected here rather than returning the
+// original jobID. Retrying the same key once the limit frees up resolves normally;
+// minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
@@ -170,6 +181,37 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
 }
 
+// jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
+// message the broadcaster returned on an idempotency hit. The broadcaster does not
+// know about import-specific structures, so the decode happens here.
+//
+// The request payload is deliberately NOT compared against the original: keeping the
+// key unique per logical request is the client's contract, and enforcing it
+// server-side would mean inventing an equality predicate over file lists whose false
+// mismatches would reject legitimate retries -- pushing the caller to mint a new key
+// and import the data twice, the very outcome this feature exists to prevent.
+//
+// The collectionID comparison is not such a predicate and is not a semantic guard: the
+// idempotency key is scoped to this collection's ID, so a hit already means both
+// broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
+// or scoping bug rather than hand back a jobID for another collection's import.
+func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
+	importMsg, err := message.AsBroadcastImportMessageV1(msg)
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
+	}
+	body, err := importMsg.Body()
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+	}
+	if body.GetCollectionID() != collectionID {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"idempotency scope resolved to an import into collection %d, not %d",
+			body.GetCollectionID(), collectionID)
+	}
+	return body.GetJobID(), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
@@ -181,7 +223,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
-) error {
+	idempotencyKey string,
+) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -192,7 +235,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return merr.Wrap(err, "failed to validate import request")
+		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Per-file PK ranges are the default path for every autoID import. The
@@ -213,7 +256,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
 		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
+			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
 		}
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
@@ -226,7 +269,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return merr.Wrap(err, "failed to start broadcast with collection id")
+		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
@@ -237,12 +280,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// in that window, an auto_commit / non-enableInReplicatingCluster import would
 	// otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
-		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return err
+		return 0, false, err
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
@@ -261,12 +304,39 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
+		// Scoped to the collection by ID, so the same client key stays a distinct
+		// operation against another collection, and a rename does not move the key off
+		// the collection it was bound to: a retry naming the renamed collection still
+		// resolves to its original job. A retry still naming the OLD collection never
+		// reaches here -- the proxy resolves the name first -- so it fails rather than
+		// importing twice. The broadcaster adds the message type; everything else about
+		// the dedup identity is this scope.
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	// Broadcast the message
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	result, err := broadcaster.Broadcast(ctx, msg)
+	if err != nil {
+		return 0, false, err
+	}
+	if result.Duplicated == nil {
+		return 0, false, nil
+	}
+	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
+	// new job was created; recover what that broadcast carried.
+	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
+	if err != nil {
+		return 0, false, err
+	}
+	// Never log the raw key: it is client-controlled and may carry sensitive data.
+	keyFingerprint := mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey))
+
+	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldJobID(originalJobID),
+		keyFingerprint)
+	return originalJobID, true, nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

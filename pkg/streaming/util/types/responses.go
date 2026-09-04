@@ -12,9 +12,34 @@ import (
 type BroadcastAppendResult struct {
 	BroadcastID   uint64                   // the broadcast id of the append operation.
 	AppendResults map[string]*AppendResult // make the channel name to the append result.
+
+	// Duplicated is non-nil when the broadcast was deduplicated by its idempotency
+	// key: no new broadcast task was created, and BroadcastID is the ID of the
+	// ORIGINAL broadcast. It carries the original broadcast message so the caller
+	// can recover its own response payload (the import jobID, for imports).
+	//
+	// AppendResults is filled in from the original broadcast's per-vchannel
+	// checkpoints and is never nil here: the duplicate path waits for the original's
+	// ack callback before answering, the same state a non-duplicate caller returns
+	// from, so a caller cannot tell a deduplicated broadcast from a fresh one. That
+	// wait is load-bearing, not politeness -- the original is not always serialized
+	// in front of this caller by a resource lock (a retry that raced a rename holds
+	// the stale name's lock; a task recovered from a replicated WAL holds none), and
+	// without it a duplicate could be answered from an original whose effects do not
+	// exist yet.
+	//
+	// Only the in-process broadcaster path fills this field. The gRPC client path
+	// (GRPCBroadcastServiceImpl.Broadcast) leaves it nil regardless of whether the
+	// broadcast was deduplicated, so it must not be read as "was not a duplicate"
+	// there.
+	Duplicated message.BroadcastMutableMessage
 }
 
 // GetAppendResult returns the append result of the given channel.
+//
+// A deduplicated broadcast returns the ORIGINAL broadcast's result for the
+// channel, so callers need no special handling for the duplicate path. It still
+// returns nil when the original had not finished being acked; see Duplicated.
 func (r *BroadcastAppendResult) GetAppendResult(channelName string) *AppendResult {
 	return r.AppendResults[channelName]
 }

@@ -63,6 +63,7 @@ import (
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
@@ -1789,6 +1790,66 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 		assert.Equal(t, "123456789", rsp.GetJobID())
+	})
+
+	// The key travels to DataCoord in the gRPC metadata, so what the proxy owes the
+	// hop is a context that still carries it when the coordinator client is called:
+	// that is what the client interceptor copies onto the outgoing call. It survives
+	// the scheduler queue, which runs the task on a context derived from this one.
+	t.Run("ImportV2 hands datacoord a context still carrying the idempotency key", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		assert.NoError(t, node.sched.Start())
+		defer node.sched.Close()
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		node.chMgr = chMgr
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil)
+		node.setMetaCache(mc)
+
+		capturedKey := make(chan string, 1)
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+				capturedKey <- interceptor.IdempotencyKeyFromContext(ctx)
+				return &internalpb.ImportResponse{
+					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					JobID:  "123456789",
+				}, nil
+			})
+		node.mixCoord = mixCoord
+
+		mdCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderIdempotencyKey, "run-1-batch-1"))
+		rsp, err := node.ImportV2(mdCtx, &internalpb.ImportRequest{
+			CollectionName: "aaa",
+			Files: []*internalpb.ImportFile{{
+				Id:    1,
+				Paths: []string{"a.json"},
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+		select {
+		case key := <-capturedKey:
+			assert.Equal(t, "run-1-batch-1", key)
+		default:
+			t.Fatal("mixCoord.ImportV2 was never called")
+		}
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
