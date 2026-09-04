@@ -68,6 +68,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
+#include "storage/TransientMemoryBudget.h"
 
 namespace milvus::index {
 
@@ -110,10 +111,10 @@ ScalarIndexStreamMemoryOverhead(
     }
 
     if (file_stream && !encrypted) {
-        total_transient_bytes = milvus::storage::SaturatingMultiply(
+        total_transient_bytes = milvus::SaturatingMultiply(
             total_transient_bytes,
             milvus::storage::kFileStreamBufferMultiplier);
-        max_task_transient_bytes = milvus::storage::SaturatingMultiply(
+        max_task_transient_bytes = milvus::SaturatingMultiply(
             max_task_transient_bytes,
             milvus::storage::kFileStreamBufferMultiplier);
     }
@@ -175,22 +176,6 @@ SortLegacyAuxBytes(int64_t num_rows) {
 }
 
 uint64_t
-SaturatingAdd(uint64_t lhs, uint64_t rhs) {
-    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
-        return std::numeric_limits<uint64_t>::max();
-    }
-    return lhs + rhs;
-}
-
-uint64_t
-SaturatingMul(uint64_t lhs, uint64_t rhs) {
-    if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
-        return std::numeric_limits<uint64_t>::max();
-    }
-    return lhs * rhs;
-}
-
-uint64_t
 IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
@@ -204,7 +189,8 @@ IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
         return 0;
     }
 
-    return SaturatingMul(static_cast<uint64_t>(num_rows), sizeof(int32_t));
+    return milvus::SaturatingMultiply(static_cast<uint64_t>(num_rows),
+                                      uint64_t{sizeof(int32_t)});
 }
 
 uint64_t
@@ -680,9 +666,9 @@ IndexFactory::VecIndexLoadResource(
     if (knowhere::UseDiskLoad(index_type, index_version)) {
         const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
         request.final_disk_cost =
-            SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
+            milvus::SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
         request.max_disk_cost =
-            SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
+            milvus::SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
     }
     return request;
 }
@@ -798,11 +784,11 @@ IndexFactory::ScalarIndexLoadResourceImpl(
         if (mmap_enable) {
             request.final_memory_cost = validity_bitmap_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost =
-                SaturatingAdd(stream_memory_overhead, validity_bitmap_bytes);
+            request.max_memory_cost = milvus::SaturatingAdd(
+                stream_memory_overhead, validity_bitmap_bytes);
         } else {
-            auto resident_bytes =
-                SaturatingAdd(index_size_in_bytes, validity_bitmap_bytes);
+            const auto resident_bytes = milvus::SaturatingAdd(
+                index_size_in_bytes, validity_bitmap_bytes);
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost =

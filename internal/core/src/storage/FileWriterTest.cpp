@@ -12,9 +12,11 @@
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -29,8 +31,12 @@
 
 #include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
+#include "folly/ScopeGuard.h"
+#include "folly/futures/Promise.h"
+#include "folly/system/ThreadName.h"
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus;
@@ -69,6 +75,7 @@ class FileWriterTest : public testing::Test {
 
     void
     TearDown() override {
+        LocalFileIOPool::GetInstance().Configure(0);
         std::filesystem::remove_all(test_dir_);
         // Reset rate limiter to disabled ratios to avoid test interference
         auto& limiter = milvus::storage::io::WriteRateLimiter::GetInstance();
@@ -145,9 +152,9 @@ TEST_F(FileWriterTest, FinishSkipsFdatasyncWritebackWithDirectIO) {
     EXPECT_EQ(ReadFile(filename), test_data);
 }
 
-TEST_F(FileWriterTest, FinishKeepsFdatasyncInWriterPool) {
+TEST_F(FileWriterTest, FinishKeepsFdatasyncUnderWritePermit) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
-    FileWriteWorkerPool::GetInstance().Configure(1);
+    LocalFileIOPool::GetInstance().Configure(1);
 
     for (bool has_tail_flush : {false, true}) {
         SCOPED_TRACE(has_tail_flush ? "with tail flush" : "without tail flush");
@@ -196,14 +203,15 @@ TEST_F(FileWriterTest, FinishKeepsFdatasyncInWriterPool) {
         EXPECT_EQ(second_finish.get(), second_data.size());
     }
 
-    FileWriteWorkerPool::GetInstance().Configure(0);
+    LocalFileIOPool::GetInstance().Configure(0);
 }
 
-TEST_F(FileWriterTest, FinishPropagatesPooledSyncFailure) {
+TEST_F(FileWriterTest, FinishPropagatesSyncFailureWithWriteLimit) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
-    FileWriteWorkerPool::GetInstance().Configure(1);
+    LocalFileIOPool::GetInstance().Configure(1);
 
-    std::string filename = (test_dir_ / "pooled_sync_failure.txt").string();
+    std::string filename =
+        (test_dir_ / "write_limit_sync_failure.txt").string();
     FileWriter writer(filename);
     writer.SetFdatasyncOnFinish();
     std::string test_data(kBufferSize * 2, 'x');
@@ -213,15 +221,16 @@ TEST_F(FileWriterTest, FinishPropagatesPooledSyncFailure) {
 
     EXPECT_THROW(writer.Finish(), std::runtime_error);
 
-    FileWriteWorkerPool::GetInstance().Configure(0);
+    LocalFileIOPool::GetInstance().Configure(0);
 }
 
-TEST_F(FileWriterTest, WritePropagatesPooledFailure) {
+TEST_F(FileWriterTest, WritePropagatesFailureWithWriteLimit) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
     FileWriter::SetBufferSize(kBufferSize);
-    FileWriteWorkerPool::GetInstance().Configure(1);
+    LocalFileIOPool::GetInstance().Configure(1);
 
-    std::string filename = (test_dir_ / "pooled_write_failure.txt").string();
+    std::string filename =
+        (test_dir_ / "write_limit_write_failure.txt").string();
     FileWriter writer(filename);
     FileWriterTestAccessor::InvalidateFd(writer);
     std::string test_data(kBufferSize * 2, 'x');
@@ -229,7 +238,7 @@ TEST_F(FileWriterTest, WritePropagatesPooledFailure) {
     EXPECT_THROW(writer.Write(test_data.data(), test_data.size()),
                  std::runtime_error);
 
-    FileWriteWorkerPool::GetInstance().Configure(0);
+    LocalFileIOPool::GetInstance().Configure(0);
 }
 
 TEST_F(FileWriterTest, MmapChunkTargetWithWriteback) {
@@ -1013,13 +1022,346 @@ TEST_F(FileWriterTest, MultiThreadedWriteWithDirectIO) {
     }
 }
 
-// Test executor-based asynchronous writes
-TEST_F(FileWriterTest, ExecutorBasedAsyncWrites) {
-    // Set up executor with 2 threads
-    FileWriteWorkerPool::GetInstance().Configure(2);
+TEST_F(FileWriterTest, WritesDoNotWaitForTheLocalFileWorkerPool) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    ASSERT_EQ(blocker_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto filename = (test_dir_ / "synchronous_writer.txt").string();
+    auto buffer_size = kBufferSize;
+    auto write = std::async(std::launch::async, [filename, buffer_size]() {
+        FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+        FileWriter::SetBufferSize(buffer_size);
+        FileWriter writer(filename);
+        std::vector<char> data(buffer_size + 1, 'x');
+        writer.Write(data.data(), data.size());
+        writer.Finish();
+    });
+
+    EXPECT_EQ(write.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::ready);
+    release_blocker_promise->set_value();
+    write.get();
+}
+
+TEST_F(FileWriterTest, LocalFileIOPoolUsesPriorityWorkerExecutor) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+    auto promise = std::make_shared<folly::Promise<std::string>>();
+    auto future = promise->getSemiFuture();
+
+    executor->add([promise]() {
+        promise->setValue(folly::getCurrentThreadName().value_or(""));
+    });
+
+    auto thread_name = std::move(future).get();
+    EXPECT_EQ(thread_name.rfind("MILVUS_LF_IO_", 0), 0);
+    EXPECT_EQ(executor->getNumPriorities(), 2);
+}
+
+TEST_F(FileWriterTest, LocalFileIOWorkerCanUseFileWriter) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+    auto promise = std::make_shared<std::promise<void>>();
+    auto future = promise->get_future();
+    auto filename = (test_dir_ / "worker_file_writer.txt").string();
+
+    executor->add([promise, filename]() {
+        try {
+            FileWriter writer(filename);
+            const char data = 'x';
+            writer.Write(&data, sizeof(data));
+            writer.Finish();
+            promise->set_value();
+        } catch (...) {
+            promise->set_exception(std::current_exception());
+        }
+    });
+
+    EXPECT_NO_THROW(future.get());
+}
+
+TEST_F(FileWriterTest, ConfiguredWriteLimitBlocksAdditionalWriters) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto first = pool.AcquireWritePermit();
+
+    auto second = std::async(std::launch::async,
+                             [&pool]() { return pool.AcquireWritePermit(); });
+    EXPECT_EQ(second.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    first = {};
+    EXPECT_EQ(second.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto second_permit = second.get();
+    (void)second_permit;
+}
+
+TEST_F(FileWriterTest, FileWriterWaitsForConfiguredWritePermit) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::future<void> write;
+    auto permit = pool.AcquireWritePermit();
+    auto write_started_promise = std::make_shared<std::promise<void>>();
+    auto write_started = write_started_promise->get_future();
+    auto filename = (test_dir_ / "permit_limited_writer.txt").string();
+    std::string data(kBufferSize + 1, 'x');
+    write = std::async(std::launch::async,
+                       [filename, data, write_started_promise]() {
+                           FileWriter writer(filename);
+                           write_started_promise->set_value();
+                           writer.Write(data.data(), data.size());
+                           writer.Finish();
+                       });
+
+    ASSERT_EQ(write_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(write.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+
+    permit = {};
+    EXPECT_EQ(write.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_NO_THROW(write.get());
+    EXPECT_EQ(ReadFile(filename), data);
+}
+
+TEST_F(FileWriterTest, DisablingWriteLimitUnblocksWaitingWriters) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto first = pool.AcquireWritePermit();
+    auto second = std::async(std::launch::async,
+                             [&pool]() { return pool.AcquireWritePermit(); });
+    ASSERT_EQ(second.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    pool.Configure(0);
+    EXPECT_EQ(second.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto second_permit = second.get();
+    (void)second_permit;
+}
+
+TEST_F(FileWriterTest, SameWorkerCountDoesNotReplaceActiveExecutor) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+    auto* original_executor = executor.get();
+    auto task_started_promise = std::make_shared<std::promise<void>>();
+    auto task_started = task_started_promise->get_future();
+    auto release_task_promise = std::make_shared<std::promise<void>>();
+    auto release_task = release_task_promise->get_future().share();
+    bool task_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!task_released) {
+            release_task_promise->set_value();
+        }
+    });
+    executor->add([task_started_promise, release_task]() {
+        task_started_promise->set_value();
+        release_task.wait();
+    });
+    ASSERT_EQ(task_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto configure =
+        std::async(std::launch::async, [&pool]() { pool.Configure(1); });
+    auto configure_status = configure.wait_for(std::chrono::seconds(2));
+    if (configure_status != std::future_status::ready) {
+        release_task_promise->set_value();
+        task_released = true;
+        release_guard.dismiss();
+        configure.get();
+        FAIL() << "same-size configuration waited for the active executor";
+    }
+    configure.get();
+    EXPECT_EQ(pool.GetExecutor().get(), original_executor);
+
+    release_task_promise->set_value();
+    task_released = true;
+    release_guard.dismiss();
+}
+
+TEST_F(FileWriterTest, ShrinkingLocalFileIOPoolDrainsQueuedTasks) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(2);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+    auto release_tasks_promise = std::make_shared<std::promise<void>>();
+    auto release_tasks = release_tasks_promise->get_future().share();
+    bool tasks_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!tasks_released) {
+            release_tasks_promise->set_value();
+        }
+    });
+    auto first_started_promise = std::make_shared<std::promise<void>>();
+    auto first_started = first_started_promise->get_future();
+    auto second_started_promise = std::make_shared<std::promise<void>>();
+    auto second_started = second_started_promise->get_future();
+    executor->add([first_started_promise, release_tasks]() {
+        first_started_promise->set_value();
+        release_tasks.wait();
+    });
+    executor->add([second_started_promise, release_tasks]() {
+        second_started_promise->set_value();
+        release_tasks.wait();
+    });
+    ASSERT_EQ(first_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    ASSERT_EQ(second_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto completed = std::make_shared<std::atomic<size_t>>(0);
+    std::vector<std::future<void>> queued;
+    for (size_t i = 0; i < 4; ++i) {
+        auto promise = std::make_shared<std::promise<void>>();
+        queued.push_back(promise->get_future());
+        executor->add([completed, promise]() {
+            completed->fetch_add(1);
+            promise->set_value();
+        });
+    }
+
+    auto configure =
+        std::async(std::launch::async, [&pool]() { pool.Configure(1); });
+    EXPECT_EQ(configure.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    release_tasks_promise->set_value();
+    tasks_released = true;
+    release_guard.dismiss();
+    configure.get();
+    for (auto& future : queued) {
+        EXPECT_NO_THROW(future.get());
+    }
+    EXPECT_EQ(completed->load(), queued.size());
+}
+
+TEST_F(FileWriterTest, PublishesWriteLimitAfterExecutorResizeCompletes) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(2);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+
+    auto release_tasks_promise = std::make_shared<std::promise<void>>();
+    auto release_tasks = release_tasks_promise->get_future().share();
+    bool tasks_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!tasks_released) {
+            release_tasks_promise->set_value();
+        }
+    });
+    auto first_started_promise = std::make_shared<std::promise<void>>();
+    auto first_started = first_started_promise->get_future();
+    auto second_started_promise = std::make_shared<std::promise<void>>();
+    auto second_started = second_started_promise->get_future();
+    executor->add([first_started_promise, release_tasks]() {
+        first_started_promise->set_value();
+        release_tasks.wait();
+    });
+    executor->add([second_started_promise, release_tasks]() {
+        second_started_promise->set_value();
+        release_tasks.wait();
+    });
+    ASSERT_EQ(first_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    ASSERT_EQ(second_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto first_permit = pool.AcquireWritePermit();
+    auto configure_started_promise = std::make_shared<std::promise<void>>();
+    auto configure_started = configure_started_promise->get_future();
+    auto configure =
+        std::async(std::launch::async, [&pool, configure_started_promise]() {
+            configure_started_promise->set_value();
+            pool.Configure(1);
+        });
+    ASSERT_EQ(configure_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(configure.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    auto second_permit = std::async(
+        std::launch::async, [&pool]() { return pool.AcquireWritePermit(); });
+    auto second_status = second_permit.wait_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(second_status, std::future_status::ready);
+
+    release_tasks_promise->set_value();
+    tasks_released = true;
+    release_guard.dismiss();
+    configure.get();
+    first_permit = {};
+    ASSERT_EQ(second_permit.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto acquired_permit = second_permit.get();
+    (void)acquired_permit;
+}
+
+TEST_F(FileWriterTest, ConfiguredLimitPreservesWriteErrors) {
+    if (access("/dev/full", W_OK) != 0) {
+        GTEST_SKIP() << "/dev/full is unavailable";
+    }
+    LocalFileIOPool::GetInstance().Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+    FileWriter writer("/dev/full");
+    std::vector<char> data(kBufferSize + 1, 'x');
+
+    try {
+        writer.Write(data.data(), data.size());
+        FAIL() << "expected write failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileWriteFailed);
+    }
+}
+
+TEST_F(FileWriterTest, ConfiguredLimitPreservesFinishErrors) {
+    if (access("/dev/full", W_OK) != 0) {
+        GTEST_SKIP() << "/dev/full is unavailable";
+    }
+    LocalFileIOPool::GetInstance().Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+    FileWriter writer("/dev/full");
+    const char data = 'x';
+    writer.Write(&data, sizeof(data));
+
+    try {
+        writer.Finish();
+        FAIL() << "expected finish failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileWriteFailed);
+    }
+}
+
+// Test configured write concurrency limit
+TEST_F(FileWriterTest, ConfiguredWriteLimitWithBufferedIO) {
+    // Configure a write concurrency limit of 2
+    LocalFileIOPool::GetInstance().Configure(2);
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
-    std::string filename = (test_dir_ / "executor_async.txt").string();
+    std::string filename = (test_dir_ / "limited_buffered.txt").string();
     FileWriter writer(filename);
 
     // Write multiple chunks
@@ -1046,14 +1388,14 @@ TEST_F(FileWriterTest, ExecutorBasedAsyncWrites) {
     EXPECT_EQ(read_data, expected_data);
 }
 
-// Test executor-based asynchronous writes with direct IO
-TEST_F(FileWriterTest, ExecutorBasedAsyncWritesWithDirectIO) {
-    // Set up executor with 2 threads
-    FileWriteWorkerPool::GetInstance().Configure(2);
+// Test configured write concurrency limit with direct IO
+TEST_F(FileWriterTest, ConfiguredWriteLimitWithDirectIO) {
+    // Configure a write concurrency limit of 2
+    LocalFileIOPool::GetInstance().Configure(2);
     FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
     FileWriter::SetBufferSize(kBufferSize);
 
-    std::string filename = (test_dir_ / "executor_async_direct.txt").string();
+    std::string filename = (test_dir_ / "limited_direct.txt").string();
     FileWriter writer(filename);
 
     // Write multiple chunks asynchronously
@@ -1080,10 +1422,10 @@ TEST_F(FileWriterTest, ExecutorBasedAsyncWritesWithDirectIO) {
     EXPECT_EQ(read_data, expected_data);
 }
 
-// Test concurrent writes using executor
-TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
-    // Set up executor with 4 threads
-    FileWriteWorkerPool::GetInstance().Configure(4);
+// Test concurrent writes with configured limit
+TEST_F(FileWriterTest, ConcurrentWritesWithConfiguredLimit) {
+    // Configure a write concurrency limit of 4
+    LocalFileIOPool::GetInstance().Configure(4);
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     const int num_files = 8;
@@ -1093,7 +1435,7 @@ TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
     // Prepare filenames and test data
     for (int i = 0; i < num_files; ++i) {
         filenames.push_back(
-            (test_dir_ / ("concurrent_executor_" + std::to_string(i) + ".txt"))
+            (test_dir_ / ("concurrent_limited_" + std::to_string(i) + ".txt"))
                 .string());
         test_data.emplace_back(1024 * 1024);  // 1MB per file
         std::generate(test_data[i].begin(), test_data[i].end(), std::rand);
@@ -1124,27 +1466,27 @@ TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
     }
 }
 
-// Test executor configuration with invalid number of threads
-TEST_F(FileWriterTest, InvalidExecutorConfiguration) {
+// Test local file I/O configuration with invalid number of threads
+TEST_F(FileWriterTest, InvalidLocalFileIOConfiguration) {
     // Test with zero threads
-    EXPECT_NO_THROW(FileWriteWorkerPool::GetInstance().Configure(0));
+    EXPECT_NO_THROW(LocalFileIOPool::GetInstance().Configure(0));
 
     // Test with negative number of threads
-    EXPECT_NO_THROW(FileWriteWorkerPool::GetInstance().Configure(-1));
+    EXPECT_NO_THROW(LocalFileIOPool::GetInstance().Configure(-1));
 }
 
-// Test executor configuration changes
-TEST_F(FileWriterTest, ExecutorConfigurationChanges) {
+// Test local file I/O configuration changes
+TEST_F(FileWriterTest, LocalFileIOConfigurationChanges) {
     // Set initial executor
-    FileWriteWorkerPool::GetInstance().Configure(2);
+    LocalFileIOPool::GetInstance().Configure(2);
 
-    // Change executor configuration
-    FileWriteWorkerPool::GetInstance().Configure(4);
+    // Change local file I/O configuration
+    LocalFileIOPool::GetInstance().Configure(4);
 
     // Verify the change doesn't break functionality
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
-    std::string filename = (test_dir_ / "executor_change.txt").string();
+    std::string filename = (test_dir_ / "limit_change.txt").string();
     FileWriter writer(filename);
 
     std::string test_data = "Test data for executor change";
@@ -1158,11 +1500,11 @@ TEST_F(FileWriterTest, ExecutorConfigurationChanges) {
     EXPECT_EQ(content, test_data);
 }
 
-// Test mixed buffered and direct IO with executor
-TEST_F(FileWriterTest, MixedIOWithExecutor) {
-    FileWriteWorkerPool::GetInstance().Configure(2);
+// Test mixed buffered and direct IO with configured limit
+TEST_F(FileWriterTest, MixedIOWithConfiguredLimit) {
+    LocalFileIOPool::GetInstance().Configure(2);
 
-    // Test buffered IO with executor
+    // Test buffered IO with configured limit
     {
         FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
         std::string filename = (test_dir_ / "mixed_buffered.txt").string();
@@ -1178,7 +1520,7 @@ TEST_F(FileWriterTest, MixedIOWithExecutor) {
         EXPECT_EQ(content, test_data);
     }
 
-    // Test direct IO with executor
+    // Test direct IO with configured limit
     {
         FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
         FileWriter::SetBufferSize(kBufferSize);
@@ -1196,12 +1538,12 @@ TEST_F(FileWriterTest, MixedIOWithExecutor) {
     }
 }
 
-// Test large data writes with executor
-TEST_F(FileWriterTest, LargeDataWritesWithExecutor) {
-    FileWriteWorkerPool::GetInstance().Configure(2);
+// Test large data writes with configured limit
+TEST_F(FileWriterTest, LargeDataWritesWithConfiguredLimit) {
+    LocalFileIOPool::GetInstance().Configure(2);
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
-    std::string filename = (test_dir_ / "large_data_executor.txt").string();
+    std::string filename = (test_dir_ / "large_data_limited.txt").string();
     FileWriter writer(filename);
 
     const size_t large_size = 10 * 1024 * 1024;  // 10MB
@@ -1218,8 +1560,8 @@ TEST_F(FileWriterTest, LargeDataWritesWithExecutor) {
 }
 
 // Test executor with different buffer sizes
-TEST_F(FileWriterTest, ExecutorWithDifferentBufferSizes) {
-    FileWriteWorkerPool::GetInstance().Configure(2);
+TEST_F(FileWriterTest, ConfiguredLimitWithDifferentBufferSizes) {
+    LocalFileIOPool::GetInstance().Configure(2);
     FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
 
     std::vector<size_t> buffer_sizes = {4096, 8192, 16384, 32768};
@@ -1246,15 +1588,15 @@ TEST_F(FileWriterTest, ExecutorWithDifferentBufferSizes) {
     }
 }
 
-// Test error handling in async operations
-TEST_F(FileWriterTest, ErrorHandlingInAsyncOperations) {
-    FileWriteWorkerPool::GetInstance().Configure(2);
+// Test error handling in configured-limit operations
+TEST_F(FileWriterTest, ErrorHandlingWithConfiguredLimit) {
+    LocalFileIOPool::GetInstance().Configure(2);
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
-    // Test with invalid file path in async context
+    // Test with invalid file path with a configured limit
     std::string invalid_path = "/invalid/path/async_test.txt";
 
-    // This should throw an exception even in async context
+    // This should throw an exception even with a configured limit
     EXPECT_THROW(
         {
             FileWriter writer(invalid_path);
@@ -1273,8 +1615,8 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
     threads.reserve(num_threads);
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([i]() {
-            // Each thread sets different executor configurations
-            FileWriteWorkerPool::GetInstance().Configure(i + 1);
+            // Each thread sets different local file I/O configurations
+            LocalFileIOPool::GetInstance().Configure(i + 1);
             FileWriter::SetMode(i % 2 == 0 ? FileWriter::WriteMode::BUFFERED
                                            : FileWriter::WriteMode::DIRECT);
             FileWriter::SetBufferSize(4096 * (i + 1));
@@ -1299,7 +1641,7 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
 TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     // Start with buffered mode
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
-    FileWriteWorkerPool::GetInstance().Configure(2);
+    LocalFileIOPool::GetInstance().Configure(2);
 
     std::string filename1 = (test_dir_ / "config_change_test1.txt").string();
     std::string filename2 = (test_dir_ / "config_change_test2.txt").string();
@@ -1314,7 +1656,7 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     // Change configuration while first writer is still active
     FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
     FileWriter::SetBufferSize(8192);
-    FileWriteWorkerPool::GetInstance().Configure(4);
+    LocalFileIOPool::GetInstance().Configure(4);
 
     // Create second FileWriter with new configuration
     FileWriter writer2(filename2);

@@ -638,6 +638,8 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		registerStorageV2AsyncLoadReadWindowConfig(paramtable.Get())
+
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			factor, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {

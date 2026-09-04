@@ -76,6 +76,121 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	}()
 	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key, "2048"))
 	assert.Equal(t, int64(2048), getTakeForOutputResultCountLimit())
+
+	previousReadWindow := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		pt.Reset(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key)
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
+	})
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterConfigWatcherWithCatchUpSerializesInitialSyncAndUpdates(t *testing.T) {
+	var current atomic.Bool
+	var applied atomic.Bool
+	var syncCalls atomic.Int32
+	callbackRegistered := make(chan func(), 1)
+	firstRead := make(chan struct{})
+	secondSyncStarted := make(chan struct{})
+	secondSyncApplied := make(chan struct{})
+	releaseFirstSync := make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+			callbackRegistered <- syncConfig
+		}, func() {
+			value := current.Load()
+			call := syncCalls.Add(1)
+			switch call {
+			case 1:
+				close(firstRead)
+				<-releaseFirstSync
+			case 2:
+				close(secondSyncStarted)
+			}
+			applied.Store(value)
+			if call == 2 {
+				close(secondSyncApplied)
+			}
+		})
+		close(done)
+	}()
+
+	callback := <-callbackRegistered
+	<-firstRead
+	current.Store(true)
+	callbackInvoked := make(chan struct{})
+	callbackDone := make(chan struct{})
+	go func() {
+		close(callbackInvoked)
+		callback()
+		close(callbackDone)
+	}()
+	<-callbackInvoked
+
+	overlapped := false
+	select {
+	case <-secondSyncStarted:
+		overlapped = true
+		<-secondSyncApplied
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstSync)
+	<-done
+	<-callbackDone
+	assert.False(t, overlapped, "config update ran concurrently with the initial catch-up")
+	assert.True(t, applied.Load(), "the concurrent update must be applied after the stale catch-up")
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	updateStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024)
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+
+	assert.NoError(t, pt.Remove(item.Key))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterStorageV2AsyncLoadEnabledWatcherCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
+	assert.NoError(t, pt.Save(item.Key, "true"))
+
+	var applied atomic.Bool
+	registerStorageV2AsyncLoadEnabledWatcher(t.Context(), pt, "test", applied.Store)
+	assert.True(t, applied.Load())
+
+	assert.NoError(t, pt.Save(item.Key, "false"))
+	assert.False(t, applied.Load())
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
@@ -326,6 +441,18 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 		UpdateLoadTransientBudgetBytes(0)
 		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
 	})
+}
+
+func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	updateStorageV2AsyncLoadReadWindowSizeBytes(0)
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	updateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
+	assert.EqualValues(t, 16*1024*1024, getStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

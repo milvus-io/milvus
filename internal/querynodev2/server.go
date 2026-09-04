@@ -287,6 +287,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 			mlog.Info(node.ctx, "queryNode.segcore.storageV2.cellTargetSizeBytes updated",
 				mlog.Int64("bytes", newBytes))
 		}))
+	initcore.RegisterStorageV2AsyncLoadEnabledWatcher(node.ctx, pt, "querynode")
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 

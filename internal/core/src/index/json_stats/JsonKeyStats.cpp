@@ -60,6 +60,7 @@
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
@@ -1128,6 +1129,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto writeback_mode = mmap_config.GetMmapWriteback()
+                              ? MmapChunkWritebackMode::FdatasyncOnFinish
+                              : MmapChunkWritebackMode::Disabled;
 
     auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
     column_group->columns = column_names;
@@ -1151,6 +1155,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                                               /*in_load_list=*/true);
     auto eager_load =
         resolved_warmup_policy != CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    const auto enable_async_load =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
 
     if (eager_load) {
         auto needed_columns =
@@ -1186,7 +1192,10 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             warmup_policy,
             fmt::format("jks_{}", field_id_),
             /*fallback_bytes_per_row=*/0,
-            shard_);
+            shard_,
+            /*column_size_estimate=*/std::nullopt,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1268,7 +1277,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
             /*fallback_bytes_per_row=*/0,
             shard_,
-            size_estimate);
+            /*column_size_estimate=*/size_estimate,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));

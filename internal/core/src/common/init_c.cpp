@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstddef>
+#include "common/init_c.h"
+
 #include <algorithm>
+#include <cstddef>
 #include <mutex>
 #include <string>
 
@@ -23,18 +25,15 @@
 #include <arrow/io/type_fwd.h>
 #include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
-#include "common/init_c.h"
+
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "common/init_c.h"
-#include "monitor/Monitor.h"
-#include "log/Log.h"
-#include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "storage/EntryStreamUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -220,6 +219,23 @@ UpdateArrowIOThreadPoolMetrics() {
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
+}
+
+void
+SetStorageV2AsyncLoadEnabled(const bool enabled) {
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+}
+
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
+    milvus::segcore::storagev2translator::
+        SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
+}
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes() {
+    return milvus::segcore::storagev2translator::
+        StorageV2AsyncLoadReadWindowSizeBytes();
 }
 
 void

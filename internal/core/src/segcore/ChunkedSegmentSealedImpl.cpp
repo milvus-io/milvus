@@ -134,6 +134,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -2184,7 +2185,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         });
         load_group_futures.emplace_back(std::move(future));
     }
-
     storage::WaitAllFutures(load_group_futures);
     if (schema_snapshot->is_external_collection()) {
         committer.Commit(
@@ -8180,7 +8180,7 @@ void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+    const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     bool eager_load,
@@ -8241,7 +8241,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         });
         load_group_futures.emplace_back(std::move(future));
     }
-
     storage::WaitAllFutures(load_group_futures);
 }
 
@@ -8371,27 +8370,28 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         cache_key_suffix = std::to_string(milvus_field_ids.front().get());
     }
 
-    auto translator =
-        std::make_unique<storagev2translator::ManifestGroupTranslator>(
-            get_segment_id(),
-            GroupChunkType::DEFAULT,
-            index,
-            std::move(chunk_reader),
-            field_metas,
-            column_group->columns,
-            *needed_columns,
-            use_mmap,
-            mmap_config.GetMmapPopulate(),
-            mmap_dir_path,
-            milvus_field_ids.size(),
-            segment_load_info.GetPriority(),
-            eager_load,
-            warmup_policy,
-            cache_key_suffix,
-            segment_load_info.GetEstimatedBytesPerRow(),
-            segment_load_info.GetInsertChannel(),
-            std::nullopt,
-            writeback_mode);
+    auto translator = std::make_unique<
+        storagev2translator::ManifestGroupTranslator>(
+        get_segment_id(),
+        GroupChunkType::DEFAULT,
+        index,
+        std::move(chunk_reader),
+        field_metas,
+        column_group->columns,
+        *needed_columns,
+        use_mmap,
+        mmap_config.GetMmapPopulate(),
+        mmap_dir_path,
+        milvus_field_ids.size(),
+        segment_load_info.GetPriority(),
+        eager_load,
+        warmup_policy,
+        cache_key_suffix,
+        segment_load_info.GetEstimatedBytesPerRow(),
+        segment_load_info.GetInsertChannel(),
+        /*column_size_estimate=*/std::nullopt,
+        /*writeback_mode=*/writeback_mode,
+        /*enable_async_load=*/storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -8519,27 +8519,28 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         cache_key_suffix = std::to_string(milvus_field_ids.front().get());
     }
 
-    auto translator =
-        std::make_unique<storagev2translator::ManifestGroupTranslator>(
-            get_segment_id(),
-            GroupChunkType::DEFAULT,
-            index,
-            std::move(chunk_reader),
-            field_metas,
-            column_group->columns,
-            *needed_columns,
-            use_mmap,
-            mmap_config.GetMmapPopulate(),
-            mmap_dir_path,
-            milvus_field_ids.size(),
-            segment_load_info.GetPriority(),
-            eager_load,
-            warmup_policy,
-            cache_key_suffix,
-            segment_load_info.GetEstimatedBytesPerRow(),
-            segment_load_info.GetInsertChannel(),
-            std::move(column_size_estimate),
-            writeback_mode);
+    auto translator = std::make_unique<
+        storagev2translator::ManifestGroupTranslator>(
+        get_segment_id(),
+        GroupChunkType::DEFAULT,
+        index,
+        std::move(chunk_reader),
+        field_metas,
+        column_group->columns,
+        *needed_columns,
+        use_mmap,
+        mmap_config.GetMmapPopulate(),
+        mmap_dir_path,
+        milvus_field_ids.size(),
+        segment_load_info.GetPriority(),
+        eager_load,
+        warmup_policy,
+        cache_key_suffix,
+        segment_load_info.GetEstimatedBytesPerRow(),
+        segment_load_info.GetInsertChannel(),
+        /*column_size_estimate=*/std::move(column_size_estimate),
+        /*writeback_mode=*/writeback_mode,
+        /*enable_async_load=*/storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

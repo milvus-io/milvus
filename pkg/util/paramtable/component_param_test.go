@@ -202,6 +202,42 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, item.GetAsBool())
 	})
 
+	t.Run("query node storage v2 async load config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.StorageV2EnableAsyncLoad
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.storageV2.enableAsyncLoad", item.Key)
+		assert.False(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
+	})
+
+	t.Run("query node storage v2 async read window config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes", item.Key)
+		assert.True(t, item.Export)
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+
+		params.Save(item.Key, "0")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "-1")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "16MiB")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "9223372036854775808")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "33554432")
+		assert.EqualValues(t, 32*1024*1024, item.GetAsInt64())
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 
