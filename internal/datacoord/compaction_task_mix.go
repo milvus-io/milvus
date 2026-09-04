@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -26,7 +25,8 @@ import (
 var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
-	taskProto atomic.Value // *datapb.CompactionTask
+	taskProto  atomic.Value // *datapb.CompactionTask
+	stateGuard compactionTaskStateGuard
 
 	allocator allocator.Allocator
 	meta      CompactionMeta
@@ -105,8 +105,6 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		if err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 		return
 	}
 	mlog.Info(context.TODO(), "mixCompactionTask notify compaction tasks to DataNode")
@@ -318,11 +316,15 @@ func (t *mixCompactionTask) doClean() error {
 }
 
 func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
+
+	oldTask := t.GetTaskProto()
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
-	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
+	if oldTask.State == datapb.CompactionTaskState_completed ||
+		oldTask.State == datapb.CompactionTaskState_cleaned ||
+		oldTask.State == datapb.CompactionTaskState_failed ||
+		oldTask.State == datapb.CompactionTaskState_timeout {
 		ts := time.Now().Unix()
 		opts = append(opts, setEndTime(ts))
 	}
@@ -332,6 +334,7 @@ func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) err
 	if err != nil {
 		return err
 	}
+	updateCompactionTaskMetrics(oldTask, task)
 	t.SetTask(task)
 	return nil
 }

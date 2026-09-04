@@ -2,17 +2,23 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globaltask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -316,4 +322,198 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	t1.QueryTaskOnWorker(cluster)
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
+}
+
+func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
+	const (
+		retryNodeID    = int64(99001)
+		normalNodeID   = int64(99002)
+		retryPlanID    = int64(99001)
+		normalPlanID   = int64(99002)
+		compactionType = datapb.CompactionType_SortCompaction
+	)
+
+	taskType := compactionType.String()
+	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", taskType, metrics.Pending)
+	nullExecuting := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", taskType, metrics.Executing)
+	retryExecuting := metrics.DataCoordCompactionTaskNum.WithLabelValues("99001", taskType, metrics.Executing)
+	retryDone := metrics.DataCoordCompactionTaskNum.WithLabelValues("99001", taskType, metrics.Done)
+	normalExecuting := metrics.DataCoordCompactionTaskNum.WithLabelValues("99002", taskType, metrics.Executing)
+	normalDone := metrics.DataCoordCompactionTaskNum.WithLabelValues("99002", taskType, metrics.Done)
+	initialPending := testutil.ToFloat64(pending)
+	initialNullExecuting := testutil.ToFloat64(nullExecuting)
+	initialRetryExecuting := testutil.ToFloat64(retryExecuting)
+	initialRetryDone := testutil.ToFloat64(retryDone)
+	initialNormalExecuting := testutil.ToFloat64(normalExecuting)
+	initialNormalDone := testutil.ToFloat64(normalDone)
+	t.Cleanup(func() {
+		pending.Set(initialPending)
+		nullExecuting.Set(initialNullExecuting)
+		retryExecuting.Set(initialRetryExecuting)
+		retryDone.Set(initialRetryDone)
+		normalExecuting.Set(initialNormalExecuting)
+		normalDone.Set(initialNormalDone)
+	})
+
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, segmentID int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:    segmentID,
+				State: commonpb.SegmentState_Flushed,
+			}}
+		},
+	).Maybe()
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Times(2)
+	meta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
+		nil, &segMetricMutation{}, nil).Times(2)
+	meta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Times(2)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Maybe()
+	newTask := func(planID int64) *mixCompactionTask {
+		return newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        planID,
+			CollectionID:  1,
+			Type:          compactionType,
+			State:         datapb.CompactionTaskState_pipelining,
+			NodeID:        NullNodeID,
+			InputSegments: []int64{planID},
+			Schema:        &schemapb.CollectionSchema{},
+		}, alloc, meta, newMockVersionManager())
+	}
+
+	compactionTask := newTask(retryPlanID)
+
+	scheduler := globaltask.NewMockGlobalScheduler(t)
+	scheduler.EXPECT().Enqueue(compactionTask).Once()
+	handler := newCompactionInspector(nil, nil, nil, scheduler, scheduler, newMockVersionManager())
+	require.NoError(t, handler.submitTask(compactionTask))
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+
+	// Moving a task into the generic scheduler does not mean that a worker has
+	// accepted it yet. It must remain pending until CreateTaskOnWorker succeeds.
+	handler.schedule()
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+	require.Equal(t, initialNullExecuting, testutil.ToFloat64(nullExecuting))
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	compactionTask.CreateTaskOnWorker(retryNodeID, cluster)
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+	require.Equal(t, initialRetryExecuting+1, testutil.ToFloat64(retryExecuting))
+
+	// A worker query error returns the task to pending. Repeating the failed
+	// Create path must not apply another metric transition.
+	cluster.EXPECT().QueryCompaction(retryNodeID, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(retryNodeID)).Once()
+	compactionTask.QueryTaskOnWorker(cluster)
+	require.Equal(t, datapb.CompactionTaskState_pipelining, compactionTask.GetTaskProto().GetState())
+	require.EqualValues(t, NullNodeID, compactionTask.GetTaskProto().GetNodeID())
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+	require.Equal(t, initialRetryExecuting, testutil.ToFloat64(retryExecuting))
+	for i := 0; i < 5; i++ {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("compaction already exists")).Once()
+		compactionTask.CreateTaskOnWorker(retryNodeID, cluster)
+	}
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+	require.Equal(t, initialRetryExecuting, testutil.ToFloat64(retryExecuting))
+	require.Equal(t, initialNullExecuting, testutil.ToFloat64(nullExecuting))
+
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	compactionTask.CreateTaskOnWorker(retryNodeID, cluster)
+	cluster.EXPECT().QueryCompaction(retryNodeID, mock.Anything).Return(
+		&datapb.CompactionPlanResult{PlanID: retryPlanID, State: datapb.CompactionTaskState_completed}, nil).Once()
+	compactionTask.QueryTaskOnWorker(cluster)
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+	require.Equal(t, initialRetryExecuting, testutil.ToFloat64(retryExecuting))
+	require.Equal(t, initialRetryDone+1, testutil.ToFloat64(retryDone))
+
+	// A separate task with no retry must still follow pending -> executing -> done.
+	normalTask := newTask(normalPlanID)
+	require.NoError(t, handler.submitTask(normalTask))
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+
+	normalCluster := session.NewMockCluster(t)
+	normalCluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	normalTask.CreateTaskOnWorker(normalNodeID, normalCluster)
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+	require.Equal(t, initialNormalExecuting+1, testutil.ToFloat64(normalExecuting))
+
+	normalCluster.EXPECT().QueryCompaction(normalNodeID, mock.Anything).Return(
+		&datapb.CompactionPlanResult{PlanID: normalPlanID, State: datapb.CompactionTaskState_completed}, nil).Once()
+	normalTask.QueryTaskOnWorker(normalCluster)
+	require.Equal(t, datapb.CompactionTaskState_completed, normalTask.GetTaskProto().GetState())
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+	require.Equal(t, initialNormalExecuting, testutil.ToFloat64(normalExecuting))
+	require.Equal(t, initialNormalDone+1, testutil.ToFloat64(normalDone))
+}
+
+func TestMixCompactionTaskMetricsConcurrentCompletionDoesNotDrift(t *testing.T) {
+	const (
+		nodeID         = int64(99003)
+		compactionType = datapb.CompactionType_SortCompaction
+	)
+
+	taskType := compactionType.String()
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99003", taskType, metrics.Executing)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99003", taskType, metrics.Done)
+	initialExecuting := testutil.ToFloat64(executing)
+	initialDone := testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		executing.Set(initialExecuting)
+		done.Set(initialDone)
+	})
+
+	firstSaveStarted := make(chan struct{})
+	releaseFirstSave := make(chan struct{})
+	var saveCalls atomic.Int32
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *datapb.CompactionTask) error {
+			if saveCalls.Add(1) == 1 {
+				close(firstSaveStarted)
+				<-releaseFirstSave
+			}
+			return nil
+		},
+	).Twice()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:  99003,
+		Type:    compactionType,
+		State:   datapb.CompactionTaskState_meta_saved,
+		NodeID:  nodeID,
+		Channel: "concurrent-completion",
+	}, nil, meta, newMockVersionManager())
+	incCompactionTaskMetric(task.GetTaskProto())
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	}()
+	<-firstSaveStarted
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	}()
+
+	var secondErr error
+	secondFinished := false
+	select {
+	case secondErr = <-secondDone:
+		secondFinished = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstSave)
+	require.NoError(t, <-firstDone)
+	if !secondFinished {
+		secondErr = <-secondDone
+	}
+	require.NoError(t, secondErr)
+
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
 }

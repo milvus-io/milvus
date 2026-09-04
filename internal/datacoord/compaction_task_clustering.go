@@ -50,9 +50,10 @@ import (
 var _ CompactionTask = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	taskProto atomic.Value // *datapb.CompactionTask
-	plan      *datapb.CompactionPlan
-	result    *datapb.CompactionPlanResult
+	taskProto  atomic.Value // *datapb.CompactionTask
+	stateGuard compactionTaskStateGuard
+	plan       *datapb.CompactionPlan
+	result     *datapb.CompactionPlanResult
 
 	allocator        allocator.Allocator
 	meta             CompactionMeta
@@ -771,6 +772,7 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 	}
 	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
+		createErr := err
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -781,8 +783,7 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 			return err
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		return createErr
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 }
@@ -796,11 +797,15 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 }
 
 func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
+
+	oldTask := t.GetTaskProto()
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
-	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
+	if oldTask.State == datapb.CompactionTaskState_completed ||
+		oldTask.State == datapb.CompactionTaskState_cleaned ||
+		oldTask.State == datapb.CompactionTaskState_failed ||
+		oldTask.State == datapb.CompactionTaskState_timeout {
 		ts := time.Now().Unix()
 		opts = append(opts, setEndTime(ts))
 	}
@@ -811,6 +816,7 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 		mlog.Warn(context.TODO(), "Failed to saveTaskMeta", mlog.Err(err))
 		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
 	}
+	updateCompactionTaskMetrics(oldTask, task)
 	t.SetTask(task)
 	mlog.Info(context.TODO(), "updateAndSaveTaskMeta success", mlog.String("task state", t.GetTaskProto().GetState().String()))
 	return nil

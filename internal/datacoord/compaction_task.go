@@ -17,7 +17,11 @@
 package datacoord
 
 import (
+	"strconv"
+	"sync"
+
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -48,6 +52,64 @@ type CompactionTask interface {
 }
 
 type compactionTaskOpt func(task *datapb.CompactionTask)
+
+type compactionTaskStateGuard struct {
+	sync.Mutex
+}
+
+type compactionTaskMetric struct {
+	nodeID         int64
+	compactionType string
+	status         string
+}
+
+func getCompactionTaskMetric(task *datapb.CompactionTask) compactionTaskMetric {
+	metric := compactionTaskMetric{
+		nodeID:         task.GetNodeID(),
+		compactionType: task.GetType().String(),
+		status:         metrics.Executing,
+	}
+
+	switch task.GetState() {
+	case datapb.CompactionTaskState_pipelining:
+		metric.nodeID = NullNodeID
+		metric.status = metrics.Pending
+	case datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_failed,
+		datapb.CompactionTaskState_timeout,
+		datapb.CompactionTaskState_cleaned:
+		metric.status = metrics.Done
+	}
+
+	return metric
+}
+
+func updateCompactionTaskMetrics(oldTask, newTask *datapb.CompactionTask) {
+	oldMetric := getCompactionTaskMetric(oldTask)
+	newMetric := getCompactionTaskMetric(newTask)
+	if oldMetric == newMetric {
+		return
+	}
+
+	updateCompactionTaskMetric(oldMetric, -1)
+	updateCompactionTaskMetric(newMetric, 1)
+}
+
+func updateCompactionTaskMetric(metric compactionTaskMetric, delta float64) {
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		strconv.FormatInt(metric.nodeID, 10),
+		metric.compactionType,
+		metric.status,
+	).Add(delta)
+}
+
+func incCompactionTaskMetric(task *datapb.CompactionTask) {
+	updateCompactionTaskMetric(getCompactionTaskMetric(task), 1)
+}
+
+func decCompactionTaskMetric(task *datapb.CompactionTask) {
+	updateCompactionTaskMetric(getCompactionTaskMetric(task), -1)
+}
 
 func setNodeID(nodeID int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
