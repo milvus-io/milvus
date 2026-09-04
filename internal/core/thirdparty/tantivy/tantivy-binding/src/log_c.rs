@@ -1,5 +1,12 @@
 use std::ffi::{c_char, CStr};
 
+use crate::log::{init_log, set_log_callback, set_log_level, TantivyLogCallback};
+
+#[no_mangle]
+pub extern "C" fn tantivy_set_log_callback(callback: TantivyLogCallback) {
+    set_log_callback(callback);
+}
+
 #[no_mangle]
 pub extern "C" fn tantivy_set_log_level(level: *const c_char) {
     let level_str = unsafe { CStr::from_ptr(level) }.to_str().unwrap_or("info");
@@ -14,5 +21,19 @@ pub extern "C" fn tantivy_set_log_level(level: *const c_char) {
         _ => log::LevelFilter::Info,
     };
 
-    log::set_max_level(filter);
+    set_log_level(filter);
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_test_log_from_background_thread() -> bool {
+    init_log();
+    std::thread::spawn(|| {
+        log::trace!(target: "tantivy::background", "bridge trace");
+        log::debug!(target: "tantivy::background", "bridge debug");
+        log::info!(target: "tantivy::background", "bridge info");
+        log::warn!(target: "tantivy::background", "bridge warn");
+        log::error!(target: "tantivy::background", "bridge error");
+    })
+    .join()
+    .is_ok()
 }

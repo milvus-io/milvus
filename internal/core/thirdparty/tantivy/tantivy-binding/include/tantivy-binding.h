@@ -22,6 +22,14 @@ enum class TantivyDataType : uint8_t {
   JSON,
 };
 
+enum class TantivyLogLevel {
+  Trace,
+  Debug,
+  Info,
+  Warn,
+  Error,
+};
+
 struct RustArray {
   uint32_t *array;
   size_t len;
@@ -101,6 +109,15 @@ struct RustResult {
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
 
 using RegexMatchFn = bool(*)(void*, const uint8_t*, uintptr_t);
+
+using TantivyLogCallback = bool(*)(TantivyLogLevel level,
+                                   const char *target,
+                                   uintptr_t target_len,
+                                   const char *file,
+                                   uintptr_t file_len,
+                                   uint32_t line,
+                                   const char *message,
+                                   uintptr_t message_len);
 
 struct TantivyToken {
   const char *token;
@@ -597,7 +614,11 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       bool in_ram,
                                       bool enable_background_merge);
 
+void tantivy_set_log_callback(TantivyLogCallback callback);
+
 void tantivy_set_log_level(const char *level);
+
+bool tantivy_test_log_from_background_thread();
 
 void free_rust_string(const char *ptr);
 
