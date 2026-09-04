@@ -261,6 +261,17 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 	return left.expr.GetColumnExpr().GetInfo()
 }
 
+// formatDataTypeForError renders the data type a field was declared with in
+// uppercase. Array fields keep the element type and use the same
+// "Array[Element]" spelling as getDataType so error messages stay consistent
+// across the package.
+func formatDataTypeForError(dataType, elementType schemapb.DataType) string {
+	if typeutil.IsArrayType(dataType) && elementType != schemapb.DataType_None {
+		return fmt.Sprintf("%s[%s]", dataType, elementType)
+	}
+	return strings.ToUpper(dataType.String())
+}
+
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	// A raw-bytes value has exactly one consumer family — the membership filter
 	// blob argument of membership_match — each
@@ -746,17 +757,35 @@ func hexDigit(n uint32) byte {
 	return byte(n-10) + 'a'
 }
 
-func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType, leftName, rightName string) error {
+	leftValid := canConvertToIntegerType(leftType, leftElementType)
+	rightValid := canConvertToIntegerType(rightType, rightElementType)
+	if leftValid && rightValid {
+		return nil
+	}
+
+	// Name every offending field and its declared type so the caller does not
+	// have to guess which side of the expression broke the operator.
+	var offendingParts []string
+	if !leftValid && leftName != "" {
+		offendingParts = append(offendingParts,
+			fmt.Sprintf("field '%s' is %s", leftName, formatDataTypeForError(leftType, leftElementType)))
+	}
+	if !rightValid && rightName != "" {
+		offendingParts = append(offendingParts,
+			fmt.Sprintf("field '%s' is %s", rightName, formatDataTypeForError(rightType, rightElementType)))
+	}
+	var offending string
+	if len(offendingParts) > 0 {
+		offending = ", but " + strings.Join(offendingParts, " and ")
+	}
+
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
-		}
+		return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types%s", offending)
 	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
 		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
-		}
+		return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types%s", offending)
 	default:
 	}
 	return nil

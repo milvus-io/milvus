@@ -1197,30 +1197,56 @@ func Test_checkValidModArith(t *testing.T) {
 	t.Run("mod with integers is valid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 		assert.NoError(t, err)
 	})
 
 	t.Run("mod with float left is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			schemapb.DataType_Int64, schemapb.DataType_None, "price", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.Contains(t, err.Error(), "but field 'price' is FLOAT")
 	})
 
 	t.Run("mod with float right is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			schemapb.DataType_Float, schemapb.DataType_None, "", "price")
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "but field 'price' is FLOAT")
+	})
+
+	t.Run("mod with unnamed operands keeps the plain message", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Float, schemapb.DataType_None,
+			schemapb.DataType_Float, schemapb.DataType_None, "", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.NotContains(t, err.Error(), "but field")
+	})
+
+	t.Run("mod with array operands reports element types", func(t *testing.T) {
+		// Array operands must render the element type using the same
+		// "Array[Element]" spelling as getDataType, and every invalid side
+		// must be named in one pass.
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Array, schemapb.DataType_Float,
+			schemapb.DataType_Array, schemapb.DataType_Double,
+			"floatArr", "doubleArr")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.Contains(t, err.Error(), "field 'floatArr' is Array[Float]")
+		assert.Contains(t, err.Error(), "field 'doubleArr' is Array[Double]")
+		assert.Contains(t, err.Error(), " and ")
 	})
 
 	t.Run("add operation is always valid", func(t *testing.T) {
 		// Non-mod operations should not be validated by this function
 		err := checkValidModArith(planpb.ArithOpType_Add,
 			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			schemapb.DataType_Float, schemapb.DataType_None, "", "")
 		assert.NoError(t, err)
 	})
 }
@@ -1240,31 +1266,33 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		t.Run(op.String()+" with integers is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with integer array element is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Array, schemapb.DataType_Int32,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with float left is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Float, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "price", "")
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+			assert.Contains(t, err.Error(), "but field 'price' is FLOAT")
 		})
 
 		t.Run(op.String()+" with double right is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Double, schemapb.DataType_None)
+				schemapb.DataType_Double, schemapb.DataType_None, "", "price")
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+			assert.Contains(t, err.Error(), "but field 'price' is DOUBLE")
 		})
 	}
 }
