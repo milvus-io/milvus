@@ -1302,6 +1302,10 @@ func (id *InsertData) SetBM25Stats(bm25Stats map[int64]*storage.BM25Stats) {
 	id.bm25Stats = bm25Stats
 }
 
+func (id *InsertData) GetBM25Stats() map[int64]*storage.BM25Stats {
+	return id.bm25Stats
+}
+
 func (id *InsertData) GetDatas() []*storage.InsertData {
 	return id.data
 }

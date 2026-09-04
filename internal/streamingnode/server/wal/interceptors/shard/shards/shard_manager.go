@@ -164,6 +164,8 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
 		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
 			continue
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
+			continue
 		default:
 			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
 		}
