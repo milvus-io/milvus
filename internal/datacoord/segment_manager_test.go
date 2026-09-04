@@ -116,12 +116,14 @@ func TestAllocSegment(t *testing.T) {
 	mockAllocator := newMockAllocator(t)
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 
 	t.Run("normal allocation", func(t *testing.T) {
 		allocations, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100, storage.StorageV1)
@@ -140,7 +142,7 @@ func TestAllocSegment(t *testing.T) {
 		// 	allocTsSucceed: true,
 		// 	AllocIDSucceed: false,
 		// }
-		segmentManager, err := newSegmentManager(meta, failsAllocator)
+		segmentManager, err := newSegmentManager(meta, failsAllocator, withCollectionHandler(collectionHandler))
 		assert.NoError(t, err)
 		_, err = segmentManager.AllocSegment(ctx, collID, 100, "c2", 100, storage.StorageV1)
 		assert.Error(t, err)
@@ -150,7 +152,7 @@ func TestAllocSegment(t *testing.T) {
 		failsAllocator := allocator.NewMockAllocator(t)
 		failsAllocator.EXPECT().AllocID(mock.Anything).Return(0, nil).Maybe()
 		failsAllocator.EXPECT().AllocTimestamp(mock.Anything).Return(0, errors.New("mock")).Maybe()
-		segmentManager, err := newSegmentManager(meta, failsAllocator)
+		segmentManager, err := newSegmentManager(meta, failsAllocator, withCollectionHandler(collectionHandler))
 		assert.Error(t, err)
 		assert.Nil(t, segmentManager)
 	})
@@ -196,11 +198,15 @@ func TestAllocSegmentExpirationUsesHybridTimestampArithmetic(t *testing.T) {
 
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: 1, Schema: newTestSchema()})
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: 1, Schema: newTestSchema()}, nil
+	}}
 
-	segmentManager, err := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(func(*schemapb.CollectionSchema) (int, error) {
-		return 1000, nil
-	}))
+	segmentManager, err := newSegmentManager(meta, mockAllocator,
+		withCollectionHandler(collectionHandler),
+		withCalUpperLimitPolicy(func(*schemapb.CollectionSchema) (int, error) {
+			return 1000, nil
+		}))
 	assert.NoError(t, err)
 
 	allocations, err := segmentManager.AllocSegment(ctx, 1, 1, "large-ts-channel", 10, storage.StorageV1)
@@ -247,10 +253,11 @@ func TestLastExpireReset(t *testing.T) {
 	}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.Nil(t, err)
-	// add collection
 	channelName := "c1"
 	schema := newTestSchema()
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
 	initSegment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
@@ -263,7 +270,7 @@ func TestLastExpireReset(t *testing.T) {
 
 	// assign segments, set max segment to only 1MB, equalling to 10485 rows
 	var bigRows, smallRows int64 = 10000, 1000
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 	initSegment.State = commonpb.SegmentState_Dropped
 	meta.segments.SetSegment(1, initSegment)
 	allocs, _ := segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows, storage.StorageV1)
@@ -300,9 +307,8 @@ func TestLastExpireReset(t *testing.T) {
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
 	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker)
-	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
-	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
+	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator, withCollectionHandler(collectionHandler))
 	// reset row number to avoid being cleaned by empty segment
 	restartedMeta.SetRowCount(segmentID1, bigRows)
 	restartedMeta.SetRowCount(segmentID2, bigRows)
@@ -331,10 +337,8 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
-	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 
 	vchannel := "ch0"
 	partitionID := int64(100)
@@ -392,8 +396,10 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000, storage.StorageV1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
@@ -414,8 +420,10 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000, storage.StorageV1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
@@ -436,8 +444,10 @@ func TestDropSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 100, "c1", 1000, storage.StorageV1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
@@ -459,12 +469,16 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
 
 	mockPolicy := func(schema *schemapb.CollectionSchema) (int, error) {
 		return 1, nil
 	}
-	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
+	segmentManager, _ := newSegmentManager(meta, mockAllocator,
+		withCollectionHandler(collectionHandler),
+		withCalUpperLimitPolicy(mockPolicy))
 	allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 2, len(allocations))
@@ -481,12 +495,16 @@ func TestExpireAllocation(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
 
 	mockPolicy := func(schema *schemapb.CollectionSchema) (int, error) {
 		return 10000000, nil
 	}
-	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
+	segmentManager, _ := newSegmentManager(meta, mockAllocator,
+		withCollectionHandler(collectionHandler),
+		withCalUpperLimitPolicy(mockPolicy))
 	// alloc 100 times and expire
 	var maxts Timestamp
 	var id int64 = -1
@@ -523,8 +541,10 @@ func TestGetFlushableSegments(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator)
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -587,8 +607,12 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealL1SegmentByLifetime())) // always seal
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator,
+			withCollectionHandler(collectionHandler),
+			withSegmentSealPolices(sealL1SegmentByLifetime())) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -614,8 +638,12 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator,
+			withCollectionHandler(collectionHandler),
+			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -639,8 +667,11 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
 		segmentManager, _ := newSegmentManager(meta, mockAllocator,
+			withCollectionHandler(collectionHandler),
 			withSegmentSealPolices(sealL1SegmentByLifetime()),
 			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
@@ -666,8 +697,10 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator)
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -751,8 +784,12 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(alwaysSealPolicy())) // always seal
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator,
+			withCollectionHandler(collectionHandler),
+			withSegmentSealPolices(alwaysSealPolicy())) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -782,8 +819,12 @@ func TestTryToSealSegment(t *testing.T) {
 		schema := newTestSchema()
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
+		collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+			return &collectionInfo{ID: collID, Schema: schema}, nil
+		}}
+		segmentManager, _ := newSegmentManager(meta, mockAllocator,
+			withCollectionHandler(collectionHandler),
+			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2, storage.StorageV1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -1113,8 +1154,10 @@ func TestDropSegmentOfPartition(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(context.Background())
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	collectionHandler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collID, Schema: schema}, nil
+	}}
+	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCollectionHandler(collectionHandler))
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 100, "c1", 1000, storage.StorageV1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
@@ -1135,10 +1178,8 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 	assert.NoError(t, err)
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 
-	schema := newTestSchema()
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 
 	t.Run("StorageV3 segment has manifest path", func(t *testing.T) {
 		segID, err := mockAllocator.AllocID(ctx)

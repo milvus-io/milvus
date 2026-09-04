@@ -66,10 +66,13 @@ type snapshotExportManager struct {
 	meta            *snapshotExportMeta
 	snapshotManager *snapshotManager
 
-	wakeCh    chan struct{}
-	startOnce sync.Once
-	closeOnce sync.Once
-	wg        sync.WaitGroup
+	wakeCh chan struct{}
+	// lifecycleMu prevents Start from adding the run goroutine after Close has
+	// canceled the manager and begun waiting for it.
+	lifecycleMu sync.Mutex
+	startOnce   sync.Once
+	closeOnce   sync.Once
+	wg          sync.WaitGroup
 
 	runningMu sync.Mutex
 	running   map[int64]context.CancelFunc
@@ -101,6 +104,11 @@ func newSnapshotExportManager(
 }
 
 func (m *snapshotExportManager) Start() {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.ctx.Err() != nil {
+		return
+	}
 	m.startOnce.Do(func() {
 		m.wg.Add(1)
 		go m.run()
@@ -109,7 +117,9 @@ func (m *snapshotExportManager) Start() {
 
 func (m *snapshotExportManager) Close() {
 	m.closeOnce.Do(func() {
+		m.lifecycleMu.Lock()
 		m.cancel()
+		m.lifecycleMu.Unlock()
 		m.wg.Wait()
 	})
 }
@@ -189,6 +199,18 @@ func (m *snapshotExportManager) Submit(
 		PinId:          pinID,
 	}
 	if err := m.meta.CreateJob(ctx, job); err != nil {
+		// A failed Save response is ambiguous: the job may already be durable.
+		// Keep its pin and reload the authoritative result on restart. Unpinning
+		// here could recover a persisted Pending job with an unprotected source.
+		if errors.Is(err, errSnapshotExportJobPersistence) {
+			if m.ctx.Err() == nil {
+				mlog.Fatal(ctx, "snapshot export job publication failed; terminating process",
+					mlog.FieldJobID(jobID),
+					mlog.Int64("pinID", pinID),
+					mlog.Err(err))
+			}
+			return 0, err
+		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotPinCleanupTimeout)
 		defer cancel()
 		collID, snapName, remaining, unpinErr := m.snapshotManager.snapshotMeta.UnpinSnapshot(cleanupCtx, pinID)
@@ -730,6 +752,11 @@ func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryL
 		job.Reason = reason
 		job.EndTime = uint64(time.Now().UnixMilli())
 		job.SnapshotMetadataUri = ""
+		// TODO: A failed export can leave partially copied objects under its
+		// exports/{uuid} target. Automatic cleanup needs target-side LIST and
+		// DELETE permissions, which are not part of the current export contract;
+		// until that contract is defined, cleanup relies on bucket lifecycle or
+		// manual removal.
 		job.ExternalSpec = ""
 		return false, nil
 	}

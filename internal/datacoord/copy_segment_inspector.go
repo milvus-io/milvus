@@ -180,16 +180,19 @@ func (s *copySegmentInspector) Close() {
 // - Safe to call multiple times (scheduler handles duplicate enqueues)
 // - Only InProgress tasks are reloaded (Pending will be handled by inspect loop)
 func (s *copySegmentInspector) reloadFromMeta() {
-	// Retrieve all jobs (no filters)
 	jobs := s.copyMeta.GetJobBy(s.ctx)
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobId() < jobs[j].GetJobId()
 	})
 
 	for _, job := range jobs {
+		if job.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting {
+			continue
+		}
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
-			if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
+			if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending ||
+				(task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress && isNodeAssigned(task.GetNodeId())) {
 				s.scheduler.Enqueue(task)
 			}
 		}
@@ -213,7 +216,6 @@ func (s *copySegmentInspector) reloadFromMeta() {
 // - Failed tasks need prompt cleanup to prevent orphaned segments
 // - Periodic inspection ensures no tasks are missed during state transitions
 func (s *copySegmentInspector) inspect() {
-	// Retrieve all jobs (no filters)
 	jobs := s.copyMeta.GetJobBy(s.ctx)
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobId() < jobs[j].GetJobId()
@@ -221,10 +223,33 @@ func (s *copySegmentInspector) inspect() {
 
 	for _, job := range jobs {
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			for _, task := range tasks {
+				s.processFailed(task)
+			}
+			continue
+		}
+		if job.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting {
+			continue
+		}
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.CopySegmentTaskState_CopySegmentTaskPending:
 				s.processPending(task)
+			case datapb.CopySegmentTaskState_CopySegmentTaskRetry:
+				s.processRetry(task)
+			case datapb.CopySegmentTaskState_CopySegmentTaskInProgress:
+				// Idempotent while owned; recovers a wrapper released locally after
+				// a failed retry-state write.
+				if !isNodeAssigned(task.GetNodeId()) {
+					if err := s.copyMeta.UpdateTask(s.ctx, task.GetTaskId(),
+						UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskRetry)); err != nil {
+						mlog.Warn(s.ctx, "failed to recover unassigned copy retry",
+							WrapCopySegmentTaskLog(task, mlog.Err(err))...)
+					}
+					continue
+				}
+				s.scheduler.Enqueue(task)
 			case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 				s.processFailed(task)
 			}
@@ -252,7 +277,33 @@ func (s *copySegmentInspector) inspect() {
 // - Safe to enqueue same task multiple times (scheduler handles duplicates)
 // - Task state will transition to InProgress when actually dispatched
 func (s *copySegmentInspector) processPending(task CopySegmentTask) {
+	job := s.copyMeta.GetJob(s.ctx, task.GetJobId())
+	if job == nil || job.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting {
+		return
+	}
 	s.scheduler.Enqueue(task)
+}
+
+// processRetry keeps retry ownership in the CopySegment business layer. It
+// retires the old task/targets and publishes a fresh task and fresh target IDs
+// through CopySegmentMeta; the global scheduler never schedules the Retry
+// record itself.
+func (s *copySegmentInspector) processRetry(task CopySegmentTask) {
+	concrete, ok := task.(*copySegmentTask)
+	if !ok {
+		mlog.Warn(s.ctx, "cannot replace retry copy segment task with unknown implementation",
+			WrapCopySegmentTaskLog(task)...)
+		return
+	}
+	replacement, err := concrete.replaceRetryAttempt(s.ctx)
+	if err != nil {
+		mlog.Warn(s.ctx, "failed to replace copy segment retry task",
+			WrapCopySegmentTaskLog(task, mlog.Err(err))...)
+		return
+	}
+	if replacement != nil {
+		s.scheduler.Enqueue(replacement)
+	}
 }
 
 // processFailed handles cleanup for failed copy segment tasks.
@@ -270,9 +321,11 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // - Dropping ensures consistent state and prevents data corruption
 //
 // Error handling:
-// - Logs warnings if drop fails but continues processing other segments
-// - Failed drops will be retried on next inspection cycle
-func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
+//   - Logs warnings if drop fails but continues processing other segments
+//   - Returns false if any target still needs cleanup; retained task records make
+//     those failures retryable on the next inspection cycle
+func (s *copySegmentInspector) processFailed(task CopySegmentTask) bool {
+	cleaned := true
 	// Drop target segments if copy failed
 	for _, mapping := range task.GetIdMappings() {
 		targetSegID := mapping.GetTargetSegmentId()
@@ -281,9 +334,14 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 			continue
 		}
 
+		// is_importing is cleared with the drop: the garbage collector skips
+		// is_importing segments to protect the in-flight commit marker, so a
+		// dropped target that keeps the flag would never be reclaimed. Copy
+		// targets are never that marker.
 		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
-		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
+		err := s.meta.UpdateSegmentsInfo(s.ctx, op, UpdateIsImporting(targetSegID, false))
 		if err != nil {
+			cleaned = false
 			mlog.Warn(s.ctx, "failed to drop target segment after copy task failed",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID), mlog.Err(err))...)
 		} else {
@@ -291,4 +349,5 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID))...)
 		}
 	}
+	return cleaned
 }

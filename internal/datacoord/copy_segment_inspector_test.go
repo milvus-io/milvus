@@ -72,11 +72,6 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
-		ID:     s.collectionID,
-		Schema: newTestSchema(),
-	})
-
 	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 
@@ -98,7 +93,7 @@ func TestCopySegmentInspector(t *testing.T) {
 	suite.Run(t, new(CopySegmentInspectorSuite))
 }
 
-func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
+func (s *CopySegmentInspectorSuite) TestReloadFromMeta_SkipsTerminalJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -107,14 +102,14 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
-			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
 		},
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
-	// Create a completed task (should not be enqueued)
+	// A dispatchable task of a terminal job must not be revived by recovery.
 	task := &copySegmentTask{
 		copyMeta: s.copyMeta,
 		tr:       timerecord.NewTimeRecorder("task"),
@@ -124,12 +119,12 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
-		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 
-	// Reload should not enqueue completed tasks
+	// No Enqueue expectation: reload must skip the terminal job.
 	s.inspector.reloadFromMeta()
 }
 
@@ -159,12 +154,13 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
+		NodeId:       7,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task1)
 	s.NoError(err)
 
-	// Create a pending task (should not be enqueued by reload)
+	// Pending work is also recovered on startup.
 	task2 := &copySegmentTask{
 		copyMeta: s.copyMeta,
 		tr:       timerecord.NewTimeRecorder("task2"),
@@ -179,12 +175,7 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
 	err = s.copyMeta.AddTask(context.TODO(), task2)
 	s.NoError(err)
 
-	// Expect only the in-progress task to be enqueued
-	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
-		copyTask, ok := t.(CopySegmentTask)
-		return ok && copyTask.GetTaskId() == 1001
-	})).Once()
-
+	s.scheduler.EXPECT().Enqueue(mock.Anything).Times(2)
 	s.inspector.reloadFromMeta()
 }
 
@@ -344,6 +335,69 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 	})
 }
 
+func (s *CopySegmentInspectorSuite) TestRetryTaskSwapLeavesOneMetadataOwner() {
+	ctx := context.Background()
+	const (
+		oldTaskID = int64(1001)
+		newTaskID = int64(1002)
+		oldTarget = int64(101)
+		newTarget = int64(102)
+	)
+
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: s.jobID, CollectionId: s.collectionID,
+			State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: 1, TargetSegmentId: oldTarget, PartitionId: 10,
+			}},
+		},
+		tr: timerecord.NewTimeRecorder("job"),
+	}
+	s.Require().NoError(s.copyMeta.AddJob(ctx, job))
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	oldTask := &copySegmentTask{tr: timerecord.NewTimeRecorder("old"), times: taskcommon.NewTimes()}
+	oldTask.task.Store(&datapb.CopySegmentTask{
+		TaskId: oldTaskID, JobId: s.jobID, CollectionId: s.collectionID,
+		NodeId: 7, TaskVersion: 0, TaskSlot: 1,
+		State: datapb.CopySegmentTaskState_CopySegmentTaskRetry,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 1, TargetSegmentId: oldTarget, PartitionId: 10,
+		}},
+	})
+	s.Require().NoError(s.copyMeta.AddTask(ctx, oldTask))
+	s.meta.segments.SetSegment(oldTarget, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: oldTarget, CollectionID: s.collectionID, PartitionID: 10,
+		InsertChannel: "ch-1", State: commonpb.SegmentState_Importing,
+		IsImporting: true, NumOfRows: 100,
+	}))
+
+	replacement := &copySegmentTask{tr: timerecord.NewTimeRecorder("new"), times: taskcommon.NewTimes()}
+	replacement.task.Store(&datapb.CopySegmentTask{
+		TaskId: newTaskID, JobId: s.jobID, CollectionId: s.collectionID,
+		NodeId: NullNodeID, TaskVersion: 1, TaskSlot: 1,
+		State: datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 1, TargetSegmentId: newTarget, PartitionId: 10,
+		}},
+	})
+	s.catalog.EXPECT().Update(
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	).Return(nil).Once()
+
+	replaced, err := s.copyMeta.ReplaceRetryTask(ctx, oldTaskID, replacement)
+	s.Require().NoError(err)
+	s.True(replaced)
+	s.Nil(s.copyMeta.GetTask(ctx, oldTaskID))
+	s.Same(replacement, s.copyMeta.GetTask(ctx, newTaskID))
+	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(ctx, oldTarget).GetState())
+	s.False(s.meta.GetSegment(ctx, oldTarget).GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(ctx, newTarget).GetState())
+	s.True(s.meta.GetSegment(ctx, newTarget).GetIsImporting())
+}
+
 func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
@@ -389,7 +443,8 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	err = s.copyMeta.AddTask(context.TODO(), task1)
 	s.NoError(err)
 
-	// Create an in-progress task (should not be processed by inspect)
+	// Create an assigned in-progress task. The inspector re-offers it so a
+	// scheduler restart cannot leave durable running work unpolled.
 	task2 := &copySegmentTask{
 		copyMeta: s.copyMeta,
 		tr:       timerecord.NewTimeRecorder("task2"),
@@ -399,6 +454,7 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 		TaskId:       1002,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
+		NodeId:       10,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task2)
@@ -423,10 +479,14 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	err = s.copyMeta.AddTask(context.TODO(), task3)
 	s.NoError(err)
 
-	// Expect only the pending task to be enqueued
+	// Pending work is dispatched and assigned in-progress work is resumed.
 	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
 		copyTask, ok := t.(CopySegmentTask)
 		return ok && copyTask.GetTaskId() == 1001
+	})).Once()
+	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
+		copyTask, ok := t.(CopySegmentTask)
+		return ok && copyTask.GetTaskId() == 1002
 	})).Once()
 
 	// Inspect should process pending and failed tasks

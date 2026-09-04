@@ -624,18 +624,6 @@ func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo, expectedSize in
 	return segment.getSegmentSize() < int64(float64(expectedSize)*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
 }
 
-func (t *compactionTrigger) isCompactableSegment(targetSize, expectedSize int64) bool {
-	smallProportion := Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat()
-	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
-
-	// avoid invalid single segment compaction
-	if compactableProportion < smallProportion {
-		compactableProportion = smallProportion
-	}
-
-	return targetSize > int64(float64(expectedSize)*compactableProportion)
-}
-
 func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }

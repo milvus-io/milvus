@@ -504,7 +504,7 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
             field_id.has_value()) {
             return field_id.value();
         }
-        ThrowInfo(ErrorCode::DataFormatBroken,
+        ThrowInfo(ErrorCode::InvalidParameter,
                   "external column '{}' not found in schema",
                   column_name);
     }

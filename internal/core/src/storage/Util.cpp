@@ -2593,13 +2593,15 @@ ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
     auto fsb_array =
         std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
-    AssertInfo(fsb_array->byte_width() == byte_width,
-               "vector byte width mismatch{}, expected {} bytes for "
-               "dim {}, actual {} bytes",
-               FieldErrorSuffix(field_meta),
-               byte_width,
-               dim,
-               fsb_array->byte_width());
+    if (fsb_array->byte_width() != byte_width) {
+        ThrowInfo(ErrorCode::DimNotMatch,
+                  "vector byte width mismatch{}, expected {} bytes for "
+                  "dim {}, actual {} bytes",
+                  FieldErrorSuffix(field_meta),
+                  byte_width,
+                  dim,
+                  fsb_array->byte_width());
+    }
 }
 
 void
@@ -2614,14 +2616,16 @@ ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
             continue;
         }
         auto actual_width = binary_array->value_length(i);
-        AssertInfo(actual_width == byte_width,
-                   "vector byte width mismatch{}, expected {} bytes for "
-                   "dim {}, actual {} bytes at row {}",
-                   FieldErrorSuffix(field_meta),
-                   byte_width,
-                   dim,
-                   actual_width,
-                   i);
+        if (actual_width != byte_width) {
+            ThrowInfo(ErrorCode::DimNotMatch,
+                      "vector byte width mismatch{}, expected {} bytes for "
+                      "dim {}, actual {} bytes at row {}",
+                      FieldErrorSuffix(field_meta),
+                      byte_width,
+                      dim,
+                      actual_width,
+                      i);
+        }
     }
 }
 
@@ -2754,12 +2758,12 @@ ValidateVectorListElementType(
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return;
     }
-    AssertInfo(false,
-               "vector element type mismatch{}, expected {} or raw uint8 "
-               "bytes, actual {}",
-               FieldErrorSuffix(field_meta),
-               ArrowTypeName(expected_type),
-               actual_type->ToString());
+    ThrowInfo(ErrorCode::DataTypeInvalid,
+              "vector element type mismatch{}, expected {} or raw uint8 "
+              "bytes, actual {}",
+              FieldErrorSuffix(field_meta),
+              ArrowTypeName(expected_type),
+              actual_type->ToString());
 }
 
 arrow::ArrayVector
@@ -2886,13 +2890,15 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                     auto offset = list_array->value_offset(i);
                     auto actual_length =
                         list_array->value_offset(i + 1) - offset;
-                    AssertInfo(actual_length == expected_list_length,
-                               "vector list length mismatch{}, expected {}, "
-                               "actual {} at row {}",
-                               FieldErrorSuffix(field_meta),
-                               expected_list_length,
-                               actual_length,
-                               i);
+                    if (actual_length != expected_list_length) {
+                        ThrowInfo(ErrorCode::DimNotMatch,
+                                  "vector list length mismatch{}, expected {}, "
+                                  "actual {} at row {}",
+                                  FieldErrorSuffix(field_meta),
+                                  expected_list_length,
+                                  actual_length,
+                                  i);
+                    }
                     if (should_copy_row(
                             values, offset, offset + actual_length, i)) {
                         milvus::fastmem::FastMemcpy(
@@ -2920,11 +2926,14 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                        FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
-            AssertInfo(fsl_array->value_length() == expected_list_length,
-                       "vector list length mismatch{}, expected {}, actual {}",
-                       FieldErrorSuffix(field_meta),
-                       expected_list_length,
-                       fsl_array->value_length());
+            if (fsl_array->value_length() != expected_list_length) {
+                ThrowInfo(
+                    ErrorCode::DimNotMatch,
+                    "vector list length mismatch{}, expected {}, actual {}",
+                    FieldErrorSuffix(field_meta),
+                    expected_list_length,
+                    fsl_array->value_length());
+            }
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
@@ -2940,7 +2949,7 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                 }
             }
         } else {
-            ThrowInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::DataTypeInvalid,
                       "unsupported arrow type for vector normalization{}: {}",
                       FieldErrorSuffix(field_meta),
                       array->type()->ToString());
@@ -3386,7 +3395,7 @@ ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
         case arrow::Type::STRING_VIEW:
             return DataType::STRING;
         default:
-            ThrowInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::DataTypeInvalid,
                       "unsupported array element arrow type{}: {}",
                       FieldErrorSuffix(field_meta),
                       values->type()->ToString());
@@ -3415,12 +3424,13 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
         auto actual_element_type =
             ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        AssertInfo(
-            IsCompatibleArrayElementType(actual_element_type, element_type),
-            "array element type mismatch{}, expected {}, actual {}",
-            FieldErrorSuffix(field_meta),
-            element_type,
-            actual_element_type);
+        if (!IsCompatibleArrayElementType(actual_element_type, element_type)) {
+            ThrowInfo(ErrorCode::DataTypeInvalid,
+                      "array element type mismatch{}, expected {}, actual {}",
+                      FieldErrorSuffix(field_meta),
+                      element_type,
+                      actual_element_type);
+        }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
         AssertInfo(status.ok(), "BinaryBuilder reserve failed");
@@ -3590,18 +3600,20 @@ ValidateScalarArrowType(DataType data_type,
     if (expected_type == nullptr) {
         return;
     }
-    AssertInfo(array->type()->Equals(*expected_type),
-               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
-               FieldErrorSuffix(field_meta),
-               expected_type->ToString(),
-               array->type()->ToString());
+    if (!array->type()->Equals(*expected_type)) {
+        ThrowInfo(ErrorCode::DataTypeInvalid,
+                  "field type mismatch{}, expected Arrow {}, actual Arrow {}",
+                  FieldErrorSuffix(field_meta),
+                  expected_type->ToString(),
+                  array->type()->ToString());
+    }
 }
 
 void
 AssertExternalArrowType(const std::shared_ptr<arrow::Array>& array,
                         const std::string& expected,
                         const FieldMeta& field_meta) {
-    ThrowInfo(ErrorCode::Unsupported,
+    ThrowInfo(ErrorCode::DataTypeInvalid,
               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
               FieldErrorSuffix(field_meta),
               expected,

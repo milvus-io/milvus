@@ -1400,10 +1400,14 @@ func (t *bumpSchemaVersionCompactionTask) Complete() {
 	}
 }
 
-func (t *bumpSchemaVersionCompactionTask) Stop() {
+func (t *bumpSchemaVersionCompactionTask) Cancel() {
 	if t.cancel != nil {
 		t.cancel()
 	}
+}
+
+func (t *bumpSchemaVersionCompactionTask) Stop() {
+	t.Cancel()
 	if t.done != nil {
 		<-t.done
 	}

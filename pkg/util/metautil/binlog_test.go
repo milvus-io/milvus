@@ -270,6 +270,7 @@ func TestExtractJSONKeyStatsRelativePaths(t *testing.T) {
 				"files/json_stats/3/10/2/1/2/3/100/meta.json",
 				"files/json_stats/3/10/2/1/2/3/100/shared_key_index/.managed.json_0",
 				"files/insert_log/1/2/3/_stats/json_stats.100/shredding_data/data.parquet",
+				"files/insert_log/1/2/3/_stats/json_stats.100/42/shredding_data/data.parquet",
 				"shared_key_index/already-relative",
 			},
 		},
@@ -281,6 +282,7 @@ func TestExtractJSONKeyStatsRelativePaths(t *testing.T) {
 		"meta.json",
 		"shared_key_index/.managed.json_0",
 		"shredding_data/data.parquet",
+		"42/shredding_data/data.parquet",
 		"shared_key_index/already-relative",
 	}
 	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
@@ -321,7 +323,7 @@ func TestBuildJSONKeyStatsPathsV3(t *testing.T) {
 	stats := map[int64]*datapb.JsonKeyStats{
 		100: {
 			FieldID: 100,
-			Files:   []string{"meta.json", "shared_key_index/.managed.json_0"},
+			Files:   []string{"meta.json", "shared_key_index/.managed.json_0", "42/meta.json"},
 		},
 	}
 
@@ -330,6 +332,7 @@ func TestBuildJSONKeyStatsPathsV3(t *testing.T) {
 	wantFiles := []string{
 		"files/insert_log/1/2/3/_stats/json_stats.100/meta.json",
 		"files/insert_log/1/2/3/_stats/json_stats.100/shared_key_index/.managed.json_0",
+		"files/insert_log/1/2/3/_stats/json_stats.100/42/meta.json",
 	}
 	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
 		t.Errorf("BuildJSONKeyStatsPaths() V3 Files = %v, want %v", stats[100].Files, wantFiles)

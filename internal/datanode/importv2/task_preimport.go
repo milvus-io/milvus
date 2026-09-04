@@ -118,11 +118,10 @@ func (t *PreImportTask) Cancel() {
 }
 
 func (t *PreImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
 	return &PreImportTask{
 		PreImportTask: typeutil.Clone(t.PreImportTask),
-		ctx:           ctx,
-		cancel:        cancel,
+		ctx:           t.ctx,
+		cancel:        t.cancel,
 		partitionIDs:  t.GetPartitionIDs(),
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
@@ -141,18 +140,22 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		mlog.Any("files", t.req.GetImportFiles()),
 		mlog.FieldSchema(t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
 
+	// TODO: Once storage/import readers preserve reliable error categories and
+	// causes, wait for all file futures and publish one task-level verdict: any
+	// InputError is Failed; otherwise any error is Retry. Per-file state writes
+	// are order-dependent and cannot classify this safely today.
 	fn := func(i int, file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -161,7 +164,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "preimport failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		mlog.Info(t.ctx, "read file stat done", WrapLogFields(t, mlog.Strings("files", file.GetPaths()),
@@ -234,6 +237,6 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	t.manager.Update(t.GetTaskID(), UpdateFileStat(fileIdx, stat))
+	t.manager.Update(t, UpdateFileStat(fileIdx, stat))
 	return nil
 }

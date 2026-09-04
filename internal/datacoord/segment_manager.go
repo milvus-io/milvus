@@ -131,6 +131,7 @@ type SegmentManager struct {
 	meta      *meta
 	allocator allocator.Allocator
 	helper    allocHelper
+	handler   Handler
 
 	channelLock     *lock.KeyLock[string]
 	channel2Growing *typeutil.ConcurrentMap[string, typeutil.UniqueSet]
@@ -164,6 +165,10 @@ func (f allocFunc) apply(manager *SegmentManager) {
 // get allocOption with allocHelper setting
 func withAllocHelper(helper allocHelper) allocOption {
 	return allocFunc(func(manager *SegmentManager) { manager.helper = helper })
+}
+
+func withCollectionHandler(handler Handler) allocOption {
+	return allocFunc(func(manager *SegmentManager) { manager.handler = handler })
 }
 
 // get default allocHelper, which does nothing
@@ -331,7 +336,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	})
 
 	// Apply allocation policy.
-	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
+	maxCountPerSegment, err := s.estimateMaxNumOfRows(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +413,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	var maxNumOfRows int
 	if !req.IsCreatedByStreaming {
 		var err error
-		maxNumOfRows, err = s.estimateMaxNumOfRows(req.CollectionID)
+		maxNumOfRows, err = s.estimateMaxNumOfRows(ctx, req.CollectionID)
 		if err != nil {
 			mlog.Error(context.TODO(), "failed to open new segment while estimateMaxNumOfRows", mlog.Err(err))
 			return nil, err
@@ -455,11 +460,16 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	return segment, s.helper.afterCreateSegment(segmentInfo)
 }
 
-func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
-	// it's ok to use meta.GetCollection here, since collection meta is set before using segmentManager
-	collMeta := s.meta.GetCollection(collectionID)
-	if collMeta == nil {
-		return -1, merr.WrapErrServiceInternalMsg("failed to get collection %d", collectionID)
+func (s *SegmentManager) estimateMaxNumOfRows(ctx context.Context, collectionID UniqueID) (int, error) {
+	if s.handler == nil {
+		return -1, merr.WrapErrServiceInternalMsg("collection handler is not configured")
+	}
+	collMeta, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return -1, err
+	}
+	if collMeta == nil || collMeta.Schema == nil {
+		return -1, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }

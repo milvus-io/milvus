@@ -31,6 +31,7 @@ import (
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -203,6 +204,11 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
 	defer commit.UnPatch()
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
 
 	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
 		SegmentID:     201,
@@ -213,6 +219,7 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 		},
 	})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.True(t, fatalCalled)
 	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 201).GetManifestPath())
 }
 
