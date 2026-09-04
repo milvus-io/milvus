@@ -1,7 +1,7 @@
 package datacoord
 
 import (
-	"math"
+	"strconv"
 	"testing"
 
 	"github.com/blang/semver/v4"
@@ -468,8 +468,9 @@ func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
 func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty - returns MaxInt32 (no upper bound)
-	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+	// empty - no QueryNode to bound the cluster, so the bound is what this
+	// coordinator's own image can load
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetMaximumIndexEngineVersion())
 
 	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
 	m.Startup(map[string]*sessionutil.Session{
@@ -512,8 +513,8 @@ func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
 func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty - returns MaxInt32
-	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+	// empty - bounded by this coordinator's own compiled-in scalar version
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetMaximumScalarIndexEngineVersion())
 
 	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
 	m.Startup(map[string]*sessionutil.Session{
@@ -881,4 +882,52 @@ func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
 
 	assert.Equal(t, int32(1), m.GetCurrentIndexEngineVersion())
 	assert.Equal(t, int32(1), m.GetCurrentScalarIndexEngineVersion())
+}
+
+// TestEmptySessionSetBoundsAnOverrideByThisBinary is the other half of the
+// no-session fallback. The clamp at the end of the resolve functions is what
+// stops dataCoord.targetVecIndexVersion from asking for an index nothing in
+// the cluster can load; with no QueryNode session the upper bound used to be
+// MaxInt32, so the clamp did nothing and the override was written through
+// whatever it said. The bound with no session is the same assumption the
+// current version already makes: a QueryNode started later runs this image.
+func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	m := newIndexEngineVersionManager()
+
+	compiledInVec := segcore.GetIndexEngineInfo().CurrentIndexVersion
+	assert.Equal(t, compiledInVec, m.GetMaximumIndexEngineVersion(),
+		"with no session the ceiling is what this image can load")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetMaximumScalarIndexEngineVersion())
+
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(compiledInVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.Equal(t, compiledInVec, m.ResolveVecIndexVersion(),
+		"an override above what this image can load must be clamped to it")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.ResolveScalarIndexVersion())
+}
+
+// An override BELOW the bound is untouched: the clamp is a ceiling, not a
+// rewrite, and asking for an older index version is a legitimate thing to do.
+func TestEmptySessionSetLeavesAnOverrideBelowThisBinaryAlone(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	m := newIndexEngineVersionManager()
+
+	p.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "1")
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "0")
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.EqualValues(t, 1, m.ResolveVecIndexVersion())
+	assert.EqualValues(t, 0, m.ResolveScalarIndexVersion())
 }
