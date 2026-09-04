@@ -25,6 +25,7 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -114,7 +115,8 @@ type meta struct {
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 	broker                        broker.Broker
 	// Snapshot Meta
-	snapshotMeta *snapshotMeta
+	snapshotMeta   *snapshotMeta
+	quotaMetricsMu sync.Mutex
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -585,6 +587,12 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 }
 
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
+	if aggregateCollectionMetrics {
+		m.quotaMetricsMu.Lock()
+		defer m.quotaMetricsMu.Unlock()
+	}
+
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
@@ -638,32 +646,93 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	// Reset to remove dropped collection
 	metrics.DataCoordStoredBinlogSize.Reset()
-	for collectionID, state2Size := range storedBinlogSize {
-		for state, size := range state2Size {
-			metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
+	if aggregateCollectionMetrics {
+		storedBinlogSizeByDB := make(map[string]map[string]int64)
+		for collectionID, state2Size := range storedBinlogSize {
+			dbName := coll2DbName[collectionID]
+			if _, ok := storedBinlogSizeByDB[dbName]; !ok {
+				storedBinlogSizeByDB[dbName] = make(map[string]int64)
+			}
+			for state, size := range state2Size {
+				storedBinlogSizeByDB[dbName][state] += size
+			}
+		}
+		for dbName, state2Size := range storedBinlogSizeByDB {
+			for state, size := range state2Size {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(dbName, metrics.AllLabel, state).Set(float64(size))
+			}
+		}
+	} else {
+		for collectionID, state2Size := range storedBinlogSize {
+			for state, size := range state2Size {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
+			}
 		}
 	}
 	// Reset to remove dropped collection
 	metrics.DataCoordSegmentBinLogFileCount.Reset()
-	for collectionID, size := range binlogFileCount {
-		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
+	if aggregateCollectionMetrics {
+		var totalBinlogFileCount int64
+		for _, size := range binlogFileCount {
+			totalBinlogFileCount += size
+		}
+		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(metrics.AllLabel).Set(float64(totalBinlogFileCount))
+	} else {
+		for collectionID, size := range binlogFileCount {
+			metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
+		}
 	}
 
 	metrics.DataCoordNumStoredRows.Reset()
-	for collectionID, statesRows := range collectionRowsNum {
-		coll, ok := m.collections.Get(collectionID)
-		if ok {
+	if aggregateCollectionMetrics {
+		storedRowsByDB := make(map[string]map[commonpb.SegmentState]int64)
+		for collectionID, statesRows := range collectionRowsNum {
+			coll, ok := m.collections.Get(collectionID)
+			if !ok {
+				continue
+			}
+			if _, ok := storedRowsByDB[coll.DatabaseName]; !ok {
+				storedRowsByDB[coll.DatabaseName] = make(map[commonpb.SegmentState]int64)
+			}
 			for state, rows := range statesRows {
-				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
+				storedRowsByDB[coll.DatabaseName][state] += rows
+			}
+		}
+		for dbName, statesRows := range storedRowsByDB {
+			for state, rows := range statesRows {
+				metrics.DataCoordNumStoredRows.WithLabelValues(
+					dbName, metrics.AllLabel, metrics.AllLabel, state.String()).Set(float64(rows))
+			}
+		}
+	} else {
+		for collectionID, statesRows := range collectionRowsNum {
+			coll, ok := m.collections.Get(collectionID)
+			if ok {
+				for state, rows := range statesRows {
+					metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
+				}
 			}
 		}
 	}
 
 	metrics.DataCoordL0DeleteEntriesNum.Reset()
-	for collectionID, entriesNum := range collectionL0RowCounts {
-		coll, ok := m.collections.Get(collectionID)
-		if ok {
-			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
+	if aggregateCollectionMetrics {
+		l0DeleteEntriesByDB := make(map[string]int64)
+		for collectionID, entriesNum := range collectionL0RowCounts {
+			coll, ok := m.collections.Get(collectionID)
+			if ok {
+				l0DeleteEntriesByDB[coll.DatabaseName] += entriesNum
+			}
+		}
+		for dbName, entriesNum := range l0DeleteEntriesByDB {
+			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(dbName, metrics.AllLabel).Set(float64(entriesNum))
+		}
+	} else {
+		for collectionID, entriesNum := range collectionL0RowCounts {
+			coll, ok := m.collections.Get(collectionID)
+			if ok {
+				metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
+			}
 		}
 	}
 

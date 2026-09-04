@@ -3802,6 +3802,76 @@ func TestMeta_Basic(t *testing.T) {
 	})
 }
 
+func TestGetQuotaInfoAggregatesCollectionMetrics(t *testing.T) {
+	previousMode := metrics.CollectionLevelMetricsMode()
+	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
+	t.Cleanup(func() {
+		metrics.SetCollectionLevelMetricsMode(previousMode)
+		metrics.DataCoordStoredBinlogSize.Reset()
+		metrics.DataCoordSegmentBinLogFileCount.Reset()
+		metrics.DataCoordNumStoredRows.Reset()
+		metrics.DataCoordL0DeleteEntriesNum.Reset()
+	})
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+
+	const databaseName = "aggregate-db"
+	for collectionID, collectionName := range map[int64]string{
+		1: "collection-1",
+		2: "collection-2",
+	} {
+		meta.AddCollection(&collectionInfo{
+			ID:           collectionID,
+			DatabaseName: databaseName,
+			Schema: &schemapb.CollectionSchema{
+				Name: collectionName,
+			},
+		})
+	}
+
+	segment1 := buildSegment(1, 10, 100, "channel-1")
+	segment1.NumOfRows = 10
+	segment1.Level = datapb.SegmentLevel_L0
+	segment1.Stats = &datapb.Statistics{
+		InsertBinlogSize:  100,
+		InsertBinlogCount: 1,
+		DeleteNumRows:     3,
+	}
+	segment1.Binlogs = []*datapb.FieldBinlog{{
+		FieldID: 1,
+		Binlogs: []*datapb.Binlog{{LogID: 1}},
+	}}
+	require.NoError(t, meta.AddSegment(context.Background(), segment1))
+
+	segment2 := buildSegment(2, 20, 200, "channel-2")
+	segment2.NumOfRows = 20
+	segment2.Level = datapb.SegmentLevel_L0
+	segment2.Stats = &datapb.Statistics{
+		InsertBinlogSize:  200,
+		InsertBinlogCount: 2,
+		DeleteNumRows:     4,
+	}
+	segment2.Binlogs = []*datapb.FieldBinlog{{
+		FieldID: 1,
+		Binlogs: []*datapb.Binlog{{LogID: 2}, {LogID: 3}},
+	}}
+	require.NoError(t, meta.AddSegment(context.Background(), segment2))
+
+	quotaInfo := meta.GetQuotaInfo()
+	require.Equal(t, int64(300), quotaInfo.TotalBinlogSize)
+	assert.Equal(t, float64(300), prometheustestutil.ToFloat64(
+		metrics.DataCoordStoredBinlogSize.WithLabelValues(
+			databaseName, metrics.AllLabel, commonpb.SegmentState_Growing.String())))
+	assert.Equal(t, float64(3), prometheustestutil.ToFloat64(
+		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(metrics.AllLabel)))
+	assert.Equal(t, float64(30), prometheustestutil.ToFloat64(
+		metrics.DataCoordNumStoredRows.WithLabelValues(
+			databaseName, metrics.AllLabel, metrics.AllLabel, commonpb.SegmentState_Growing.String())))
+	assert.Equal(t, float64(7), prometheustestutil.ToFloat64(
+		metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(databaseName, metrics.AllLabel)))
+}
+
 func TestGetUnFlushedSegments(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)

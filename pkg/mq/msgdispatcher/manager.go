@@ -383,7 +383,9 @@ func (c *dispatcherManager) uploadMetric() {
 	defer c.mu.RUnlock()
 
 	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
-	fn := func(gauge *prometheus.GaugeVec) {
+	fn := func(gauge interface {
+		WithLabelValues(lvs ...string) prometheus.Gauge
+	}) {
 		if c.mainDispatcher == nil {
 			return
 		}

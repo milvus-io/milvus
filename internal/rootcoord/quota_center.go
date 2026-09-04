@@ -418,6 +418,10 @@ func (q *QuotaCenter) collectMetrics() error {
 	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
 	oldQueryNodes := typeutil.NewSet(lo.Keys(q.queryNodeMetrics)...)
 	q.clearMetrics()
+	if metrics.IsCollectionLevelMetricsAggregateMode() {
+		metrics.RootCoordNumEntities.Reset()
+		metrics.RootCoordIndexedNumEntities.Reset()
+	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, GetMetricsTimeout)
 	defer cancel()
@@ -433,6 +437,7 @@ func (q *QuotaCenter) collectMetrics() error {
 
 		collections := typeutil.NewUniqueSet()
 		numEntitiesLoaded := make(map[int64]int64)
+		numEntitiesLoadedByDB := make(map[string]int64)
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
 				oldQueryNodes.Remove(queryNodeMetric.ID)
@@ -462,10 +467,17 @@ func (q *QuotaCenter) collectMetrics() error {
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				if metrics.IsCollectionLevelMetricsAggregateMode() {
+					numEntitiesLoadedByDB[coll.DBName] += numEntity
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				}
 			}
 			return true
 		})
+		for dbName, numEntity := range numEntitiesLoadedByDB {
+			metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.LoadedLabel).Set(float64(numEntity))
+		}
 
 		return rangeErr
 	})
@@ -502,6 +514,13 @@ func (q *QuotaCenter) collectMetrics() error {
 			collectionMetrics = cm.Collections
 		}
 
+		numEntitiesTotalByDB := make(map[string]int64)
+		type indexedEntitiesKey struct {
+			dbName        string
+			indexName     string
+			isVectorIndex string
+		}
+		indexedEntitiesByKey := make(map[indexedEntitiesKey]int64)
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
@@ -522,22 +541,47 @@ func (q *QuotaCenter) collectMetrics() error {
 				return true
 			}
 			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				if metrics.IsCollectionLevelMetricsAggregateMode() {
+					numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				}
 				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
 				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
 					if _, ok := fields[indexInfo.FieldID]; !ok {
 						continue
 					}
 					field := fields[indexInfo.FieldID]
-					metrics.RootCoordIndexedNumEntities.WithLabelValues(
-						coll.DBName,
-						coll.Name,
-						indexInfo.IndexName,
-						strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+					isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
+					if metrics.IsCollectionLevelMetricsAggregateMode() {
+						key := indexedEntitiesKey{
+							dbName:        coll.DBName,
+							indexName:     indexInfo.IndexName,
+							isVectorIndex: isVectorIndex,
+						}
+						indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
+					} else {
+						metrics.RootCoordIndexedNumEntities.WithLabelValues(
+							coll.DBName,
+							coll.Name,
+							indexInfo.IndexName,
+							isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
+					}
 				}
 			}
 			return true
 		})
+		for dbName, numEntity := range numEntitiesTotalByDB {
+			metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.TotalLabel).Set(float64(numEntity))
+		}
+		for key, numEntity := range indexedEntitiesByKey {
+			metrics.RootCoordIndexedNumEntities.WithLabelValues(
+				key.dbName,
+				metrics.AllLabel,
+				key.indexName,
+				key.isVectorIndex,
+			).Set(float64(numEntity))
+		}
 
 		for _, collectionID := range datacoordQuotaCollections {
 			_, ok := q.collectionIDToDBID.Get(collectionID)
