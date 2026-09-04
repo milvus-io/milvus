@@ -48,8 +48,8 @@ ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 # Generate fipsmodule.cnf for FIPS module integrity self-test.
 # FIPS activation is handled programmatically at startup — no OPENSSL_CONF needed.
-RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so && \
-    chown milvus:milvus /milvus/configs/ssl/fipsmodule.cnf
+USER milvus:milvus
+RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so
 
 # protobuf 5.x RepeatedField adds container annotations that trigger ASAN
 # container-overflow false positives during static initialization, disable it.
