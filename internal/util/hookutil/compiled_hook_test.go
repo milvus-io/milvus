@@ -19,7 +19,9 @@
 package hookutil
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +31,16 @@ import (
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// saveHookKey writes one hook.* configuration key and clears it again when the
+// test ends, so that no test inherits the configuration another one left
+// behind and the order they run in does not matter.
+func saveHookKey(t *testing.T, key, value string) {
+	t.Helper()
+	hp := paramtable.GetHookParams()
+	require.NoError(t, hp.Save(key, value))
+	t.Cleanup(func() { _ = hp.Save(key, "") })
+}
 
 // hookProvider is a form that supplies nothing but a hook, which is the
 // smallest thing a distribution can do to take over the request path.
@@ -88,18 +100,44 @@ func TestInitHookRefusesACompiledInHookBesideAPlugin(t *testing.T) {
 }
 
 // initRecordingHook is a compiled-in hook that remembers how it was
-// initialized, and can refuse.
+// initialized, and can refuse. The config-reload watcher re-initializes the
+// hook from its own goroutine, so the record is taken under a lock.
 type initRecordingHook struct {
 	MockAPIHook
-	params  map[string]string
 	initErr error
-	inits   int
+
+	mu     sync.Mutex
+	params map[string]string
+	inits  int
 }
 
 func (h *initRecordingHook) Init(params map[string]string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.inits++
 	h.params = params
 	return h.initErr
+}
+
+// failInitsWith makes every later Init refuse, which is what an operator
+// editing a hook.* key to a value the hook cannot accept looks like from here.
+func (h *initRecordingHook) failInitsWith(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.initErr = err
+}
+
+// initCount and initParams read what Init recorded.
+func (h *initRecordingHook) initCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.inits
+}
+
+func (h *initRecordingHook) initParams() map[string]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.params
 }
 
 // A compiled-in hook is initialized the way a plug-in is: once, with the hook
@@ -107,16 +145,14 @@ func (h *initRecordingHook) Init(params map[string]string) error {
 // it runs in the proxy process.
 func TestInitHookInitialisesTheCompiledInHookWithTheHookConfig(t *testing.T) {
 	paramtable.Init()
-	hp := paramtable.GetHookParams()
-	require.NoError(t, hp.Save("somekey", "someValue"))
-	t.Cleanup(func() { _ = hp.Save("somekey", "") })
+	saveHookKey(t, "somekey", "someValue")
 	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
 	installHook(t, h)
 
 	require.NoError(t, initHook())
 
-	assert.Equal(t, 1, h.inits, "initialized exactly once")
-	assert.Equal(t, "someValue", h.params["somekey"], "the hook sees the hook.* configuration, as a plug-in does")
+	assert.Equal(t, 1, h.initCount(), "initialized exactly once")
+	assert.Equal(t, "someValue", h.initParams()["somekey"], "the hook sees the hook.* configuration, as a plug-in does")
 	assert.Same(t, h, GetHook(), "the initialized hook is the one stored")
 }
 
@@ -132,4 +168,52 @@ func TestInitHookFailsWhenTheCompiledInHookCannotInitialise(t *testing.T) {
 	assert.ErrorContains(t, err, "the internal port is taken")
 	_, isDefault := GetHook().(DefaultHook)
 	assert.True(t, isDefault, "a hook that failed to initialize is not stored")
+}
+
+// A compiled-in hook is reconfigured the way a plug-in is too: editing a
+// hook.* key re-initializes the hook that is installed, whichever way it got
+// there. Without the watcher, a form compiled into the binary would keep the
+// configuration it was started with forever while a plug-in picked the change
+// up, and the two would answer the same config edit differently.
+func TestConfigChangeReinitializesTheCompiledInHook(t *testing.T) {
+	paramtable.Init()
+	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	installHook(t, h)
+
+	require.NoError(t, initHook())
+	require.Equal(t, 1, h.initCount())
+
+	saveHookKey(t, "reloadedkey", "reloadedValue")
+
+	assert.Eventually(t, func() bool {
+		return h.initCount() > 1 && h.initParams()["reloadedkey"] == "reloadedValue"
+	}, 10*time.Second, 10*time.Millisecond,
+		"a hook.* config edit must re-initialize the compiled-in hook with the new configuration")
+	assert.Same(t, h, GetHook(), "the re-initialized hook is the one that stays installed")
+}
+
+// A hook.* edit the compiled-in hook refuses must not take the proxy down: it
+// is already serving, and the edit can be made at any moment. The refusal is
+// reported and the configuration that was working stays in place. (Start-up is
+// the other way round, and is covered above: a hook that cannot initialize
+// there is a proxy that does not start.)
+func TestAConfigChangeRefusedByTheCompiledInHookKeepsTheProxyUp(t *testing.T) {
+	paramtable.Init()
+	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	installHook(t, h)
+
+	require.NoError(t, initHook())
+	// Start-up is over before any edit arrives, as it is in a running proxy:
+	// the refusal below has to be judged on the refresh path alone.
+	require.Same(t, h, GetHook())
+	initsBeforeTheEdit := h.initCount()
+
+	h.failInitsWith(errors.New("hook.someKey is not a duration"))
+	saveHookKey(t, "refusedkey", "nonsense")
+
+	assert.Eventually(t, func() bool { return h.initCount() > initsBeforeTheEdit },
+		10*time.Second, 10*time.Millisecond,
+		"the refused edit must still have been offered to the hook")
+	assert.Same(t, h, GetHook(), "the hook that refused the new configuration stays installed")
+	h.failInitsWith(nil)
 }
