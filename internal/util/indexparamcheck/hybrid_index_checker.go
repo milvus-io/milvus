@@ -13,7 +13,7 @@ type HYBRIDChecker struct {
 	scalarIndexChecker
 }
 
-var validHYBRIDJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
+var validHYBRIDJSONCastTypes = []string{"BOOL", "INT8", "INT16", "INT32", "INT64", "DOUBLE", "VARCHAR"}
 
 func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {

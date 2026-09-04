@@ -87,6 +87,7 @@
 #include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/JsonIndexBuilder.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
@@ -430,6 +431,27 @@ ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
         }
     }
     return best_path;
+}
+
+bool
+ChunkedSegmentSealedImpl::HasTypedJsonPathIndexForOperandType(
+    FieldId field_id,
+    std::string_view path,
+    DataType data_type,
+    bool any_type,
+    bool is_array) const {
+    auto runtime = CaptureRuntimeResourceState();
+    for (const auto& index : runtime->json_indices) {
+        if (index.field_id != field_id || index.nested_path != path ||
+            index.cast_type.data_type() == JsonCastType::DataType::JSON) {
+            continue;
+        }
+        if (any_type || milvus::index::json::IsDataTypeSupported(
+                            index.cast_type, data_type, is_array)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool
@@ -5650,6 +5672,11 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
         return nullptr;
     }
 
+    AssertInfo(
+        IsSupportedJsonStatsDataFormat(info_proto->json_stats_data_format()),
+        "unsupported JSON stats data format {}",
+        info_proto->json_stats_data_format());
+
     LOG_INFO(
         "start load json key stats, segment:{}, field:{}, build:{}, "
         "version:{}, "
@@ -5703,6 +5730,7 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
     auto index = std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
+    index->SetDataFormatVersion(info_proto->json_stats_data_format());
     milvus::tracer::TraceContext trace_ctx;
     try {
         milvus::ScopedTimer timer(

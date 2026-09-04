@@ -970,10 +970,11 @@ GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
                              int64_t collection_id,
                              int64_t partition_id,
                              int64_t segment_id,
-                             int64_t field_id) {
+                             int64_t field_id,
+                             int64_t json_stats_data_format) {
     boost::filesystem::path p = cm->GetRootPath();
     p /= std::string(JSON_STATS_ROOT_PATH);
-    p /= std::string(JSON_STATS_DATA_FORMAT_VERSION);
+    p /= std::to_string(json_stats_data_format);
     p /= GenJsonStatsPathIdentifier(build_id,
                                     index_version,
                                     collection_id,

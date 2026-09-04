@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -352,6 +353,76 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.NoError(err)
 }
 
+func (s *statsInspectorSuite) TestSubmitStatsTaskPinsJSONStatsFormat() {
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+	s.T().Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.JSONStatsFormatVersion.Key)
+	})
+
+	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.Require().NoError(err)
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.Require().NotNil(task)
+	s.Equal(common.JSONStatsDataFormatV4, task.GetJsonStatsDataFormat())
+
+	// A refresh affects only tasks created afterwards. Retry/restart of this
+	// persisted task must keep producing the same format.
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "3")
+	s.Equal(common.JSONStatsDataFormatV4, task.GetJsonStatsDataFormat())
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskRechecksJSONStatsFormatOwnership() {
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+	s.T().Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.JSONStatsFormatVersion.Key)
+	})
+
+	collection := s.mt.GetCollection(1)
+	collection.Schema.Fields = append(collection.Schema.Fields,
+		&schemapb.FieldSchema{FieldID: 102, Name: "json_old", DataType: schemapb.DataType_JSON},
+		&schemapb.FieldSchema{FieldID: 103, Name: "json_missing", DataType: schemapb.DataType_JSON},
+	)
+	segment := s.mt.GetHealthySegment(s.ctx, 10)
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+	}
+
+	// This is the submission-time half of the activation race: discovery may
+	// have selected the missing field while the target was still V3, but once
+	// submission observes V4 it must leave the whole segment to compaction.
+	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	// A future-format field must also block an in-place V4 task. Otherwise a
+	// direct caller could bypass migration policy selection and downgrade it.
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+		103: {FieldID: 103, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4 + 1},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4 + 1},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	// The same no-downgrade rule applies during rollback. A task discovered
+	// while V4 was active must not overwrite a V4 field if submission observes
+	// a V3 target.
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "3")
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
 func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 
@@ -455,6 +526,22 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 
 	s.inspector.triggerJSONKeyIndexStatsTask()
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+func (s *statsInspectorSuite) TestNeedJSONKeyIndexDoesNotRewriteExistingStats() {
+	const fieldID = int64(202)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		State: commonpb.SegmentState_Flushed,
+		Level: datapb.SegmentLevel_L1,
+	})
+
+	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		fieldID: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+	}
+	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatV4
+	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
 }
 
 // Every trigger loop must give up as soon as the scheduler is backlogged instead

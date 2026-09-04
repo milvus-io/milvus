@@ -100,6 +100,39 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 	if len(values) <= 1 {
 		return values
 	}
+
+	// A mixed JSON numeric Term is executable with one int64/double candidate
+	// matcher. Keep the physical literal kinds intact: converting either side for
+	// sorting would lose int64 precision, and cross-kind de-duplication belongs
+	// to the exact matcher rather than the plan rewriter. Put int64 values first
+	// so physical dispatch is deterministic, then reuse the homogeneous sorting
+	// and de-duplication below for each kind.
+	allNumeric, hasInt64, hasFloat := true, false, false
+	for _, value := range values {
+		switch valueCaseWithNil(value) {
+		case "int64":
+			hasInt64 = true
+		case "float":
+			hasFloat = true
+		default:
+			allNumeric = false
+		}
+	}
+	if allNumeric && hasInt64 && hasFloat {
+		intValues := make([]*planpb.GenericValue, 0, len(values))
+		floatValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			if valueCase(value) == "int64" {
+				intValues = append(intValues, value)
+			} else {
+				floatValues = append(floatValues, value)
+			}
+		}
+		intValues = sortGenericValues(intValues)
+		floatValues = sortGenericValues(floatValues)
+		return append(intValues, floatValues...)
+	}
+
 	var kind string
 	for _, v := range values {
 		if v == nil || v.GetVal() == nil {
@@ -231,11 +264,13 @@ func canRewriteNotEqual(col *planpb.ColumnInfo, value *planpb.GenericValue) bool
 	return !hasMissingPathSemantics(col)
 }
 
-// canBuildTermExpr reports whether values can be represented by one segcore
-// TermExpr. TermExpr selects one scalar executor for the entire value list, so
-// the values must be concrete, homogeneous scalars; array-valued literals are
-// lowered to equality expressions instead.
-func canBuildTermExpr(values ...*planpb.GenericValue) bool {
+// canApplyHomogeneousTermRewrite reports whether values are safe for the
+// existing type-specific algebraic rewrites. Segcore can execute a mixed
+// int64/float JSON TermExpr, but those values intentionally return false here
+// until intersection and subtraction rewrites use the same exact cross-type
+// numeric equality. Array-valued literals are lowered to equality expressions
+// instead.
+func canApplyHomogeneousTermRewrite(values ...*planpb.GenericValue) bool {
 	if len(values) == 0 {
 		return false
 	}

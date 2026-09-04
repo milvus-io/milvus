@@ -39,6 +39,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealed.h"
@@ -2636,6 +2637,20 @@ class SegmentExpr : public Expr {
                    pinned_index_[0].get()) != nullptr;
     }
 
+    // Returns the Milvus scalar type of the pinned typed JSON path index, or
+    // DataType::NONE when no typed (non-flat) JSON index is pinned. The flat
+    // index is excluded because it keeps an exact integer field and is handled
+    // separately. Used to dispatch int64 JSON literals to the exact integer
+    // executor when the user provisioned an INT* cast type.
+    DataType
+    PinnedJsonIndexCastElementType() const {
+        if (field_type_ != DataType::JSON || pinned_index_.empty() ||
+            PinnedJsonIndexIsFlat()) {
+            return DataType::NONE;
+        }
+        return pinned_index_[0].get()->GetCastType().ToMilvusDataType();
+    }
+
     static bool
     IsInt64SafeForJsonDoubleIndex(int64_t value) {
         constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
@@ -2714,11 +2729,23 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    HasJsonStats(FieldId field_id) const {
-        return segment_->type() == SegmentType::Sealed &&
-               static_cast<const segcore::SegmentSealed*>(segment_)
-                       ->GetJsonStats(op_ctx_, field_id)
-                       .get() != nullptr;
+    HasQueryableJsonStats(FieldId field_id) const {
+        if (segment_->type() != SegmentType::Sealed) {
+            return false;
+        }
+        auto stats =
+            static_cast<const segcore::SegmentSealed*>(segment_)->GetJsonStats(
+                op_ctx_, field_id);
+        // V3 and V4 stats are both queryable. Successfully built V3 artifacts
+        // only contain numbers the old parser accepted, so their numeric
+        // content agrees with the current executors. The single known gap is
+        // the V3 empty-string null sentinel: a real "" reads back as null in
+        // typed columns. That narrow case is documented in
+        // docs/agent_guides/json-filtering/cross-path-semantics.md and closes
+        // once the segment migrates to V4. Querying V3 preserves the
+        // pre-upgrade behavior instead of falling back to raw scans.
+        return stats != nullptr &&
+               IsSupportedJsonStatsDataFormat(stats->GetDataFormatVersion());
     }
 
     static bool
@@ -2733,10 +2760,41 @@ class SegmentExpr : public Expr {
 
     // Check whether this expression can use JsonStats without pinning.
     // All conditions are available before execution path determination.
+    // A typed Path index provisioned for this exact path outranks stats, so
+    // the probe below is part of this single answer instead of being repeated
+    // by every JSON expression.
     bool
     CanUseJsonStatsAtInit() const {
-        return plan_options_.expr_use_json_stats && HasJsonStats(field_id_) &&
-               !nested_path_.empty() && !PathContainsInteger(nested_path_);
+        return plan_options_.expr_use_json_stats &&
+               HasQueryableJsonStats(field_id_) && !nested_path_.empty() &&
+               !PathContainsInteger(nested_path_) &&
+               !PrefersTypedJsonPathIndex();
+    }
+
+    // A typed JSON Path index whose cast type accepts this operand is
+    // explicitly provisioned for the exact path. This metadata-only probe
+    // avoids pinning and deliberately excludes JsonFlatIndex. Once selected,
+    // the Path index answers within its configured projection; numeric
+    // precision does not downgrade it to RawData.
+    bool
+    HasTypedJsonPathIndexForOperandTypeAtInit() const {
+        if (field_type_ != DataType::JSON) {
+            return false;
+        }
+        return segment_->HasTypedJsonPathIndexForOperandType(
+            field_id_,
+            milvus::Json::pointer(nested_path_),
+            value_type_,
+            allow_any_json_cast_type_,
+            is_json_contains_);
+    }
+
+    // Whether the typed Path index should be preferred over JsonStats.
+    // Overridden by expressions whose operand shape can be rejected by the
+    // typed projection even when the cast type matches.
+    virtual bool
+    PrefersTypedJsonPathIndex() const {
+        return HasTypedJsonPathIndexForOperandTypeAtInit();
     }
 
     virtual bool

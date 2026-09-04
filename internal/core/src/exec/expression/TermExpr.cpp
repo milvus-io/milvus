@@ -16,7 +16,6 @@
 
 #include "TermExpr.h"
 
-#include <math.h>
 #include <simdjson.h>
 #include <algorithm>
 #include <cstdint>
@@ -261,11 +260,28 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
+            if (mixed_json_numeric_) {
+                if (PinnedJsonIndexIsFlat()) {
+                    return ExecMixedJsonNumericForFlatIndex();
+                }
+                return ExecVisitorImplForIndex<double>();
+            }
             if constexpr (std::is_same_v<ValueType, int64_t>) {
                 if (PinnedJsonIndexIsFlat()) {
                     return ExecVisitorImplForIndex<int64_t>();
                 }
-                return ExecVisitorImplForIndex<double>();
+                switch (PinnedJsonIndexCastElementType()) {
+                    case DataType::INT8:
+                        return ExecVisitorImplForIndex<int8_t>();
+                    case DataType::INT16:
+                        return ExecVisitorImplForIndex<int16_t>();
+                    case DataType::INT32:
+                        return ExecVisitorImplForIndex<int32_t>();
+                    case DataType::INT64:
+                        return ExecVisitorImplForIndex<int64_t>();
+                    default:
+                        return ExecVisitorImplForIndex<double>();
+                }
             } else {
                 return ExecVisitorImplForIndex<ValueType>();
             }
@@ -607,12 +623,30 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
     auto real_batch_size = GetNextBatchSize();
 
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
+    if constexpr (std::is_same_v<GetType, int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(expr_->vals_);
+        }
+    }
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        if constexpr (!std::is_same_v<GetType, int64_t> &&
+                      !std::is_same_v<GetType, double>) {
+            arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        }
         arg_inited_ = true;
     }
 
-    if (arg_set_->Empty()) {
+    const bool candidates_empty = [&]() {
+        if constexpr (std::is_same_v<GetType, int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            return !json_number_membership_matcher_->HasNumericCandidates();
+        } else {
+            return arg_set_->Empty();
+        }
+    }();
+    if (candidates_empty) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
@@ -657,10 +691,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                         }
                         if constexpr (std::is_same_v<GetType, int64_t> ||
                                       std::is_same_v<GetType, double>) {
-                            auto value =
-                                ConvertJsonNumberExact<GetType>(src[i]);
-                            res[i] =
-                                value.has_value() && this->arg_set_->In(*value);
+                            res[i] = this->json_number_membership_matcher_
+                                         ->MatchesAny(src[i]);
                         } else {
                             res[i] = this->arg_set_->In(src[i]);
                         }
@@ -712,12 +744,11 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
                 bool is_number = false;
-                auto get_value = ParseBsonNumberExact<GetType>(
-                    bson, value_offset, is_number);
-                if (get_value.has_value()) {
-                    res_view[row_offset] = this->arg_set_->In(*get_value);
-                }
+                const bool matched = this->json_number_membership_matcher_
+                                         ->MatchesAnyBsonNumberAtOffset(
+                                             bson, value_offset, is_number);
                 if (is_number) {
+                    res_view[row_offset] = matched;
                     valid_res_view[row_offset] = true;
                 }
                 return;
@@ -802,12 +833,30 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(expr_->vals_);
+        }
+    }
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        if constexpr (!std::is_same_v<GetType, std::int64_t> &&
+                      !std::is_same_v<GetType, double>) {
+            arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        }
         arg_inited_ = true;
     }
 
-    if (arg_set_->Empty()) {
+    const bool candidates_empty = [&]() {
+        if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            return !json_number_membership_matcher_->HasNumericCandidates();
+        } else {
+            return arg_set_->Empty();
+        }
+    }();
+    if (candidates_empty) {
         res.reset();
         MoveCursor();
         return res_vec;
@@ -824,7 +873,9 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::shared_ptr<MultiElement>& terms) {
+            const std::shared_ptr<MultiElement>& terms,
+            const std::shared_ptr<JsonNumberMembershipMatcher>&
+                number_membership_matcher) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -832,25 +883,16 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+            if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                          std::is_same_v<GetType, double>) {
                 auto x_num = data[i].at_numeric(pointer);
                 if (x_num.error()) {
                     return std::make_pair(false, false);
                 }
-                auto n = x_num.value();
-                if (n.is_int64()) {
-                    return std::make_pair(true,
-                                          terms->In(ValueType(n.get_int64())));
-                }
-                // uint64 or double → compare as double, consistent with
-                // index/stats paths.
-                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                          : n.get_double();
-                // if the term set is {1}, and the value is 1.1, we should
-                // not return true.
                 return std::make_pair(
                     true,
-                    std::floor(dval) == dval && terms->In(ValueType(dval)));
+                    number_membership_matcher
+                        ->MatchesAnyWithUint64DoubleFallback(x_num.value()));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {
@@ -869,7 +911,15 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (terms->Empty()) {
+            const bool empty = [&]() {
+                if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                              std::is_same_v<GetType, double>) {
+                    return !number_membership_matcher->HasNumericCandidates();
+                } else {
+                    return terms->Empty();
+                }
+            }();
+            if (empty) {
                 res[i] = false;
                 continue;
             }
@@ -888,20 +938,24 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer,
-                                                            arg_set_);
+        processed_size =
+            ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
+                                               std::nullptr_t{},
+                                               input,
+                                               res,
+                                               valid_res,
+                                               pointer,
+                                               arg_set_,
+                                               json_number_membership_matcher_);
     } else {
-        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                         std::nullptr_t{},
-                                                         res,
-                                                         valid_res,
-                                                         pointer,
-                                                         arg_set_);
+        processed_size =
+            ProcessDataChunks<milvus::Json>(execute_sub_batch,
+                                            std::nullptr_t{},
+                                            res,
+                                            valid_res,
+                                            pointer,
+                                            arg_set_,
+                                            json_number_membership_matcher_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -963,18 +1017,84 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {
+        if (vals.empty()) {
+            return TargetBitmap(index_ptr->Count(), false);
+        }
         TermIndexFunc<T> func;
         return func(index_ptr, vals.size(), vals.data());
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
-    if (field_type_ == DataType::JSON && args->values_.empty()) {
+    // A genuinely empty IN list is deterministic even for null JSON. A
+    // nonempty list narrowed to no representable values must still preserve
+    // the typed index's null bitmap (including failed casts).
+    if (field_type_ == DataType::JSON && expr_->vals_.empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
+    AssertInfo(res->size() == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res->size(),
+               real_batch_size);
+    return res;
+}
+
+VectorPtr
+PhyTermFilterExpr::ExecMixedJsonNumericForFlatIndex() {
+    auto next_batch_size =
+        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            nullptr, expr_->column_.element_level_, real_batch_size)) {
+        return res;
+    }
+
+    if (!mixed_json_index_values_inited_) {
+        for (const auto& value : expr_->vals_) {
+            if (value.has_int64_val()) {
+                mixed_json_int_values_.push_back(value.int64_val());
+            } else if (value.has_float_val()) {
+                mixed_json_double_values_.push_back(value.float_val());
+            } else {
+                ThrowInfo(DataTypeInvalid,
+                          "mixed JSON numeric TermExpr contains non-numeric "
+                          "value type {}",
+                          static_cast<int>(value.val_case()));
+            }
+        }
+        mixed_json_index_values_inited_ = true;
+    }
+
+    auto execute_sub_batch = [this](index::ScalarIndex<int64_t>* int_index,
+                                    const std::vector<int64_t>& int_values,
+                                    const std::vector<double>& double_values) {
+        TermIndexFunc<int64_t> int_func;
+        auto result = int_func(int_index, int_values.size(), int_values.data());
+
+        auto* flat_index =
+            dynamic_cast<const index::JsonFlatIndex*>(pinned_index_[0].get());
+        AssertInfo(flat_index != nullptr,
+                   "mixed JSON numeric flat-index execution requires a "
+                   "JsonFlatIndex");
+        const auto json_pointer = milvus::Json::pointer(nested_path_);
+        const auto index_path = flat_index->GetNestedPath();
+        auto double_executor = flat_index->create_executor<double>(
+            json_pointer.substr(index_path.size()));
+        TermIndexFunc<double> double_func;
+        result |= double_func(
+            double_executor.get(), double_values.size(), double_values.data());
+        return result;
+    };
+
+    auto res = ProcessIndexChunks<int64_t>(
+        execute_sub_batch, mixed_json_int_values_, mixed_json_double_values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1246,16 +1366,28 @@ PhyTermFilterExpr::DetermineExecPath() {
     // consume values using the type selected from vals_[0].
     if (expr_->column_.data_type_ == DataType::JSON &&
         expr_->vals_.size() > 1) {
+        const auto is_numeric = [](const proto::plan::GenericValue& value) {
+            return value.has_int64_val() || value.has_float_val();
+        };
         const auto expected_type = expr_->vals_[0].val_case();
+        bool same_type = true;
+        bool all_numeric = is_numeric(expr_->vals_[0]);
         for (size_t i = 1; i < expr_->vals_.size(); ++i) {
-            if (expr_->vals_[i].val_case() != expected_type) {
+            const auto& value = expr_->vals_[i];
+            same_type = same_type && value.val_case() == expected_type;
+            all_numeric = all_numeric && is_numeric(value);
+        }
+        if (!same_type) {
+            // A list that mixes int64 and float is numerically well defined:
+            // 2 and 2.0 are the same JSON number. Any other mixed list is
+            // rejected, as on master. Values not all of one val_case but all
+            // numeric necessarily contain both int64 and float.
+            if (!all_numeric) {
                 ThrowInfo(DataTypeInvalid,
-                          "TermExpr values must have the same type, value 0 "
-                          "has type {} but value {} has type {}",
-                          static_cast<int>(expected_type),
-                          i,
-                          static_cast<int>(expr_->vals_[i].val_case()));
+                          "TermExpr values must have the same type, except "
+                          "mixed int64/float JSON values");
             }
+            mixed_json_numeric_ = true;
         }
     }
 
@@ -1292,14 +1424,18 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    if (data_type == DataType::JSON && !expr_->vals_.empty() &&
-        expr_->vals_[0].val_case() ==
-            proto::plan::GenericValue::ValCase::kInt64Val) {
-        const auto has_unsafe_literal = std::any_of(
-            expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
-                return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
-            });
-        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
+    // JSON needs no further precision guard. A DOUBLE JSON Path index answers
+    // large integer literals with double semantics instead of declining the
+    // index; INT* Path indexes answer within their configured width, and
+    // JsonFlatIndex keeps an exact integer field. The string check below is
+    // VARCHAR/TEXT only.
+    if (data_type == DataType::JSON) {
+        // A mixed int64/float IN list cannot be served by an INT* cast index:
+        // the float literal has no integer representation. Decline the index
+        // so the term falls back to raw/stats, which handle both numeric kinds.
+        if (mixed_json_numeric_ &&
+            IsIntegerDataType(PinnedJsonIndexCastElementType()) &&
+            PinnedJsonIndexCastElementType() != DataType::BOOL) {
             exec_path_ = ExprExecPath::RawData;
         }
         return;

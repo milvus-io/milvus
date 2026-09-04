@@ -40,6 +40,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/OpContext.h"
 #include "common/Span.h"
@@ -47,7 +48,6 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/bson_view.h"
-#include "common/jsmn.h"
 #include "common/protobuf_utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -72,7 +72,25 @@ class CollectSingleJsonStatsInfoAccessor;
 class TraverseJsonForBuildStatsAccessor;
 class JsonStatsProjectionTestAccessor;
 
+namespace milvus {
+class Json;
+}
+
 namespace milvus::index {
+
+enum class JsonStatsBuildValueState { VALID, UNREPRESENTABLE_NUMBER };
+
+struct JsonStatsBuildValue {
+    std::string storage_value;
+    std::optional<double> parsed_double;
+    JsonStatsBuildValueState state{JsonStatsBuildValueState::VALID};
+
+    bool
+    IsUnrepresentableNumber() const {
+        return state == JsonStatsBuildValueState::UNREPRESENTABLE_NUMBER;
+    }
+};
+
 class JsonKeyStats : public ScalarIndex<std::string> {
  public:
     explicit JsonKeyStats(
@@ -81,9 +99,23 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         int64_t json_stats_max_shredding_columns = 1024,
         double json_stats_shredding_ratio_threshold = 0.3,
         int64_t json_stats_write_batch_size = 81920,
-        uint32_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION);
+        uint32_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+        int64_t json_stats_data_format = JSON_STATS_DATA_FORMAT_V3);
 
     ~JsonKeyStats() override;
+
+    int64_t
+    GetDataFormatVersion() const {
+        return json_stats_data_format_;
+    }
+
+    void
+    SetDataFormatVersion(int64_t version) {
+        AssertInfo(IsSupportedJsonStatsDataFormat(version),
+                   "unsupported JSON stats data format {}",
+                   version);
+        json_stats_data_format_ = version;
+    }
 
     using ScalarIndex<std::string>::BuildWithFieldData;
 
@@ -427,7 +459,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  private:
     void
-    CollectSingleJsonStatsInfo(std::string_view json_str,
+    CollectSingleJsonStatsInfo(const milvus::Json& json,
                                std::map<JsonKey, KeyStatsInfo>& infos);
 
     std::string
@@ -443,11 +475,14 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas, bool nullable);
 
     void
-    TraverseJsonForStats(const char* json,
-                         jsmntok* tokens,
-                         int& index,
+    TraverseJsonForStats(simdjson::ondemand::value value,
                          std::vector<std::string>& path,
                          std::map<JsonKey, KeyStatsInfo>& infos);
+
+    void
+    TraverseJsonDocumentForStats(const milvus::Json& json,
+                                 std::vector<std::string>& path,
+                                 std::map<JsonKey, KeyStatsInfo>& infos);
 
     void
     AddKeyStatsInfo(const std::vector<std::string>& paths,
@@ -476,7 +511,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
 
     void
-    BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id);
+    BuildKeyStatsForRow(const milvus::Json& json, uint32_t row_id);
 
     void
     BuildKeyStatsForNullRow();
@@ -499,79 +534,27 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
-                const std::string& value,
-                std::map<JsonKey, std::string>& values);
+                JsonStatsBuildValue value,
+                std::map<JsonKey, JsonStatsBuildValue>& values);
 
     void
-    TraverseJsonForBuildStats(const char* json,
-                              jsmntok* tokens,
-                              int& index,
+    TraverseJsonForBuildStats(simdjson::ondemand::value value,
                               std::vector<std::string>& path,
-                              std::map<JsonKey, std::string>& values);
+                              std::map<JsonKey, JsonStatsBuildValue>& values);
 
-    bool
-    IsBoolean(const std::string& str) {
-        return str == "true" || str == "false";
-    }
+    void
+    TraverseJsonDocumentForBuildStats(
+        const milvus::Json& json,
+        std::vector<std::string>& path,
+        std::map<JsonKey, JsonStatsBuildValue>& values);
 
-    bool
-    IsInt64(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
+    std::pair<JSONType, JsonStatsBuildValue>
+    ParsePrimitiveValue(simdjson::ondemand::value value);
 
-        return !iss.fail() && iss.eof();
-    }
-
-    bool
-    IsFloat(const std::string& str) {
-        try {
-            std::stof(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    bool
-    IsDouble(const std::string& str) {
-        try {
-            std::stod(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    bool
-    IsNull(const std::string& str) {
-        return str == "null";
-    }
-
-    JSONType
-    getType(const std::string& str) {
-        if (IsBoolean(str)) {
-            return JSONType::BOOL;
-            // TODO: add int8, int16, int32 support
-            // now we only support int64 for build performance
-            // } else if (IsInt8(str)) {
-            //     return JSONType::INT8;
-            // } else if (IsInt16(str)) {
-            //     return JSONType::INT16;
-            // } else if (IsInt32(str)) {
-            //     return JSONType::INT32;
-        } else if (IsInt64(str)) {
-            return JSONType::INT64;
-        } else if (IsFloat(str)) {
-            return JSONType::FLOAT;
-        } else if (IsDouble(str)) {
-            return JSONType::DOUBLE;
-        } else if (IsNull(str)) {
-            return JSONType::NONE;
-        }
-        LOG_DEBUG("unknown json type for string: {}", str);
-        return JSONType::UNKNOWN;
-    }
+    std::pair<JSONType, JsonStatsBuildValue>
+    ParsePrimitiveDocument(simdjson::ondemand::document& document,
+                           simdjson::ondemand::json_type type,
+                           std::string_view raw_json);
 
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
@@ -619,7 +602,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t max_shredding_columns_;
     double shredding_ratio_threshold_;
     int64_t write_batch_size_;
-
+    int64_t json_stats_data_format_{JSON_STATS_DATA_FORMAT_V3};
     std::map<JsonKey, JsonKeyLayoutType> key_types_;
     std::set<JsonKey> shared_keys_;
     std::set<JsonKey> column_keys_;

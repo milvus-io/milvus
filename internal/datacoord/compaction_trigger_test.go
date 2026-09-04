@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"strconv"
 	satomic "sync/atomic"
 	"testing"
 	"time"
@@ -3480,7 +3481,157 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
 	})
 
+	t.Run("scalar V5 to V6 is owned by JSON path migration policy", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence - 1,
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+		im.indexes[collID][indexID].FieldID = 100
+		im.indexes[collID][indexID].IndexParams = append(
+			im.indexes[collID][indexID].IndexParams,
+			&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: "/a"},
+			&commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: "double"},
+		)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(common.MinScalarIndexVersionForJsonPathPresence).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
 	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
+}
+
+func TestShouldAutoUpgradeScalarIndexVersion(t *testing.T) {
+	presenceVersion := common.MinScalarIndexVersionForJsonPathPresence
+	typedPathParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "INVERTED"},
+		{Key: common.JSONPathKey, Value: "/a"},
+		{Key: common.JSONCastTypeKey, Value: "DOUBLE"},
+	}
+	flatParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "INVERTED"},
+		{Key: common.JSONPathKey, Value: "/a"},
+		{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_JSON))},
+	}
+	ngramParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "nGrAm"},
+		{Key: common.JSONPathKey, Value: "/a"},
+		{Key: common.JSONCastTypeKey, Value: "VARCHAR"},
+	}
+	tests := []struct {
+		name     string
+		params   []*commonpb.KeyValuePair
+		current  int32
+		resolved int32
+		want     bool
+	}{
+		{
+			name:     "typed path upgrade below presence version remains generic",
+			params:   typedPathParams,
+			current:  presenceVersion - 2,
+			resolved: presenceVersion - 1,
+			want:     true,
+		},
+		{
+			name:     "typed path V5 to V6 presence transition is dedicated",
+			params:   typedPathParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "typed path older artifact crossing V6 is dedicated",
+			params:   typedPathParams,
+			current:  presenceVersion - 2,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "typed path V6 to future remains generic",
+			params:   typedPathParams,
+			current:  presenceVersion,
+			resolved: presenceVersion + 1,
+			want:     true,
+		},
+		{
+			name:     "typed path future target from V5 remains dedicated",
+			params:   typedPathParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion + 1,
+			want:     false,
+		},
+		{
+			name:     "ordinary scalar exact V5 to V6 avoids unrelated compaction",
+			current:  presenceVersion - 1,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "ordinary scalar V5 to V7 remains generic",
+			current:  presenceVersion - 1,
+			resolved: presenceVersion + 1,
+			want:     true,
+		},
+		{
+			name:     "Flat JSON exact V5 to V6 avoids unrelated compaction",
+			params:   flatParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "Flat JSON V5 to V7 remains generic",
+			params:   flatParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion + 1,
+			want:     true,
+		},
+		{
+			name:     "NGRAM exact V5 to V6 avoids unrelated compaction",
+			params:   ngramParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "NGRAM V5 to V7 remains generic",
+			params:   ngramParams,
+			current:  presenceVersion - 1,
+			resolved: presenceVersion + 1,
+			want:     true,
+		},
+		{
+			name:     "matching version does not rebuild",
+			params:   typedPathParams,
+			current:  presenceVersion,
+			resolved: presenceVersion,
+			want:     false,
+		},
+		{
+			name:     "newer artifact does not downgrade",
+			params:   typedPathParams,
+			current:  presenceVersion + 1,
+			resolved: presenceVersion,
+			want:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, shouldAutoUpgradeScalarIndexVersion(test.params, test.current, test.resolved))
+		})
+	}
 }
 
 func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testing.T) {
@@ -3548,6 +3699,37 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testi
 
 		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
 		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("explicit scalar force-rebuild still applies to V5 to V6", func(t *testing.T) {
+		Params.Save("dataCoord.autoUpgradeSegmentIndex", "true")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+		Params.Save("dataCoord.targetScalarIndexVersion", "6")
+		defer func() {
+			Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
+			Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+			Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		}()
+
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence - 1,
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(common.MinScalarIndexVersionForJsonPathPresence).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.True(t, trigger.ShouldRebuildSegmentIndex(segment))
 	})
 }
 

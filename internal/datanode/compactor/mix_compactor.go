@@ -538,7 +538,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		// TextStatsLogs already carries full object keys for mixed-version compatibility;
 		// AddStatsToManifest stores the manifest-relative representation at commit time.
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
-			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
+			statEntries := packed.TextIndexStatEntries(textStatsLogs)
 			newManifest, mErr := packed.AddStatsToManifest(
 				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
 			if mErr != nil {

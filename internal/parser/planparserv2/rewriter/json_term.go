@@ -5,13 +5,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
-var jsonTermKindOrder = []string{"bool", "int64", "float", "string", "array"}
+var jsonTermExecutorKindOrder = []string{"bool", "numeric", "string", "array"}
+
+func jsonTermExecutorKind(value *planpb.GenericValue) string {
+	kind := valueCaseWithNil(value)
+	if isNumericCase(kind) {
+		return "numeric"
+	}
+	return kind
+}
 
 // normalizeTermExprs enforces the execution invariant that every TermExpr can
-// be dispatched to one scalar executor. JSON terms are partitioned by concrete
-// value kind, while whole-ARRAY membership is lowered to array equality
-// branches because segcore has no array-valued TermExpr executor. This is
-// correctness normalization, not an optional optimization.
+// be dispatched to one scalar executor. JSON terms are partitioned by executor
+// kind; int64 and float literals share one numeric executor and one candidate
+// matcher, so mixed numeric IN parses each row once. Whole-ARRAY membership is
+// lowered to array equality branches because segcore has no array-valued
+// TermExpr executor. This is correctness normalization, not an optional
+// optimization.
 func normalizeTermExprs(expr *planpb.Expr) *planpb.Expr {
 	if expr == nil {
 		return nil
@@ -76,7 +86,7 @@ func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Exp
 
 	buckets := make(map[string][]*planpb.GenericValue)
 	for _, value := range term.GetValues() {
-		kind := valueCaseWithNil(value)
+		kind := jsonTermExecutorKind(value)
 		buckets[kind] = append(buckets[kind], value)
 	}
 
@@ -90,7 +100,7 @@ func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Exp
 	}
 
 	parts := make([]*planpb.Expr, 0, len(buckets))
-	for _, kind := range jsonTermKindOrder {
+	for _, kind := range jsonTermExecutorKindOrder {
 		values := buckets[kind]
 		if len(values) == 0 {
 			continue
@@ -115,7 +125,7 @@ func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Exp
 	// that cannot be executed.
 	for kind, values := range buckets {
 		known := false
-		for _, orderedKind := range jsonTermKindOrder {
+		for _, orderedKind := range jsonTermExecutorKindOrder {
 			if kind == orderedKind {
 				known = true
 				break
@@ -133,7 +143,7 @@ func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Exp
 }
 
 func valueGroupKey(col *planpb.ColumnInfo, value *planpb.GenericValue) (string, bool) {
-	if col == nil || !canBuildTermExpr(value) {
+	if col == nil || !canApplyHomogeneousTermRewrite(value) {
 		return "", false
 	}
 	kind := valueCase(value)
@@ -147,7 +157,7 @@ func valueGroupKey(col *planpb.ColumnInfo, value *planpb.GenericValue) (string, 
 }
 
 func termGroupKey(term *planpb.TermExpr) (string, bool) {
-	if term == nil || term.GetColumnInfo() == nil || !canBuildTermExpr(term.GetValues()...) {
+	if term == nil || term.GetColumnInfo() == nil || !canApplyHomogeneousTermRewrite(term.GetValues()...) {
 		return "", false
 	}
 	kind := valueCase(term.GetValues()[0])

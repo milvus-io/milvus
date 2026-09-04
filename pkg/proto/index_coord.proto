@@ -351,6 +351,9 @@ message StatsTask {
     index.StatsSubJob subJobType = 11;
     bool canRecycle = 12;
     repeated internal.FileResourceInfo file_resources = 13;
+    // JSON stats format pinned when this task is created. Zero in legacy
+    // persisted tasks is interpreted as V3.
+    int64 json_stats_data_format = 14;
 }
 
 enum StatsSubJob {

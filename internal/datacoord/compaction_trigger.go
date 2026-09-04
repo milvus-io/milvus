@@ -837,7 +837,13 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 				segmentIndexVersion = index.CurrentScalarIndexVersion
 			}
 
-			if segmentIndexVersion < resolvedEngineVersion {
+			shouldRebuild := segmentIndexVersion < resolvedEngineVersion
+			if !isVectorIndex {
+				shouldRebuild = shouldAutoUpgradeScalarIndexVersion(
+					indexParams, segmentIndexVersion, resolvedEngineVersion)
+			}
+
+			if shouldRebuild {
 				mlog.Info(context.TODO(), "index version is too old, trigger compaction",
 					mlog.FieldSegmentID(segment.ID),
 					mlog.FieldIndexID(index.IndexID),
@@ -912,6 +918,36 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	}
 
 	return false
+}
+
+// shouldAutoUpgradeScalarIndexVersion reports whether the generic segment-index
+// upgrader may use a scalar engine version change as a compaction reason.
+//
+// V6 changes only the presence bitmap of typed JSON path indexes. An exact
+// cluster-wide V5-to-V6 transition is therefore suppressed for every scalar
+// index, avoiding unrelated rewrites. Typed path artifacts crossing from any
+// pre-V6 version to V6 or newer are owned by the dedicated migration policy so
+// it can enforce the QueryNode and DataNode capability gates. Other upgrades
+// of ordinary scalar, Flat JSON, and NGRAM indexes remain generic, as do typed
+// path upgrades that start at V6. Explicit force-rebuild handling is separate
+// and is not filtered here.
+func shouldAutoUpgradeScalarIndexVersion(
+	indexParams []*commonpb.KeyValuePair,
+	currentVersion, resolvedVersion int32,
+) bool {
+	if currentVersion >= resolvedVersion {
+		return false
+	}
+
+	presenceVersion := common.MinScalarIndexVersionForJsonPathPresence
+	if currentVersion == presenceVersion-1 && resolvedVersion == presenceVersion {
+		// V6 changes only typed JSON Path artifacts. Do not compact every
+		// unrelated scalar index for an exact cluster-wide V5-to-V6 bump.
+		return false
+	}
+	return !isTypedJSONPathIndexParams(indexParams) ||
+		currentVersion >= presenceVersion ||
+		resolvedVersion < presenceVersion
 }
 
 func isFlushed(segment *SegmentInfo) bool {

@@ -5845,6 +5845,7 @@ type dataCoordConfig struct {
 	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
+	JSONStatsFormatVersion           ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -7564,6 +7565,23 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.JSONStatsFormatVersion = ParamItem{
+		Key:          "dataCoord.jsonStatsFormatVersion",
+		Version:      "3.0.0",
+		DefaultValue: "3",
+		Doc: `Data format used for newly created JSON stats. Supported values are 3 and 4.
+Format 4 must only be enabled manually after every DataCoord and QueryCoord understands V4, every QueryNode can read V3/V4, and every DataNode can write V3/V4. Eligible regular segments with V3 stats remain readable and are migrated by compaction; this migration requires dataCoord.enableCompaction=true when DataCoord starts because enableCompaction is not refreshable. Migration reuses dataCoord.compaction.storageVersion.rateLimitTokens and rateLimitInterval as an independent per-policy throttle; zero tokens disable migration, and simultaneous storage/JSON migrations each receive that quota. With dataNode.compaction.useMergeSort=false, a rewritten segment may use raw-scan fallback until a later sort compaction makes it eligible for V4 stats. External collections are not compacted and keep using V3 stats until their segments are refreshed or replaced. Once V4 stats have been published, switching back to V3 does not make rollback to an older binary safe.`,
+		Export: true,
+		Formatter: func(value string) string {
+			version := getAsInt64(value)
+			if version != 3 && version != 4 {
+				return "3"
+			}
+			return strconv.FormatInt(version, 10)
+		},
+	}
+	p.JSONStatsFormatVersion.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

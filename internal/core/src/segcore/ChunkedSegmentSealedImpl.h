@@ -176,6 +176,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                std::string_view query_path) const override;
 
     bool
+    HasTypedJsonPathIndexForOperandType(FieldId field_id,
+                                        std::string_view path,
+                                        DataType data_type,
+                                        bool any_type,
+                                        bool is_array) const;
+
+    bool
     Contain(const PkType& pk) const override;
 
     void

@@ -63,8 +63,16 @@ const char HINTS[] = "hints";
 // json stats related
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
 constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
-// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
-constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "3";
+inline constexpr int64_t JSON_STATS_DATA_FORMAT_V3 = 3;
+inline constexpr int64_t JSON_STATS_DATA_FORMAT_V4 = 4;
+// Latest format supported by this binary. The format selected for new writes
+// is supplied by DataCoord with each stats task.
+constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "4";
+inline constexpr bool
+IsSupportedJsonStatsDataFormat(int64_t version) {
+    return version == JSON_STATS_DATA_FORMAT_V3 ||
+           version == JSON_STATS_DATA_FORMAT_V4;
+}
 constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
 constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
 constexpr const char* JSON_STATS_META_FILE_NAME = "meta.json";

@@ -58,6 +58,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -83,12 +84,15 @@ struct LoadedJsonOffsetStats {
     int64_t count;
     int64_t exists_count;
     int64_t null_count;
+    int64_t valid_count;
+    bool is_nested;
 };
 
 LoadedJsonOffsetStats
 BuildAndLoadJsonInvertedIndexForOffsetRegression(
     const std::vector<std::string>& json_raw_data,
-    const std::vector<uint8_t>* valid_data = nullptr) {
+    const std::vector<uint8_t>* valid_data = nullptr,
+    const std::string& json_cast_type = "DOUBLE") {
     constexpr int64_t collection_id = 1;
     constexpr int64_t partition_id = 2;
     constexpr int64_t segment_id = 3;
@@ -114,7 +118,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
     index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index::INVERTED_INDEX_TYPE;
-    create_index_info.json_cast_type = JsonCastType::FromString("DOUBLE");
+    create_index_info.json_cast_type = JsonCastType::FromString(json_cast_type);
     create_index_info.json_path = "/a";
 
     auto build_index = index::IndexFactory::GetInstance().CreateJsonIndex(
@@ -171,9 +175,12 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
     auto exists = loaded_json_index->Exists();
     auto nulls = loaded_json_index->IsNull();
+    auto valid = loaded_json_index->IsNotNull();
     return {loaded_json_index->Count(),
             static_cast<int64_t>(exists.count()),
-            static_cast<int64_t>(nulls.count())};
+            static_cast<int64_t>(nulls.count()),
+            static_cast<int64_t>(valid.count()),
+            loaded_json_index->IsNestedIndex()};
 }
 
 }  // namespace
@@ -209,6 +216,12 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": [9007199254740992]})",
         R"({"a": [9007199254740993]})",
         R"({"a": [9007199254740994]})",
+        R"({"a": [18446744073709551616]})",
+        R"({"a": [9223372036854775808]})",
+        R"({"a": [9223372036854775809]})",
+        R"({"a": [1e400]})",
+        R"({"a": 1e400})",
+        R"({"a": 7})",
     };
 
     auto json_path = "/a";
@@ -325,17 +338,91 @@ TEST(JsonIndexTest, TestJsonContains) {
         proto::plan::JSONContainsExpr_JSONOp_Contains,
         true,
         std::vector<proto::plan::GenericValue>{large_int_value});
-    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+    // ARRAY_DOUBLE is a double projection (JsonCastType has no INT64), so the
+    // index answers large integers with double precision instead of declining
+    // to a raw scan. Row 25 (2^53) and row 26 (2^53+1) share one double, so
+    // both match. Documented in
+    // docs/agent_guides/json-filtering/cross-path-semantics.md.
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
         large_int_expr, segment.get(), json_raw_data.size()));
-    EXPECT_EQ(milvus::test::EvalExprBatchSizes(
-                  large_int_expr, segment.get(), json_raw_data.size()),
-              (std::vector<int64_t>{8, 8, 8, 4}));
     auto large_int_plan = std::make_shared<plan::FilterBitsNode>(
         DEFAULT_PLANNODE_ID, large_int_expr);
     auto large_int_result = query::ExecuteQueryExpr(
         large_int_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(large_int_result.count(), 1);
+    EXPECT_EQ(large_int_result.count(), 2);
+    EXPECT_TRUE(large_int_result[25]);
     EXPECT_TRUE(large_int_result[26]);
+
+    // Every numeric CONTAINS shape stays on the ARRAY_DOUBLE index: the only
+    // remaining JSON fallback is a mixed-type or array-shaped operand.
+    auto check_numeric = [&](proto::plan::JSONContainsExpr_JSONOp op,
+                             std::vector<proto::plan::GenericValue> values,
+                             const std::vector<int64_t>& expected) {
+        auto numeric_expr = std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+            op,
+            true,
+            std::move(values));
+        EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+            numeric_expr, segment.get(), json_raw_data.size()));
+        auto numeric_plan = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, numeric_expr);
+        auto numeric_result = query::ExecuteQueryExpr(
+            numeric_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+        EXPECT_EQ(numeric_result.count(), expected.size());
+        for (auto id : expected) {
+            EXPECT_TRUE(numeric_result[id]);
+        }
+    };
+
+    proto::plan::GenericValue two_to_53;
+    two_to_53.set_float_val(9007199254740992.0);
+    proto::plan::GenericValue missing;
+    missing.set_float_val(12345.0);
+    // Rows 25 (2^53) and 26 (2^53+1) collapse onto the same double.
+    check_numeric(
+        proto::plan::JSONContainsExpr_JSONOp_Contains, {two_to_53}, {25, 26});
+    check_numeric(proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                  {two_to_53, missing},
+                  {25, 26});
+    check_numeric(proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                  {two_to_53},
+                  {25, 26});
+
+    // Rows 29 (2^63) and 30 (2^63+1) already share a double on every path.
+    proto::plan::GenericValue two_to_63;
+    two_to_63.set_float_val(9223372036854775808.0);
+    check_numeric(
+        proto::plan::JSONContainsExpr_JSONOp_Contains, {two_to_63}, {29, 30});
+
+    // 2^64 exceeds uint64, so the build skips row 28's element entirely.
+    proto::plan::GenericValue two_to_64;
+    two_to_64.set_float_val(18446744073709551616.0);
+    check_numeric(
+        proto::plan::JSONContainsExpr_JSONOp_Contains, {two_to_64}, {});
+
+    proto::plan::GenericValue seven;
+    seven.set_int64_val(7);
+    auto validity_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{seven});
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        validity_expr, segment.get(), json_raw_data.size()));
+    auto validity_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, validity_expr);
+    auto validity_result = milvus::test::gen_filter_res(validity_plan.get(),
+                                                        segment.get(),
+                                                        json_raw_data.size(),
+                                                        MAX_TIMESTAMP);
+    TargetBitmapView valid(validity_result->GetValidRawData(),
+                           validity_result->size());
+    for (size_t i = 0; i < validity_result->size(); ++i) {
+        // Rows 17..31 have an ARRAY operand. In particular, [] and [1e400]
+        // remain valid operands; the scalar 1e400/7 rows are UNKNOWN.
+        EXPECT_EQ(valid[i], i >= 17 && i <= 31) << "row " << i;
+    }
 }
 
 TEST(JsonIndexTest, TestJsonCast) {
@@ -614,4 +701,25 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     EXPECT_EQ(stats.count, json_raw_data.size());
     EXPECT_EQ(stats.exists_count, 10);
     EXPECT_EQ(stats.null_count, 20);
+}
+
+TEST(JsonIndexTest, ArrayPathValiditySurvivesProductionLoad) {
+    auto stats = BuildAndLoadJsonInvertedIndexForOffsetRegression(
+        {
+            R"({"a":[]})",
+            R"({"a":[null]})",
+            R"({"a":[1e400]})",
+            R"({"a":[1e400,7]})",
+            R"({"a":1e400})",
+            R"({"a":7})",
+            R"({"b":1})",
+        },
+        nullptr,
+        "ARRAY_DOUBLE");
+
+    EXPECT_EQ(stats.count, 7);
+    EXPECT_EQ(stats.exists_count, 5);
+    EXPECT_EQ(stats.null_count, 3);
+    EXPECT_EQ(stats.valid_count, 4);
+    EXPECT_FALSE(stats.is_nested);
 }

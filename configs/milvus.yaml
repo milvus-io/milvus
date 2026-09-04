@@ -942,6 +942,10 @@ dataCoord:
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
+  # JSON stats format for new writes. Set to 4 only after all DataCoords, QueryCoords, QueryNodes, and DataNodes support V3/V4.
+  # Migrating existing V3 stats requires dataCoord.enableCompaction=true when DataCoord starts; enableCompaction is not refreshable.
+  # Migration independently reuses the storage-version compaction rate limit; 0 tokens disables it. Without merge sort, raw scan is used until later sort compaction rebuilds V4 stats.
+  jsonStatsFormatVersion: 3
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:

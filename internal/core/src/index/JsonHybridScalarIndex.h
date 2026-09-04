@@ -59,11 +59,16 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
+        // This direct/test-only entry point has no build-version config, so it
+        // retains the current semantics. Production builds use Build(config).
+        constexpr auto presence_semantics =
+            JsonPathPresenceSemantics::NON_NULL_TARGET;
         auto result = ConvertJsonToTypedFieldData<T>(field_datas,
                                                      json_schema_,
                                                      nested_path_,
                                                      cast_type_,
-                                                     cast_function_);
+                                                     cast_function_,
+                                                     presence_semantics);
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 
         auto n = result.field_data->get_num_rows();
@@ -94,6 +99,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
             return;
         }
 
+        auto presence_semantics =
+            ResolveJsonPathPresenceSemanticsForBuild(config);
         this->bitmap_index_cardinality_limit_ =
             GetBitmapCardinalityLimitFromConfig(config);
 
@@ -118,7 +125,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                                                      json_schema_,
                                                      nested_path_,
                                                      cast_type_,
-                                                     cast_function_);
+                                                     cast_function_,
+                                                     presence_semantics);
 
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 

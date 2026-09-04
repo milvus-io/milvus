@@ -158,12 +158,16 @@ class BsonView {
         : data_(data.data()), size_(data.size()) {
     }
 
-    // Core implementation: check if a BSON value is "empty" (null or recursively contains only nulls/empties)
-    // Following the same semantics as Json::isObjectEmpty/isDocEmpty in Json.h
+    // Check whether a BSON value is recursively empty. This remains useful for
+    // BSON normalization tests, but EXISTS uses
+    // IsBsonValuePresentForExists below.
     static bool
     IsBsonValueEmpty(const milvus::bson::value_view& val) {
         switch (val.type()) {
             case milvus::bson::type::k_null:
+                // TODO: If Milvus later distinguishes present-but-invalid from
+                // null/missing, update raw JSON, typed path indexes, shared and
+                // shredded JSON stats, and predicate validity together.
                 return true;
             case milvus::bson::type::k_document:
                 return IsBsonValueEmpty(val.get_document().value);
@@ -172,6 +176,14 @@ class BsonView {
             default:
                 return false;
         }
+    }
+
+    // Milvus EXISTS uses non-null target presence. Containers are present even
+    // when they are empty or contain only null values; descendants are not
+    // inspected here.
+    static bool
+    IsBsonValuePresentForExists(const milvus::bson::value_view& val) {
+        return val.type() != milvus::bson::type::k_null;
     }
 
     static bool
@@ -209,6 +221,12 @@ class BsonView {
             default:
                 return false;
         }
+    }
+
+    bool
+    IsBsonValuePresentForExists(size_t offset) const {
+        AssertInfo(offset < size_, "bson offset out of range");
+        return ParseBsonField(data_, offset).type != milvus::bson::type::k_null;
     }
 
     explicit BsonView(const uint8_t* data, size_t size)
@@ -410,6 +428,8 @@ class BsonView {
                             return ParseAsArray(ptr);
                         }
                         break;
+                    case milvus::bson::type::k_null:
+                        return std::nullopt;
                     default:
                         return std::nullopt;
                 }
@@ -432,6 +452,8 @@ class BsonView {
                     break;
                 case milvus::bson::type::k_bool:
                     ptr += 1;
+                    break;
+                case milvus::bson::type::k_null:
                     break;
                 case milvus::bson::type::k_array:
                 case milvus::bson::type::k_document: {

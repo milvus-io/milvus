@@ -90,8 +90,15 @@ class BsonDocument {
 // Parse a JSON array string and return a self-owned buffer containing the
 // BSON array bytes (length-prefixed, including terminator). The returned
 // vector's data() can be used directly with bson_view.
+enum class UnrepresentableJsonNumberPolicy {
+    REJECT,
+    NORMALIZE_TO_NULL,
+};
+
 std::vector<uint8_t>
-BuildBsonArrayBytesFromJsonString(const std::string& json_array);
+BuildBsonArrayBytesFromJsonString(
+    const std::string& json_array,
+    UnrepresentableJsonNumberPolicy number_policy);
 
 class BsonBuilder {
  public:
@@ -101,8 +108,24 @@ class BsonBuilder {
                 const std::string& value,
                 const JSONType& type);
 
+    static void
+    AppendDoubleToDom(DomNode& root,
+                      const std::vector<std::string>& keys,
+                      double value);
+
+    static void
+    AppendArrayToDom(DomNode& root,
+                     const std::vector<std::string>& keys,
+                     std::vector<uint8_t> array_bytes);
+
     static DomNode
     CreateValueNode(const std::string& value, JSONType type);
+
+    static DomNode
+    CreateDoubleValueNode(double value);
+
+    static DomNode
+    CreateArrayValueNode(std::vector<uint8_t> array_bytes);
 
     static void
     ConvertDomToBson(const DomNode& node, bson_t* builder);
