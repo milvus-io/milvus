@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -122,6 +123,13 @@ func (job *LoadCollectionJob) Execute() error {
 	// collection, for the same reason: once spawn has run, every resource group
 	// named in replicas holds one, the diff below comes back empty, and the
 	// resource group this request adds would never get an observer task.
+	//
+	// On a replay of this message the snapshot is taken AFTER the original
+	// spawn and already holds every requested group, so the replay registers
+	// no task - which is right, because the group's task is already there:
+	// the first attempt registers it before anything that can fail (below),
+	// and a restart rebuilds one for every group of a loaded collection
+	// (CollectionObserver.recoverResourceGroupTasks).
 	preSpawnRGs := typeutil.NewSet[string]()
 	if incrementalExpansion {
 		for _, replica := range job.meta.GetByCollection(job.ctx, req.GetCollectionId()) {
@@ -159,6 +167,17 @@ func (job *LoadCollectionJob) Execute() error {
 	// would reset to Loading/0 and take the resource groups that are serving
 	// right now down with them. Skip the overwrite and register an observer
 	// task per added resource group instead.
+	//
+	// Everything on this path is idempotent, and it has to be: the spawn
+	// above is persisted before any of it, and if this process fails or dies
+	// between the two the message is replayed. The replay finds the added
+	// replicas already in meta, the predicate still says expansion (an
+	// identical replica set on a Loaded collection is exactly a replay), and
+	// each step below either registers nothing, writes the value that is
+	// already there, or re-pulls a target that has not changed. Taking the
+	// native path on a replay instead would write the collection back to
+	// Loading/0 and make the group that is serving unreadable until the
+	// added one finishes - the incident this path exists to remove.
 	if incrementalExpansion {
 		// Nothing keeps this span on this path: the collection holds the
 		// LoadSpan of the load that created it, and that span is what
@@ -169,6 +188,25 @@ func (job *LoadCollectionJob) Execute() error {
 		mlog.Info(job.ctx, "incremental resource group expansion, keeping loaded collection meta",
 			mlog.Int64("collectionID", req.GetCollectionId()),
 			mlog.Int32("replicaNumber", replicaNumber))
+
+		// One task per resource group this request adds, registered FIRST:
+		// the two writes that follow can fail, and a failure after the spawn
+		// is a replay whose snapshot no longer sees the added group, so this
+		// is the one attempt that will register its task. The predicate
+		// guarantees every replica being added lives in one of these groups,
+		// so no added replica is left unobserved, and resource groups that
+		// were already there keep the state -- and the tasks -- they already
+		// had. A task registered before the next target is pulled reads an
+		// unknown percentage until it is, which pauses its clock rather than
+		// running it.
+		for _, replica := range replicas {
+			rgName := replica.GetResourceGroupName()
+			if preSpawnRGs.Contain(rgName) {
+				continue
+			}
+			preSpawnRGs.Insert(rgName)
+			job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), req.GetPartitionIds(), rgName)
+		}
 
 		// The replica count is the one property of the collection this request
 		// legitimately changes; the predicate has established that everything
@@ -188,19 +226,6 @@ func (job *LoadCollectionJob) Execute() error {
 		// below, where the observer only ever sees a populated next target.
 		if _, err = job.targetObserver.UpdateNextTarget(req.GetCollectionId()); err != nil {
 			return err
-		}
-
-		// One task per resource group this request adds. The predicate
-		// guarantees every replica being added lives in one of them, so no
-		// added replica is left unobserved, and resource groups that were
-		// already there keep the state -- and the tasks -- they already had.
-		for _, replica := range replicas {
-			rgName := replica.GetResourceGroupName()
-			if preSpawnRGs.Contain(rgName) {
-				continue
-			}
-			preSpawnRGs.Insert(rgName)
-			job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), req.GetPartitionIds(), rgName)
 		}
 		return nil
 	}
@@ -332,13 +357,35 @@ func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int6
 //   - every existing replica appears in the new set, in the same resource
 //     group: no replica is being released or moved, so no resource group is
 //     losing state that the collection meta still claims it has.
-//   - the new replica set is strictly larger, and every added replica lives in
-//     a resource group that holds none of this collection's replicas today:
-//     this is the "adds resource groups" part, and it is what lets the caller
-//     cover every added replica with one observer task per added resource
-//     group. An extra replica in a resource group that is already loaded would
-//     be left with no task at all, so that request keeps the overwrite.
+//   - every added replica lives in a resource group that holds none of this
+//     collection's replicas today: this is the "adds resource groups" part,
+//     and it is what lets the caller cover every added replica with one
+//     observer task per added resource group. An extra replica in a resource
+//     group that is already loaded would be left with no task at all, so that
+//     request keeps the overwrite.
+//
+// The whole path is a form's: it answers false on a stock binary
+// (extension.FormInstalled), which keeps master's behavior exactly - every load
+// of an already-loaded collection, a two-group LoadCollection included, writes
+// the collection back to Loading/0 and the collection-wide observer walks it up
+// again. The deployment shape that loads one collection into several resource
+// groups independently, and cannot afford that reset, is the one a compiled-in
+// form builds.
+//
+// The new set need not be LARGER. A request whose replica set is exactly the
+// stored one, on a Loaded collection, is this job's own message replayed: the
+// spawn persisted the added replicas, the process failed before the rest of
+// the fast path ran, and the message came back. Nothing else produces that
+// shape - a request that changes nothing is dropped before it is broadcast
+// (GenerateAlterLoadConfigMessage) - and taking the overwrite on it would
+// write a serving collection back to Loading/0, which is the one outcome this
+// predicate exists to prevent. Deciding from the requested set against what is
+// stored, rather than from the count growing, is what makes the replay land on
+// the same path as the original.
 func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadConfigMessageHeader, newReplicas []*messagespb.LoadReplicaConfig) bool {
+	if !extension.FormInstalled() {
+		return false
+	}
 	existing := job.meta.GetCollection(job.ctx, req.GetCollectionId())
 	if existing == nil || existing.GetStatus() != querypb.LoadStatus_Loaded {
 		return false
@@ -370,8 +417,8 @@ func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadCo
 	}
 
 	existingReplicas := job.meta.GetByCollection(job.ctx, req.GetCollectionId())
-	if len(newReplicas) <= len(existingReplicas) {
-		return false
+	if len(newReplicas) < len(existingReplicas) {
+		return false // a replica is being released
 	}
 	existingRGByReplica := make(map[int64]string, len(existingReplicas))
 	loadedRGs := typeutil.NewSet[string]()
