@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"path"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -28,8 +29,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -46,11 +49,13 @@ type reader struct {
 	storageVersion int64
 	importEz       string
 
-	fileSize      *atomic.Int64
-	bufferSize    int
-	retryAttempts uint
-	deleteData    map[any]typeutil.Timestamp // pk2ts
-	insertLogs    map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
+	fileSize         *atomic.Int64
+	bufferSize       int
+	retryAttempts    uint
+	deleteData       map[any]typeutil.Timestamp // pk2ts
+	insertLogs       map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
+	storageV3Files   []string                   // segment-local files plus manifest-owned LOB files
+	storageV3LobSize int64                      // manifest-reported LOB size when available
 
 	filters []Filter
 	dr      storage.DeserializeReader[*storage.Value]
@@ -108,6 +113,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
 			"Valid paths length should be one or two, but got paths:%s", paths)
 	}
+	if r.storageVersion == storage.StorageV3 {
+		return r.initStorageV3(paths[0], tsStart, tsEnd)
+	}
+
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
 		return err
@@ -186,6 +195,96 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 	r.filters = append(r.filters, deleteFilter)
+	return nil
+}
+
+func (r *reader) initStorageV3(segmentBasePath string, tsStart, tsEnd uint64) error {
+	// StorageV3 TEXT import uses milvus-storage SegmentReader. Its current C
+	// API cannot receive Milvus' key-retriever context, so encrypted backups
+	// must fail before any manifest or LOB file is opened. CMEK support requires
+	// extending that existing reader API and is intentionally outside this PR.
+	if r.importEz != "" {
+		return merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 backup import is not supported",
+		)
+	}
+
+	manifestPath := packed.MarshalManifestPath(segmentBasePath, packed.ManifestLatest)
+	rwOptions := []storage.RwOption{
+		storage.WithVersion(storage.StorageV3),
+		storage.WithBufferSize(32 * 1024 * 1024),
+		storage.WithStorageConfig(r.storageConfig),
+		storage.WithResolveTextLob(),
+	}
+
+	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, r.schema, rwOptions...)
+	if err != nil {
+		return err
+	}
+	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
+	})
+
+	if err := r.collectStorageV3Files(segmentBasePath, manifestPath); err != nil {
+		r.dr.Close()
+		return err
+	}
+
+	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, r.storageConfig)
+	if err != nil {
+		r.dr.Close()
+		return merr.Wrap(err, "failed to read StorageV3 deltalogs from manifest")
+	}
+	if len(deltaPaths) == 0 {
+		return nil
+	}
+
+	r.deleteData, err = r.readDeleteV3(deltaPaths, tsStart, tsEnd)
+	if err != nil {
+		r.dr.Close()
+		return err
+	}
+	deleteFilter, err := FilterWithDelete(r)
+	if err != nil {
+		r.dr.Close()
+		return err
+	}
+	r.filters = append(r.filters, deleteFilter)
+	return nil
+}
+
+func (r *reader) collectStorageV3Files(segmentBasePath, manifestPath string) error {
+	r.storageV3LobSize = 0
+	files := make(map[string]struct{})
+	// WalkWithPrefix matches raw string prefixes. Keep the directory boundary
+	// so segment "10" cannot include files owned by a sibling such as "100".
+	segmentPrefix := strings.TrimSuffix(path.Clean(segmentBasePath), "/") + "/"
+	err := importcommon.WalkWithPrefixRetry(r.ctx, r.cm, segmentPrefix, true, r.retryAttempts,
+		func() {
+			clear(files)
+		},
+		func(info *storage.ChunkObjectInfo) bool {
+			files[info.FilePath] = struct{}{}
+			return true
+		})
+	if err != nil {
+		return err
+	}
+
+	lobFiles, err := packed.GetManifestLobFiles(manifestPath, r.storageConfig)
+	if err != nil {
+		return merr.Wrap(err, "failed to read StorageV3 LOB files from manifest")
+	}
+	for _, lobFile := range lobFiles {
+		if lobFile.FileSizeBytes > 0 {
+			r.storageV3LobSize += lobFile.FileSizeBytes
+			continue
+		}
+		if lobFile.Path != "" {
+			files[lobFile.Path] = struct{}{}
+		}
+	}
+	r.storageV3Files = lo.Keys(files)
 	return nil
 }
 
@@ -271,6 +370,61 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				}
 				deleteData[pk] = ts
 			}
+		}
+	}
+	return deleteData, nil
+}
+
+func (r *reader) readDeleteV3(
+	deltaPaths []string,
+	tsStart, tsEnd uint64,
+) (map[any]typeutil.Timestamp, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
+	if err != nil {
+		return nil, err
+	}
+	options := []storage.RwOption{
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(r.storageConfig),
+	}
+	// GetDeltaLogPathsFromManifest has already removed zero-entry manifest
+	// markers. Read the remaining physical files through the shared path reader
+	// so task cancellation is checked between files.
+	reader, err := storage.NewDeltalogReader(r.ctx, pkField.DataType, deltaPaths, options...)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	deleteData := make(map[any]typeutil.Timestamp)
+	for {
+		record, err := reader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		// RecordReader owns this borrowed record and releases it on the next
+		// Next or Close. Releasing it here would double-release Arrow buffers.
+		for i := 0; i < record.Len(); i++ {
+			ts := typeutil.Timestamp(record.Column(common.TimeStampField).(*array.Int64).Value(i))
+			if ts < tsStart || ts > tsEnd {
+				continue
+			}
+			var pk any
+			switch pkField.DataType {
+			case schemapb.DataType_Int64:
+				pk = record.Column(0).(*array.Int64).Value(i)
+			case schemapb.DataType_VarChar:
+				pk = strings.Clone(record.Column(0).(*array.String).Value(i))
+			default:
+				return nil, merr.WrapErrDataIntegrityMsg("unsupported primary key type %s in StorageV3 deltalog", pkField.DataType.String())
+			}
+			if existing, ok := deleteData[pk]; ok && existing > ts {
+				continue
+			}
+			deleteData[pk] = ts
 		}
 	}
 	return deleteData, nil
@@ -386,12 +540,24 @@ func (r *reader) Size() (int64, error) {
 	if size := r.fileSize.Load(); size != 0 {
 		return size, nil
 	}
-	size, err := storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	paths := lo.Flatten(lo.Values(r.insertLogs))
+	baseSize := int64(0)
+	if r.storageVersion == storage.StorageV3 {
+		paths = r.storageV3Files
+		baseSize = r.storageV3LobSize
+	}
+	size, err := storage.GetFilesSize(r.ctx, paths, r.cm)
 	if err != nil {
 		return 0, err
 	}
+	size += baseSize
 	r.fileSize.Store(size)
 	return size, nil
 }
 
-func (r *reader) Close() {}
+func (r *reader) Close() {
+	if r.dr != nil {
+		_ = r.dr.Close()
+		r.dr = nil
+	}
+}

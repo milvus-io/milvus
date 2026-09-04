@@ -808,6 +808,20 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	// the plugin context contract carries the key base64-encoded, matching
 	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
 	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
+
+	// WithResolveTextLob is used by backup import, where schemaWithEZ is the
+	// destination schema. The destination key must not be passed to the source
+	// reader or a plaintext backup would be mistaken for a CMEK source.
+	capturedPluginContext = pluginContext
+	reader, err = NewManifestRecordReader(context.Background(), "manifest-json", schemaWithEZ,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithCollectionID(2),
+		WithResolveTextLob(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.Nil(t, capturedPluginContext)
 }
 
 // TestNewManifestRecordReaderPresentFieldsSkipManifestRead pins the P5 perf path:
