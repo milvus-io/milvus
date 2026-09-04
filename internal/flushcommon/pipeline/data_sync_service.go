@@ -328,7 +328,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	if params.FlushSourceModeNotifier != nil {
 		writeBufferOptions = append(writeBufferOptions, writebuffer.WithFlushSourceModeNotifier(params.FlushSourceModeNotifier))
 	}
-	err = params.WriteBufferManager.Register(channelName, metacache, writeBufferOptions...)
+	err = params.WriteBufferManager.Register(ds.ctx, channelName, metacache, writeBufferOptions...)
 	if err != nil {
 		mlog.Warn(initCtx, "failed to register channel buffer", mlog.String("channel", channelName), mlog.Err(err))
 		return nil, err
