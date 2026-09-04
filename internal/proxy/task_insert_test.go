@@ -98,7 +98,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 			},
 		},
 	}
-	task.metaCache = cache
+	task.MetaCache = cache
 
 	err := task.PreExecute(context.Background())
 	assert.Error(t, err)
@@ -352,7 +352,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 }
 
 func TestInsertTask(t *testing.T) {
-	t.Run("test getChannels", func(t *testing.T) {
+	t.Run("test GetChannels", func(t *testing.T) {
 		collectionID := UniqueID(0)
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
@@ -365,7 +365,7 @@ func TestInsertTask(t *testing.T) {
 		chMgr := channelmgr.NewMockChannelsMgr(t)
 		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		it := insertTask{
-			baseTask: baseTask{metaCache: cache},
+			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -374,9 +374,9 @@ func TestInsertTask(t *testing.T) {
 			},
 			chMgr: chMgr,
 		}
-		err := it.setChannels()
+		err := it.SetChannels()
 		assert.NoError(t, err)
-		resChannels := it.getChannels()
+		resChannels := it.GetChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, it.pChannels)
 	})
@@ -489,7 +489,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(&collectionInfo{Schema: info}, nil)
-	task.metaCache = cache
+	task.MetaCache = cache
 	err = task.PreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -635,7 +635,7 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(&collectionInfo{Schema: info}, nil)
-	task.metaCache = cache
+	task.MetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 }
@@ -665,7 +665,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 				},
 			}),
 		}, nil)
-		it.metaCache = mockCache
+		it.MetaCache = mockCache
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
@@ -735,7 +735,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
-			baseTask:    baseTask{metaCache: cache},
+			baseTask:    baseTask{MetaCache: cache},
 			schema:      schemaWithNamespaceEnabled,
 			idAllocator: idAllocator,
 		}
@@ -754,7 +754,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
-			baseTask:    baseTask{metaCache: cache},
+			baseTask:    baseTask{MetaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -782,7 +782,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
-			baseTask:    baseTask{metaCache: cache},
+			baseTask:    baseTask{MetaCache: cache},
 			schema:      schemaWithNamespaceDisabled,
 			idAllocator: idAllocator,
 		}
@@ -802,7 +802,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
-			baseTask:    baseTask{metaCache: cache},
+			baseTask:    baseTask{MetaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)

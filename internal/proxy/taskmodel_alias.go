@@ -19,14 +19,24 @@ package proxy
 import (
 	"context"
 
-	"google.golang.org/grpc"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 )
 
-// use timestampAllocatorInterface to keep other components testable
-//
-//go:generate mockery --name=timestampAllocatorInterface --filename=mock_tso_test.go --outpkg=proxy --output=. --inpackage --structname=mockTimestampAllocator --with-expecter
-type timestampAllocatorInterface interface {
-	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error)
+// Aliases to the extracted task model, kept so the concrete task structs that
+// remain in this package can keep their original (unexported) type names.
+
+type (
+	baseTask        = taskmodel.BaseTask
+	dmlTask         = taskmodel.DMLTask
+	tsoAllocator    = taskmodel.TsoAllocator
+	Condition       = taskmodel.Condition
+	TaskCondition   = taskmodel.TaskCondition
+	pChan           = taskmodel.PChan
+	vChan           = taskmodel.VChan
+	pChanStatistics = taskmodel.PChanStatistics
+	BaseInsertTask  = taskmodel.BaseInsertTask
+)
+
+func NewTaskCondition(ctx context.Context) *taskmodel.TaskCondition {
+	return taskmodel.NewTaskCondition(ctx)
 }

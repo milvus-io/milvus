@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -1691,7 +1692,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 	proxy.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+	sched, err := scheduler.NewTaskScheduler(ctx, proxy.tsoAllocator)
 	s.Require().NoError(err)
 
 	err = sched.Start()
@@ -1814,7 +1815,7 @@ func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHigh
 			proxy.tsoAllocator = &timestampAllocator{
 				tso: newMockTimestampAllocatorInterface(),
 			}
-			sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+			sched, err := scheduler.NewTaskScheduler(ctx, proxy.tsoAllocator)
 			s.Require().NoError(err)
 
 			err = sched.Start()
