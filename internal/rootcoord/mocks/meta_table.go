@@ -2610,6 +2610,52 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// HasFileResource provides a mock function with given fields: ctx
+func (_m *IMetaTable) HasFileResource(ctx context.Context) bool {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasFileResource")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context) bool); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// IMetaTable_HasFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasFileResource'
+type IMetaTable_HasFileResource_Call struct {
+	*mock.Call
+}
+
+// HasFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) HasFileResource(ctx interface{}) *IMetaTable_HasFileResource_Call {
+	return &IMetaTable_HasFileResource_Call{Call: _e.mock.On("HasFileResource", ctx)}
+}
+
+func (_c *IMetaTable_HasFileResource_Call) Run(run func(ctx context.Context)) *IMetaTable_HasFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_HasFileResource_Call) Return(_a0 bool) *IMetaTable_HasFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_HasFileResource_Call) RunAndReturn(run func(context.Context) bool) *IMetaTable_HasFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IncFileResourceRefCnt provides a mock function with given fields: ids
 func (_m *IMetaTable) IncFileResourceRefCnt(ids []int64) error {
 	ret := _m.Called(ids)
