@@ -568,7 +568,7 @@ func isEmbeddingFunctionOutputField(field *schemapb.FieldSchema, collSchema *sch
 // This function checks whether all fields are provided in the collSchema.Fields and not function output.
 // If any field is missing in the msg, an error will be returned.
 //
-// This funcion also checks the length of each column. All columns shall have the same length.
+// This function also checks the length of each column. All columns shall have the same length.
 // Also, the InsertData.Infos shall have BlobInfo with this length returned.
 // When the length is not aligned, an error will be returned.
 func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, srcField *schemapb.FieldData, logicalRows int) error {
