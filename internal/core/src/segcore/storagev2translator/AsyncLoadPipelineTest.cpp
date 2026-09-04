@@ -484,12 +484,17 @@ class FakeReader final : public milvus_storage::api::Reader {
         auto pending =
             std::make_shared<PendingOpen>(column_group_index, needed_columns);
         auto future = pending->promise.getSemiFuture();
+        std::function<void()> on_async_call;
         {
             std::lock_guard lock(mutex_);
             called_on_executor_.push_back(executor_ && executor_->IsRunning());
             priorities_.push_back(executor_ ? executor_->CurrentPriority()
                                             : folly::Executor::MID_PRI);
             pending_opens_.push_back(std::move(pending));
+            on_async_call = on_async_call_;
+        }
+        if (on_async_call) {
+            on_async_call();
         }
         return future;
     }
@@ -517,6 +522,12 @@ class FakeReader final : public milvus_storage::api::Reader {
     void
     Fail(const size_t request_index, arrow::Status status) {
         Pending(request_index)->promise.setValue(std::move(status));
+    }
+
+    void
+    SetOnAsyncCall(std::function<void()> on_async_call) {
+        std::lock_guard lock(mutex_);
+        on_async_call_ = std::move(on_async_call);
     }
 
     size_t
@@ -567,6 +578,7 @@ class FakeReader final : public milvus_storage::api::Reader {
     mutable std::vector<std::shared_ptr<PendingOpen>> pending_opens_;
     mutable std::vector<bool> called_on_executor_;
     mutable std::vector<int8_t> priorities_;
+    mutable std::function<void()> on_async_call_;
 };
 
 class SyncFallbackReader final : public milvus_storage::api::Reader {
@@ -787,6 +799,32 @@ TEST_F(AsyncLoadPipelineTest,
     }
     EXPECT_EQ(reader->AsyncCalls(), 0);
     EXPECT_EQ(reader->SyncCalls(), 0);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       StopsDispatchingChunkReaderOpensAfterContextCancellation) {
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    reader->SetOnAsyncCall([&source]() { source.requestCancellation(); });
+    std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 2},
+                                           {.column_group_index = 4},
+                                           {.column_group_index = 6}};
+
+    auto future = Start(OpenChunkReadersAsync(
+        &ctx, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+    const auto dispatched_opens = reader->AsyncCalls();
+    for (size_t i = 0; i < dispatched_opens; ++i) {
+        reader->Complete(i);
+    }
+
+    try {
+        Get(std::move(future));
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(dispatched_opens, 1);
 }
 
 TEST_F(AsyncLoadPipelineTest,

@@ -55,8 +55,10 @@ struct AsyncChunkReaderOpenOptions {
 using ChunkReaderPtr = std::shared_ptr<milvus_storage::api::ChunkReader>;
 
 // Opens all requested chunk readers concurrently on the async-load executor
-// and returns them in request order. The context token is captured at call
-// time; Arrow storage statuses retain their Segcore error classification.
+// and returns them in request order. Cancellation is checked before each
+// storage dispatch and after all issued opens settle; an issued storage open
+// is drained rather than interrupted. The context token is captured at call
+// time, and Arrow statuses retain their Segcore error classification.
 [[nodiscard]] folly::coro::Task<std::vector<ChunkReaderPtr>>
 OpenChunkReadersAsync(const milvus::OpContext* ctx,
                       int64_t segment_id,
