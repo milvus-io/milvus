@@ -57,6 +57,23 @@ func TestSetHookInstallsTheHook(t *testing.T) {
 	assert.Nil(t, InstalledCoordinatorEngine(), "installing a hook must not conjure an engine")
 }
 
+// FormInstalled is the one question the coordinators ask, and it must be
+// exactly "is a hook installed": nothing else a distribution sets counts.
+func TestFormInstalledFollowsTheHookAlone(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	assert.False(t, FormInstalled(), "a stock binary has no form installed")
+
+	SetCoordinatorEngine(&fakeCoordinatorEngine{})
+	assert.False(t, FormInstalled(), "an engine alone is not a form: the hook is the mark")
+
+	SetHook(stubHook{name: "form"})
+	assert.True(t, FormInstalled())
+
+	SetHook(nil)
+	assert.False(t, FormInstalled(), "uninstalling the hook uninstalls the form")
+}
+
 func TestSetCoordinatorEngineInstallsTheEngine(t *testing.T) {
 	ResetForTest()
 	t.Cleanup(ResetForTest)
