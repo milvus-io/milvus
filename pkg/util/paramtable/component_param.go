@@ -43,6 +43,7 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
 	DefaultLoadTransientBudgetBytes            = 0
+	DefaultJSONStatsBuildMaxInflightBytes      = 512 * 1024 * 1024
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -7549,13 +7550,21 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
 
+	const defaultJSONStatsWriteBatchSize = "81920"
 	p.JSONStatsWriteBatchSize = ParamItem{
 		Key:          "dataCoord.jsonShreddingWriteBatchSize",
 		Version:      "2.6.5",
-		DefaultValue: "81920",
-		Doc:          "the batch size to write",
+		DefaultValue: defaultJSONStatsWriteBatchSize,
+		Doc:          "the batch size to write; values must be positive, otherwise the default is used",
 		FallbackKeys: []string{"dataCoord.jsonStatsWriteBatchSize"},
 		Export:       true,
+		Formatter: func(value string) string {
+			batchSize, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || batchSize <= 0 {
+				return defaultJSONStatsWriteBatchSize
+			}
+			return value
+		},
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
 }
@@ -7648,8 +7657,10 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel               ParamItem `refreshable:"false"`
-	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
+	BuildParallel                  ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency    ParamItem `refreshable:"true"`
+	JSONStatsBuildMaxWorkers       ParamItem `refreshable:"true"`
+	JSONStatsBuildMaxInflightBytes ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -8208,6 +8219,37 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+
+	p.JSONStatsBuildMaxWorkers = ParamItem{
+		Key:          "dataNode.jsonStats.parallelBuild.maxWorkers",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "Maximum number of process-wide JSON Stats Build workers. The effective value is capped by the cgroup-aware CPU count. Values less than or equal to 0 use the safe automatic limit min(CPU, 8).",
+		Export:       true,
+	}
+	p.JSONStatsBuildMaxWorkers.Init(base.mgr)
+
+	p.JSONStatsBuildMaxInflightBytes = ParamItem{
+		Key:          "dataNode.jsonStats.parallelBuild.maxInflightBytes",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(DefaultJSONStatsBuildMaxInflightBytes),
+		Doc: `Process-wide transient memory budget in bytes for materialized JSON Stats Build chunks. ` +
+			`The budget is shared by concurrent builds. Lower values reduce peak memory at the cost of ` +
+			`parallelism. A chunk larger than the budget is allowed to run exclusively to guarantee ` +
+			`progress. Set to 0 to disable the limit.`,
+		Export: true,
+		Formatter: func(v string) string {
+			value, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || value < 0 {
+				mlog.Warn(context.TODO(), "dataNode.jsonStats.parallelBuild.maxInflightBytes must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.Int64("default", DefaultJSONStatsBuildMaxInflightBytes))
+				return strconv.Itoa(DefaultJSONStatsBuildMaxInflightBytes)
+			}
+			return v
+		},
+	}
+	p.JSONStatsBuildMaxInflightBytes.Init(base.mgr)
 
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",

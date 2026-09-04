@@ -77,6 +77,25 @@ BsonInvertedIndex::AddRecord(const std::string& key,
 }
 
 void
+BsonInvertedIndex::AddRecords(const std::string& key,
+                              std::vector<int64_t> records) {
+    if (records.empty()) {
+        return;
+    }
+
+    auto& destination = inverted_index_map_[key];
+    if (destination.empty()) {
+        destination = std::move(records);
+        return;
+    }
+
+    // Let vector retain spare capacity from its geometric growth. Reserving
+    // exactly the required size for every chunk would reallocate and copy the
+    // entire accumulated postings list on nearly every merge.
+    destination.insert(destination.end(), records.begin(), records.end());
+}
+
+void
 BsonInvertedIndex::BuildIndex() {
     if (wrapper_ == nullptr) {
         if (tantivy_index_exist(path_.c_str())) {

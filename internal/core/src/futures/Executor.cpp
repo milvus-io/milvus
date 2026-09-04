@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <utility>
 
 #include "Executor.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -20,6 +22,8 @@
 namespace milvus::futures {
 
 const int kNumPriority = 3;
+const int kJsonStatsBuildNumPriority = 1;
+const size_t kJsonStatsBuildMinThreads = 1;
 
 folly::CPUThreadPoolExecutor*
 getSearchCPUExecutor() {
@@ -38,6 +42,18 @@ getLoadCPUExecutor() {
         thread_num,
         folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
         std::make_shared<folly::NamedThreadFactory>("MILVUS_LOAD_"));
+    return &executor;
+}
+
+folly::CPUThreadPoolExecutor*
+getJsonStatsBuildExecutor() {
+    auto max_thread_num = static_cast<size_t>(std::max(1, milvus::CPU_NUM));
+    static folly::CPUThreadPoolExecutor executor(
+        std::pair<size_t, size_t>{max_thread_num, kJsonStatsBuildMinThreads},
+        folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(
+            kJsonStatsBuildNumPriority),
+        std::make_shared<folly::NamedThreadFactory>(
+            "MILVUS_JSON_STATS_BUILD_"));
     return &executor;
 }
 

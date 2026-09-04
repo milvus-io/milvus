@@ -75,6 +75,33 @@ func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	}
 }
 
+func TestComponentParam_DataCoordJSONStatsWriteBatchSize(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.DataCoordCfg.JSONStatsWriteBatchSize
+	legacyKey := item.FallbackKeys[0]
+	params.Reset(item.Key)
+	params.Reset(legacyKey)
+	t.Cleanup(func() {
+		params.Reset(item.Key)
+		params.Reset(legacyKey)
+	})
+
+	assert.EqualValues(t, 81920, item.GetAsInt64())
+
+	params.Save(item.Key, "4096")
+	assert.EqualValues(t, 4096, item.GetAsInt64())
+
+	for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+		params.Save(item.Key, invalid)
+		assert.EqualValues(t, 81920, item.GetAsInt64(), invalid)
+	}
+
+	params.Reset(item.Key)
+	params.Save(legacyKey, "-1")
+	assert.EqualValues(t, 81920, item.GetAsInt64())
+}
+
 func TestMembershipFilterConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true))
 	params := proxyConfig{}
@@ -1017,6 +1044,22 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
+		assert.Equal(t, 8, Params.JSONStatsBuildMaxWorkers.GetAsInt())
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "-1")
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "invalid")
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "0")
+		assert.Equal(t, int64(0),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "67108864")
+		assert.Equal(t, int64(67108864),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Reset(Params.JSONStatsBuildMaxInflightBytes.Key)
 
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")

@@ -84,13 +84,27 @@ class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
     GetLoadTransientBudget() {
-        static TransientMemoryBudget instance;
+        static TransientMemoryBudget instance(
+            &LoadMemoryOverheadController::GetInstance());
+        return instance;
+    }
+
+    static TransientMemoryBudget&
+    GetJsonStatsBuildBudget() {
+        // JSON stats materialization is not part of the load path, so its
+        // independent budget must not reconfigure MCL load-overhead policy.
+        static TransientMemoryBudget instance(nullptr);
         return instance;
     }
 
     static void
     SetLoadTransientBudgetBytes(size_t bytes) {
         GetLoadTransientBudget().SetCapacityBytes(bytes);
+    }
+
+    static void
+    SetJsonStatsBuildBudgetBytes(size_t bytes) {
+        GetJsonStatsBuildBudget().SetCapacityBytes(bytes);
     }
 
     /// Block until enough budget is available. Safe to call when the calling
@@ -158,10 +172,46 @@ class TransientMemoryBudget {
         cv_.notify_all();
     }
 
+    /// Replace a task's pre-dispatch reservation with its measured result
+    /// size. Growth is intentionally non-blocking: completed workers must not
+    /// wait for consumers that are ordered behind other active tasks. Any
+    /// temporary overage prevents new TryAcquire calls until consumers release
+    /// enough bytes.
+    void
+    ReconcileReservation(size_t reserved_bytes, size_t actual_bytes) {
+        bool released_bytes = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            AssertInfo(reserved_bytes <= inflight_bytes_,
+                       "Transient memory budget reconcile exceeds inflight: "
+                       "reserved {}, inflight {}",
+                       reserved_bytes,
+                       inflight_bytes_);
+            auto other_inflight_bytes = inflight_bytes_ - reserved_bytes;
+            AssertInfo(actual_bytes <= std::numeric_limits<size_t>::max() -
+                                           other_inflight_bytes,
+                       "Transient memory budget reconcile overflow: actual "
+                       "{}, other inflight {}",
+                       actual_bytes,
+                       other_inflight_bytes);
+            inflight_bytes_ = other_inflight_bytes + actual_bytes;
+            released_bytes = actual_bytes < reserved_bytes;
+        }
+        if (released_bytes) {
+            cv_.notify_all();
+        }
+    }
+
     size_t
     CapacityBytes() const {
         std::lock_guard<std::mutex> lock(mu_);
         return CapacityBytesLocked();
+    }
+
+    size_t
+    InflightBytes() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return inflight_bytes_;
     }
 
     void
@@ -170,16 +220,16 @@ class TransientMemoryBudget {
         auto old_capacity = CapacityBytes();
         auto expanding =
             old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
-        auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
-        if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
+        if (load_overhead_controller_ != nullptr && expanding &&
+            !load_overhead_controller_->UpdateBudgetBytes(bytes)) {
             return;
         }
         {
             std::lock_guard<std::mutex> lock(mu_);
             capacity_bytes_ = bytes;
         }
-        if (!expanding) {
-            overhead_controller.UpdateBudgetBytes(bytes);
+        if (load_overhead_controller_ != nullptr && !expanding) {
+            load_overhead_controller_->UpdateBudgetBytes(bytes);
         }
         cv_.notify_all();
     }
@@ -190,10 +240,9 @@ class TransientMemoryBudget {
     }
 
  private:
-    TransientMemoryBudget() = default;
-
-    explicit TransientMemoryBudget(size_t capacity_bytes)
-        : capacity_bytes_(capacity_bytes) {
+    explicit TransientMemoryBudget(
+        LoadMemoryOverheadController* load_overhead_controller)
+        : load_overhead_controller_(load_overhead_controller) {
     }
 
     size_t
@@ -219,6 +268,7 @@ class TransientMemoryBudget {
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t capacity_bytes_{0};
+    LoadMemoryOverheadController* const load_overhead_controller_;
 };
 
 inline size_t
