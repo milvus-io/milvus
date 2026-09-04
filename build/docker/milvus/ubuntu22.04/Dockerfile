@@ -13,6 +13,7 @@ FROM ubuntu:jammy-20240530
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
 RUN apt-get update && \
@@ -31,12 +32,13 @@ RUN apt-get update && \
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
-RUN mkdir -p /milvus/bin
-COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus
+RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+    install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus
+COPY --chown=milvus:milvus --chmod=774 ./bin/milvus /milvus/bin/milvus
 
-COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
+COPY --chown=milvus:milvus --chmod=774 ./configs/ /milvus/configs/
 
-COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
+COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
@@ -46,17 +48,15 @@ ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 # Generate fipsmodule.cnf for FIPS module integrity self-test.
 # FIPS activation is handled programmatically at startup — no OPENSSL_CONF needed.
-RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so
+RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so && \
+    chown milvus:milvus /milvus/configs/ssl/fipsmodule.cnf
 
-# Change user to milvus
 # protobuf 5.x RepeatedField adds container annotations that trigger ASAN
 # container-overflow false positives during static initialization, disable it.
-ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
-    mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
 ENV ASAN_OPTIONS=detect_leaks=1:detect_container_overflow=0
-USER milvus:milvus
+
+# Run as milvus by default; downstream images may select another user at build time.
+USER ${MILVUS_RUNTIME_USER}
 
 ENTRYPOINT ["/tini", "--"]
 
