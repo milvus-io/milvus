@@ -9,6 +9,10 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 service ViewSyncService {
     rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
     }
+    // SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
+    // Applies to both loaded and unloaded collections.
+    rpc SyncDataView(SyncDataViewRequest) returns (SyncDataViewResponse) {
+    }
 }
 
 // DataVersion is the composite version embedded in a QueryView version.
@@ -134,9 +138,46 @@ message SyncResponse {
 // SyncQueryViewsResponse reports the follower's latest local states.
 message SyncQueryViewsResponse {
     repeated QueryViewOfShard query_views = 1;
+    // Balance attributes reported by the node for coord's balancer decision-making.
+    oneof balance_attributes {
+        StreamingNodeBalanceAttributes streaming_node = 2;
+        QueryNodeBalanceAttributes query_node = 3;
+    }
 }
 
 message SyncCloseResponse {
+}
+
+//
+// ======================== SyncDataView RPC Messages ========================
+//
+
+// SyncDataViewRequest carries data view timetick information to streaming nodes.
+// Only used for unloaded collections; loaded collections sync timetick via SyncQueryView.
+message SyncDataViewRequest {
+    repeated DataViewShardTimeTick shards = 1;
+}
+
+// DataViewShardTimeTick is a lightweight message carrying only the vchannel and timetick
+// for delete data eviction, avoiding the overhead of full DataViewOfShard.
+message DataViewShardTimeTick {
+    string vchannel = 1;
+    // TransformLog entries with timetick > this value need to be consumed for this shard.
+    uint64 transform_start_after_timetick = 2;
+}
+
+// SyncDataViewResponse is the acknowledgement of the data view sync.
+message SyncDataViewResponse {
+}
+
+// StreamingNodeBalanceAttributes carries streaming node metrics for balance decisions.
+message StreamingNodeBalanceAttributes {
+}
+
+// QueryNodeBalanceAttributes carries query node resource usage metrics for balance decisions.
+message QueryNodeBalanceAttributes {
+    int64 memory_usage = 1;  // Current memory usage in bytes.
+    int64 disk_usage = 2;    // Current disk usage in bytes.
 }
 
 // ShardID identifies one shard within a replica.
