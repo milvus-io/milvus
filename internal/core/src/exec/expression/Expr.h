@@ -749,6 +749,75 @@ class SegmentExpr : public Expr {
             evaluate_batch, input, res, valid_res, &candidate_mask, values...);
     }
 
+    // Sequential reverse-lookup over the contiguous global row range
+    // [start_offset, start_offset + batch_size). This is the shape of the
+    // no-offset-input index-only scan, and it avoids materializing a
+    // per-batch OffsetVector solely to encode a start plus a count.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupSequentialWithMask(BatchEvaluator evaluate_batch,
+                                         int64_t start_offset,
+                                         int64_t batch_size,
+                                         TargetBitmapView res,
+                                         TargetBitmapView valid_res,
+                                         const TargetBitmap& candidate_mask,
+                                         const ValTypes&... values) {
+        AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+        using Index = index::ScalarIndex<IndexInnerType>;
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        auto* index_ptr = const_cast<Index*>(scalar_index);
+        const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
+        const bool all_valid = cached_index_all_valid_;
+        const bool has_candidate_mask = !candidate_mask.empty();
+        AssertInfo(!has_candidate_mask ||
+                       candidate_mask.size() == static_cast<size_t>(batch_size),
+                   "candidate mask size {} does not match offset batch size {}",
+                   candidate_mask.size(),
+                   batch_size);
+
+        for (auto i = 0; i < batch_size; ++i) {
+            if (has_candidate_mask && !candidate_mask[i]) {
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
+            auto offset = start_offset + i;
+            auto raw = index_ptr->Reverse_Lookup(offset);
+            if (!raw.has_value()) {
+                res[i] = valid_res[i] = false;
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    ValidityView{},
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
+            T raw_data = raw.value();
+            bool valid_data = all_valid || valid_result[offset];
+            evaluate_batch.template operator()<FilterType::random>(
+                &raw_data,
+                ValidityView::FromExpanded(&valid_data),
+                nullptr,
+                1,
+                res + i,
+                valid_res + i,
+                values...);
+        }
+
+        return batch_size;
+    }
+
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
     ProcessIndexLookupByOffsetsImpl(BatchEvaluator evaluate_batch,
