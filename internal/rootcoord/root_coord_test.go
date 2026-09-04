@@ -2272,6 +2272,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
 			clientAdded = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientAdded)
 		})
@@ -2290,6 +2291,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
 		})
@@ -2307,6 +2309,19 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 
 		c := newTestCore()
 		c.proxyClientManager = proxyManager
+		c.addProxyClient(session)
+	})
+
+	t.Run("empty resources", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+		observer.EXPECT().IsEmpty().Return(true)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
 		c.addProxyClient(session)
 	})
 }

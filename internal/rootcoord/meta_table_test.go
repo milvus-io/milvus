@@ -2052,6 +2052,14 @@ func TestMetaTableGetFileResources(t *testing.T) {
 	})
 }
 
+func TestMetaTableHasFileResource(t *testing.T) {
+	meta := &MetaTable{fileResourceID2Meta: make(map[int64]*internalpb.FileResourceInfo)}
+	require.False(t, meta.HasFileResource(context.Background()))
+
+	meta.fileResourceID2Meta[1] = &internalpb.FileResourceInfo{Id: 1}
+	require.True(t, meta.HasFileResource(context.Background()))
+}
+
 func TestMetaTable_DropPartition_CopyOnWrite(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	originalPart := &model.Partition{
