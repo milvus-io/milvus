@@ -76,9 +76,12 @@ type CollectionObserver struct {
 // group's brand new task would look expired the instant it is registered and
 // the replica it just spawned would be torn down. LastProgress/LastProgressAt
 // give such a task its own progress watermark instead: LastProgressAt moves
-// whenever this task's own per-resource-group load percentage advances, and the
-// task is only considered timed out after LoadTimeoutSeconds without an
-// advance.
+// whenever this task's own per-resource-group load percentage changes -- in
+// either direction, because a load that goes backwards is still moving -- and
+// the task is only considered timed out after LoadTimeoutSeconds in which that
+// percentage did not change at all. A percentage that could not be read is
+// carried over rather than recorded, so a failed read is never mistaken for a
+// stall. LastProgress is -1 until the first percentage is read.
 type LoadTask struct {
 	LoadType     querypb.LoadType
 	CollectionID int64
@@ -232,6 +235,16 @@ func (ob *CollectionObserver) Observe(ctx context.Context) {
 	ob.observeLoadStatus(ctx, progress)
 }
 
+// unknownLoadPercentage is what the per-tick scan publishes for a resource
+// group whose load percentage could not be established this tick. It is not a
+// low percentage and must never be compared as one: it says nothing was
+// learned. Both consumers of the progress map read it as "no information" --
+// observeResourceGroupTimeout pauses its clock, observeLoadStatus does not
+// finish the task -- and it deliberately travels all the way to them unchanged,
+// so that neither can be handed a figure that looks like a measurement and is
+// not.
+const unknownLoadPercentage int32 = -1
+
 // observeResourceGroupProgress is the resource-group-aware slice of the per-tick
 // scan, computed exactly once per tick and consumed by both observeTimeout (as
 // the progress watermark) and observeLoadStatus (to decide when a scoped task is
@@ -244,24 +257,58 @@ func (ob *CollectionObserver) Observe(ctx context.Context) {
 // loads -- it walks the task map without reading a single target or
 // distribution entry and returns a nil map, so both consumers see no progress
 // entry at all and fall through to the code that existed before.
+//
+// Two situations answer unknownLoadPercentage rather than a number:
+//
+//   - the read failed, or the resource group holds no replica yet because the
+//     load is still committing its meta;
+//   - nothing in the distribution mentions this collection at all. This is the
+//     state right after a coordinator restart, before any QueryNode has
+//     reported: every group of the collection would read 0, "carries none of
+//     its targets", which is indistinguishable from a group that genuinely has
+//     nothing and would put a load timeout on groups that have been serving the
+//     whole time. The check is per collection, cached for the tick, and it also
+//     spares the target and distribution walk while the answer could only be 0.
 func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) map[string]int32 {
-	var progress map[string]int32
+	var (
+		progress map[string]int32
+		reported map[int64]bool
+	)
 	ob.loadTasks.Range(func(key string, task LoadTask) bool {
 		if task.ResourceGroup == "" {
 			return true
 		}
+		if progress == nil {
+			progress = make(map[string]int32)
+			reported = make(map[int64]bool)
+		}
+
+		hasReported, cached := reported[task.CollectionID]
+		if !cached {
+			hasReported = len(ob.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(task.CollectionID))) > 0
+			reported[task.CollectionID] = hasReported
+		}
+		if !hasReported {
+			mlog.RatedInfo(ctx, 0.1, "no distribution reported for the collection yet, resource group load percentage unknown",
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.String("resourceGroup", task.ResourceGroup))
+			progress[key] = unknownLoadPercentage
+			return true
+		}
+
 		percentage, err := utils.LoadPercentageByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, task.CollectionID, task.ResourceGroup)
 		if err != nil {
 			// Rate-limited: this runs per task per observation tick, and a
 			// persistent read failure (a recorded load failure, say) would
-			// otherwise print once a second until the task times out.
+			// otherwise print once a second for as long as it lasts.
 			mlog.RatedWarn(ctx, 0.1, "failed to read resource group load percentage",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup),
 				mlog.Err(err))
 		}
-		if progress == nil {
-			progress = make(map[string]int32)
+		if percentage < 0 {
+			progress[key] = unknownLoadPercentage
+			return true
 		}
 		progress[key] = percentage
 		return true
@@ -360,13 +407,55 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[s
 func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, key string, task LoadTask, percentage int32) {
 	now := time.Now()
 
-	// Refresh the watermark when progress moved. A fully loaded resource group
-	// refreshes forever: its task may legitimately outlive the load timeout
-	// while waiting for the gated status promotion, and a replica that is
-	// already serving must never be torn down by a load timeout. A zero
-	// LastProgressAt (a task built by a caller that did not seed it) starts its
-	// clock now rather than at the epoch, so it is never instantly expired.
-	if percentage > task.LastProgress || percentage >= 100 || task.LastProgressAt.IsZero() {
+	// An unknown percentage PAUSES the clock: the watermark keeps the last
+	// percentage that was actually read, and LastProgressAt is moved to now so
+	// that the timeout can only ever be measured over ticks that learned
+	// something. Nothing is known, so nothing is decided -- and a task that has
+	// never had one informative observation can never time out at all.
+	//
+	// Letting the clock run here instead is what would make this dangerous:
+	// the figure is unknown exactly when a coordinator has just restarted and
+	// no QueryNode has reported yet, so the teardown below would fire on every
+	// resource group of every loaded collection at once. A task whose group
+	// never becomes readable is not leaked: it is removed by observeTimeout's
+	// first check as soon as the collection leaves meta (release or drop).
+	if percentage < 0 {
+		mlog.RatedWarn(ctx, 0.1, "resource group load percentage unknown, pausing the load timeout",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.String("traceID", key),
+			mlog.Int32("lastKnownProgress", task.LastProgress))
+		task.LastProgressAt = now
+		ob.loadTasks.Insert(key, task)
+		return
+	}
+
+	// Refresh the watermark whenever the percentage MOVED, in either
+	// direction. A load can legitimately go backwards -- a delegator restarts,
+	// or a freshly flushed segment enters the next target -- and then climb
+	// back through values it has already visited; a watermark that only
+	// ratcheted up would stop refreshing at the first regression and the load
+	// timeout would tear down a resource group that was making progress the
+	// whole time. Only a percentage that does not move at all is a stall.
+	//
+	// This is a weaker rule than the unscoped path's, which refreshes a
+	// partition's UpdatedAt only on a strict rise (observePartitionLoadStatus
+	// returns early when the loaded count did not grow, though it does write
+	// the lower count back). The consequence is accepted deliberately: a
+	// percentage that oscillates below 100 -- 50, 49, 50 -- keeps refreshing
+	// and is never declared stalled, so "stalled" here means "did not move at
+	// all". Tracking a loaded-count watermark of our own instead would catch
+	// the oscillation, but it would also reintroduce the false regression this
+	// rule exists to remove, on a figure that legitimately moves down in steady
+	// state; a load that keeps moving is left alone.
+	//
+	// A fully loaded resource group refreshes forever: its task may
+	// legitimately outlive the load timeout while waiting for the gated status
+	// promotion, and a replica that is already serving must never be torn down
+	// by a load timeout. A zero LastProgressAt (a task built by a caller that
+	// did not seed it) starts its clock now rather than at the epoch, so it is
+	// never instantly expired.
+	if percentage != task.LastProgress || percentage >= 100 || task.LastProgressAt.IsZero() {
 		task.LastProgress = percentage
 		task.LastProgressAt = now
 		ob.loadTasks.Insert(key, task)
@@ -392,11 +481,37 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 // keep their replicas, since their loads are independent by construction. The
 // collection-level meta and target go away only once the last resource group is
 // gone, which is the same condition under which the unscoped path drops them.
+//
+// With one exception, which is the hard limit on what a load timeout is allowed
+// to do: it may shrink an expansion that never came up, and it may abandon a
+// load that never completed, but it may NEVER unload a collection that is
+// serving. If taking this resource group's replicas away would leave a Loaded
+// collection with none, the task is dropped and nothing is released -- the
+// collection keeps serving with the replicas it has. The unscoped path has
+// always had this property for free, because its timeout branch only runs for a
+// Loading collection; a scoped task is registered on a Loaded one, so it needs
+// the rule spelled out. Any percentage that is wrong in the pessimistic
+// direction -- and the ways to read a serving group as 0 are many, all of them
+// transient -- stops here instead of costing the deployment its collection.
 func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context, key string, task LoadTask) {
+	replicas := ob.meta.GetByCollection(ctx, task.CollectionID)
 	replicaIDs := make([]int64, 0)
-	for _, replica := range ob.meta.GetByCollection(ctx, task.CollectionID) {
+	for _, replica := range replicas {
 		if replica.GetResourceGroup() == task.ResourceGroup {
 			replicaIDs = append(replicaIDs, replica.GetID())
+		}
+	}
+
+	if len(replicaIDs) == len(replicas) {
+		if collection := ob.meta.GetCollection(ctx, task.CollectionID); collection != nil &&
+			collection.GetStatus() == querypb.LoadStatus_Loaded {
+			mlog.RatedWarn(ctx, 0.1, "load timeout for the last resource group of a loaded collection, keeping it loaded and dropping the task",
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.String("resourceGroup", task.ResourceGroup),
+				mlog.String("traceID", key),
+				mlog.Int64s("replicaIDs", replicaIDs))
+			ob.loadTasks.Remove(key)
+			return
 		}
 	}
 
