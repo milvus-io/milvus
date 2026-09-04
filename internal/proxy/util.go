@@ -91,15 +91,7 @@ var logger = mlog.With(mlog.String("role", typeutil.ProxyRole))
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
 func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
-	for _, structArrayField := range schema.StructArrayFields {
-		structName := structArrayField.Name
-		for _, field := range structArrayField.Fields {
-			// Create transformed name: structName[fieldName]
-			newName := typeutil.ConcatStructFieldName(structName, field.Name)
-			field.Name = newName
-		}
-	}
-
+	typeutil.QualifyStructSubFieldNames(schema)
 	return nil
 }
 

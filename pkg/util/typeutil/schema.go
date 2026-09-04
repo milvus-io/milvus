@@ -4211,6 +4211,36 @@ func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
 }
 
+// IsQualifiedStructSubFieldName reports whether fieldName is already in the
+// structName[fieldName] form for the given struct.
+func IsQualifiedStructSubFieldName(structName string, fieldName string) bool {
+	return strings.HasPrefix(fieldName, structName+"[") && strings.HasSuffix(fieldName, "]")
+}
+
+// QualifyStructSubFieldNames rewrites every struct array sub-field name in the
+// schema into the structName[fieldName] form the schema is stored under, and
+// reports whether anything was rewritten.
+//
+// The proxy applies this on the user-facing create path. A CreateCollection that
+// enters through the replicate ingress does not pass the proxy, and a producer
+// that built it from a DescribeCollection result carries the bare names that
+// DescribeCollection hands back. Qualifying again is idempotent, so a message
+// that already carries qualified names -- one forwarded from a peer cluster's
+// WAL -- is left untouched.
+func QualifyStructSubFieldNames(schema *schemapb.CollectionSchema) bool {
+	changed := false
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if IsQualifiedStructSubFieldName(structField.GetName(), field.GetName()) {
+				continue
+			}
+			field.Name = ConcatStructFieldName(structField.GetName(), field.GetName())
+			changed = true
+		}
+	}
+	return changed
+}
+
 // IsStructSubField checks if a field name follows the "structName[fieldName]" convention,
 // indicating it is a sub-field within a StructArrayField.
 func IsStructSubField(fieldName string) bool {
