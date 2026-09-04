@@ -76,8 +76,8 @@ func (it *insertTask) EndTs() Timestamp {
 	return it.insertMsg.EndTimestamp
 }
 
-func (it *insertTask) setChannels() error {
-	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+func (it *insertTask) SetChannels() error {
+	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (it *insertTask) setChannels() error {
 	return nil
 }
 
-func (it *insertTask) getChannels() []pChan {
+func (it *insertTask) GetChannels() []pChan {
 	return it.pChannels
 }
 
@@ -143,14 +143,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.GetMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
@@ -168,7 +168,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
+	schema, err := it.GetMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -272,7 +272,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.getMetaCache(), it.insertMsg.GetDbName(), collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -289,7 +289,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.insertMsg.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
+			pinfo, err := it.GetMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err

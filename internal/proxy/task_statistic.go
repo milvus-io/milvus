@@ -110,11 +110,11 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-PreExecute")
 	defer sp.End()
 
-	collID, err := g.getMetaCache().GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
+	collID, err := g.GetMetaCache().GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	partIDs, err := getPartitionIDs(ctx, g.getMetaCache(), g.request.GetDbName(), g.collectionName, g.partitionNames)
+	partIDs, err := getPartitionIDs(ctx, g.GetMetaCache(), g.request.GetDbName(), g.collectionName, g.partitionNames)
 	if err != nil { // err is not nil if partition not exists
 		return err
 	}
@@ -131,7 +131,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.getMetaCache(), g.mixc, g.request.GetDbName(), g.collectionName, g.CollectionID, partIDs)
+	loaded, unloaded, err := checkFullLoaded(ctx, g.GetMetaCache(), g.mixc, g.request.GetDbName(), g.collectionName, g.CollectionID, partIDs)
 	log := mlog.With(
 		mlog.String("collectionName", g.collectionName),
 		mlog.Int64("collectionID", g.CollectionID),
@@ -643,7 +643,7 @@ func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := g.getMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
+	collID, err := g.GetMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -726,12 +726,12 @@ func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := g.getMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
+	collID, err := g.GetMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
 	g.collectionID = collID
-	partitionID, err := g.getMetaCache().GetPartitionID(ctx, g.GetDbName(), g.CollectionName, g.PartitionName)
+	partitionID, err := g.GetMetaCache().GetPartitionID(ctx, g.GetDbName(), g.CollectionName, g.PartitionName)
 	if err != nil {
 		return err
 	}

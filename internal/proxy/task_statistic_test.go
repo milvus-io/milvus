@@ -175,7 +175,7 @@ func (s *StatisticTaskSuite) TestStatisticTask_Timeout() {
 
 func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisticsTask {
 	return &getStatisticsTask{
-		baseTask:       baseTask{metaCache: s.metaCache},
+		baseTask:       baseTask{MetaCache: s.metaCache},
 		Condition:      NewTaskCondition(ctx),
 		ctx:            ctx,
 		collectionName: s.collectionName,
