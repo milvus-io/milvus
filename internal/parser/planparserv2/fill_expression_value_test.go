@@ -582,6 +582,19 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			{`(Int64Field >> {shift}) >= 1`, map[string]*schemapb.TemplateValue{
 				"shift": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			}},
+			// depth-2 nested arithmetic with a placeholder on the second op's
+			// operand, and separately on the final comparison value
+			{`((Int64Field >> 2) & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			}},
+			{`((Int64Field & 12) + {offset}) == {target}`, map[string]*schemapb.TemplateValue{
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+			}},
+			{`((Int64Field + {offset}) * 2) == 20`, map[string]*schemapb.TemplateValue{
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -1138,6 +1151,33 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRangeDivisionByZero() {
 			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 		}
 		s.assertValidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("second op division by integer zero should fail", func() {
+		exprStr := `(Int64Field + 1) / {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("second op modulo by integer zero should fail", func() {
+		exprStr := `(Int64Field + 1) % {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("second op shift amount out of range should fail", func() {
+		exprStr := `(Int64Field + 1) << {shift} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"shift": generateTemplateValue(schemapb.DataType_Int64, int64(64)),
+			"value": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
 	})
 }
 

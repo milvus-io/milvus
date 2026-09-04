@@ -504,6 +504,39 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 	return validateBinaryRangeBounds(lowerValue, upperValue, expr.GetLowerInclusive(), expr.GetUpperInclusive())
 }
 
+// castArithFillOperand casts a (possibly template-filled) arithmetic operand
+// to dataType and enforces the same structural constraints
+// validateAndCastArithOperand checks at plan time (no division/modulus by a
+// literal zero, shift amount in [0, 64)) — needed again here because a
+// templated operand skips those checks until its value is known.
+func castArithFillOperand(arithOp planpb.ArithOpType, dataType schemapb.DataType, operand *planpb.GenericValue) (*planpb.GenericValue, error) {
+	castedOperand, err := castValue(dataType, operand)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate divisor for division/modulo operations
+	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
+		if (IsInteger(castedOperand) && castedOperand.GetInt64Val() == 0) ||
+			(IsFloating(castedOperand) && castedOperand.GetFloatVal() == 0) {
+			return nil, merr.WrapErrQueryPlanMsg("division or modulus by zero")
+		}
+	}
+
+	// Validate the shift amount for shift operations. A templated amount
+	// skips the plan-time [0, 64) guard in validateAndCastArithOperand (its
+	// value is unknown at parse time), so it must be re-checked here once
+	// filled. A negative or >= 64 amount is undefined behavior in the C++
+	// executor.
+	if arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr {
+		if !IsInteger(castedOperand) || castedOperand.GetInt64Val() < 0 || castedOperand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", castedOperand.String())
+		}
+	}
+
+	return castedOperand, nil
+}
+
 func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue) error {
 	var dataType schemapb.DataType
 	var err error
@@ -540,7 +573,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			return err
 		}
 
-		castedOperand, err := castValue(dataType, operand)
+		castedOperand, err := castArithFillOperand(expr.GetArithOp(), dataType, operand)
 		if err != nil {
 			return err
 		}
@@ -567,6 +600,45 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		}
 
 		expr.RightOperand = castedOperand
+	}
+
+	// Optional second arithmetic op (depth-2 nesting): ((column arithOp
+	// rightOperand) arithOp2 rightOperand2). dataType at this point is
+	// arithOp1's result type (or Int64 for ArrayLength); arithOp2's operand is
+	// cast against it, mirroring how the plan-time combineNestedBinaryArithExpr
+	// chains calcDataType from the inner op's result into the outer op's
+	// target type. The final comparison value is then cast against whichever
+	// type is left after this block runs.
+	if expr.GetArithOp2() != planpb.ArithOpType_Unknown {
+		operand2 := expr.GetRightOperand2()
+		if operand2 == nil || expr.GetOperand2TemplateVariableName() != "" {
+			operand2, ok = templateValues[expr.GetOperand2TemplateVariableName()]
+			if !ok {
+				return merr.WrapErrQueryPlanMsg("the second right operand value of expression template variable name {%s} is not found", expr.GetOperand2TemplateVariableName())
+			}
+		}
+
+		operand2Expr := toValueExpr(operand2)
+		if err = checkValidModArith(expr.GetArithOp2(), dataType, schemapb.DataType_None,
+			operand2Expr.dataType, schemapb.DataType_None); err != nil {
+			return err
+		}
+
+		if operand2.GetArrayVal() != nil {
+			return merr.WrapErrQueryPlanMsg("can not comparisons array directly")
+		}
+
+		dataType, err = getTargetType(dataType, operand2Expr.dataType)
+		if err != nil {
+			return err
+		}
+
+		castedOperand2, err := castArithFillOperand(expr.GetArithOp2(), dataType, operand2)
+		if err != nil {
+			return err
+		}
+
+		expr.RightOperand2 = castedOperand2
 	}
 
 	value := expr.GetValue()

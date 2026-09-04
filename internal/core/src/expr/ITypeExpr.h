@@ -689,12 +689,26 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
                                const proto::plan::OpType op_type,
                                const proto::plan::ArithOpType arith_op_type,
                                const proto::plan::GenericValue value,
-                               const proto::plan::GenericValue right_operand)
+                               const proto::plan::GenericValue right_operand,
+                               const proto::plan::ArithOpType arith_op_type2 =
+                                   proto::plan::ArithOpType::Unknown,
+                               const proto::plan::GenericValue right_operand2 =
+                                   proto::plan::GenericValue())
         : column_(column),
           op_type_(op_type),
           arith_op_type_(arith_op_type),
           right_operand_(right_operand),
-          value_(value) {
+          value_(value),
+          arith_op_type2_(arith_op_type2),
+          right_operand2_(right_operand2) {
+    }
+
+    // True when a second arithmetic op is chained after arith_op_type_ and
+    // before the comparison: ((column arith_op_type_ right_operand_)
+    // arith_op_type2_ right_operand2_) op_type_ value_.
+    bool
+    has_second_op() const {
+        return arith_op_type2_ != proto::plan::ArithOpType::Unknown;
     }
 
     std::string
@@ -705,7 +719,13 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
            << ", Arith Operator Type: "
            << milvus::proto::plan::ArithOpType_Name(arith_op_type_)
            << ", Value: " << value_.ShortDebugString()
-           << ", Right Operand: " << right_operand_.ShortDebugString() << "]";
+           << ", Right Operand: " << right_operand_.ShortDebugString();
+        if (has_second_op()) {
+            ss << ", Arith Operator Type 2: "
+               << milvus::proto::plan::ArithOpType_Name(arith_op_type2_)
+               << ", Right Operand 2: " << right_operand2_.ShortDebugString();
+        }
+        ss << "]";
 
         return ss.str();
     }
@@ -716,6 +736,9 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
     const proto::plan::ArithOpType arith_op_type_;
     const proto::plan::GenericValue right_operand_;
     const proto::plan::GenericValue value_;
+    const proto::plan::ArithOpType arith_op_type2_{
+        proto::plan::ArithOpType::Unknown};
+    const proto::plan::GenericValue right_operand2_;
 };
 
 class TimestamptzArithCompareExpr : public ITypeFilterExpr {

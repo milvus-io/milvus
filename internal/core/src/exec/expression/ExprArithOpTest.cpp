@@ -244,6 +244,26 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
         {R"(~age32 < -1000)",
          [](int32_t v) { return (~int64_t(v)) < -1000; },
          DataType::INT32},
+        // Depth-2 nested arithmetic (issue #51269): two ops before the
+        // comparison. The first two mirror the issue's own motivating
+        // bitmask-extraction examples (shift then mask); the rest cover a
+        // Tier-1-only op pair (Shr+BitAnd, no SIMD kernel for either op)
+        // alongside a pure-arithmetic pair (Add+Mul).
+        {R"((age64 >> 2) & 1 == 1)",
+         [](int64_t v) { return ((v >> 2) & 1) == 1; },
+         DataType::INT64},
+        {R"((age32 >> 4) & 7 == 5)",
+         [](int32_t v) { return ((int64_t(v) >> 4) & 7) == 5; },
+         DataType::INT32},
+        {R"((age16 >> 1) & 3 != 0)",
+         [](int16_t v) { return ((int64_t(v) >> 1) & 3) != 0; },
+         DataType::INT16},
+        {R"((age32 + 1) * 2 == 400)",
+         [](int32_t v) { return ((int64_t(v) + 1) * 2) == 400; },
+         DataType::INT32},
+        {R"((age64 % 10) + 1 > 5)",
+         [](int64_t v) { return ((v % int64_t(10)) + 1) > 5; },
+         DataType::INT64},
     };
 
     auto schema = std::make_shared<Schema>();

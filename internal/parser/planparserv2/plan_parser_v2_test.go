@@ -1696,6 +1696,11 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`~Int32Field != 0`,
 		`~JSONField["A"] == 0`,
 		`~ArrayField[0] >= 0`,
+		// depth-2 nested arithmetic (two ops before the comparison) over a
+		// single field is supported; see TestExpr_NestedBinaryArith for
+		// plan-structure assertions on cases like these.
+		`(Int64Field >> 2) * 2 == 4`,
+		`(~Int64Field) + 1 == 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1748,10 +1753,10 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`~VarCharField == 0`,
 		// folding ~ over a non-integer literal is invalid (integer-only)
 		`Int64Field == ~1.5`,
-		// nested arithmetic (two arith ops before the comparison) is unsupported,
-		// consistent with the other arithmetic / bitwise operators
-		`(Int64Field >> 2) * 2 == 4`,
-		`(~Int64Field) + 1 == 0`,
+		// depth-3+ nested arithmetic (three or more ops before the comparison)
+		// is still unsupported, as is nested arithmetic between two fields.
+		`((Int64Field >> 2) & 1) * 2 == 4`,
+		`((Int64Field + Int32Field) >> 1) == 4`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1833,6 +1838,79 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		}
 		assert.Equal(t, planpb.OpType_Equal, ure.GetOp(), c.expr)
 		assert.Equal(t, c.expected, ure.GetValue().GetInt64Val(), c.expr)
+	}
+}
+
+// TestExpr_NestedBinaryArith asserts plan-structure for depth-2 nested
+// arithmetic: ((column arithOp operand) arithOp2 operand2) cmpOp value, the
+// motivating case being bitmask extraction (e.g. (flags >> 2) & 1 == 1).
+func TestExpr_NestedBinaryArith(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	type nestedCase struct {
+		expr     string
+		arithOp  planpb.ArithOpType
+		operand  int64
+		arithOp2 planpb.ArithOpType
+		operand2 int64
+		cmpOp    planpb.OpType
+		value    int64
+	}
+	cases := []nestedCase{
+		// the issue's own motivating examples: extract and test a bit / a
+		// multi-bit field
+		{`((Int64Field >> 2) & 1) == 1`, planpb.ArithOpType_Shr, 2, planpb.ArithOpType_BitAnd, 1, planpb.OpType_Equal, 1},
+		{`((Int64Field >> 4) & 7) == 5`, planpb.ArithOpType_Shr, 4, planpb.ArithOpType_BitAnd, 7, planpb.OpType_Equal, 5},
+		// plain arithmetic chain
+		{`(Int64Field + 1) * 2 == 6`, planpb.ArithOpType_Add, 1, planpb.ArithOpType_Mul, 2, planpb.OpType_Equal, 6},
+		{`(Int64Field % 5) + 1 != 2`, planpb.ArithOpType_Mod, 5, planpb.ArithOpType_Add, 1, planpb.OpType_NotEqual, 2},
+		// ~x rewrites to (x ^ -1) before nesting is resolved, so this is a
+		// depth-2 chain (BitXor then Add) over an ordinary field, not special-cased
+		{`(~Int64Field) + 1 == 0`, planpb.ArithOpType_BitXor, -1, planpb.ArithOpType_Add, 1, planpb.OpType_Equal, 0},
+		// reversed nesting on the outer op (constant op2 nested), Add/Mul only
+		{`1 + (Int64Field >> 2) == 3`, planpb.ArithOpType_Shr, 2, planpb.ArithOpType_Add, 1, planpb.OpType_Equal, 3},
+	}
+	for _, c := range cases {
+		expr, err := ParseExpr(helper, c.expr, nil)
+		assert.NoError(t, err, c.expr)
+		bao := expr.GetBinaryArithOpEvalRangeExpr()
+		assert.NotNil(t, bao, c.expr)
+		if bao == nil {
+			continue
+		}
+		assert.Equal(t, c.arithOp, bao.GetArithOp(), c.expr)
+		assert.Equal(t, c.operand, bao.GetRightOperand().GetInt64Val(), c.expr)
+		assert.Equal(t, c.arithOp2, bao.GetArithOp2(), c.expr)
+		assert.Equal(t, c.operand2, bao.GetRightOperand2().GetInt64Val(), c.expr)
+		assert.Equal(t, c.cmpOp, bao.GetOp(), c.expr)
+		assert.Equal(t, c.value, bao.GetValue().GetInt64Val(), c.expr)
+	}
+
+	// Rejections that must still hold at depth-2.
+	unsupported := []string{
+		// depth-3+: three chained ops before the comparison
+		`((Int64Field >> 2) & 1) | 1 == 1`,
+		`((Int64Field + 1) * 2) - 3 == 4`,
+		// field-to-field arithmetic nested inside a second op
+		`((Int64Field + Int32Field) >> 1) == 4`,
+		// div/mod by zero on the second op
+		`(Int64Field + 1) / 0 == 1`,
+		`(Int64Field + 1) % 0 == 1`,
+		// shift amount for the second op out of [0, 64)
+		`(Int64Field + 1) << 64 == 0`,
+		`(Int64Field + 1) >> -1 == 0`,
+		// bitwise/shift on the second op requires an integer intermediate type
+		`(FloatField + 1) & 1 == 1`,
+		// the reversed-nesting form only supports Add/Mul for the outer op,
+		// same restriction as the existing depth-1 case
+		`1 - (Int64Field >> 2) == 3`,
+		// array_length cannot participate in a nested chain
+		`(array_length(ArrayField) + 1) == 3`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
 	}
 }
 
