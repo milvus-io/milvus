@@ -6,8 +6,10 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 
 	"go.opentelemetry.io/otel"
+	"golang.org/x/exp/maps"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
@@ -23,11 +25,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/distance"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+var gPrunePrinted = false
 
 type PruneInfo struct {
 	filterRatio float64
@@ -87,6 +90,7 @@ func PruneSegments(ctx context.Context,
 			return
 		}
 		for _, partStats := range partitionStats {
+			mlog.Debug(context.TODO(), "partStats segment IDS", mlog.Int64s("segmentIDs", maps.Keys(partStats.SegmentStats)))
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
 		pruneType = "vector"
@@ -154,6 +158,7 @@ func PruneSegments(ctx context.Context,
 				} else {
 					newSegments = append(newSegments, segment)
 				}
+				mlog.Debug(context.TODO(), "Filter segment id", mlog.Int64("segmentID", segment.SegmentID), mlog.Int64("NodeID", item.NodeID), mlog.Bool("exist", exist))
 			}
 			item.Segments = newSegments
 			sealedSegments[idx] = item
@@ -204,6 +209,64 @@ type segmentDisStruct struct {
 	rows      int // for keep track of sufficiency of topK
 }
 
+func DistanceToCentroid(vectorFloat []float32,
+	fieldStat storage.FieldStats,
+	keyField *schemapb.FieldSchema,
+	numRows int, metricType string,
+	neededSegments map[UniqueID]struct{},
+	segId UniqueID,
+	segmentsToSearch map[string]segmentDisStruct,
+	lock1 *sync.Mutex,
+	lock2 *sync.Mutex,
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+	if fieldStat.Centroids == nil || len(fieldStat.Centroids) == 0 {
+		lock1.Lock()
+		neededSegments[segId] = struct{}{}
+		lock1.Unlock()
+		return
+	}
+	// Determine metric comparator once
+	var computeDistance func(a, b []float32) float32
+	if keyField.GetDataType() != schemapb.DataType_FloatVector {
+		lock1.Lock()
+		neededSegments[segId] = struct{}{}
+		lock1.Unlock()
+		return
+	}
+	switch metricType {
+	case distance.L2:
+		computeDistance = distance.L2Impl
+	case distance.IP, distance.COSINE:
+		if metricType == distance.IP {
+			computeDistance = distance.IPImpl
+		} else {
+			computeDistance = distance.CosineImpl
+		}
+	default:
+		mlog.Error(context.TODO(), "unsupported metric type", mlog.String("metricType", metricType))
+		lock1.Lock()
+		neededSegments[segId] = struct{}{}
+		lock1.Unlock()
+		return
+	}
+
+	var dis float32
+	for i := 0; i < len(fieldStat.Centroids); i++ {
+		dis = computeDistance(vectorFloat, fieldStat.Centroids[i].GetValue().([]float32))
+		mlog.Debug(context.TODO(), "Segment distance", mlog.Int64("segId", segId), mlog.Int("i", i), mlog.Float32("distance", dis))
+		lock2.Lock()
+		key := fmt.Sprintf("%d%d", segId, i)
+		segmentsToSearch[key] = segmentDisStruct{
+			segmentID: segId,
+			distance:  dis,
+			rows:      numRows,
+		}
+		lock2.Unlock()
+	}
+}
+
 func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 	searchReq *internalpb.SearchRequest,
 	vectorBytes [][]byte,
@@ -215,7 +278,11 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 	// 1. calculate vectors' distances
 	neededSegments := make(map[UniqueID]struct{})
 	for _, vecBytes := range vectorBytes {
-		segmentsToSearch := make([]segmentDisStruct, 0)
+		segmentsToSearchMap := make(map[string]segmentDisStruct)
+		var wg sync.WaitGroup
+		lock1 := &sync.Mutex{}
+		lock2 := &sync.Mutex{}
+		floatVector := clustering.DeserializeFloatVector(vecBytes)
 		for segId, segStats := range partitionStats.SegmentStats {
 			// here, we do not skip needed segments required by former query vector
 			// meaning that repeated calculation will be carried and the larger the nq is
@@ -223,37 +290,16 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 			// 1. calculate distances from centroids
 			for _, fieldStat := range segStats.FieldStats {
 				if fieldStat.FieldID == keyField.GetFieldID() {
-					if fieldStat.Centroids == nil || len(fieldStat.Centroids) == 0 {
-						neededSegments[segId] = struct{}{}
-						break
-					}
-					var dis []float32
-					var disErr error
-					switch keyField.GetDataType() {
-					case schemapb.DataType_FloatVector:
-						dis, disErr = clustering.CalcVectorDistance(dim, keyField.GetDataType(),
-							vecBytes, fieldStat.Centroids[0].GetValue().([]float32), searchReq.GetMetricType())
-					default:
-						neededSegments[segId] = struct{}{}
-						disErr = merr.WrapErrParameterInvalid(schemapb.DataType_FloatVector, keyField.GetDataType(),
-							"Currently, pruning by cluster only support float_vector type")
-					}
-					// currently, we only support float vector and only one center one segment
-					if disErr != nil {
-						mlog.Error(context.TODO(), "calculate distance error", mlog.Err(disErr))
-						neededSegments[segId] = struct{}{}
-						break
-					}
-					segmentsToSearch = append(segmentsToSearch, segmentDisStruct{
-						segmentID: segId,
-						distance:  dis[0],
-						rows:      segStats.NumRows,
-					})
-					break
+					wg.Add(1)
+					go DistanceToCentroid(floatVector, fieldStat, keyField, segStats.NumRows, searchReq.GetMetricType(),
+						neededSegments, segId, segmentsToSearchMap, lock1, lock2, &wg)
 				}
 			}
 		}
-		// 2. sort the distances
+		wg.Wait()
+		segmentsToSearch := maps.Values(segmentsToSearchMap)
+
+		// 1. sort segments by geometry score
 		switch searchReq.GetMetricType() {
 		case distance.L2:
 			sort.SliceStable(segmentsToSearch, func(i, j int) bool {
@@ -265,9 +311,12 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 			})
 		}
 
-		// 3. filtered non-target segments
+		// 2. determine fixed number of segments to search
 		segmentCount := len(segmentsToSearch)
 		targetSegNum := int(math.Sqrt(float64(segmentCount)) * filterRatio)
+		if targetSegNum <= 0 {
+			targetSegNum = 1
+		}
 		if targetSegNum > segmentCount {
 			mlog.Debug(context.TODO(), "Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
 				mlog.Int("targetSegNum", targetSegNum),
@@ -275,18 +324,35 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 				mlog.Float64("filterRatio", filterRatio))
 			targetSegNum = segmentCount
 		}
-		optimizedRowCount := 0
-		// set the last n - targetSegNum as being filtered
-		for i := 0; i < segmentCount; i++ {
-			optimizedRowCount += segmentsToSearch[i].rows
-			neededSegments[segmentsToSearch[i].segmentID] = struct{}{}
-			if int64(optimizedRowCount) >= searchReq.GetTopk() && i+1 >= targetSegNum {
-				break
-			}
+		if !gPrunePrinted {
+			mlog.Warn(context.TODO(), "Pruning segments", mlog.Int("targetSegNum", targetSegNum), mlog.Int("segmentCount", segmentCount))
+			gPrunePrinted = true
 		}
+		optimizedRowCount := 0
+		added := 0
+		soFarNeededSegments := maps.Clone(neededSegments)
+		// forcing the same number of segments to search for e
+		for i := 0; i < segmentCount && added < targetSegNum; i++ {
+			seg := segmentsToSearch[i]
+
+			// deduplicate by segmentID
+			if _, ok := neededSegments[seg.segmentID]; ok {
+				_, ok = soFarNeededSegments[seg.segmentID]
+				if ok {
+					added++
+				}
+				continue
+			}
+
+			neededSegments[seg.segmentID] = struct{}{}
+			optimizedRowCount += seg.rows
+			added++
+		}
+
+		mlog.Debug(context.TODO(), "Needed Segments", mlog.Int("count", len(neededSegments)), mlog.Any("segments", maps.Keys(neededSegments)))
 	}
 
-	// 3. set not needed segments as removed
+	// 3. set unnecessary segments as removed
 	for segId := range partitionStats.SegmentStats {
 		if _, ok := neededSegments[segId]; !ok {
 			filteredSegments[segId] = struct{}{}
