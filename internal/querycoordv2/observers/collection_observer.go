@@ -116,9 +116,71 @@ func NewCollectionObserver(
 	collections := meta.GetAllCollections(context.TODO())
 	for _, collection := range collections {
 		ob.LoadCollection(context.Background(), collection.GetCollectionID(), "")
+		if collection.GetStatus() == querypb.LoadStatus_Loaded {
+			ob.recoverResourceGroupTasks(context.Background(), collection.GetCollectionID())
+		}
 	}
 
 	return ob
+}
+
+// recoverResourceGroupTasks rebuilds the resource-group-scoped tasks of one
+// already-loaded collection after a restart.
+//
+// Scoped tasks live only in memory: the incremental-expansion path adds a
+// resource group to a collection that is already serving, deliberately leaves
+// the collection meta at Loaded/100% -- overwriting it would take the resource
+// groups that are serving right now down with it -- and registers a scoped task
+// to watch the new group. Nothing about that task is persisted, so a
+// querycoord that restarts mid-expansion would come back with the new group's
+// replicas in meta, the raised replica number, a collection reporting 100%, and
+// nobody watching the group that is actually still loading: it would never
+// finish, never time out, and never be torn down.
+//
+// The state itself says which groups those are, so no new meta is needed. A
+// group whose replicas already carry every target of the collection is loaded
+// and needs no watcher; any other group of a loaded collection is a group that
+// was still catching up when the process went away, which is exactly what a
+// scoped task is for.
+//
+// Only loaded collections are rebuilt this way. A collection still loading is
+// watched end to end by its collection-wide task, which owns both the status
+// promotion and the timeout; putting scoped tasks beside it would aim a second,
+// independent teardown at the same replicas.
+//
+// Every resource group holding a replica gets a task, without asking how loaded
+// it is. Asking would be pointless here: this runs from the constructor, where
+// the distribution manager is empty and the target may not be recovered, so the
+// answer is 0 for everything -- a group that has been serving for weeks and a
+// group that never came up are indistinguishable here. The task itself is what
+// tells them apart later, on evidence, and a group that turns out to be loaded
+// finishes its task on the first tick that says so.
+//
+// Handing a task to a serving group is safe because of two rules, not one:
+//
+//   - a percentage that is not evidence is unknown, and unknown pauses the
+//     clock (observeResourceGroupProgress and observeResourceGroupTimeout), so
+//     the timeout is only ever measured over ticks that learned something;
+//   - the teardown itself may never take the last replicas of a Loaded
+//     collection (releaseResourceGroupOnTimeout), so even a reading that is
+//     wrong in the pessimistic direction cannot unload a serving collection.
+//
+// A task whose group never becomes readable simply stays paused until the
+// collection leaves meta, where observeTimeout's first check removes it.
+func (ob *CollectionObserver) recoverResourceGroupTasks(ctx context.Context, collectionID int64) {
+	recovered := typeutil.NewSet[string]()
+	for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
+		rgName := replica.GetResourceGroup()
+		if rgName == "" || recovered.Contain(rgName) {
+			continue
+		}
+		recovered.Insert(rgName)
+
+		mlog.Info(ctx, "rebuilding the load task of a resource group after a restart",
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("resourceGroup", rgName))
+		ob.LoadCollection(ctx, collectionID, rgName)
+	}
 }
 
 func (ob *CollectionObserver) Start() {
@@ -258,21 +320,34 @@ const unknownLoadPercentage int32 = -1
 // distribution entry and returns a nil map, so both consumers see no progress
 // entry at all and fall through to the code that existed before.
 //
-// Two situations answer unknownLoadPercentage rather than a number:
+// A percentage is published only when the reading is EVIDENCE. Three things
+// have to hold, and each of them is a way a serving resource group reads as 0
+// while nothing is wrong with it:
 //
-//   - the read failed, or the resource group holds no replica yet because the
-//     load is still committing its meta;
-//   - nothing in the distribution mentions this collection at all. This is the
-//     state right after a coordinator restart, before any QueryNode has
-//     reported: every group of the collection would read 0, "carries none of
-//     its targets", which is indistinguishable from a group that genuinely has
-//     nothing and would put a load timeout on groups that have been serving the
-//     whole time. The check is per collection, cached for the tick, and it also
-//     spares the target and distribution walk while the answer could only be 0.
+//   - the collection's target must be known. It is measured against the target,
+//     so with no channels in either the current or the next target every group
+//     of the collection scores 0. After an ungraceful restart that is the
+//     normal state for a while: the current target is persisted only on a
+//     graceful stop and the next target has to be pulled from datacoord.
+//   - every replica of this resource group must have a node that has reported a
+//     channel of this collection. The figure is a MIN across the group's
+//     replicas, so one replica whose node has not reported yet -- a pod still
+//     pending, an image still pulling -- drags a fully loaded group to 0. This
+//     subsumes the weaker "has anything reported this collection at all",
+//     which is the state right after any coordinator restart.
+//   - the read itself must succeed and answer a percentage, rather than -1 for
+//     a group that holds no replica or a collection that is not registered.
+//
+// Anything else is unknownLoadPercentage. The predicates live here rather than
+// in utils.LoadPercentageByResourceGroup because they are this observer's
+// question -- "is this reading worth acting on" -- while the util answers the
+// question ShowLoadCollections asks, where -1 has a narrower published meaning
+// ("no replica of this collection in that group") that these situations must
+// not be folded into.
 func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) map[string]int32 {
 	var (
 		progress map[string]int32
-		reported map[int64]bool
+		reported map[int64][]*meta.DmChannel
 	)
 	ob.loadTasks.Range(func(key string, task LoadTask) bool {
 		if task.ResourceGroup == "" {
@@ -280,16 +355,26 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 		}
 		if progress == nil {
 			progress = make(map[string]int32)
-			reported = make(map[int64]bool)
+			reported = make(map[int64][]*meta.DmChannel)
 		}
 
-		hasReported, cached := reported[task.CollectionID]
-		if !cached {
-			hasReported = len(ob.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(task.CollectionID))) > 0
-			reported[task.CollectionID] = hasReported
+		if !ob.readyToObserve(ctx, task.CollectionID) {
+			mlog.RatedInfo(ctx, 0.1, "collection target not known yet, resource group load percentage unknown",
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.String("resourceGroup", task.ResourceGroup))
+			progress[key] = unknownLoadPercentage
+			return true
 		}
-		if !hasReported {
-			mlog.RatedInfo(ctx, 0.1, "no distribution reported for the collection yet, resource group load percentage unknown",
+
+		// One distribution read per collection per tick, shared by every group
+		// of it.
+		channels, cached := reported[task.CollectionID]
+		if !cached {
+			channels = ob.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(task.CollectionID))
+			reported[task.CollectionID] = channels
+		}
+		if !ob.everyReplicaHasReported(ctx, task.CollectionID, task.ResourceGroup, channels) {
+			mlog.RatedInfo(ctx, 0.1, "a replica of the resource group has not reported yet, load percentage unknown",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup))
 			progress[key] = unknownLoadPercentage
@@ -314,6 +399,37 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 		return true
 	})
 	return progress
+}
+
+// everyReplicaHasReported answers whether every replica of collectionID in
+// rgName owns a node that appears in channels, the delegators the distribution
+// manager currently holds for this collection.
+//
+// It is deliberately per replica rather than per group: the group's percentage
+// is the minimum over its replicas, so a single replica that has told this
+// coordinator nothing is enough to make the whole group's figure meaningless.
+// A group with no replica at all answers false too -- there is nothing to have
+// evidence about, and the load may still be committing its meta.
+func (ob *CollectionObserver) everyReplicaHasReported(ctx context.Context, collectionID int64, rgName string, channels []*meta.DmChannel) bool {
+	found := false
+	for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
+		if replica.GetResourceGroup() != rgName {
+			continue
+		}
+		found = true
+
+		reported := false
+		for _, channel := range channels {
+			if replica.Contains(channel.Node) {
+				reported = true
+				break
+			}
+		}
+		if !reported {
+			return false
+		}
+	}
+	return found
 }
 
 func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[string]int32) {
