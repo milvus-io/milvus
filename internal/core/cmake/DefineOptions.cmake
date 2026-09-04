@@ -63,6 +63,9 @@ define_option(MILVUS_USE_PCH "Use precompiled headers to speed up compilation" O
 
 define_option(MILVUS_UNITY_BUILD "Use CMake unity (jumbo) build to speed up compilation" OFF)
 
+define_option(MILVUS_USE_SPLIT_DWARF
+        "Split DWARF debug info into external .dwo files" OFF)
+
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
