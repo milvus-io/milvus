@@ -5022,7 +5022,7 @@ func (f *fakeDataViewGC) snapshot() ([]int64, []int) {
 // TestGarbageCollector_recycleDataViews verifies the DataView GC sweep: every
 // non-paused collection is garbage collected with retainLatest=1, paused
 // collections are skipped, GC errors are tolerated (logged, not fatal), a
-// cancelled context stops the sweep, and a nil collector is a no-op.
+// canceled context stops the sweep, and a nil collector is a no-op.
 func TestGarbageCollector_recycleDataViews(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -5072,7 +5072,7 @@ func TestGarbageCollector_recycleDataViews(t *testing.T) {
 		assert.ElementsMatch(t, []int64{100, 101, 102}, collected)
 	})
 
-	t.Run("cancelled context stops the sweep", func(t *testing.T) {
+	t.Run("canceled context stops the sweep", func(t *testing.T) {
 		fake := &fakeDataViewGC{}
 		gc := newGarbageCollector(meta, nil, GcOption{dataViewGC: fake})
 		ctx, cancel := context.WithCancel(context.Background())
