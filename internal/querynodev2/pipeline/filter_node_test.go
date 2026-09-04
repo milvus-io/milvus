@@ -26,10 +26,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -106,6 +110,42 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 		suite.True(lo.Contains(suite.validSegmentIDs, msg.SegmentID))
 	}
 	suite.Equal(suite.deleteSegmentSum, len(nodeMsg.deleteMsgs))
+}
+
+func (suite *FilterNodeSuite) TestSchemaChangeAppendErrorPanics() {
+	collection := segments.NewTestCollection(suite.collectionID, querypb.LoadType_LoadCollection, nil)
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
+
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+
+	validMutable := message.NewSchemaChangeMessageBuilderV2().
+		WithVChannel(suite.channel).
+		WithHeader(&message.SchemaChangeMessageHeader{
+			CollectionId: suite.collectionID,
+		}).
+		WithBody(&message.SchemaChangeMessageBody{
+			Schema: &schemapb.CollectionSchema{Version: 1},
+		}).
+		MustBuildMutable()
+	raw := validMutable.IntoMessageProto()
+	corruptedMutable := message.NewMutableMessageBeforeAppend([]byte{0xff}, raw.GetProperties()).WithTimeTick(10)
+	msgID := mock_message.NewMockMessageID(suite.T())
+	msgID.EXPECT().String().Return("mock-id").Maybe()
+	tsMsg, err := adaptor.NewSchemaChangeMessageBody(corruptedMutable.IntoImmutableMessage(msgID))
+	suite.Require().NoError(err)
+
+	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	suite.Panics(func() {
+		node.Operate(&msgstream.MsgPack{
+			BeginTs: 10,
+			EndTs:   10,
+			Msgs:    []msgstream.TsMsg{tsMsg},
+		})
+	})
 }
 
 // test filter node with collection load partition

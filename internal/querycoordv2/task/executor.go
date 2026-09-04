@@ -27,6 +27,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -230,13 +232,23 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.rpcReturned.Store(true)
+	markRPCReturned := true
+	defer func() {
+		if markRPCReturned {
+			action.rpcReturned.Store(true)
+		}
+	}()
 	ctx := task.Context()
 
 	var err error
 	defer func() {
 		if err != nil {
-			task.Fail(err)
+			if isLoadSegmentPendingError(err) {
+				markRPCReturned = false
+				task.SetReason(err.Error())
+			} else {
+				task.Fail(err)
+			}
 		}
 		ex.removeTask(task, step)
 	}()
@@ -286,7 +298,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to load segment", mlog.Err(err))
+		if isLoadSegmentPendingError(err) {
+			mlog.Info(ctx, "load segment waits for transient runtime readiness", mlog.Err(err))
+		} else {
+			mlog.Warn(ctx, "failed to load segment", mlog.Err(err))
+		}
 		return err
 	}
 
@@ -294,6 +310,25 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	mlog.Info(context.TODO(), "load segments done", mlog.Duration("elapsed", elapsed))
 
 	return nil
+}
+
+func isLoadSegmentPendingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if merr.IsRetryableErr(err) {
+		return true
+	}
+	if errors.IsAny(err,
+		context.DeadlineExceeded,
+		grpc.ErrClientConnClosing,
+		merr.ErrChannelNotAvailable,
+		merr.ErrNodeNotAvailable,
+		merr.ErrNodeNotFound,
+	) {
+		return true
+	}
+	return funcutil.IsGrpcErr(err, codes.Unavailable, codes.DeadlineExceeded, codes.Aborted)
 }
 
 // If we enable following checking when loading segments,

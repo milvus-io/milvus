@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -151,7 +152,14 @@ func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegm
 	)
 
 	log.Info(ctx, "start to reopen segments")
-	err := node.loader.ReopenSegments(ctx, req.GetInfos())
+	var err error
+	if loader, ok := node.loader.(interface {
+		ReopenSegmentsWithSchema(context.Context, *schemapb.CollectionSchema, []*querypb.SegmentLoadInfo) error
+	}); ok {
+		err = loader.ReopenSegmentsWithSchema(ctx, req.GetSchema(), req.GetInfos())
+	} else {
+		err = node.loader.ReopenSegments(ctx, req.GetInfos())
+	}
 	if err != nil {
 		log.Warn(ctx, "failed to reopen segments", mlog.Err(err))
 		return merr.Status(err)

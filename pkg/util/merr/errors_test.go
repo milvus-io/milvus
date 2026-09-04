@@ -103,6 +103,9 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3), ErrCollectionSchemaVersionNotReady)
 	s.True(Status(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3)).GetRetriable())
 	s.Equal(commonpb.ErrorCode_NotReadyServe, Status(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3)).GetErrorCode())
+	s.ErrorIs(WrapErrCollectionSchemaVersionNotReadyWithVersion("test_collection", 1, 3), ErrCollectionSchemaVersionNotReady)
+	s.True(Status(WrapErrCollectionSchemaVersionNotReadyWithVersion("test_collection", 1, 3)).GetRetriable())
+	s.Equal(commonpb.ErrorCode_NotReadyServe, Status(WrapErrCollectionSchemaVersionNotReadyWithVersion("test_collection", 1, 3)).GetErrorCode())
 	// Partition related
 	s.ErrorIs(WrapErrPartitionNotFound("test_partition", "failed to get partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_partition", "failed to query"), ErrPartitionNotLoaded)

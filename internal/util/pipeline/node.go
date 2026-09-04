@@ -28,6 +28,10 @@ type Node interface {
 	Close()
 }
 
+type preCloser interface {
+	PreClose()
+}
+
 type nodeCtx struct {
 	node         Node
 	InputChannel chan Msg

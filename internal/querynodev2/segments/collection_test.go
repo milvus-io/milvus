@@ -167,7 +167,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Same(schemaV8, updatedSchema)
 	})
 
-	s.Run("same_schema_version_with_newer_barrier_updates_properties", func() {
+	s.Run("same_schema_version_with_newer_barrier_does_not_update_payload", func() {
 		cm := NewCollectionManager()
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
@@ -188,8 +188,8 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		schema, version := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(0), version)
-		s.Same(updatedSchema, schema)
-		s.Equal("int64Field", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
+		s.Same(baseSchema, schema)
+		s.NotContains(common.CloneKeyValuePairs(schema.GetProperties()).ToMap(), common.CollectionTTLFieldKey)
 	})
 
 	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_schema_version", func() {
