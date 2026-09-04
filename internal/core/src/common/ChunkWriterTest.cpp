@@ -433,7 +433,7 @@ TEST(VectorArrayChunkWriterTest, NullableRowsRoundTripThroughChunkViews) {
                            true);
     auto [views, valid] = chunk.Views();
     ASSERT_EQ(views.size(), 4);
-    ASSERT_EQ(valid.size(), 4);
+    ASSERT_TRUE(valid);
     EXPECT_TRUE(valid[0]);
     EXPECT_FALSE(valid[1]);
     EXPECT_TRUE(valid[2]);

@@ -467,6 +467,46 @@ func (s *WriteSuite) TestDelete() {
 			})
 		}
 	})
+
+	s.Run("roaring template", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		blob, err := NewRoaringBitmapBlob([]int64{-1, 0, 42})
+		s.Require().NoError(err)
+
+		s.mock.EXPECT().Delete(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dr *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+				s.Equal(collName, dr.GetCollectionName())
+				s.Equal("membership_match(id, {ids}, type=roaring)", dr.GetExpr())
+				value := dr.GetExprTemplateValues()["ids"]
+				s.Require().NotNil(value)
+				bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
+				s.Require().True(ok)
+				s.Equal([]byte(blob), bytesValue.BytesVal)
+				return &milvuspb.MutationResult{
+					Status:    merr.Success(),
+					DeleteCnt: 3,
+				}, nil
+			}).Once()
+
+		result, err := s.client.Delete(ctx, NewDeleteOption(collName).
+			WithExpr("membership_match(id, {ids}, type=roaring)").
+			WithTemplateParam("ids", blob))
+		s.NoError(err)
+		s.EqualValues(3, result.DeleteCount)
+	})
+
+	s.Run("invalid template value", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		_, err := s.client.Delete(ctx, NewDeleteOption(collName).
+			WithExpr("id == {id}").
+			WithTemplateParam("id", struct{}{}))
+		s.ErrorContains(err, "invalid delete expression template parameter")
+
+		_, err = s.client.Delete(ctx, NewDeleteOption(collName).
+			WithExpr("id == {id}").
+			WithTemplateParam("id", nil))
+		s.ErrorContains(err, "invalid delete expression template parameter")
+	})
 }
 
 func TestWrite(t *testing.T) {

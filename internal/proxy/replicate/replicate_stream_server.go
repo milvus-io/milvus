@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const replicateRespChanLength = 128
@@ -114,6 +115,9 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRequest_ReplicateMessage) error {
 	p.wg.Add(1)
 	defer p.wg.Done()
+	if req == nil || req.ReplicateMessage == nil {
+		return merr.WrapErrParameterMissing("replicate_message")
+	}
 	reqMsg := req.ReplicateMessage.GetMessage()
 	msg, err := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
 	if err != nil {

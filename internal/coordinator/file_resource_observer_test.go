@@ -31,6 +31,7 @@ import (
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -65,6 +66,7 @@ func (s *FileResourceObserverSuite) TestNewFileResourceObserver() {
 	s.NotNil(observer.distribution)
 	s.NotNil(observer.notifyCh)
 	s.NotNil(observer.closeCh)
+	s.Equal(fileresource.CloseMode, observer.proxyMode)
 }
 
 func (s *FileResourceObserverSuite) TestStartStop() {
@@ -176,7 +178,7 @@ func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
 		}
-		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, Version: 1})
+		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: QueryNode, Version: 1})
 		s.True(observer.CheckNodeSynced(1))
 	})
 }
@@ -314,7 +316,7 @@ func (s *FileResourceObserverSuite) TestSync() {
 			dnMode:       fileresource.CloseMode,
 		}
 		// Pre-populate distribution with same version
-		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, Version: 1})
+		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: QueryNode, Version: 1})
 
 		err := observer.Sync()
 		s.NoError(err)
@@ -425,6 +427,111 @@ func (s *FileResourceObserverSuite) TestSync() {
 
 		err := observer.Sync()
 		s.Error(err)
+	})
+
+	s.Run("sync_proxy_success", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(2))
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+
+		s.NoError(observer.Sync())
+		info, ok := observer.distribution.Get(200)
+		s.True(ok)
+		s.Equal(Proxy, info.NodeType)
+		s.Equal(uint64(2), info.Version)
+	})
+
+	s.Run("sync_proxy_failure", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceUnavailable), nil)
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+
+		s.ErrorIs(observer.Sync(), merr.ErrServiceUnavailable)
+		_, ok := observer.distribution.Get(200)
+		s.False(ok)
+	})
+
+	s.Run("skip_synced_proxy", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+		observer.distribution.Insert(200, &NodeInfo{NodeID: 200, NodeType: Proxy, Version: 2})
+
+		s.NoError(observer.Sync())
+		info, ok := observer.distribution.Get(200)
+		s.True(ok)
+		s.Equal(uint64(2), info.Version)
+	})
+
+	s.Run("sync_only_outdated_proxy", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		syncedClient := mocks.NewMockProxyClient(s.T())
+		outdatedClient := mocks.NewMockProxyClient(s.T())
+		outdatedClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		proxyManager.GetProxyClients().Insert(200, syncedClient)
+		proxyManager.GetProxyClients().Insert(201, outdatedClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+		observer.distribution.Insert(200, &NodeInfo{NodeID: 200, NodeType: Proxy, Version: 2})
+		observer.distribution.Insert(201, &NodeInfo{NodeID: 201, NodeType: Proxy, Version: 1})
+
+		s.NoError(observer.Sync())
+		info, ok := observer.distribution.Get(201)
+		s.True(ok)
+		s.Equal(uint64(2), info.Version)
 	})
 
 	s.Run("cleanup_removed_nodes", func() {

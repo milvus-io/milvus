@@ -1766,9 +1766,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 0)
+		assert.ElementsMatch(t, []UniqueID{9, 10, 11, 12}, resp.GetChannels()[0].GetDroppedSegmentIds())
 		assert.ElementsMatch(t, []UniqueID{}, resp.GetChannels()[0].GetUnflushedSegmentIds())
-		// assert.ElementsMatch(t, []UniqueID{9, 10, 12}, resp.GetChannels()[0].GetFlushedSegmentIds())
+		assert.ElementsMatch(t, []UniqueID{13}, resp.GetChannels()[0].GetFlushedSegmentIds())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1879,7 +1879,9 @@ func TestManualCompaction(t *testing.T) {
 		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
-		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.MatchedBy(func(req *milvuspb.ManualCompactionRequest) bool {
+			return req.GetCollectionID() == 1 && req.GetL0Compaction()
+		})).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1891,6 +1893,103 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("test manual rewrite target returns durable target id when guard enabled", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
+		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
+
+		catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+		targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+		require.NoError(t, err)
+
+		handler := NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+		inspector := NewMockCompactionInspector(t)
+		versionManager := NewMockVersionManager(t)
+		versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
+		svr := &Server{allocator: alloc}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{compactionTargetMeta: targetMeta}
+		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+
+		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+			CollectionID: 1,
+			SegmentIds:   []int64{10, 20},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		require.Equal(t, int64(100), resp.GetCompactionID())
+		require.Zero(t, resp.GetCompactionPlanCount())
+
+		record := records[100]
+		require.NotNil(t, record)
+		require.Equal(t, datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
+		require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+		require.Equal(t, int32(0), record.GetTailLimit())
+		require.Equal(t, uint64(200), record.GetActivatedAtTS())
+		require.Equal(t, uint64(200), record.GetExpectedTS())
+		require.Equal(t, int64(1), record.GetCollectionID())
+		segmentIDs, ok := compactionTargetSegmentIDs(record)
+		require.True(t, ok)
+		require.Equal(t, []int64{10, 20}, segmentIDs)
+	})
+
+	t.Run("test manual rewrite target rejects unsupported filters", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+		for _, test := range []struct {
+			name    string
+			request *milvuspb.ManualCompactionRequest
+		}{
+			{
+				name: "partition",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					PartitionId:  2,
+				},
+			},
+			{
+				name: "channel",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					Channel:      "ch-1",
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				alloc := allocator.NewMockAllocator(t)
+
+				catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+				targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+				require.NoError(t, err)
+
+				handler := NewNMockHandler(t)
+				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+				inspector := NewMockCompactionInspector(t)
+				versionManager := NewMockVersionManager(t)
+				versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
+				svr := &Server{allocator: alloc}
+				svr.stateCode.Store(commonpb.StateCode_Healthy)
+				svr.meta = &meta{compactionTargetMeta: targetMeta}
+				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+
+				resp, err := svr.ManualCompaction(context.Background(), test.request)
+
+				require.NoError(t, err)
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				require.Zero(t, resp.GetCompactionID())
+				require.Empty(t, records)
+			})
+		}
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {

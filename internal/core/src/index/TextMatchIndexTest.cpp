@@ -30,11 +30,13 @@
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
+#include "common/Slice.h"
 #include "common/Types.h"
 #include "common/common_type_c.h"
 #include "common/protobuf_utils.h"
@@ -63,6 +65,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
+#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -75,6 +78,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+TEST(TextMatch, WriterMemoryBudgets) {
+    EXPECT_EQ(milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
+
 SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
@@ -128,6 +139,21 @@ CreateTextMatchTestFileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
 }
 
+class FileSliceSizeGuard {
+ public:
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+ private:
+    int64_t old_slice_size_;
+};
+
 std::unique_ptr<index::TextMatchIndex>
 BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
     auto index = std::make_unique<index::TextMatchIndex>(
@@ -139,7 +165,7 @@ BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    index->BuildIndexFromFieldData({field_data}, false);
+    index->BuildIndexFromFieldData({field_data}, false, 0);
     return index;
 }
 
@@ -154,6 +180,19 @@ AssertTextMatchUploadReturnsRelativePaths(
         ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
             << file.file_name;
         ASSERT_GT(file.file_size, 0);
+    }
+}
+
+void
+ExpectOnlyTextMatchHit(index::TextMatchIndex& index,
+                       const std::string& term,
+                       int64_t expected,
+                       int64_t row_count) {
+    auto result = index.MatchQuery(term, 1);
+    ASSERT_EQ(result.size(), static_cast<size_t>(row_count)) << term;
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(static_cast<bool>(result[i]), i == expected)
+            << term << " unexpected at offset " << i;
     }
 }
 
@@ -413,6 +452,231 @@ TEST(TextMatch, UploadUnifiedReturnsRelativeTextLogPaths) {
               std::string::npos);
 }
 
+TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
+    using Index = index::TextMatchIndex;
+
+    auto with_null =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_with_null",
+                                "milvus_tokenizer",
+                                "{}",
+                                /*enable_background_merge=*/false);
+    with_null->AddTextSealed("alpha", true, 0);
+    with_null->AddNullSealed(1);
+    with_null->AddTextSealed("beta", true, 2);
+    with_null->CreateReader(milvus::index::SetBitsetSealed);
+    with_null->Finish();
+    with_null->Reload();
+    with_null->FinalizeSealed();
+    with_null->FinalizeSealed();  // Idempotent for converging sealed paths.
+
+    auto nulls = with_null->IsNull();
+    ASSERT_EQ(nulls.size(), 3);
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_EQ(with_null->ValidityBitmapByteSize(), sizeof(uint64_t));
+
+    auto all_valid =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_all_valid",
+                                "milvus_tokenizer",
+                                "{}",
+                                /*enable_background_merge=*/false);
+    all_valid->AddTextSealed("alpha", true, 0);
+    all_valid->AddTextSealed("beta", true, 1);
+    all_valid->CreateReader(milvus::index::SetBitsetSealed);
+    all_valid->Finish();
+    all_valid->Reload();
+    all_valid->FinalizeSealed();
+
+    EXPECT_EQ(all_valid->ValidityBitmapByteSize(), 0);
+    auto valid = all_valid->IsNotNull();
+    ASSERT_EQ(valid.size(), 2);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+    auto no_nulls = all_valid->IsNull();
+    EXPECT_EQ(no_nulls.count(), 0);
+}
+
+TEST(TextMatch, V2LoadFinalizesValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1003);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = builder->Upload({});
+
+    std::vector<std::string> files;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+    }
+    storage::DiskFileManagerImpl file_manager(ctx);
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), sizeof(uint64_t));
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), texts.size());
+        EXPECT_FALSE(nulls[0]);
+        EXPECT_TRUE(nulls[1]);
+        EXPECT_FALSE(nulls[2]);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), texts.size());
+        EXPECT_FALSE(not_in[0]);
+        EXPECT_FALSE(not_in[1]);
+        EXPECT_TRUE(not_in[2]);
+    }
+}
+
+TEST(TextMatch, V2LoadSlicedNullOffsets) {
+    constexpr int64_t kSliceSize = 4 * 1024;
+    constexpr size_t kRows = kSliceSize / sizeof(size_t) + 1;
+
+    auto ctx = CreateTextMatchTestFileManagerContext(1004);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts(kRows);
+    std::vector<uint8_t> valid_bytes((kRows + 7) / 8, 0);
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = [&]() {
+        FileSliceSizeGuard slice_size_guard(kSliceSize);
+        return builder->Upload({});
+    }();
+
+    std::vector<std::string> files;
+    bool found_null_offset_slice = false;
+    bool found_slice_meta = false;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+        auto file_name =
+            boost::filesystem::path(file.file_name).filename().string();
+        found_null_offset_slice |=
+            file_name.find(index::INDEX_NULL_OFFSET_FILE_NAME +
+                           std::string("_")) == 0;
+        found_slice_meta |= file_name == INDEX_FILE_SLICE_META;
+    }
+    ASSERT_TRUE(found_null_offset_slice);
+    ASSERT_TRUE(found_slice_meta);
+
+    storage::DiskFileManagerImpl file_manager(ctx);
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(),
+                  TargetBitmap(kRows).size_in_bytes());
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), kRows);
+        EXPECT_EQ(nulls.count(), kRows);
+
+        auto valid = loaded->IsNotNull();
+        ASSERT_EQ(valid.size(), kRows);
+        EXPECT_EQ(valid.count(), 0);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), kRows);
+        EXPECT_EQ(not_in.count(), 0);
+    }
+}
+
+TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1005);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = builder->Upload({});
+
+    std::vector<std::string> files;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+    }
+    auto index_size = stats->GetMemSize();
+    auto bitmap_bytes =
+        static_cast<int64_t>(TargetBitmap(texts.size()).size_in_bytes());
+    storage::DiskFileManagerImpl file_manager(ctx);
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        storagev1translator::TextMatchIndexLoadInfo load_info{
+            mmap_enabled,
+            3,
+            101,
+            "{}",
+            index_size,
+            static_cast<int64_t>(texts.size()),
+            "",
+            ""};
+        storagev1translator::TextMatchIndexTranslator translator(
+            load_info, ctx, config);
+
+        auto [estimated_loaded, estimated_overhead] =
+            translator.estimated_byte_size_of_cell(0);
+        if (mmap_enabled) {
+            EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, index_size);
+            EXPECT_EQ(estimated_overhead.memory_bytes, index_size);
+            EXPECT_EQ(estimated_overhead.file_bytes, 0);
+        } else {
+            EXPECT_EQ(estimated_loaded.memory_bytes, index_size + bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, 0);
+            EXPECT_EQ(estimated_overhead.memory_bytes, 0);
+            EXPECT_EQ(estimated_overhead.file_bytes, index_size);
+        }
+
+        auto cells = translator.get_cells(nullptr, {0});
+        ASSERT_EQ(cells.size(), 1);
+        auto* loaded = cells.front().second.get();
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), bitmap_bytes);
+        if (mmap_enabled) {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, bitmap_bytes);
+            EXPECT_EQ(loaded->CellByteSize().file_bytes,
+                      loaded->ByteSize() - bitmap_bytes);
+        } else {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, loaded->ByteSize());
+            EXPECT_EQ(loaded->CellByteSize().file_bytes, 0);
+        }
+    }
+}
+
 // Regression test: BuildIndexFromFieldData with multiple FieldData batches
 // and nullable fields must record correct global offsets in null_offset_.
 // Previously, null_offset_.push_back(i) used the batch-local index instead
@@ -467,7 +731,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */, 0);
     index->Commit();
     index->Reload();
 
@@ -530,6 +794,101 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     }
 }
 
+// Regression test: a growing segment loads each batch at the offset PreInsert
+// reserved. BuildIndexFromFieldData has to place that batch's doc ids there,
+// the same doc-id space AddTextsGrowing writes into -- starting at 0 would
+// stack the loaded batch on top of doc ids the index already owns.
+TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
+    using Index = index::TextMatchIndex;
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_offset_begin",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    // Rows [0, 3) arrive through the insert path, which is already
+    // offset-addressed.
+    const std::vector<std::string> inserted = {"alpha", "beta", "gamma"};
+    index->AddTextsGrowing(
+        inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
+
+    // Rows [3, 6) arrive through the load path, at the offset it reserved;
+    // row 4 is null, so its null bitmap entry must use the same doc-id space.
+    const std::vector<std::string> loaded = {"delta", "", "epsilon"};
+    const std::vector<uint8_t> loaded_valid = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, loaded.size());
+    field_data->FillFieldData(
+        loaded.data(), loaded_valid.data(), loaded.size(), 0);
+    index->BuildIndexFromFieldData({field_data}, true, /*offset_begin=*/3);
+    index->Commit();
+    index->Reload();
+
+    auto nulls = index->IsNull();
+    auto not_nulls = index->IsNotNull();
+    ASSERT_EQ(nulls.size(), 6);
+    ASSERT_EQ(not_nulls.size(), 6);
+    for (int64_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(static_cast<bool>(nulls[i]), i == 4);
+        EXPECT_EQ(static_cast<bool>(not_nulls[i]), i != 4);
+    }
+
+    ExpectOnlyTextMatchHit(*index, "alpha", 0, 6);
+    ExpectOnlyTextMatchHit(*index, "gamma", 2, 6);
+    ExpectOnlyTextMatchHit(*index, "delta", 3, 6);
+    ExpectOnlyTextMatchHit(*index, "epsilon", 5, 6);
+}
+
+// The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
+// index honouring offset_begin, this covers load_field_data_common actually
+// handing it the offset PreInsert reserved. Insert fills rows [0, 2), a load
+// fills [2, 4); on a build that indexes from 0 the loaded rows land on top of
+// the inserted ones and the term queries below hit the wrong offsets.
+TEST(TextMatch, GrowingLoadBuildsTextIndexAtReservedOffset) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_impl, nullptr);
+    const auto pk_field = FieldId(100);
+    const auto str_field = FieldId(101);
+
+    constexpr int64_t inserted_rows = 2;
+    auto data = DataGen(schema, inserted_rows);
+    auto* str_col = data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col->at(0) = "football basketball";
+    str_col->at(1) = "swimming tennis";
+    ASSERT_EQ(seg->PreInsert(inserted_rows), 0);
+    seg->Insert(0,
+                inserted_rows,
+                data.row_ids_.data(),
+                data.timestamps_.data(),
+                data.raw_);
+
+    const std::vector<std::string> loaded = {"cricket rugby", "hockey curling"};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
+    field_data->FillFieldData(loaded.data(), loaded.size());
+    auto reserved = seg->PreInsert(loaded.size());
+    ASSERT_EQ(reserved, inserted_rows);
+    seg_impl->load_field_data_common(
+        str_field, reserved, {field_data}, pk_field, loaded.size());
+
+    auto pinned = seg_impl->GetTextIndex(nullptr, str_field);
+    auto* index = pinned.get();
+
+    ExpectOnlyTextMatchHit(*index, "football", 0, 4);
+    ExpectOnlyTextMatchHit(*index, "tennis", 1, 4);
+    ExpectOnlyTextMatchHit(*index, "cricket", 2, 4);
+    ExpectOnlyTextMatchHit(*index, "curling", 3, 4);
+}
+
 TEST(TextMatch, BuildIndexFromTextFieldData) {
     auto ctx = CreateTextMatchTestFileManagerContext(
         1002, proto::schema::DataType::Text);
@@ -542,7 +901,7 @@ TEST(TextMatch, BuildIndexFromTextFieldData) {
         storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false, 0));
 }
 
 TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
@@ -797,7 +1156,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true);
+    index->BuildIndexFromFieldData(field_datas, true, 0);
     index->Commit();
     index->Reload();
 
@@ -1030,8 +1389,10 @@ TEST(TextMatch, GrowingNaiveNullable) {
                        .mutable_scalars()
                        ->mutable_string_data()
                        ->mutable_data();
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
@@ -1233,8 +1594,10 @@ TEST(TextMatch, SealedNaiveNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1422,8 +1785,10 @@ TEST(TextMatch, GrowingJieBaNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1604,8 +1969,10 @@ TEST(TextMatch, SealedJieBaNullable) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = raw_str_valid[i];
     }
@@ -1708,8 +2075,10 @@ TEST(TextMatch, GrowingLoadData) {
     for (int64_t i = 0; i < N; i++) {
         str_col->at(i) = raw_str[i];
     }
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = true;
     }
@@ -1746,8 +2115,10 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
     int64_t N = 1000;
     uint64_t seed = 19190504;
     auto raw_data = DataGen(schema, N, seed);
-    auto str_col_valid =
-        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col_valid = raw_data.raw_->mutable_fields_data()
+                             ->at(1)
+                             .mutable_scalars()
+                             ->mutable_valid_data();
     auto str_col = raw_data.raw_->mutable_fields_data()
                        ->at(1)
                        .mutable_scalars()

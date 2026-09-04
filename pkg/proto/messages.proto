@@ -639,6 +639,7 @@ message RestoreSnapshotMessageHeader {
     bool external = 6;           // True for external snapshot restore
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
+    string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
@@ -715,9 +716,6 @@ message PartialUpdateCAS {
     uint64 read_ts = 1;
     // observed_pchannel_term must be non-zero.
     int64 observed_pchannel_term = 2;
-
-    reserved 3, 4;
-    reserved "primary_key_field_id", "collection_id";
 }
 
 ///

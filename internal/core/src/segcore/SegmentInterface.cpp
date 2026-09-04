@@ -28,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/SystemProperty.h"
@@ -37,6 +38,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -48,6 +50,12 @@
 #include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
+
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
+    return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+        segment_instance_uid(), get_segment_id(), field_id);
+}
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
@@ -838,7 +846,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         auto create_count = IsVectorArrayDataType(data_type) ? count : 0;
         auto result = CreateEmptyVectorDataArray(create_count, field_meta);
 
-        auto valid_data = result->mutable_valid_data();
+        auto valid_data = MutableFieldDataRowValidData(result.get());
         for (int64_t i = 0; i < count; ++i) {
             valid_data->Add(false);
         }
@@ -848,7 +856,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         if (field_meta.is_nullable()) {
-            auto res = result->mutable_valid_data()->mutable_data();
+            auto res =
+                MutableFieldDataRowValidData(result.get())->mutable_data();
             for (int64_t i = 0; i < count; ++i) {
                 res[i] = true;
             }

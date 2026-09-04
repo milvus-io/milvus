@@ -18,19 +18,25 @@ package producer
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestBatchCommitProduce(t *testing.T) {
@@ -172,6 +178,222 @@ func TestProduceGuard_Commit_NoMessages(t *testing.T) {
 	})
 }
 
+func TestProduceGuardCommitPartialUpdateSingleMessageUsesTxn(t *testing.T) {
+	rp := &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}}
+
+	msg := createRealPartialUpdateInsertMessage(t, "test-v")
+
+	var (
+		mu           sync.Mutex
+		seen         []message.MessageType
+		bodyTxn      *message.TxnContext
+		commitMsg    message.MutableMessage
+		beginTxnCtx  = &message.TxnContext{TxnID: 1, Keepalive: time.Second}
+		producePatch = mockey.Mock((*ResumableProducer).produceInternal).To(
+			func(_ *ResumableProducer, _ context.Context, m message.MutableMessage) (*types.AppendResult, error) {
+				mu.Lock()
+				defer mu.Unlock()
+
+				seen = append(seen, m.MessageType())
+				switch m.MessageType() {
+				case message.MessageTypeBeginTxn:
+					return &types.AppendResult{TxnCtx: beginTxnCtx}, nil
+				case message.MessageTypeInsert:
+					bodyTxn = m.TxnContext()
+					return &types.AppendResult{TxnCtx: m.TxnContext()}, nil
+				case message.MessageTypeCommitTxn:
+					commitMsg = m
+					return &types.AppendResult{TxnCtx: m.TxnContext()}, nil
+				default:
+					return &types.AppendResult{}, nil
+				}
+			}).Build()
+	)
+	defer producePatch.UnPatch()
+
+	guard := &ProduceGuard{producer: rp, msgs: []message.MutableMessage{msg}}
+	result, err := guard.commit(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeInsert,
+		message.MessageTypeCommitTxn,
+	}, seen)
+	require.NotNil(t, bodyTxn)
+	assert.Equal(t, beginTxnCtx.TxnID, bodyTxn.TxnID)
+	require.NotNil(t, commitMsg)
+	require.True(t, message.HasPartialUpdateCAS(commitMsg))
+	marker, ok := commitMsg.Properties().Get("_puc")
+	require.True(t, ok)
+	require.Empty(t, marker)
+}
+
+func TestProduceGuardPartialUpdateTxnExpiredReturnsCASRetry(t *testing.T) {
+	msg := createRealPartialUpdateInsertMessage(t, "test-v")
+	guard := &ProduceGuard{
+		producer: &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}},
+		msgs:     []message.MutableMessage{msg},
+	}
+
+	attempts := 0
+	m := mockey.Mock((*ProduceGuard).produceWithTxnOnce).To(
+		func(*ProduceGuard, context.Context, ...message.MutableMessage) (*types.AppendResult, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, status.NewTransactionExpired("expired")
+			}
+			return &types.AppendResult{}, nil
+		},
+	).Build()
+	defer m.UnPatch()
+
+	_, err := guard.produceTxn(context.Background(), msg)
+
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS())
+	require.Equal(t, 1, attempts)
+}
+
+func TestProduceGuardOrdinaryTxnExpiredReplaysWholeTransaction(t *testing.T) {
+	msgs := []message.MutableMessage{
+		createRealInsertMessage(t, "test-v"),
+		createRealInsertMessage(t, "test-v"),
+	}
+	guard := &ProduceGuard{
+		producer: &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}},
+		msgs:     msgs,
+	}
+
+	var (
+		mu        sync.Mutex
+		beginIDs  []message.TxnID
+		bodyCount = make(map[message.TxnID]int)
+		commitIDs []message.TxnID
+	)
+	nextTxnID := message.TxnID(1)
+	producePatch := mockey.Mock((*ResumableProducer).produceInternal).To(
+		func(_ *ResumableProducer, _ context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+
+			switch msg.MessageType() {
+			case message.MessageTypeBeginTxn:
+				txnCtx := &message.TxnContext{TxnID: nextTxnID, Keepalive: time.Second}
+				nextTxnID++
+				beginIDs = append(beginIDs, txnCtx.TxnID)
+				return &types.AppendResult{TxnCtx: txnCtx}, nil
+			case message.MessageTypeCommitTxn:
+				txnID := msg.TxnContext().TxnID
+				commitIDs = append(commitIDs, txnID)
+				if txnID == 1 {
+					return nil, status.NewTransactionExpired("expired")
+				}
+				return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+			default:
+				txnID := msg.TxnContext().TxnID
+				bodyCount[txnID]++
+				return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+			}
+		},
+	).Build()
+	defer producePatch.UnPatch()
+
+	result, err := guard.produceTxn(context.Background(), msgs...)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []message.TxnID{1, 2}, beginIDs)
+	require.Equal(t, []message.TxnID{1, 2}, commitIDs)
+	require.Equal(t, len(msgs), bodyCount[1])
+	require.Equal(t, len(msgs), bodyCount[2])
+}
+
+func TestProduceGuardCommitExistingPartialUpdateTxnIsNotRewrapped(t *testing.T) {
+	rp := &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}}
+	txnCtx := message.TxnContext{TxnID: 7, Keepalive: time.Second}
+	replicateHeader := &message.ReplicateHeader{
+		ClusterID:              "primary",
+		MessageID:              walimplstest.NewTestMessageID(10),
+		LastConfirmedMessageID: walimplstest.NewTestMessageID(9),
+		TimeTick:               100,
+		VChannel:               "test-v",
+	}
+
+	for _, tc := range []struct {
+		name      string
+		replicate bool
+	}{
+		{name: "local transactional message"},
+		{name: "replicated transactional message", replicate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := createRealPartialUpdateInsertMessage(t, "test-v").WithTxnContext(txnCtx)
+			if tc.replicate {
+				msg = msg.WithReplicateHeader(replicateHeader)
+			}
+
+			var seen []message.MutableMessage
+			producePatch := mockey.Mock((*ResumableProducer).produceInternal).To(
+				func(_ *ResumableProducer, _ context.Context, m message.MutableMessage) (*types.AppendResult, error) {
+					seen = append(seen, m)
+					if m.MessageType() == message.MessageTypeBeginTxn {
+						return &types.AppendResult{TxnCtx: &message.TxnContext{TxnID: 99, Keepalive: time.Second}}, nil
+					}
+					return &types.AppendResult{TxnCtx: m.TxnContext()}, nil
+				}).Build()
+			defer producePatch.UnPatch()
+
+			guard := &ProduceGuard{producer: rp, msgs: []message.MutableMessage{msg}}
+			_, err := guard.commit(context.Background())
+			require.NoError(t, err)
+			require.Len(t, seen, 1)
+			require.Equal(t, message.MessageTypeInsert, seen[0].MessageType())
+			require.Equal(t, txnCtx.TxnID, seen[0].TxnContext().TxnID)
+			if tc.replicate {
+				require.Equal(t, replicateHeader.ClusterID, seen[0].ReplicateHeader().ClusterID)
+			} else {
+				require.Nil(t, seen[0].ReplicateHeader())
+			}
+		})
+	}
+}
+
+func TestProduceGuardCommitOrdinarySingleMessageAutoCommit(t *testing.T) {
+	rp := &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}}
+	msg := createRealInsertMessage(t, "test-v")
+
+	var seen []message.MessageType
+	producePatch := mockey.Mock((*ResumableProducer).produceInternal).To(
+		func(_ *ResumableProducer, _ context.Context, m message.MutableMessage) (*types.AppendResult, error) {
+			seen = append(seen, m.MessageType())
+			return &types.AppendResult{}, nil
+		}).Build()
+	defer producePatch.UnPatch()
+
+	guard := &ProduceGuard{producer: rp, msgs: []message.MutableMessage{msg}}
+	result, err := guard.commit(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, []message.MessageType{message.MessageTypeInsert}, seen)
+}
+
+func TestCommitTxnReturnsMarkerError(t *testing.T) {
+	expected := status.NewUnrecoverableError("mark commit failed")
+	patch := mockey.Mock(message.MarkPartialUpdateCASCommit).Return(expected).Build()
+	defer patch.UnPatch()
+
+	guard := &ProduceGuard{}
+	result, err := guard.commitTxn(
+		context.Background(),
+		"test-v",
+		&message.TxnContext{TxnID: 1},
+		true,
+	)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, expected)
+}
+
 func TestBatchCommitProduce_ReservationError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -276,4 +498,21 @@ func TestProduceGuard_Commit_Error(t *testing.T) {
 	resAppend, err := task.commit(context.Background())
 	assert.Error(t, err)
 	assert.Nil(t, resAppend)
+}
+
+func validProducerPartialUpdateCAS() *messagespb.PartialUpdateCAS {
+	return &messagespb.PartialUpdateCAS{
+		ReadTs:               100,
+		ObservedPchannelTerm: 2,
+	}
+}
+
+func createRealPartialUpdateInsertMessage(t *testing.T, vchannel string) message.MutableMessage {
+	t.Helper()
+	builder := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.InsertRequest{CollectionID: 1}).
+		WithVChannel(vchannel)
+	require.NoError(t, builder.AddPartialUpdateCAS(validProducerPartialUpdateCAS()))
+	return builder.MustBuildMutable()
 }

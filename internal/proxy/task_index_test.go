@@ -68,7 +68,11 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	queryCoord := NewMixCoordMock()
 
+	cache, err := initMetaCache(ctx, queryCoord)
+	assert.NoError(t, err)
+
 	gist := &getIndexStateTask{
+		baseTask: baseTask{MetaCache: cache},
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
 			Base:           &commonpb.MsgBase{},
 			DbName:         dbName,
@@ -86,8 +90,6 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	}
 
 	// failed to get collection id.
-	err := InitMetaCache(ctx, queryCoord)
-	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
 }
 
@@ -107,10 +109,9 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = mockCache
-
 	dit := dropIndexTask{
-		ctx: ctx,
+		baseTask: baseTask{MetaCache: mockCache},
+		ctx:      ctx,
 		DropIndexRequest: &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0,
@@ -140,18 +141,17 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(0), errors.New("error"))
-		globalMetaCache = mockCache
+		dit.MetaCache = mockCache
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
 
+	dit.MetaCache = mockCache
 	mockCache.On("GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = mockCache
-
 	t.Run("coll has been loaded", func(t *testing.T) {
 		qc := getMockQueryCoord()
 		qc.ExpectedCalls = nil
@@ -222,11 +222,9 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("int64"),
 	).Return(&collectionInfo{}, nil)
-
-	globalMetaCache = mockCache
-
 	cit := createIndexTask{
-		ctx: ctx,
+		baseTask: baseTask{MetaCache: mockCache},
+		ctx:      ctx,
 		req: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_CreateIndex,

@@ -84,7 +84,15 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
 			return nil, err
 		}
-		defer txnSession.CommitDone()
+		defer func() {
+			if txn.IsCommitAdmissionRejected(err) {
+				txnSession.RejectCommit()
+				return
+			}
+			// Preserve the existing transaction outcome for non-admission errors.
+			// WAL append failures do not prove that CommitTxn was not persisted.
+			txnSession.CommitDone()
+		}()
 	case message.MessageTypeRollbackTxn:
 		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
 			return nil, err

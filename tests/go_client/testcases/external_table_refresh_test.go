@@ -3845,7 +3845,7 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	require.NotEmpty(t, snapshotInfo.GetS3Location())
 
 	minioCfg := getMinIOConfig()
-	externalSource := extTestURI(minioCfg, snapshotInfo.GetS3Location())
+	externalSource := snapshotInfo.GetS3Location()
 	externalSpec := extTestSpec(minioCfg, "milvus-table")
 
 	externalName := common.GenRandomString("mt_ext", 6)
@@ -3982,7 +3982,7 @@ func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
 	require.NotEmpty(t, snapshotInfo.GetS3Location())
 
 	minioCfg := getMinIOConfig()
-	externalSource := extTestURI(minioCfg, snapshotInfo.GetS3Location())
+	externalSource := snapshotInfo.GetS3Location()
 	externalSpec := extTestSpec(minioCfg, "milvus-table")
 
 	externalName := common.GenRandomString("mt_vpk_ext", 6)

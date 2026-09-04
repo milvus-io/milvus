@@ -109,6 +109,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->IsNull();
     }
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override {
         return internal_index_->IsNotNull();
@@ -230,6 +235,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
     int32_t bitmap_index_cardinality_limit_;
     ScalarIndexType low_cardinality_index_type_;
     ScalarIndexType high_cardinality_index_type_;
+    // Resolved scalar index engine version from the last Build() call;
+    // gates whether nested (struct sub-field) high-cardinality data may
+    // select STL_SORT (see kNestedHybridStlSortMinVersion).
+    int32_t scalar_index_version_{0};
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};

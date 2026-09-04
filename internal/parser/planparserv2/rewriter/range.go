@@ -963,6 +963,11 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				mergedUpper := second.upper
 				mergedUpperInc := second.upperInc
 
+				// Lower bound: same value, prefer inclusive
+				if cmpGeneric(g.effDt, first.lower, second.lower) == 0 && second.lowerInc {
+					mergedLowerInc = true
+				}
+
 				// Upper bound: take maximum
 				cmpUppers := cmpGeneric(g.effDt, first.upper, second.upper)
 				if cmpUppers > 0 {

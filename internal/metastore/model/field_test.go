@@ -10,6 +10,10 @@ import (
 )
 
 var (
+	fieldTypeSchema = &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_FloatVector},
+	}
+
 	filedSchemaPb = &schemapb.FieldSchema{
 		FieldID:      fieldID,
 		Name:         fieldName,
@@ -19,6 +23,7 @@ var (
 		TypeParams:   typeParams,
 		IndexParams:  indexParams,
 		AutoID:       false,
+		TypeSchema:   fieldTypeSchema,
 	}
 
 	fieldModel = &Field{
@@ -30,6 +35,7 @@ var (
 		DataType:     schemapb.DataType_FloatVector,
 		TypeParams:   typeParams,
 		IndexParams:  indexParams,
+		TypeSchema:   fieldTypeSchema,
 	}
 )
 
@@ -55,6 +61,13 @@ func TestUnmarshalFieldModels(t *testing.T) {
 	ret := UnmarshalFieldModels([]*schemapb.FieldSchema{filedSchemaPb})
 	assert.Equal(t, []*Field{fieldModel}, ret)
 	assert.Nil(t, UnmarshalFieldModels(nil))
+}
+
+func TestFieldCloneTypeSchema(t *testing.T) {
+	cloned := fieldModel.Clone()
+	assert.NotSame(t, fieldModel.TypeSchema, cloned.TypeSchema)
+	cloned.TypeSchema.Kind = &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}
+	assert.Equal(t, schemapb.DataType_FloatVector, fieldModel.TypeSchema.GetLeafType())
 }
 
 func TestCheckFieldsEqual(t *testing.T) {

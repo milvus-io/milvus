@@ -109,7 +109,8 @@ func (s *StructArraySuite) TestNullableScalarRows() {
 	s.False(isNull, "an empty struct array is distinct from null")
 
 	for _, fieldData := range column.FieldData().GetStructArrays().GetFields() {
-		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+		s.Equal([]bool{true, false, true}, getFieldDataValidData(fieldData))
+		s.Nil(fieldData.GetValidData())
 		s.Equal(2, len(fieldData.GetScalars().GetArrayData().GetData()))
 	}
 }
@@ -171,7 +172,8 @@ func (s *StructArraySuite) TestNullableCompactSlice() {
 	s.Require().NoError(err)
 	s.NotNil(value)
 	for _, fieldData := range sliced.FieldData().GetStructArrays().GetFields() {
-		s.Equal([]bool{false, true}, fieldData.GetValidData())
+		s.Equal([]bool{false, true}, getFieldDataValidData(fieldData))
+		s.Nil(fieldData.GetValidData())
 	}
 }
 
@@ -262,7 +264,8 @@ func (s *StructArraySuite) TestNullableVectorRows() {
 	fields := column.FieldData().GetStructArrays().GetFields()
 	s.Require().Len(fields, 2)
 	for _, fieldData := range fields {
-		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+		s.Equal([]bool{true, false, true}, getFieldDataValidData(fieldData))
+		s.Nil(fieldData.GetValidData())
 	}
 	s.Len(fields[0].GetScalars().GetArrayData().GetData(), 2)
 	s.Len(fields[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -386,8 +389,8 @@ func (s *StructArraySuite) TestParseNullableStructArray() {
 	intSub := &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
 		FieldName: "id",
-		ValidData: validData,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			ValidData: validData,
 			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
 				ElementType: schemapb.DataType_Int64,
 				Data: []*schemapb.ScalarField{
@@ -401,8 +404,8 @@ func (s *StructArraySuite) TestParseNullableStructArray() {
 	strSub := &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
 		FieldName: "tag",
-		ValidData: validData,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			ValidData: validData,
 			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
 				ElementType: schemapb.DataType_VarChar,
 				Data: []*schemapb.ScalarField{
@@ -488,8 +491,9 @@ func (s *StructArraySuite) TestParseNullableStructArrayEmptySlice() {
 	s.Zero(parsed.Len())
 	s.Require().NoError(parsed.ValidateNullable())
 	for _, fieldData := range parsed.FieldData().GetStructArrays().GetFields() {
-		s.NotNil(fieldData.ValidData)
-		s.Empty(fieldData.GetValidData())
+		s.NotNil(getFieldDataValidData(fieldData))
+		s.Empty(getFieldDataValidData(fieldData))
+		s.Nil(fieldData.GetValidData())
 	}
 }
 
@@ -500,8 +504,9 @@ func (s *StructArraySuite) TestParseNullableStructArrayEmptyRows() {
 	})
 	source.SetNullable(true)
 	for _, fieldData := range source.FieldData().GetStructArrays().GetFields() {
-		s.NotNil(fieldData.ValidData)
-		s.Empty(fieldData.GetValidData())
+		s.NotNil(getFieldDataValidData(fieldData))
+		s.Empty(getFieldDataValidData(fieldData))
+		s.Nil(fieldData.GetValidData())
 	}
 
 	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
@@ -558,8 +563,8 @@ func (s *StructArraySuite) TestParseNullableStructArrayRejectsMismatchedMasks() 
 		return &schemapb.FieldData{
 			Type:      schemapb.DataType_Array,
 			FieldName: name,
-			ValidData: validData,
 			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				ValidData: validData,
 				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
 					ElementType: schemapb.DataType_Int64,
 					Data: []*schemapb.ScalarField{

@@ -320,6 +320,15 @@ func TestWrapErrPreservesInnerChain(t *testing.T) {
 			code:     ErrServiceInternal.errCode,
 		},
 		{
+			name: "CollectionPartialUpdateConflict",
+			wrap: func() error {
+				return WrapErrCollectionPartialUpdateConflictErr(inner, "ctx %s", "test")
+			},
+			sentinel: ErrCollectionPartialUpdateConflict,
+			other:    ErrServiceUnavailable,
+			code:     ErrCollectionPartialUpdateConflict.errCode,
+		},
+		{
 			name:     "ParameterInvalid",
 			wrap:     func() error { return WrapErrParameterInvalidErr(inner, "ctx %d", 42) },
 			sentinel: ErrParameterInvalid,
@@ -381,4 +390,8 @@ func TestWrapErrPreservesInnerChain(t *testing.T) {
 
 	// nil err falls back to the Msg variant; just make sure that still works.
 	assert.True(t, errors.Is(WrapErrServiceInternalErr(nil, "no underlying err"), ErrServiceInternal))
+	assert.True(t, errors.Is(
+		WrapErrCollectionPartialUpdateConflictErr(nil, "no underlying err"),
+		ErrCollectionPartialUpdateConflict,
+	))
 }

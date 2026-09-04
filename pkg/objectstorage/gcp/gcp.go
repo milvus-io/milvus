@@ -38,8 +38,25 @@ func NewWrapHTTPTransport(secure bool) (*WrapHTTPTransport, error) {
 	}, nil
 }
 
+const (
+	xAmzPrefix  = "X-Amz-"
+	xGoogPrefix = "X-Goog-"
+)
+
 // RoundTrip wraps original http.RoundTripper by Adding a Bearer token acquired from tokenSrc
 func (t *WrapHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// GCS's XML API only honors x-amz-* headers when the request is signed with
+	// HMAC keys. With OAuth 2.0 (Bearer token) authentication they must be sent
+	// as their x-goog-* counterparts — e.g. minio's CopyObject sends
+	// x-amz-copy-source, which GCS rejects with "Invalid argument" under Bearer
+	// auth unless it is translated to x-goog-copy-source.
+	for k, v := range req.Header {
+		if strings.HasPrefix(k, xAmzPrefix) {
+			req.Header[xGoogPrefix+strings.TrimPrefix(k, xAmzPrefix)] = v
+			delete(req.Header, k)
+		}
+	}
+
 	// here Valid() means the token won't be expired in 10 sec
 	// so the http client timeout shouldn't be longer, or we need to change the default `expiryDelta` time
 	currentToken := t.currentToken.Load()

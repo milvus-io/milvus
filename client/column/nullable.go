@@ -32,6 +32,7 @@ var (
 	NewNullableColumnInt32                NullableColumnCreateFunc[int32, *ColumnInt32]                 = NewNullableColumnCreator(NewColumnInt32).New
 	NewNullableColumnInt64                NullableColumnCreateFunc[int64, *ColumnInt64]                 = NewNullableColumnCreator(NewColumnInt64).New
 	NewNullableColumnVarChar              NullableColumnCreateFunc[string, *ColumnVarChar]              = NewNullableColumnCreator(NewColumnVarChar).New
+	NewNullableColumnText                 NullableColumnCreateFunc[string, *ColumnText]                 = NewNullableColumnCreator(NewColumnText).New
 	NewNullableColumnString               NullableColumnCreateFunc[string, *ColumnString]               = NewNullableColumnCreator(NewColumnString).New
 	NewNullableColumnFloat                NullableColumnCreateFunc[float32, *ColumnFloat]               = NewNullableColumnCreator(NewColumnFloat).New
 	NewNullableColumnDouble               NullableColumnCreateFunc[float64, *ColumnDouble]              = NewNullableColumnCreator(NewColumnDouble).New

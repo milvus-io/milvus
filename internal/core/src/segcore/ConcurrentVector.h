@@ -20,6 +20,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
@@ -45,13 +46,19 @@ namespace milvus::segcore {
 // Backed by fixed-size per-chunk buffers held in a std::deque so that, once a
 // chunk is appended, its buffer never moves. A raw pointer returned by
 // get_chunk_data() therefore stays valid across concurrent inserts (which only
-// append — never relocate existing chunks). This replaces a single resizable
-// FixedVector<bool> whose reallocation on insert could dangle a validity
-// pointer that a concurrent query had cached.
+// ever add chunks at the back, never relocate existing ones). This replaces a
+// resizable FixedVector<bool> whose reallocation on insert could dangle a
+// validity pointer that a concurrent query had cached.
 //
 // Contract: a get_chunk_data() borrow may only be read within its own chunk
 // ([offset, chunk end)). All current readers apply validity per chunk (see
 // ApplyFieldValidData and InsertRecord::get_span_base), so this holds.
+//
+// The borrow is a raw pointer, not a lock: a reader dereferences it after
+// releasing the shared lock. A caller that rewrites an already-addressable
+// range must therefore guarantee that no reader can hold a borrow into that
+// range. set_data_raw enforces the separate "no gaps" invariant, but cannot
+// enforce this external quiescence requirement.
 class ThreadSafeValidData {
  public:
     explicit ThreadSafeValidData(int64_t size_per_chunk)
@@ -61,35 +68,34 @@ class ThreadSafeValidData {
                    size_per_chunk_);
     }
 
+    // Both writers place validity at the logical offset the caller reserved,
+    // rather than appending at the current length. The two agree only as long
+    // as batches arrive in reserved order; writing at the reserved offset
+    // states the contract in the code instead of relying on it silently.
+    //
+    // No gaps: length_ advances to the end of the write, and is_valid() admits
+    // every offset below it, so a write starting past the current length would
+    // publish a range nobody ever wrote -- validity bits read back as garbage
+    // rather than as null. Rewriting an already written range is permitted for
+    // idempotent retries, subject to the external quiescence requirement in
+    // the class contract above.
     void
-    set_data_raw(const std::vector<FieldDataPtr>& datas) {
+    set_data_raw(size_t element_offset,
+                 const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
+        check_no_gap(element_offset);
+        auto write_offset = element_offset;
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
-            reserve_to(length_ + num_row);
-            write_bits(length_, num_row, [&field_data](size_t i) {
+            reserve_to(write_offset + num_row);
+            write_bits(write_offset, num_row, [&field_data](size_t i) {
                 return field_data->is_valid(i);
             });
-            length_ += num_row;
+            write_offset += num_row;
         }
+        length_ = std::max(length_, write_offset);
     }
 
-    void
-    set_data_raw(size_t num_rows,
-                 const DataArray* data,
-                 const FieldMeta& field_meta) {
-        std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (field_meta.is_nullable()) {
-            reserve_to(length_ + num_rows);
-            write_from(length_, num_rows, data->valid_data().data());
-            length_ += num_rows;
-        }
-    }
-
-    // Write validity at the logical offset the caller reserved, rather than
-    // appending at the current length. The two agree only as long as inserts
-    // arrive in reserved order; writing at the reserved offset states the
-    // contract in the code instead of relying on it silently.
     void
     set_data_raw(size_t element_offset,
                  size_t num_rows,
@@ -97,20 +103,15 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            // This overload copies a contiguous validity buffer, so validate
+            // its source span before reading it.
+            check_source_span(num_rows, data, field_meta);
             const auto end = element_offset + num_rows;
-            // No gaps. length_ advances to `end`, and is_valid() admits every
-            // offset below it, so a write that starts past the current length
-            // would publish a range nobody ever wrote -- validity bits read
-            // back as garbage rather than as null. Overwriting an already
-            // written range IS allowed: that is what makes a Reopen backfill
-            // retry idempotent.
-            AssertInfo(element_offset <= length_,
-                       "validity write leaves a gap: element_offset={}, "
-                       "length={}",
-                       element_offset,
-                       length_);
+            check_no_gap(element_offset);
             reserve_to(end);
-            write_from(element_offset, num_rows, data->valid_data().data());
+            write_from(element_offset,
+                       num_rows,
+                       GetFieldDataRowValidData(*data).data());
             length_ = std::max(length_, end);
         }
     }
@@ -194,6 +195,40 @@ class ThreadSafeValidData {
     }
 
  private:
+    // write_from reads exactly num_rows entries from the source, so a producer
+    // payload shorter than the row count is an out-of-bounds read. Reject it at
+    // the boundary rather than silently treating the missing tail as NULL
+    // further down the ingest path.
+    static void
+    check_source_span(size_t num_rows,
+                      const DataArray* data,
+                      const FieldMeta& field_meta) {
+        // Resolve validity the same way write_from's caller does
+        // (GetFieldDataRowValidData): new payloads carry it in the
+        // field-specific ScalarField/VectorField, legacy ones in
+        // FieldData.valid_data. Checking the top-level field alone would
+        // reject every new-format payload as empty.
+        const auto valid_size =
+            static_cast<size_t>(GetFieldDataRowValidData(*data).size());
+        AssertInfo(valid_size == num_rows,
+                   "nullable field {} valid_data size {} must match "
+                   "num_rows {}",
+                   field_meta.get_id().get(),
+                   valid_size,
+                   num_rows);
+    }
+
+    // Reject a write that would leave [length_, element_offset) unwritten.
+    // Caller holds the lock.
+    void
+    check_no_gap(size_t element_offset) const {
+        AssertInfo(element_offset <= length_,
+                   "validity write leaves a gap: element_offset={}, "
+                   "length={}",
+                   element_offset,
+                   length_);
+    }
+
     // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
     void
     reserve_to(size_t n) {
@@ -335,6 +370,11 @@ class VectorBase {
         return FixedVector<bool>{};
     }
 
+    virtual void
+    bulk_is_valid_range(int64_t start, int64_t count, bool* out) const {
+        std::fill_n(out, count, true);
+    }
+
     // Non-nullable fields have no mapping at all; hand back the shared no-op
     // so callers never have to branch on a null pointer.
     virtual const OffsetMapping&
@@ -473,8 +513,9 @@ class ConcurrentVectorImpl : public VectorBase {
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
                 // One lock acquisition for the batch. The caller has already
-                // written this range's validity (SegmentGrowingImpl::Insert
-                // and fill_empty_field both do so before touching the column),
+                // written this range's validity at this same element_offset
+                // (SegmentGrowingImpl::Insert, load_field_data_common and
+                // fill_empty_field all do so before touching the column),
                 // which is what makes reading it back here well-defined.
                 valid_data_ptr_->bulk_is_valid_range(
                     element_offset, element_count, valid_data.get());
@@ -600,6 +641,11 @@ class ConcurrentVectorImpl : public VectorBase {
             fmt::format(
                 "The value of elements_per_row_ is not 1, elements_per_row_={}",
                 elements_per_row_));
+        if constexpr (std::is_same_v<Type, ArrayValue>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap nested ARRAY rows must be accessed through "
+                       "view_element()");
+        }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         auto data =
@@ -682,6 +728,17 @@ class ConcurrentVectorImpl : public VectorBase {
             return valid_data_ptr_->get_data();
         }
         return FixedVector<bool>{};
+    }
+
+    void
+    bulk_is_valid_range(int64_t start,
+                        int64_t count,
+                        bool* out) const override {
+        if (valid_data_ptr_ != nullptr) {
+            valid_data_ptr_->bulk_is_valid_range(start, count, out);
+            return;
+        }
+        std::fill_n(out, count, true);
     }
 
  private:
@@ -834,6 +891,46 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         auto chunk_offset = element_index % size_per_chunk_;
         return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
+};
+
+template <>
+class ConcurrentVector<ArrayValue>
+    : public ConcurrentVectorImpl<ArrayValue, true> {
+    using Base = ConcurrentVectorImpl<ArrayValue, true>;
+
+ public:
+    explicit ConcurrentVector(
+        int64_t size_per_chunk,
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
+        : Base(1,
+               size_per_chunk,
+               std::move(mmap_descriptor),
+               std::move(valid_data_ptr)) {
+    }
+
+    using Base::set_data_raw;
+
+    void
+    set_data_raw(ssize_t element_offset,
+                 ssize_t element_count,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) override;
+
+    ArrayValueView
+    view_element(ssize_t element_index) const {
+        auto chunk_id = element_index / size_per_chunk_;
+        auto chunk_offset = element_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
+    }
+
+ private:
+    void
+    set_mmap_proto_rows(ssize_t element_offset,
+                        std::span<const ScalarFieldProto* const> rows);
+
+    std::once_flag array_type_once_;
+    std::shared_ptr<const proto::schema::TypeSchema> array_type_;
 };
 
 template <>

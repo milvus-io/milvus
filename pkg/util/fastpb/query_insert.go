@@ -188,7 +188,8 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 }
 
 // UnmarshalInsertRequest decodes milvuspb.InsertRequest (write path, client→proxy;
-// UNTRUSTED ingress → strings are UTF-8 validated). Hot field: fields_data (5).
+// UNTRUSTED ingress → strings are UTF-8 validated). Hot field: fields_data (5);
+// RLS fields 10-11 are folded into the official merge.
 func UnmarshalInsertRequest(b []byte, ir *milvuspb.InsertRequest) error {
 	proto.Reset(ir) // match official proto.Unmarshal: clear target before decode
 	if err := (dec{utf8: true}).insertRequest(b, ir); err != nil {
@@ -306,8 +307,9 @@ func (d dec) insertRequest(b []byte, ir *milvuspb.InsertRequest) error {
 // UnmarshalUpsertRequest decodes milvuspb.UpsertRequest (write path, client→proxy;
 // UNTRUSTED ingress → strings are UTF-8 validated). Fields 1-8 share InsertRequest's
 // exact wire layout (hot field: fields_data (5)); the upsert-only fields
-// partial_update (9), namespace (10) and field_ops (11) are folded into the official
-// merge, so they decode via the standard codec and stay wire-equivalent.
+// partial_update (9), namespace (10), field_ops (11), and the RLS fields
+// rls_principal (12) and skip_rls (13) are folded into the official merge, so
+// they decode via the standard codec and stay wire-equivalent.
 func UnmarshalUpsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
 	proto.Reset(ur) // match official proto.Unmarshal: clear target before decode
 	if err := (dec{utf8: true}).upsertRequest(b, ur); err != nil {
@@ -405,7 +407,7 @@ func (d dec) upsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
 			if err := appendPackedU32(v, &ur.HashKeys); err != nil {
 				return err
 			}
-		default: // namespace (10), field_ops (11), any future field → official merge
+		default: // fields 10-13 and any future field → official merge
 			rest = append(rest, start[:tn+vn]...)
 		}
 	}

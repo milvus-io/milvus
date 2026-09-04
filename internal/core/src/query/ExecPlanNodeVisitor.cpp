@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"
@@ -49,8 +50,7 @@ ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
     tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("active_count",
-                                 query_context->get_active_count());
+    span.SetAttribute("active_count", query_context->get_active_count());
 
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),
@@ -104,22 +104,10 @@ ExecPlanNodeVisitor::ExecuteTask(
             ret = result;
         }
     }
-    span.GetSpan()->SetAttribute("total_rows", processed_num);
-    span.GetSpan()->SetAttribute("matched_rows",
-                                 ret ? processed_num - ret->nullCount() : 0);
+    span.SetAttribute("total_rows", processed_num);
+    span.SetAttribute("matched_rows",
+                      ret ? processed_num - ret->nullCount() : 0);
     return ret;
-}
-
-std::unique_ptr<RetrieveResult>
-wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
-    scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
-    retrieve_result->total_data_cnt_ = 0;
-    return retrieve_result;
 }
 
 template <typename S, typename T>
@@ -153,7 +141,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // Always copy validity data from ColumnVector
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
-    auto valid_data = data_array.mutable_valid_data();
+    auto valid_data = MutableFieldDataRowValidData(&data_array);
     const uint8_t* src_bitmap =
         static_cast<const uint8_t*>(column_vector->GetValidRawData());
     AssertInfo(src_bitmap,

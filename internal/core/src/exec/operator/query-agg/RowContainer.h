@@ -28,8 +28,6 @@ namespace exec {
 
 class Accumulator {
  public:
-    Accumulator(bool isFixedSize, int32_t fixedSize, int32_t alignment);
-
     explicit Accumulator(Aggregate* aggregate);
 
     bool

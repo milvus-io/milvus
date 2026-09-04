@@ -224,8 +224,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
@@ -240,8 +240,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "NGRAM"}, {"mmap", "false"}, {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "NGRAM"}, {"mmap", "true"}, {"field_type", "string"}},
@@ -338,6 +338,24 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
 }
 
+TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
+    milvus::segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
+    load_index_info.element_type = milvus::DataType::NONE;
+    load_index_info.index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC},
+        {"metric_type", knowhere::metric::IP},
+    };
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_size = 1024 * 1024;
+    load_index_info.num_rows = 1024;
+
+    auto request = EstimateLoadIndexResource(&load_index_info);
+
+    EXPECT_TRUE(request.has_raw_data);
+}
+
 TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
     milvus::segcore::LoadIndexInfo loadIndexInfo;
     ASSERT_FALSE(loadIndexInfo.load_resource_request.has_value());
@@ -358,10 +376,10 @@ TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
 }
 
 #ifdef BUILD_DISK_ANN
-TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
+TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;
-    constexpr uint64_t kOffsetMappingMmapBytes =
+    constexpr uint64_t kIdMapMmapBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t);
 
     auto make_load_info = [] {
@@ -398,20 +416,16 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     auto i2o_info = make_load_info();
     i2o_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     auto i2o = EstimateLoadIndexResource(&i2o_info);
-    ASSERT_EQ(i2o.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(i2o.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(i2o.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(i2o.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(i2o.max_memory_cost, baseline.max_memory_cost);
 
     auto o2i_info = make_load_info();
     o2i_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto o2i = EstimateLoadIndexResource(&o2i_info);
-    ASSERT_EQ(o2i.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(o2i.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(o2i.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(o2i.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(o2i.max_memory_cost, baseline.max_memory_cost);
 
@@ -419,10 +433,8 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     both_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     both_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto both = EstimateLoadIndexResource(&both_info);
-    ASSERT_EQ(both.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(both.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(both.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(both.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(both.max_memory_cost, baseline.max_memory_cost);
 }

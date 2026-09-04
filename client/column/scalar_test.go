@@ -215,6 +215,29 @@ func (s *ScalarSuite) TestBasic() {
 		}
 	})
 
+	s.Run("column_text", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := []string{"short text", "长文本", "large text payload"}
+		column := NewColumnText(name, data)
+		s.Equal(entity.FieldTypeText, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(data, column.Data())
+
+		fd := column.FieldData()
+		s.Equal(name, fd.GetFieldName())
+		s.EqualValues(entity.FieldTypeText, fd.GetType())
+		s.Equal(data, fd.GetScalars().GetStringData().GetData())
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnText)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(data, parsed.Data())
+			s.Equal(entity.FieldTypeText, parsed.Type())
+		}
+	})
+
 	s.Run("column_timestamptz", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
 		now := time.Now().UTC()

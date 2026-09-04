@@ -222,8 +222,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// we just redo it to refresh a new latest timetick.
 			return nil, redo.ErrRedo
 		}
-		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
-			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
+		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
+			// The target metadata no longer exists, so retrying cannot recover the operation.
 			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}

@@ -40,6 +40,7 @@ type RecoverWALFlusherParam struct {
 	RecoverySnapshot   *recovery.RecoverySnapshot
 	RecoveryStorage    recovery.RecoveryStorage
 	RateLimitComponent *rate.WALRateLimitComponent
+	OnFatal            func(error)
 }
 
 // RecoverWALFlusher recovers the wal flusher.
@@ -54,6 +55,7 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), param.ChannelInfo.Name),
 		rateLimitComponent:   param.RateLimitComponent,
 		RecoveryStorage:      param.RecoveryStorage,
+		onFatal:              param.OnFatal,
 	}
 	go flusher.Execute(param.RecoverySnapshot)
 	return flusher
@@ -69,6 +71,7 @@ type WALFlusherImpl struct {
 	emptyTimeTickCounter prometheus.Counter
 	rateLimitComponent   *rate.WALRateLimitComponent
 	recovery.RecoveryStorage
+	onFatal func(error)
 }
 
 // Execute starts the wal flusher.
@@ -79,7 +82,7 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 			impl.logger.Info(context.TODO(), "wal flusher stop")
 			return
 		}
-		if !errors.Is(err, context.Canceled) {
+		if impl.notifier.Context().Err() == nil {
 			impl.logger.DPanic(context.TODO(), "wal flusher stop to executing with unexpected error", mlog.Err(err))
 			return
 		}
@@ -94,20 +97,20 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	impl.logger.Info(context.TODO(), "wal flusher start to recovery...")
 	l, err := impl.wal.GetWithContext(impl.notifier.Context())
 	if err != nil {
-		return errors.Wrap(err, "when get wal from future")
+		return impl.notifyFatal(errors.Wrap(err, "when get wal from future"))
 	}
 	impl.logger.Info(context.TODO(), "wal ready for flusher recovery")
 
 	var checkpoint message.MessageID
 	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
 	if err != nil {
-		return errors.Wrap(err, "when build flusher components")
+		return impl.notifyFatal(errors.Wrap(err, "when build flusher components"))
 	}
 	defer impl.flusherComponents.Close()
 
 	scanner, err := impl.generateScanner(impl.notifier.Context(), impl.wal.Get(), checkpoint)
 	if err != nil {
-		return errors.Wrap(err, "when generate scanner")
+		return impl.notifyFatal(errors.Wrap(err, "when generate scanner"))
 	}
 	defer scanner.Close()
 
@@ -122,22 +125,34 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 			return nil
 		case msg, ok := <-scanner.Chan():
 			if !ok {
-				impl.logger.Warn(context.TODO(), "wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
-				return nil
+				if err := scanner.Error(); err != nil {
+					return impl.notifyFatal(errors.Wrap(err, "wal flusher scanner stopped"))
+				}
+				if impl.notifier.Context().Err() != nil {
+					return nil
+				}
+				return impl.notifyFatal(errors.New("wal flusher scanner stopped unexpectedly"))
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
-				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && impl.notifier.Context().Err() != nil {
 					return nil
 				}
 				impl.logger.Error(impl.notifier.Context(), "wal flusher dispatch failed with unexpected error",
 					mlog.FieldVChannel(msg.VChannel()),
 					mlog.String("messageType", msg.MessageType().String()),
 					mlog.Err(err))
-				return err
+				return impl.notifyFatal(err)
 			}
 		}
 	}
+}
+
+func (impl *WALFlusherImpl) notifyFatal(err error) error {
+	if err != nil && impl.notifier.Context().Err() == nil && impl.onFatal != nil {
+		impl.onFatal(err)
+	}
+	return err
 }
 
 // Close closes the wal flusher and release all related resources for it.

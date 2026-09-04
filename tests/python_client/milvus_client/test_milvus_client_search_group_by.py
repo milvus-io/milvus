@@ -659,9 +659,12 @@ class TestGroupSearch(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
         limit = 1
-        error = {ct.err_code: 999, ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
-        if grpby_unsupported_field == ct.default_float_vec_field_name:
-            error = {ct.err_code: 999, ct.err_msg: "unsupported data type VECTOR_FLOAT for group by operator"}
+        # The rejection now happens at the proxy, which names the field rather
+        # than repeating the executor's C++ type spelling; the executor's own
+        # message is unreachable for these types because the request no longer
+        # gets that far.
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"unsupported data type for group by: field {grpby_unsupported_field}"}
         self.search(
             client,
             self.collection_name,

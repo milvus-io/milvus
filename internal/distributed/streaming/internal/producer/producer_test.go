@@ -21,9 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
@@ -435,6 +437,45 @@ func TestResumableProducer_ConcurrentProduce(t *testing.T) {
 		err := <-errCh
 		assert.NoError(t, err)
 	}
+}
+
+func TestResumableProducerReturnsPartialUpdateCASError(t *testing.T) {
+	rejectProducer := &partialUpdateCASRejectProducer{}
+	appendCalls := 0
+	m := mockey.Mock((*partialUpdateCASRejectProducer).Append).To(
+		func(*partialUpdateCASRejectProducer, context.Context, message.MutableMessage) (*types.AppendResult, error) {
+			appendCalls++
+			if appendCalls > 1 {
+				return nil, context.Canceled
+			}
+			return nil, status.NewPartialUpdateRetryable("conflict")
+		},
+	).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).IsAvailable).Return(true).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Available).Return(make(chan struct{})).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Close).Return().Build()
+	defer m.UnPatch()
+
+	rp := NewResumableProducer(func(context.Context, *handler.ProducerOptions) (producer.Producer, error) {
+		return rejectProducer, nil
+	}, &ProducerOptions{PChannel: "partial-update-cas"})
+	defer rp.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := rp.produceInternal(ctx, createRealInsertMessage(t, "test-v"))
+
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS())
+	require.Nil(t, result)
+	require.Equal(t, 1, appendCalls)
+}
+
+type partialUpdateCASRejectProducer struct {
+	producer.Producer
 }
 
 func TestResumableProducer_ProduceAfterClose(t *testing.T) {

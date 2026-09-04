@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -312,8 +313,8 @@ func (c *compactionInspector) start() {
 }
 
 func (c *compactionInspector) loadMeta() {
-	// TODO: make it compatible to all types of compaction with persist meta
 	triggers := c.meta.GetCompactionTasks(context.TODO())
+	var failedTasks []*datapb.CompactionTask
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if isCompactionTaskCleaned(task) {
@@ -322,49 +323,89 @@ func (c *compactionInspector) loadMeta() {
 					mlog.String("type", task.GetType().String()),
 					mlog.String("state", task.GetState().String()))
 				continue
-			} else {
-				t, err := c.createCompactTask(task)
-				if err != nil {
-					mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, try to clean it",
+			}
+
+			t, err := c.createCompactTask(task)
+			if err != nil {
+				mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, defer cleanup",
+					mlog.Int64("planID", task.GetPlanID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", task.GetState().String()),
+					mlog.Err(err),
+				)
+				failedTasks = append(failedTasks, task)
+				continue
+			}
+			if t.NeedReAssignNodeID() {
+				if err = c.submitTask(t); err != nil {
+					mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, defer cleanup",
 						mlog.Int64("planID", task.GetPlanID()),
 						mlog.String("type", task.GetType().String()),
 						mlog.String("state", task.GetState().String()),
 						mlog.Err(err),
 					)
-					// ignore the drop error
-					c.meta.DropCompactionTask(context.TODO(), task)
+					failedTasks = append(failedTasks, task)
 					continue
 				}
-				if t.NeedReAssignNodeID() {
-					if err = c.submitTask(t); err != nil {
-						mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, try to clean it",
-							mlog.Int64("planID", task.GetPlanID()),
-							mlog.String("type", task.GetType().String()),
-							mlog.String("state", task.GetState().String()),
-							mlog.Err(err),
-						)
-						// ignore the drop error
-						c.meta.DropCompactionTask(context.Background(), task)
-						continue
-					}
-					mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
-						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-						mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-						mlog.String("type", task.GetType().String()),
-						mlog.String("state", t.GetTaskProto().GetState().String()))
-				} else {
-					c.restoreTask(t)
-					mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
-						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-						mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-						mlog.String("type", task.GetType().String()),
-						mlog.String("state", t.GetTaskProto().GetState().String()))
-				}
+				mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", t.GetTaskProto().GetState().String()))
+			} else {
+				c.restoreTask(t)
+				mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", t.GetTaskProto().GetState().String()))
 			}
 		}
 	}
+
+	if len(failedTasks) > 0 {
+		c.stopWg.Add(1)
+		go c.cleanupFailedCompactionTasks(failedTasks)
+	}
+}
+
+func (c *compactionInspector) cleanupFailedCompactionTasks(tasks []*datapb.CompactionTask) {
+	defer c.stopWg.Done()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	total := len(tasks)
+	mlog.Info(ctx, "start cleaning up failed compaction tasks", mlog.Int("total", total))
+	cleaned := 0
+	for _, task := range tasks {
+		select {
+		case <-ctx.Done():
+			mlog.Info(ctx, "failed compaction task cleanup aborted",
+				mlog.Int("cleaned", cleaned),
+				mlog.Int("remaining", total-cleaned))
+			return
+		default:
+		}
+		if err := c.meta.DropCompactionTask(ctx, task); err != nil {
+			mlog.Warn(ctx, "drop failed compaction task failed",
+				mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
+			continue
+		}
+		cleaned++
+	}
+	mlog.Info(ctx, "failed compaction task cleanup finished",
+		mlog.Int("cleaned", cleaned),
+		mlog.Int("total", total))
 }
 
 func (c *compactionInspector) loopSchedule() {
@@ -565,7 +606,14 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		return err
 	}
 
-	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
+	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
+	if err != nil {
+		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+		return err
+	}
+	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()
+	t.SetTask(t.ShadowClone(setStartTime(startTime), setCreateTs(taskCreateTS)))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
@@ -595,6 +643,11 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.ievm)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	}
+	// Revalidate input and snapshot state at admission so a protection change
+	// after planning cannot enter the task queue unchecked.
+	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
+		return nil, err
 	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
 	if !exist {

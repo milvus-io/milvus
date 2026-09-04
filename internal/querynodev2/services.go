@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -354,6 +353,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
+	// The caller may have timed out during the load/seek steps above. Commit
+	// the watch only if it is still wanted: once the pipeline starts, this
+	// node is subscribed while the coordinator has already marked the task
+	// failed, and the re-issued watch would race the stale registration.
+	if err = ctx.Err(); err != nil {
+		log.Warn(ctx, "watch dml channel canceled before commit", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	// start pipeline
 	pipeline.Start()
 	// delegator after all steps done
@@ -584,10 +592,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	log.Info(ctx, "load segments done...",
 		mlog.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
-
-	// Publish filesystem metrics after load task completion
-	// Use default filesystem (empty path) for load tasks
-	storagev2.PublishDefaultFilesystemMetrics()
 
 	return merr.Success(), nil
 }
@@ -1918,7 +1922,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetVersion(), req.GetResources())
+	err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

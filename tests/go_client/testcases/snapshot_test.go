@@ -78,6 +78,25 @@ func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID in
 	return nil, fmt.Errorf("timeout waiting for restore to complete: jobID=%d", jobID)
 }
 
+func waitForExportComplete(ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) (*milvuspb.ExportSnapshotInfo, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		info, err := mc.GetExportSnapshotState(ctx, client.NewGetExportSnapshotStateOption(jobID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get export state: %w", err)
+		}
+		switch info.GetState() {
+		case milvuspb.ExportSnapshotState_ExportSnapshotCompleted:
+			return info, nil
+		case milvuspb.ExportSnapshotState_ExportSnapshotFailed:
+			return info, fmt.Errorf("export snapshot failed: jobID=%d, reason=%s", jobID, info.GetReason())
+		default:
+			time.Sleep(time.Second)
+		}
+	}
+	return nil, fmt.Errorf("timeout waiting for export to complete: jobID=%d", jobID)
+}
+
 // waitForAllIndexesBuilt polls DescribeIndex for each index in the collection until all indexes
 // have finished building (PendingIndexRows == 0 and TotalRows == IndexedRows).
 // If the collection has no indexes, the function returns immediately.
@@ -316,6 +335,170 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	// Clean up
 	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
+	common.CheckErr(t, err, true)
+}
+
+// TestSnapshotRestoreExternalReferenced restores directly from CreateSnapshot metadata.
+// This covers the referenced layout, where metadata still points at the original
+// Milvus storage files instead of an exported self-contained bundle.
+func TestSnapshotRestoreExternalReferenced(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 1000
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("external_restore_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for external restore testing"))
+	common.CheckErr(t, err, true)
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	restoredCollName := fmt.Sprintf("restored_external_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	jobID, err := mc.RestoreExternalSnapshot(ctx,
+		client.NewRestoreExternalSnapshotOption(
+			restoredCollName,
+			snapshotInfo.GetS3Location(),
+		))
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
+	common.CheckErr(t, err, true)
+
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	require.True(t, has)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollName).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+}
+
+// TestSnapshotRestoreExternalSelfContained restores from ExportSnapshot output.
+// This covers the self-contained bundle layout under targetRoot/snapshots and
+// targetRoot/files.
+func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 1000
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("external_export_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for exported external restore testing"))
+	common.CheckErr(t, err, true)
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	exportRoot := fmt.Sprintf("snapshot_export_%s", common.GenRandomString(snapshotPrefix, 6))
+	exportJobID, err := mc.ExportSnapshot(ctx,
+		client.NewExportSnapshotOption(snapshotName, collName, exportRoot))
+	common.CheckErr(t, err, true)
+	require.NotZero(t, exportJobID)
+	exportInfo, err := waitForExportComplete(ctx, mc, exportJobID, 2*time.Minute)
+	common.CheckErr(t, err, true)
+	require.Positive(t, exportInfo.GetTotalBytes())
+	metadataURI := exportInfo.GetSnapshotMetadataUri()
+	require.NotEmpty(t, metadataURI)
+	require.NotEqual(t, snapshotInfo.GetS3Location(), metadataURI)
+
+	restoredCollName := fmt.Sprintf("restored_export_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	jobID, err := mc.RestoreExternalSnapshot(ctx,
+		client.NewRestoreExternalSnapshotOption(
+			restoredCollName,
+			metadataURI,
+		))
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
+	common.CheckErr(t, err, true)
+
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	require.True(t, has)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollName).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
 	common.CheckErr(t, err, true)
 }
 

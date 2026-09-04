@@ -1152,7 +1152,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_snapshot_growing_segment_without_flush(self):
         """
         target: test snapshot behavior with growing segment (unflushed data)

@@ -240,13 +240,13 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	if isNullable {
 		validData := make([]bool, len(selectedRows))
 		for i, ref := range selectedRows {
-			vd := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetValidData()
+			vd := typeutil.GetFieldDataValidData(results[ref.resultIdx].GetFieldsData()[fieldIdx])
 			if len(vd) > 0 && int(ref.rowIdx) < len(vd) {
 				validData[i] = vd[ref.rowIdx]
 			}
 			// ValidData absent or rowIdx out of bounds: keep false (null semantics)
 		}
-		newFd.ValidData = validData
+		typeutil.SetFieldDataValidData(newFd, validData)
 	}
 
 	return newFd, nil
@@ -416,7 +416,7 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 	for ri, r := range results {
 		numRows := typeutil.GetSizeOfIDs(r.GetIds())
 		fd := r.GetFieldsData()[fieldIdx]
-		vd := fd.GetValidData()
+		vd := typeutil.GetFieldDataValidData(fd)
 
 		if numRows == 0 {
 			indices[ri] = nil
@@ -459,7 +459,7 @@ func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool
 			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx)
 	}
 
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) == 0 {
 		if isNullable {
 			return false, merr.WrapErrServiceInternalMsg(
@@ -839,7 +839,7 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.Fiel
 			Scalars: rangeSliceScalarField(fd.GetScalars(), start, end),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, fd.GetValidData())
+		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, typeutil.GetFieldDataValidData(fd))
 		if err != nil {
 			return nil, err
 		}
@@ -848,8 +848,8 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.Fiel
 		}
 	}
 
-	if len(fd.GetValidData()) > 0 {
-		newFd.ValidData = fd.GetValidData()[start:end]
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
+		typeutil.SetFieldDataValidData(newFd, validData[start:end])
 	}
 
 	return newFd, nil
@@ -1038,7 +1038,7 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData,
 			Scalars: sliceScalarField(fd.GetScalars(), indices),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := sliceVectorField(fd.GetVectors(), indices, fd.GetValidData())
+		vectors, err := sliceVectorField(fd.GetVectors(), indices, typeutil.GetFieldDataValidData(fd))
 		if err != nil {
 			return nil, err
 		}
@@ -1048,13 +1048,12 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData,
 	}
 
 	// Preserve ValidData (nullable bitmap) for nullable fields.
-	if len(fd.GetValidData()) > 0 {
-		validData := fd.GetValidData()
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
 		newValidData := make([]bool, len(indices))
 		for i, idx := range indices {
 			newValidData[i] = validData[idx]
 		}
-		newFd.ValidData = newValidData
+		typeutil.SetFieldDataValidData(newFd, newValidData)
 	}
 
 	return newFd, nil
@@ -1366,7 +1365,7 @@ func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator
 	}
 	for fieldIdx, fd := range fieldsData {
 		if typeutil.IsCompactNullableVectorFieldData(fd) {
-			indices, _ := typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+			indices, _ := typeutil.BuildNullableVectorDataIndices(typeutil.GetFieldDataValidData(fd))
 			c.compactIndices[fieldIdx] = indices
 		}
 	}
@@ -1392,7 +1391,7 @@ func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
 func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 	var compactIdx []int
 	if typeutil.IsCompactNullableVectorFieldData(fd) {
-		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(typeutil.GetFieldDataValidData(fd))
 	}
 	return calcFieldElementSizeWithCompactIndex(fd, rowIdx, compactIdx)
 }
@@ -1499,7 +1498,7 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 // Returns (value, isNull)
 func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 	// Check valid_data for nullable fields
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) > rowIdx && !validData[rowIdx] {
 		return nil, true
 	}
@@ -1569,8 +1568,8 @@ func getRowCount(result *internalpb.RetrieveResults) int {
 	}
 
 	fd := result.GetFieldsData()[0]
-	if len(fd.GetValidData()) > 0 {
-		return len(fd.GetValidData())
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
+		return len(validData)
 	}
 	if fd.GetScalars() != nil {
 		switch data := fd.GetScalars().GetData().(type) {

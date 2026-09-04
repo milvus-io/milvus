@@ -19,6 +19,7 @@ package integration
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -35,9 +36,27 @@ import (
 
 var caseTimeout time.Duration
 
+const integrationCaseTimeoutEnv = "MILVUS_INTEGRATION_CASE_TIMEOUT"
+
 func init() {
-	flag.DurationVar(&caseTimeout, "caseTimeout", 10*time.Minute, "timeout duration for single case")
+	defaultTimeout, err := caseTimeoutFromEnvironment(os.Getenv)
+	if err != nil {
+		panic(err)
+	}
+	flag.DurationVar(&caseTimeout, "caseTimeout", defaultTimeout, "timeout duration for single case")
 	streamingutil.SetStreamingServiceEnabled()
+}
+
+func caseTimeoutFromEnvironment(getenv func(string) string) (time.Duration, error) {
+	value := getenv(integrationCaseTimeoutEnv)
+	if value == "" {
+		return 10 * time.Minute, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", integrationCaseTimeoutEnv, err)
+	}
+	return timeout, nil
 }
 
 type MiniClusterSuite struct {

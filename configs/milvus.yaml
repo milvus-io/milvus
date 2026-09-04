@@ -190,6 +190,10 @@ woodpecker:
   meta:
     type: etcd # The Type of the metadata provider. currently only support etcd.
     prefix: woodpecker # The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.
+  # The target maximum size of each Woodpecker WAL record produced by Milvus. Unit: Byte.
+  # Woodpecker does not enforce a corresponding single-entry hard limit. Milvus uses this value as the WAL-layer chunk threshold and splits larger payloads into multiple records.
+  # Values below 256 KiB are clamped to 256 KiB. Invalid or out-of-range values fall back to the default 10 MiB limit.
+  maxMessageSize: 10485760
   client:
     segmentAppend:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
@@ -281,9 +285,13 @@ pulsar:
   port: 6650 # Port of Pulsar service.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
-  # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-  # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+  # By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+  # Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.
   maxMessageSize: 2097152
+  # The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+  # A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+  # Must be a 32-bit integer of at least 1024 bytes and smaller than the active WAL backend's message-size limit: a smaller reserve cannot absorb one record's envelope, so a full-budget chunk would still be rejected by the backend. Invalid or out-of-range values fall back to the default reserve size.
+  messageReserveSize: 65536
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
   # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
@@ -313,6 +321,10 @@ pulsar:
 #     tlsKey:  # path to client's private key (PEM) used for authentication
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
+#   producer:
+#     message:
+#       max:
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
@@ -347,6 +359,24 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  clientTelemetry:
+    cleanupInterval: 60 # seconds. How often to sweep clients that stopped heartbeating and commands that expired.
+    inactiveClientThreshold: 600 # seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.
+    # seconds. How long a client may go without a heartbeat before it is reported as inactive.
+    # It is still kept, and still reported, until inactiveClientThreshold.
+    clientStatusThreshold: 60
+    commandCleanupTimeout: 10 # seconds. Timeout for the etcd operations that remove expired client commands.
+    # bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+    # Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.
+    maxMetricsPerClient: 1048576
+    maxOperationTypesPerClient: 100 # Largest number of distinct operation types kept per client; anything beyond is truncated.
+    maxClientsInMemory: 100000 # Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.
+    # How many heartbeat windows to keep per client.
+    # A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+    # the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+    # cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+    # per-collection breakdown for every connected client. Values below 1 are treated as the default.
+    retainedWindows: 2
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
   grpc:
@@ -357,6 +387,10 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
+  # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
+  # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
+  # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
+  splitChunk: true
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -367,8 +401,8 @@ proxy:
   maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
-  maxBloomFilterSize: 67108864 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxMembershipFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of membership-filter-bearing expression plans in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -432,7 +466,39 @@ proxy:
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
+    # high-level restful api, restore the value handling of releases that predate the REST insert
+    # validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+    # stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+    # through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+    # for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.
+    compatibilityMode: false
+    # high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+    # parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+    # bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+    # itself is the risk the setting exists to remove; values below 1 are read as 1.
+    maxExprParamsDepth: 100
+    # high-level restful api, return a JSON field as the document it holds rather than as a string.
+    # Turn this off only to keep clients written against the older shape working while they migrate: there a JSON field read
+    # back as "{\"a\":1}" while the same value in the dynamic field read back as {"a":1}. The insert path follows the same
+    # switch, so either shape can be sent back unchanged: while the field reads back as text, a JSON string is read as the
+    # document it spells; once it reads back as the document itself, a string is stored as the string it is. Rows written
+    # before the insert path stopped storing non-JSON bytes may not hold a document; if any row in a response is such a row,
+    # every JSON field in that response falls back to the string form and a warning is logged, so a caller always sees one
+    # shape or the other and never a mixture.
+    nativeJSONResponse: true
+    # high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+    # ({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+    # Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+    # it will be removed in a future release. It covers the shape of a top-level Array field and nothing else:
+    # a struct array's sub-fields are unaffected, and so is Accept-Type-Allow-Int64, which renders an Int64 as a
+    # string wherever one appears, including inside either kind of array.
+    legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+    # cost. Disabling restores the old always-decode behavior.
+    dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
     writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
@@ -484,8 +550,8 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
-  channelTaskTimeout: 60000 # 1 minute
-  segmentTaskTimeout: 120000 # 2 minute
+  channelTaskTimeout: 120000 # 2 minutes
+  segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
@@ -546,6 +612,7 @@ queryNode:
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+      growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
@@ -568,7 +635,12 @@ queryNode:
       # eviction is necessary and the amount of data to evict from memory/disk.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
-      # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
+      # - Disk watermark ratios are fractions of the effective local-storage disk capacity, not fractions of
+      #   queryNode.maxDiskUsagePercentage. They must satisfy diskLowWatermarkRatio <= diskHighWatermarkRatio <=
+      #   queryNode.maxDiskUsagePercentage / 100. When lowering queryNode.maxDiskUsagePercentage, adjust the
+      #   disk watermarks as needed to preserve this ordering.
+      # - The max amount of memory/disk that can be used for cache is controlled by
+      #   queryCoord.overloadedMemoryThresholdPercentage and queryNode.maxDiskUsagePercentage.
       memoryLowWatermarkRatio: 0.75
       memoryHighWatermarkRatio: 0.8
       diskLowWatermarkRatio: 0.75
@@ -592,10 +664,10 @@ queryNode:
     storageV2:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
-  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
+  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
-  maxDiskUsagePercentage: 95
+  maxDiskUsagePercentage: 95 # Maximum disk usage as a percentage of the effective local-storage disk capacity.
   cache:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
@@ -758,6 +830,9 @@ dataCoord:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
+    enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    target:
+      maxEventsPerReconcile: 100 # Maximum number of compaction events emitted by one target reconciliation.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -828,6 +903,11 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    crossBucketEndpointAllowlist:  # Comma/space separated endpoint host[:port] allowlist for snapshot server-side cross-bucket copy with custom object storage endpoints. Canonical cloud endpoints derived from cloud_provider and region are allowed without this list.
+    exportCopyConcurrency: 16 # Maximum concurrent provider-side object copy requests for ExportSnapshot. Invalid or non-positive values are coerced to the default value 16.
+    exportJobTimeout: 43200 # Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.
+    exportJobRetention: 10800 # Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.
+    exportMaxConcurrentJobs: 1 # Maximum number of snapshot export jobs executed concurrently by DataCoord.
   enableActiveStandby: false
   taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
@@ -859,8 +939,6 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
@@ -922,6 +1000,7 @@ dataNode:
     # a non-positive or unparseable value falls back to the default. Set it to at least twice
     # writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.
     writeRetryMaxInterval: 60
+    copyObjectTimeout: 3600 # Timeout in seconds for copying one object during snapshot restore, including retries.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -1070,6 +1149,7 @@ common:
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
+    useArrowFileSystemChunkManager: false # Whether segcore routes chunk manager IO (segment load, index build/load) through the milvus-storage Arrow FileSystem, unified with storage v2. Applies to both remote and local storage types; when false, the legacy chunk managers are used. Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
@@ -1079,6 +1159,20 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    iops:
+      # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+      # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+      # The default matches the milvus-storage default.
+      initialRate: 2000
+      # Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+      # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+      # The default matches the milvus-storage default.
+      maxRate: 5000
+    externalVector:
+      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
+      partialNullPolicy: error
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1116,8 +1210,6 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
-    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:
@@ -1149,6 +1241,8 @@ common:
   preferIPv6: false
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
+  nodeScheduler:
+    maxConcurrencyRatio: 2 # Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
@@ -1161,6 +1255,9 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+      proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
+    maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
+    downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 
@@ -1192,7 +1289,19 @@ quotaAndLimits:
     complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
     maxCollectionNum: 65536
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
-    maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
+    # maximum protobuf size of the Proxy-side materialized insert message, in bytes,
+    # for both insert and upsert; -1 means no limit. The check runs after Proxy field
+    # materialization, including generated fields, row IDs, timestamps, namespace data,
+    # and partial-upsert query reconstruction. It does not include later streaming-message
+    # properties, encryption expansion, StreamingNode-generated function fields, or the
+    # broker envelope.
+    maxInsertSize: 67108864
+    # maximum protobuf size of each Proxy-side materialized delete message, in bytes,
+    # for both delete and upsert tombstones; -1 means no limit. The check runs after
+    # primary keys and timestamps are materialized and routed to a vchannel. It does
+    # not include later streaming-message properties, encryption expansion, chunk
+    # markers, or the broker envelope.
+    maxDeleteSize: 16777216
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
     maxGroupSize: 10 # maximum size for one single group when doing search group by
   ddl:
@@ -1401,6 +1510,10 @@ streamingNode:
 
 # Any configuration related to the streaming service.
 streaming:
+  # Whether StreamingNode splits oversized logical messages into physical WAL records.
+  # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
+  # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
+  splitChunkSN: false
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

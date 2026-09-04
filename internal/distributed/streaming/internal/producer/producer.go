@@ -144,6 +144,11 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
+			if sErr.IsPartialUpdateRetryableCAS() {
+				// Proxy must re-query and rebuild the row instead of retrying the
+				// transaction with stale merged fields.
+				return nil, err
+			}
 			// if the error is txn unavailable or unrecoverable error,
 			// it cannot be retried forever.
 			// we should mark it and return.

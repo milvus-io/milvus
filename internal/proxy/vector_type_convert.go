@@ -277,7 +277,7 @@ func convertPlaceholder(
 
 func normalizeFP32ToFP16BF16VectorFieldData(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
-		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.GetFieldName())
+		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.GetFieldName())
 		if err != nil {
 			return err
 		}
