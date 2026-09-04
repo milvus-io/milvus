@@ -155,6 +155,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		err = cm.UpdateSchema(10, schemaV8, 8)
 		s.NoError(err)
 		s.Equal(uint64(8), cm.Get(10).SchemaVersion())
+		s.Same(schemaV8, cm.Get(10).Schema())
 
 		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		schemaV7.Version = 7
@@ -167,7 +168,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Same(schemaV8, updatedSchema)
 	})
 
-	s.Run("same_schema_version_with_newer_barrier_updates_properties", func() {
+	s.Run("same_schema_version_does_not_replace_logical_schema", func() {
 		cm := NewCollectionManager()
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
@@ -188,11 +189,41 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		schema, version := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(0), version)
-		s.Same(updatedSchema, schema)
-		s.Equal("int64Field", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
+		s.Same(baseSchema, schema)
+		s.Empty(common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
 	})
 
-	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_schema_version", func() {
+	s.Run("logical_update_preserves_load_policy", func() {
+		cm := NewCollectionManager()
+		loadSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+		loadSchema.Version = 1
+		loadSchema.Properties = []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}}
+		err := cm.PutOrRef(10, loadSchema, mock_segcore.GenTestIndexMeta(10, loadSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 50,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		logicalSchema := proto.Clone(loadSchema).(*schemapb.CollectionSchema)
+		logicalSchema.Version = 2
+		logicalSchema.Properties = nil
+		s.Require().NoError(cm.UpdateSchema(10, logicalSchema, 100))
+		s.Same(logicalSchema, cm.Get(10).Schema())
+		s.Same(loadSchema, cm.Get(10).LoadSchema())
+
+		refreshedLoadSchema := proto.Clone(logicalSchema).(*schemapb.CollectionSchema)
+		refreshedLoadSchema.Properties = []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "false"}}
+		s.Require().NoError(cm.PutOrRef(10, refreshedLoadSchema, nil, &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 101,
+		}))
+		defer cm.Unref(10, 1)
+		s.Same(logicalSchema, cm.Get(10).Schema())
+		s.Same(refreshedLoadSchema, cm.Get(10).LoadSchema())
+	})
+
+	s.Run("higher_schema_version_preserves_newer_barrier", func() {
 		cm := NewCollectionManager()
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
@@ -208,16 +239,6 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.True(shouldUpdate)
 		s.Equal(uint64(1), plan.logicalSchemaVersion)
 		s.Equal(uint64(100), plan.schemaBarrierTs)
-		s.Equal(uint64(101), plan.segcoreSchemaVersion)
-
-		cm.Get(10).setSchema(schemaV1, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-		schemaV2 := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
-		schemaV2.Version = 2
-		plan, shouldUpdate = prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV2.GetVersion()), 80)
-		s.True(shouldUpdate)
-		s.Equal(uint64(2), plan.logicalSchemaVersion)
-		s.Equal(uint64(100), plan.schemaBarrierTs)
-		s.Equal(uint64(102), plan.segcoreSchemaVersion)
 	})
 
 	s.Run("manager_uses_schema_version_from_caller", func() {
@@ -262,7 +283,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 	coll := s.cm.Get(1)
 	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
-	coll.setSchema(schema, 0, 0, initialSegcoreSchemaVersion(0, 0))
+	coll.setSchema(schema, schema, 0, 0)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -291,7 +312,7 @@ func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 
 	for i := 1; i <= 1000; i++ {
 		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
-		coll.setSchema(schema, uint64(i), uint64(i), initialSegcoreSchemaVersion(uint64(i), uint64(i)))
+		coll.setSchema(schema, schema, uint64(i), uint64(i))
 	}
 	close(stop)
 	wg.Wait()
@@ -691,7 +712,7 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
 	})
 	s.Error(err)
 	s.Error(coll.updateIndexMeta(indexMeta))
-	s.Error(coll.updateSchema(coll.Schema(), 1))
+	s.Error(coll.updateSchema(coll.Schema()))
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {

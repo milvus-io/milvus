@@ -79,6 +79,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     added_field->set_fieldid(103);
     added_field->set_data_type(schema::DataType::Int64);
     added_field->set_nullable(true);
+    collection_schema.set_version(100);
 
     std::string updated_schema_string;
     auto marshal = collection_schema.SerializeToString(&updated_schema_string);
@@ -88,8 +89,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     // UpdateSchema(CCollection, const void*, const int64_t)
     auto status = UpdateSchema(collection,
                                updated_schema_string.c_str(),
-                               updated_schema_string.length(),
-                               100);
+                               updated_schema_string.length());
     ASSERT_EQ(status.error_code, Success);
 
     auto col = static_cast<milvus::segcore::Collection*>(collection);
@@ -99,7 +99,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_EQ(add_field.get_name().get(), "added_field");
 
     // Test failure case, no panicking with failure code
-    status = UpdateSchema(collection, nullptr, 0, 200);
+    status = UpdateSchema(collection, nullptr, 0);
     ASSERT_NE(status.error_code, Success);
 
     DeleteCollection(collection);

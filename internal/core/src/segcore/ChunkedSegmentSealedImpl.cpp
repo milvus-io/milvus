@@ -2487,7 +2487,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             }
             milvus_field_ids.emplace_back(fid);
             merged_in_load_list =
-                merged_in_load_list || schema_snapshot->ShouldLoadField(fid);
+                merged_in_load_list || segment_load_info.ShouldLoadField(fid);
         }
         if (milvus_field_ids.empty()) {
             continue;
@@ -2642,7 +2642,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             }
             milvus_field_ids.emplace_back(fid);
             merged_in_load_list =
-                merged_in_load_list || schema_snapshot->ShouldLoadField(fid);
+                merged_in_load_list || segment_load_info.ShouldLoadField(fid);
         }
         if (milvus_field_ids.empty()) {
             continue;
@@ -2834,7 +2834,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             FieldDataInfo(field_id.get(),
                           num_rows,
                           mmap_dir_path,
-                          schema_snapshot->ShouldLoadField(field_id),
+                          segment_load_info.ShouldLoadField(field_id),
                           load_info.shard);
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
@@ -2957,7 +2957,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             FieldDataInfo(field_id.get(),
                           num_rows,
                           mmap_dir_path,
-                          schema_snapshot->ShouldLoadField(field_id),
+                          segment_load_info.ShouldLoadField(field_id),
                           load_info.shard);
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
@@ -6664,8 +6664,8 @@ ChunkedSegmentSealedImpl::resolve_field_data_warmup_policy(
 
     if (is_vector && !has_index) {
         auto [has_index_warmup, index_warmup_policy] =
-            schema_snapshot->CollectionWarmupPolicy(/*is_vector=*/true,
-                                                    /*is_index=*/true);
+            segment_load_info.CollectionWarmupPolicy(/*is_vector=*/true,
+                                                     /*is_index=*/true);
         if (has_index_warmup) {
             return index_warmup_policy;
         }
@@ -6684,7 +6684,7 @@ ChunkedSegmentSealedImpl::resolve_field_data_warmup_policy(
     }
 
     auto [has_field_warmup, field_warmup_policy] =
-        schema_snapshot->WarmupPolicy(field_id, is_vector, /*is_index=*/false);
+        segment_load_info.WarmupPolicy(field_id, is_vector, /*is_index=*/false);
     return has_field_warmup ? field_warmup_policy : "";
 }
 
@@ -7719,7 +7719,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
         field_id.get(),
         id_);
     auto [field_has_setting, field_mmap_enabled] =
-        schema_snapshot->MmapEnabled(field_id);
+        segment_load_info.MmapEnabled(field_id);
     auto is_vector = IsVectorDataType(field_meta.get_data_type());
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
@@ -7882,7 +7882,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             field_id.get(),
             id_);
         auto [field_has_setting, field_mmap_enabled] =
-            schema_snapshot->MmapEnabled(field_id);
+            segment_load_info.MmapEnabled(field_id);
         auto is_vector = IsVectorDataType(field_meta.get_data_type());
         auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
         auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
@@ -7933,7 +7933,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             auto field_id = field_meta.get_id();
             runtime.fields.emplace(field_id, std::move(column));
             auto [field_has_setting, field_mmap_enabled] =
-                schema_snapshot->MmapEnabled(field_id);
+                segment_load_info.MmapEnabled(field_id);
             auto is_vector = IsVectorDataType(field_meta.get_data_type());
             auto& mmap_config =
                 storage::MmapManager::GetInstance().GetMmapConfig();
@@ -8308,7 +8308,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         // - mmap setting at collection level, then all field are the same
         // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
         auto [field_has_setting, field_mmap_enabled] =
-            schema_snapshot->MmapEnabled(field_id);
+            segment_load_info.MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
     }
@@ -8468,7 +8468,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             is_vector = true;
         }
         auto [field_has_setting, field_mmap_enabled] =
-            schema_snapshot->MmapEnabled(field_id);
+            segment_load_info.MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
     }
@@ -8816,7 +8816,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             // - mmap setting at collection level, then all field are the same
             // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
             auto [field_has_setting, field_mmap_enabled] =
-                schema_snapshot->MmapEnabled(child_field_id);
+                segment_load_info.MmapEnabled(child_field_id);
             has_mmap_setting = has_mmap_setting || field_has_setting;
             mmap_enabled = mmap_enabled || field_mmap_enabled;
 

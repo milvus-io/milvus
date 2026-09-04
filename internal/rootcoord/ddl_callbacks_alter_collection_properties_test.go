@@ -685,14 +685,14 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	// Alter properties to set ttl field should create a new logical schema.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
@@ -818,6 +818,7 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
