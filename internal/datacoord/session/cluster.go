@@ -408,7 +408,6 @@ func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	properties.AppendType(taskcommon.Index)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
-	properties.AppendTaskVersion(in.GetIndexVersion())
 	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
@@ -560,7 +559,6 @@ func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
-	properties.AppendTaskVersion(in.GetVersion())
 	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }

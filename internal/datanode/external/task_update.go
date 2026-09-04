@@ -913,14 +913,16 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	//   - samplePerSegment=true: sample each segment independently. More
 	//     I/O, but per-segment MemorySize is accurate.
 	//
-	// If a later segment's sampling fails, we fall back to the first
-	// successful avgBytesPerRow so MemorySize is never written as 0 — a
-	// zero MemorySize would make QueryNode's memory estimation collapse
-	// and risk OOM on load. If ALL samples fail (or return a 0 sum because
-	// the schema has no ExternalField-mapped fields, or the sampled rows
-	// somehow evaluate to 0 bytes), we fail the task rather than silently
-	// producing zero-sized segments that would skew QN's resource estimator
-	// and risk OOM on load.
+	// If a later segment's sampling hits a transient system failure, we fall
+	// back to the first successful avgBytesPerRow so MemorySize is never
+	// written as 0. A non-retriable error (for example, one parquet file is
+	// missing a mapped external field or has the wrong Arrow type) must fail the
+	// whole task immediately: backfilling only the estimate would publish a
+	// manifest that QueryNode still cannot load. If ALL samples fail (or return
+	// a 0 sum because the schema has no ExternalField-mapped fields, or the
+	// sampled rows somehow evaluate to 0 bytes), we fail the task rather than silently producing
+	// zero-sized segments that would skew QN's resource estimator and risk OOM
+	// on load.
 	samplePerSegment := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.GetAsBool()
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
 	segmentAvgBytes := make([]int64, len(works))
@@ -940,8 +942,15 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			firstSampleErr = err
 		}
 	}
+	wrapSamplingError := func(err error, segmentID int64) error {
+		hint := ""
+		if strings.Contains(err.Error(), "not found in schema") {
+			hint = "; check external_field mappings in collection schema against actual parquet columns"
+		}
+		return merr.Wrapf(err, "external field size sampling failed for segment %d%s", segmentID, hint)
+	}
 
-	sampleOne := func(manifestPath string) (int64, bool) {
+	sampleOne := func(manifestPath string) (int64, bool, error) {
 		fieldSizes, err := packed.SampleExternalFieldSizes(
 			manifestPath, sampleRows,
 			t.req.GetCollectionID(),
@@ -955,28 +964,34 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 				mlog.String("manifestPath", manifestPath),
 				mlog.Err(err))
 			recordErr(err)
-			return 0, false
+			if !merr.IsRetryableErr(err) {
+				return 0, false, err
+			}
+			return 0, false, nil
 		}
 		total := sumFieldSizes(fieldSizes, t.req.GetSchema())
 		if total <= 0 {
-			// A non-positive total is treated as a sample failure so the
-			// caller can decide whether to fall back or fail the task. The
-			// zero can come from (a) a schema with no ExternalField-mapped
-			// fields, or (b) a Parquet file whose sampled rows really are
-			// empty — both are degenerate and must not feed QN a zero.
+			// A non-positive total is a permanent schema/data mismatch. Do not
+			// backfill it from another segment: the estimate would hide a
+			// manifest that QueryNode may still be unable to load correctly.
+			err := merr.WrapErrParameterInvalidMsg("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total)
 			taskLog.Warn(ctx, "external field size sample produced non-positive total",
 				mlog.String("manifestPath", manifestPath),
 				mlog.Int64("total", total))
-			recordErr(merr.WrapErrParameterInvalidMsg("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
-			return 0, false
+			recordErr(err)
+			return 0, false, err
 		}
-		return total, true
+		return total, true, nil
 	}
 
 	if len(manifestPaths) > 0 {
 		if samplePerSegment {
 			for i, mp := range manifestPaths {
-				if avg, ok := sampleOne(mp); ok {
+				avg, ok, err := sampleOne(mp)
+				if err != nil {
+					return nil, wrapSamplingError(err, works[i].segmentID)
+				}
+				if ok {
 					segmentAvgBytes[i] = avg
 					if fallbackAvg == 0 {
 						fallbackAvg = avg
@@ -987,7 +1002,11 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 				mlog.Int("numSegments", len(manifestPaths)),
 				mlog.Int64("fallbackAvgBytesPerRow", fallbackAvg))
 		} else {
-			if avg, ok := sampleOne(manifestPaths[0]); ok {
+			avg, ok, err := sampleOne(manifestPaths[0])
+			if err != nil {
+				return nil, wrapSamplingError(err, works[0].segmentID)
+			}
+			if ok {
 				fallbackAvg = avg
 				for i := range segmentAvgBytes {
 					segmentAvgBytes[i] = avg
@@ -998,26 +1017,31 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		}
 		// If every sample failed, fail the task rather than emitting
 		// zero-MemorySize fake binlogs that would collapse QueryNode's
-		// resource estimator and risk OOM on load. We prefer a loud
-		// failure (retry-eligible via the task state machine) over a
-		// silent success that corrupts downstream accounting.
+		// resource estimator and risk OOM on load.
 		//
-		// Embed firstSampleErr (issue #48637) so the client-facing
-		// RefreshFailed reason names the root cause (e.g. column not
-		// found in parquet) rather than forcing the operator to SSH
-		// into datanode logs.
+		// The classification MUST come from the underlying error, so wrap
+		// with merr.Wrap -- never bake the cause into an InputError format
+		// string. Sampling reads sampled rows from object storage, and the
+		// FFI errors must retain their classification through this wrapper.
+		// InvalidParameter identifies deterministic schema/mapping errors, and
+		// unknown/non-retriable failures are also returned above immediately;
+		// only errors explicitly classified retriable are eligible for a
+		// successful-sample fallback or a coordinator retry.
 		if fallbackAvg == 0 {
-			rootCause := "unknown (no sample attempted)"
-			if firstSampleErr != nil {
-				rootCause = firstSampleErr.Error()
+			if firstSampleErr == nil {
+				// Nothing was even attempted: the work list itself is
+				// degenerate, which is a request problem.
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"external field size sampling failed for all %d segment(s): no sample attempted",
+					len(manifestPaths))
 			}
 			hint := ""
-			if strings.Contains(rootCause, "not found in schema") {
+			if strings.Contains(firstSampleErr.Error(), "not found in schema") {
 				hint = "; check external_field mappings in collection schema against actual parquet columns"
 			}
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"external field size sampling failed for all %d segment(s): %s%s",
-				len(manifestPaths), rootCause, hint)
+			return nil, merr.Wrapf(firstSampleErr,
+				"external field size sampling failed for all %d segment(s)%s",
+				len(manifestPaths), hint)
 		}
 		// Fill any zero slots (sampling failed mid-loop) with the first
 		// successful average so every segment gets a non-zero MemorySize.
@@ -1038,6 +1062,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			PartitionID:    t.req.GetPartitionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
+			SchemaVersion:  t.req.GetSchema().GetVersion(),
 			StorageVersion: storage.StorageV3,
 			Level:          datapb.SegmentLevel_L1,
 			// Fake binlog so downstream treats external segments like normal

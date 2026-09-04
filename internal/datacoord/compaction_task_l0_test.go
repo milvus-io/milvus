@@ -74,8 +74,11 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	).Build()
 	defer commit.UnPatch()
 
-	task := &l0CompactionTask{meta: meta, committedV3Manifests: make(map[int64]string)}
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{200: deltalogs}))
+	task := &datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_Level0DeleteCompaction}
+	_, _, err = meta.CompleteCompactionMutation(context.Background(), task, &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{{SegmentID: 200, Deltalogs: deltalogs}},
+	})
+	require.NoError(t, err)
 
 	updated := meta.GetSegment(context.Background(), 200)
 	require.Equal(t, newManifest, updated.GetManifestPath())
@@ -113,12 +116,19 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 	).Build()
 	defer commit.UnPatch()
 
-	task := &l0CompactionTask{meta: meta}
+	task := &datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_Level0DeleteCompaction}
+	result := func() *datapb.CompactionPlanResult {
+		return &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 201, Deltalogs: freshDeltalogs()}},
+		}
+	}
 	// First attempt publishes the manifest and records the deltalog on the segment.
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
+	_, _, err = meta.CompleteCompactionMutation(context.Background(), task, result())
+	require.NoError(t, err)
 	// A retry (saveSegmentMeta re-run after a failed meta_saved/etcd write) with
 	// the same output must not append the deltalog to the manifest a second time.
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
+	_, _, err = meta.CompleteCompactionMutation(context.Background(), task, result())
+	require.NoError(t, err)
 
 	require.Equal(t, 1, commitCount, "manifest must be committed exactly once across retries")
 	updated := meta.GetSegment(context.Background(), 201)
@@ -178,14 +188,14 @@ func TestL0CompactionSaveSegmentMetaSkipsDroppedV3Target(t *testing.T) {
 	})
 
 	var commitCount atomic.Int32
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
-			commitCount.Add(int32(len(commits)))
-			return nil
+	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			commitCount.Add(1)
+			return packed.MarshalManifestPath(base, version+1), nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		InputSegments: inputs,
@@ -217,17 +227,21 @@ func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testin
 	})
 
 	var batchCalls atomic.Int32
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			batchCalls.Add(1)
-			// The primitive skips a target that vanished during manifest I/O and
-			// still returns success, but the input-segment retirement folded into
-			// the same batch (extraOps) still commits — simulate both.
-			return m.UpdateSegmentsInfo(ctx, extraOps...)
+			require.Equal(t, basePath, base)
+			require.EqualValues(t, 7, version)
+			// Drop the target after the manifest revision is prepared but before
+			// the final catalog publication. The batch must skip that target while
+			// still retiring the L0 inputs in the same catalog transaction.
+			require.NoError(t, mt.UpdateSegmentsInfo(context.Background(),
+				UpdateStatusOperator(241, commonpb.SegmentState_Dropped)))
+			return packed.MarshalManifestPath(basePath, 8), nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		InputSegments: inputs,
@@ -254,13 +268,13 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
 	})
 
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
-			return merr.WrapErrServiceInternalMsg("manifest commit failed")
+	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+			return "", merr.WrapErrServiceInternalMsg("manifest commit failed")
 		}).Build()
 	defer mockCommit.UnPatch()
 
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		InputSegments: inputs,
@@ -319,7 +333,7 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 		}).Build()
 	defer mockCommit.UnPatch()
 
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		InputSegments: inputs,
@@ -358,20 +372,44 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: actualDeltaPath, EntriesNum: 3}},
 		}},
 	}}
-	// A legacy/non-manifest destination continues through the compatibility
-	// operator. StorageV3 destinations are committed by meta directly.
-	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(nil).Once()
-
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, operators ...UpdateOperator) error {
-			s.Len(operators, 5)
-			s.Equal(actualDeltaPath, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
-			s.EqualValues(9001, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
-			return nil
-		},
-	).Once()
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.MatchedBy(func(result *datapb.CompactionPlanResult) bool {
+		segments := result.GetSegments()
+		return len(segments) == 1 &&
+			segments[0].GetSegmentID() == 200 &&
+			segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath() == actualDeltaPath &&
+			segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID() == 9001
+	})).Return(nil, nil, nil).Once()
 
 	s.NoError(task.saveSegmentMeta(output))
+	s.Equal(datapb.CompactionTaskState_meta_saved, task.GetTask().GetState())
+}
+
+func (s *L0CompactionTaskSuite) TestSaveSegmentMetaRetriesAtomicMutation() {
+	task := s.generateTestL0Task(datapb.CompactionTaskState_executing)
+	output := []*datapb.CompactionSegment{{SegmentID: 200}, {SegmentID: 201}}
+
+	first := true
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, task *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+			s.Require().Len(result.GetSegments(), 2)
+			if first {
+				first = false
+				s.Empty(result.GetSegments()[0].GetManifest())
+				result.GetSegments()[0].Manifest = "prepared-manifest"
+				return nil, nil, errors.New("atomic mutation failed")
+			}
+			s.Equal("prepared-manifest", result.GetSegments()[0].GetManifest(),
+				"a retry reuses a manifest revision prepared by the partial attempt")
+			s.Empty(result.GetSegments()[1].GetManifest())
+			return nil, nil, nil
+		},
+	).Twice()
+
+	s.Error(task.saveSegmentMeta(output))
+	s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
+
+	s.NoError(task.saveSegmentMeta(output))
+	s.Equal(datapb.CompactionTaskState_meta_saved, task.GetTask().GetState())
 }
 
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
@@ -407,7 +445,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 			Deltalogs:     deltaLogs,
 		}}
 	}).Times(2)
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
 		CollectionID:  1,
@@ -436,7 +474,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return nil
 	}).Once()
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		InputSegments: []int64{102},
 		PlanID:        1,
 		TriggerID:     19530,
@@ -467,7 +505,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 	}).Times(2)
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
 		CollectionID:  1,
@@ -524,7 +562,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 			Deltalogs:     deltaLogs,
 		}}
 	}).Times(2)
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
 		CollectionID:  1,
@@ -543,7 +581,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 }
 
 func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskState) *l0CompactionTask {
-	return newL0CompactionTask(&datapb.CompactionTask{
+	return newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
 		CollectionID:  1,
@@ -587,15 +625,19 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
+		// A worker-sent rejection (a milvus error) does prove the plan was not
+		// accepted, but reusing this planID on another node is only safe if that
+		// classification is correct. A fresh planID makes the classification
+		// unnecessary: this attempt is abandoned exactly as an unreadable outcome
+		// would be; see the dedicated case below.
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
-			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
-			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
-			return errors.New("mock error")
+			s.Require().EqualValues(t.GetTask().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTask().GetCollectionID(), collectionID)
+			return merr.WrapErrServiceInternalMsg("mock rejection")
 		})
 
 		t.CreateTaskOnWorker(100, cluster)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().State)
-		s.EqualValues(NullNodeID, t.GetTaskProto().NodeID)
+		s.Equal(datapb.CompactionTaskState_retrying, t.GetTask().State)
 	})
 
 	s.Run("test pipelining success", func() {
@@ -628,13 +670,13 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
-			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
-			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
+			s.Require().EqualValues(t.GetTask().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTask().GetCollectionID(), collectionID)
 			return nil
 		})
 
 		t.CreateTaskOnWorker(100, cluster)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, t.GetTask().GetState())
 	})
 
 	// stay in executing state when GetCompactionPlanResults error except ErrNodeNotFound
@@ -642,39 +684,54 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(t.GetTaskProto().NodeID)).Once()
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(t.GetTask().NodeID)).Once()
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().GetState())
-		s.EqualValues(NullNodeID, t.GetTaskProto().GetNodeID())
+		// A DataNode deregisters from etcd before tearing down its running
+		// compactions, so the node being gone from the registry does not prove
+		// the plan stopped. Abandon the attempt instead of re-dispatching it.
+		s.Equal(datapb.CompactionTaskState_retrying, t.GetTask().GetState())
+		s.EqualValues(100, t.GetTask().GetNodeID())
 	})
 
-	// stay in executing state when GetCompactionPlanResults error except ErrNodeNotFound
+	// An unanswered round -- transport error or nil result -- ends the attempt,
+	// same as the create path.
 	s.Run("test executing GetCompactionPlanResult fail mock error", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).Return(nil, errors.New("mock error"))
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).Return(nil, errors.New("mock error")).Once()
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().GetState())
-		s.EqualValues(-1, t.GetTaskProto().GetNodeID())
+		s.Equal(datapb.CompactionTaskState_retrying, t.GetTask().GetState())
+	})
+
+	s.Run("test executing GetCompactionPlanResult nil result", func() {
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
+		t.updateAndSaveTaskMeta(setNodeID(100))
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
+			Return(nil, nil).Once()
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_retrying, t.GetTask().GetState())
 	})
 
 	s.Run("test executing with result executing", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_executing,
 			}, nil).Once()
 
@@ -685,174 +742,167 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// No SetSegmentsCompacting expectation: releasing the inputs belongs to
+		// doClean alone, so reaching completed must not unlock them. An
+		// unexpected call here fails the test.
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, t.GetTask().GetState())
 	})
 	s.Run("test executing with result completed save segment meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, nil, errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, t.GetTask().GetState())
 	})
-	s.Run("test executing with result completed save compaction meta failed", func() {
+	s.Run("test executing with result completed process meta_saved failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_meta_saved, t.GetTask().GetState())
 	})
 
 	s.Run("test executing with result failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
 			}, nil).Once()
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, t.GetTask().GetState())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+		cluster.EXPECT().QueryCompaction(t.GetTask().NodeID, mock.Anything).
 			Return(&datapb.CompactionPlanResult{
-				PlanID: t.GetTaskProto().GetPlanID(),
+				PlanID: t.GetTask().GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
 			}, nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, t.GetTask().GetState())
 	})
 
 	s.Run("test metaSaved success", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, t.GetTask().GetState())
 	})
 
 	s.Run("test metaSaved failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		got := t.Process()
 		s.False(got)
-		s.Equal(datapb.CompactionTaskState_meta_saved, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_meta_saved, t.GetTask().GetState())
 	})
 
 	s.Run("test complete drop failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		s.Require().True(t.GetTask().GetNodeID() > 0)
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, t.GetTask().GetState())
 	})
 
 	s.Run("test complete success", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		s.Require().True(t.GetTask().GetNodeID() > 0)
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, t.GetTask().GetState())
 	})
 
 	s.Run("test process failed success", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTask().GetState())
 	})
 
 	s.Run("test process failed failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
-		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
+		s.Require().True(t.GetTask().GetNodeID() > 0)
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTask().GetState())
 	})
 
 	s.Run("test process states", func() {
@@ -986,7 +1036,7 @@ func (s *L0CompactionTaskSuite) TestSelectFlushedSegment_ForceSelectAllFlag() {
 		s.Require().NotNil(triggered, "Trigger returned nil: %s", reason)
 		triggeredView := triggered.(*LevelZeroCompactionView)
 
-		task := newL0CompactionTask(&datapb.CompactionTask{
+		task := newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:        1,
 			TriggerID:     19530,
 			CollectionID:  collectionID,
@@ -1068,7 +1118,7 @@ func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
 			RunAndReturn(func(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 				return applyFilters([]*SegmentInfo{importSeg}, filters...)
 			})
-		return newL0CompactionTask(&datapb.CompactionTask{
+		return newL0CompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:       1,
 			TriggerID:    19530,
 			CollectionID: 1,

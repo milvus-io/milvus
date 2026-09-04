@@ -728,8 +728,8 @@ func TestCluster_CreateProperties(t *testing.T) {
 			assert.Equal(t, taskcommon.Index, taskType)
 			rows := props.GetNumRows()
 			assert.Greater(t, rows, int64(0))
-			version := props.GetTaskVersion()
-			assert.Greater(t, version, int64(0))
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		case taskcommon.Stats:
 			assert.Equal(t, taskcommon.Stats, taskType)
 			rows := props.GetNumRows()
@@ -740,8 +740,8 @@ func TestCluster_CreateProperties(t *testing.T) {
 			assert.NotEmpty(t, subType)
 		case taskcommon.Analyze:
 			assert.Equal(t, taskcommon.Analyze, taskType)
-			version := props.GetTaskVersion()
-			assert.Greater(t, version, int64(0))
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		default:
 			t.Errorf("unexpected task type: %v", taskType)
 		}
@@ -932,10 +932,14 @@ func TestCluster_QueryProperties(t *testing.T) {
 			assert.Equal(t, taskcommon.Import, taskType)
 		case taskcommon.Index:
 			assert.Equal(t, taskcommon.Index, taskType)
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		case taskcommon.Stats:
 			assert.Equal(t, taskcommon.Stats, taskType)
 		case taskcommon.Analyze:
 			assert.Equal(t, taskcommon.Analyze, taskType)
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		default:
 			t.Errorf("unexpected task type: %v", taskType)
 		}
@@ -1021,10 +1025,14 @@ func TestCluster_DropProperties(t *testing.T) {
 			assert.Equal(t, taskcommon.Import, taskType)
 		case taskcommon.Index:
 			assert.Equal(t, taskcommon.Index, taskType)
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		case taskcommon.Stats:
 			assert.Equal(t, taskcommon.Stats, taskType)
 		case taskcommon.Analyze:
 			assert.Equal(t, taskcommon.Analyze, taskType)
+			_, versioned := props[taskcommon.TaskVersionKey]
+			assert.False(t, versioned)
 		default:
 			t.Errorf("unexpected task type: %v", taskType)
 		}
@@ -1170,6 +1178,32 @@ func TestCluster_CopySegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, result.State)
+	})
+
+	// The wrapper answers a Retry-state poll from properties alone, so this
+	// verifies that the state conversion preserves Retry for the coordinator.
+	t.Run("query copy segment - retry state survives the property round-trip", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("SlowDown: please reduce your request rate")
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    nil, // Retry is answered from properties, payload is not parsed
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryCopySegment(1, &datapb.QueryCopySegmentRequest{TaskID: 123})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskRetry, result.State,
+			"a worker-reported Retry must reach the coordinator as Retry, not Failed")
+		assert.Equal(t, "SlowDown: please reduce your request rate", result.Reason)
 	})
 
 	t.Run("query copy segment - failed state", func(t *testing.T) {

@@ -418,7 +418,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			// cloud_provider + region. cp=minio has no canonical endpoint
 			// and must use Milvus-form URI to embed the host explicitly.
 			if DeriveEndpoint(cp, extfs[ExtfsKeyRegion]) == "" {
-				return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
+				return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for external source with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", cp)
 			}
 		}
 	}

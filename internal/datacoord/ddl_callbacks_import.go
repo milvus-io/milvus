@@ -276,9 +276,9 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 }
 
 // commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
-// It transitions the import job from Uncommitted → Committing state.
-// Concurrency safety is guaranteed by the broadcaster framework's resource key lock
-// (exclusive collection-level lock), so no CAS is needed here.
+// Local commits persist Committing before broadcasting. The Uncommitted case is
+// retained for a replicated CommitImport that reaches a secondary before its
+// local import job has entered the commit phase.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
@@ -311,11 +311,47 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
+	if len(job.GetVchannels()) == 0 {
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", jobID)
+	}
 
-	if err := c.importMeta.UpdateJob(ctx, jobID,
-		UpdateJobState(internalpb.ImportJobState_Committing),
+	metaCtx := c.ctx
+	if metaCtx == nil {
+		metaCtx = ctx
+	}
+	if err := c.importMeta.UpdateJob(metaCtx, jobID,
+		func(current ImportJob) {
+			// Evaluate the precondition on the latest value under importMeta.mu,
+			// rather than applying an Uncommitted snapshot after timeout won.
+			if current.GetState() == internalpb.ImportJobState_Uncommitted {
+				UpdateJobState(internalpb.ImportJobState_Committing)(current)
+			}
+		},
 	); err != nil {
+		// The catalog write may have landed even when the response was lost.
+		// Stop before a stale Uncommitted snapshot can be timed out and overwrite
+		// the replicated commit intent; restart reloads the authoritative state.
+		// Callback cancellation alone is not a safe shutdown signal while the
+		// DataCoord component context remains alive.
+		if metaCtx.Err() == nil {
+			mlog.Fatal(ctx, "replicated import commit intent publication failed; terminating process",
+				mlog.FieldJobID(jobID), mlog.Err(err))
+		}
 		return err
+	}
+	job = c.importMeta.GetJob(metaCtx, jobID)
+	if job == nil {
+		return merr.WrapErrImportSysFailedMsg("job %d not found after entering commit phase", jobID)
+	}
+	switch job.GetState() {
+	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
+		// continue
+	case internalpb.ImportJobState_Failed:
+		mlog.Warn(ctx, "CommitImport ack lost the race to a terminal import failure; this replica will NOT commit",
+			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
+		return nil
+	default:
+		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
 	uncommittedDuration := job.GetTR().RecordSpan()

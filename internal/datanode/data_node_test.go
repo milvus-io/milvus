@@ -26,7 +26,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -111,4 +113,29 @@ func TestDataNode(t *testing.T) {
 		assert.Empty(t, resp)
 		util2.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
 	})
+}
+
+func TestRemoveExpiredTasksRequiresHealthy(t *testing.T) {
+	node := NewDataNode(context.Background())
+	defer node.cancel()
+	node.compactionExecutor = nil
+	node.externalCollectionManager = nil
+
+	taskCtx, cancelTask := context.WithCancel(context.Background())
+	defer cancelTask()
+	node.taskManager.LoadOrStoreIndexTask("cluster", 1, &index.IndexTaskInfo{
+		Cancel:    cancelTask,
+		StartedAt: time.Now().Add(-taskRetention() - time.Hour),
+		State:     commonpb.IndexState_InProgress,
+	})
+
+	now := time.Now()
+	node.removeExpiredTasks(now)
+	assert.Equal(t, commonpb.IndexState_InProgress, node.taskManager.LoadIndexTaskState("cluster", 1))
+	assert.NoError(t, taskCtx.Err())
+
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.removeExpiredTasks(now)
+	assert.Equal(t, commonpb.IndexState_IndexStateNone, node.taskManager.LoadIndexTaskState("cluster", 1))
+	assert.ErrorIs(t, taskCtx.Err(), context.Canceled)
 }

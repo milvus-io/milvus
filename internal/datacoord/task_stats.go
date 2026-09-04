@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -42,6 +43,12 @@ import (
 
 type statsTask struct {
 	*indexpb.StatsTask
+
+	// stateGuard makes State readable by the scheduler without the
+	// per-task key lock. Callbacks mutate them under that key lock, but the
+	// scheduler's phase derivation and metrics pass read them lock-free on
+	// their own goroutines; without this the reads are a data race.
+	stateGuard sync.RWMutex
 
 	taskSlot int64
 
@@ -87,6 +94,8 @@ func (st *statsTask) GetTaskType() taskcommon.Type {
 }
 
 func (st *statsTask) GetTaskState() taskcommon.State {
+	st.stateGuard.RLock()
+	defer st.stateGuard.RUnlock()
 	return st.GetState()
 }
 
@@ -103,10 +112,14 @@ func (st *statsTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (st *statsTask) GetTaskVersion() int64 {
-	return st.GetVersion()
+	// Stats retries use a fresh task ID. Version remains in the persisted and
+	// wire messages only so records written by older versions can still be read.
+	return 0
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
+	st.stateGuard.Lock()
+	defer st.stateGuard.Unlock()
 	st.State = state
 	st.FailReason = failReason
 }
@@ -122,25 +135,33 @@ func (st *statsTask) UpdateStateWithMeta(state indexpb.JobState, failReason stri
 	return nil
 }
 
-func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
-	if err := st.meta.statsTaskMeta.UpdateVersion(st.GetTaskID(), nodeID); err != nil {
+func (st *statsTask) assignTask(nodeID int64) error {
+	if err := st.meta.statsTaskMeta.UpdateBuildingTask(st.GetTaskID(), nodeID); err != nil {
 		return err
 	}
-	st.Version++
+	st.stateGuard.Lock()
 	st.NodeID = nodeID
+	st.State = indexpb.JobState_JobStateInProgress
+	st.FailReason = ""
+	st.stateGuard.Unlock()
 	return nil
 }
 
-func (st *statsTask) resetTask(ctx context.Context, reason string) {
-	// reset state to init
-	st.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+func (st *statsTask) retryTask(reason string) {
+	if err := st.UpdateStateWithMeta(indexpb.JobState_JobStateRetry, reason); err != nil {
+		// The wrapper must leave the scheduler even when meta persistence is
+		// unavailable. The stats inspector retries the authoritative record on
+		// TaskCheckInterval.
+		st.SetState(indexpb.JobState_JobStateRetry, reason)
+	}
 }
 
-func (st *statsTask) dropAndResetTaskOnWorker(ctx context.Context, cluster session.Cluster, reason string) {
-	if err := st.tryDropTaskOnWorker(cluster); err != nil {
-		return
-	}
-	st.resetTask(ctx, reason)
+func (st *statsTask) dropAndRetryTaskOnWorker(ctx context.Context, cluster session.Cluster, reason string) {
+	// Dropping the old worker execution is best effort. The inspector replaces
+	// its metadata with a fresh task ID before the next attempt, so the old
+	// execution has no coordinator-side commit path even when Drop fails.
+	_ = st.tryDropTaskOnWorker(ctx, cluster)
+	st.retryTask(reason)
 }
 
 func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -154,19 +175,12 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		mlog.String("subJobType", st.GetSubJobType().String()),
 	)
 
-	var err error
-	defer func() {
-		if err != nil {
-			st.resetTask(ctx, err.Error())
-		}
-	}()
-
 	// Handle empty segment case
 	segment := st.meta.GetHealthySegment(ctx, st.GetSegmentID())
 	if segment == nil {
-		log.Warn(context.TODO(), "segment is not healthy, skipping stats task")
+		log.Warn(ctx, "segment is not healthy, skipping stats task")
 		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
-			log.Warn(context.TODO(), "remove stats task failed, will retry later", mlog.Err(err))
+			log.Warn(ctx, "remove stats task failed, will retry later", mlog.Err(err))
 			return
 		}
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
@@ -185,56 +199,48 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 
 	if segment.GetNumOfRows() == 0 {
 		if err := st.handleEmptySegment(ctx); err != nil {
-			log.Warn(context.TODO(), "failed to handle empty segment", mlog.Err(err))
+			log.Warn(ctx, "failed to handle empty segment", mlog.Err(err))
 		}
-		return
-	}
-
-	// Update task version
-	if err := st.UpdateTaskVersion(nodeID); err != nil {
-		log.Warn(context.TODO(), "failed to update stats task version", mlog.Err(err))
 		return
 	}
 
 	// Prepare request
 	req, err := st.prepareJobRequest(ctx, segment)
 	if err != nil {
-		log.Warn(context.TODO(), "failed to prepare stats request", mlog.Err(err))
+		log.Warn(ctx, "failed to prepare stats request", mlog.Err(err))
 		return
 	}
 
-	// Use defer for cleanup on error
-	defer func() {
-		if err != nil {
-			st.tryDropTaskOnWorker(cluster)
-		}
-	}()
+	// Persist the assigned node and InProgress state before Create so restart can
+	// resume polling an ambiguous worker submission.
+	if err := st.assignTask(nodeID); err != nil {
+		log.Warn(ctx, "failed to persist stats task assignment", mlog.Err(err))
+		return
+	}
+
 	// Execute task creation
 	if err = cluster.CreateStats(nodeID, req); err != nil {
-		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
+		log.Warn(ctx, "failed to create stats task on worker", mlog.Err(err))
+		st.dropAndRetryTaskOnWorker(ctx, cluster, err.Error())
 		return
 	}
-	log.Info(context.TODO(), "assign stats task to worker successfully", mlog.FieldTaskID(st.GetTaskID()))
-
-	if err = st.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(context.TODO(), "failed to update stats task state to InProgress", mlog.Err(err))
-		return
-	}
-
-	log.Info(context.TODO(), "stats task update state to InProgress successfully", mlog.Int64("task version", st.GetVersion()))
+	log.Info(ctx, "assign stats task to worker successfully", mlog.FieldTaskID(st.GetTaskID()))
 }
 
 func (st *statsTask) shouldDropExternalJSONStatsTask(segment *SegmentInfo) bool {
 	if st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob || canBuildExternalJSONKeyIndex(segment) {
 		return false
 	}
-	if st.meta == nil || st.meta.collections == nil {
+	if st.handler == nil {
 		return false
 	}
 	// External-table source data may stay unchanged, so the segment may never
 	// become dropped. Drop unrebuildable reloaded JSON stats tasks immediately
 	// instead of relying on dropped-segment GC to unblock future scheduling.
-	collection := st.meta.GetCollection(segment.GetCollectionID())
+	collection, err := st.handler.GetCollection(context.TODO(), segment.GetCollectionID())
+	if err != nil {
+		return false
+	}
 	return collection != nil && collection.IsExternal()
 }
 
@@ -252,8 +258,8 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskIDs:   []int64{st.GetTaskID()},
 	})
 	if err != nil {
-		log.Warn(context.TODO(), "query stats task result failed", mlog.Err(err))
-		st.dropAndResetTaskOnWorker(ctx, cluster, err.Error())
+		log.Warn(ctx, "query stats task result failed", mlog.Err(err))
+		st.dropAndRetryTaskOnWorker(ctx, cluster, err.Error())
 		return
 	}
 
@@ -277,36 +283,57 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 				return
 			}
 			if err != nil {
+				// A lost catalog response can leave the segment result durable while
+				// process-local meta still has the old manifest. Continuing would let
+				// a later task publish from that stale base, so recover by reloading
+				// authoritative catalog state after restart.
+				processCtx := st.meta.ctx
+				if processCtx == nil {
+					processCtx = ctx
+				}
+				if processCtx.Err() == nil {
+					mlog.Fatal(processCtx, "stats result publication failed; terminating process",
+						mlog.FieldTaskID(st.GetTaskID()),
+						mlog.FieldSegmentID(st.GetSegmentID()),
+						mlog.Err(err))
+				}
 				return
 			}
-			st.UpdateStateWithMeta(state, result.GetFailReason())
+			if err := st.UpdateStateWithMeta(state, result.GetFailReason()); err != nil {
+				return
+			}
 		case indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateNone:
-			st.dropAndResetTaskOnWorker(ctx, cluster, result.GetFailReason())
+			st.dropAndRetryTaskOnWorker(ctx, cluster, result.GetFailReason())
 		case indexpb.JobState_JobStateFailed:
-			st.UpdateStateWithMeta(state, result.GetFailReason())
+			if err := st.UpdateStateWithMeta(state, result.GetFailReason()); err != nil {
+				return
+			}
 		}
 		// Otherwise (inProgress or unissued/init), keep InProgress state
 		return
 	}
 
-	log.Warn(context.TODO(), "task not found in results")
-	st.resetTask(ctx, "task not found in results")
+	log.Warn(ctx, "task not found in results")
+	st.dropAndRetryTaskOnWorker(ctx, cluster, "task not found in results")
 }
 
-func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
+func (st *statsTask) tryDropTaskOnWorker(ctx context.Context, cluster session.Cluster) error {
 	log := mlog.With(
 		mlog.FieldTaskID(st.GetTaskID()),
 		mlog.FieldSegmentID(st.GetSegmentID()),
 		mlog.FieldNodeID(st.NodeID),
 	)
+	if st.NodeID <= 0 {
+		return nil
+	}
 
 	err := cluster.DropStats(st.NodeID, st.GetTaskID())
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		log.Warn(context.TODO(), "failed to drop stats task on worker", mlog.Err(err))
+		log.Warn(ctx, "failed to drop stats task on worker", mlog.Err(err))
 		return err
 	}
 
-	log.Info(context.TODO(), "stats task dropped successfully")
+	log.Info(ctx, "stats task dropped successfully")
 	return nil
 }
 
@@ -317,17 +344,30 @@ func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster ses
 		mlog.String("subJobType", st.GetSubJobType().String()),
 	)
 
-	if st.shouldCleanupRejectedStatsResultFiles() {
+	shouldCleanupFiles, err := st.shouldCleanupRejectedStatsResultFiles(ctx)
+	if err != nil {
+		log.Warn(ctx, "failed to determine rejected stats result file ownership, keep task for retry", mlog.Err(err))
+		return
+	}
+	// Stop the worker result before deleting any file it names. If the task meta
+	// survives this pass, it must not be able to replay a partially deleted result.
+	if err := st.tryDropTaskOnWorker(ctx, cluster); err != nil {
+		log.Warn(ctx, "failed to drop rejected stats task on worker, keep task for retry", mlog.Err(err))
+		return
+	}
+	if shouldCleanupFiles {
 		// Do not defer rejected V3 stats cleanup to dropped-segment GC for
 		// external collections. External collection segments are patched only
 		// when the source changes; if the source stays stable, the segment can
 		// remain active forever and stale stats files would never be removed by
 		// dropped-segment GC. Keep this best-effort deletion external-only so
 		// internal collections continue to rely on existing GC ownership rules.
-		st.cleanupRejectedStatsResultFiles(ctx, result)
-	}
-	if err := st.tryDropTaskOnWorker(cluster); err != nil {
-		log.Warn(ctx, "failed to drop rejected stats task on worker", mlog.Err(err))
+		if err := st.cleanupRejectedStatsResultFiles(ctx, result); err != nil {
+			// MultiRemove may have deleted only part of the result. Retrying the
+			// whole result could then publish a manifest that references those
+			// already-deleted files, so cleanup failure must not replay SetJobInfo.
+			log.Warn(ctx, "failed to cleanup rejected stats result files", mlog.Err(err))
+		}
 	}
 	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
 		log.Warn(ctx, "failed to drop rejected stats task meta", mlog.Err(err))
@@ -337,39 +377,40 @@ func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster ses
 	log.Info(ctx, "discard rejected stats result", mlog.String("reason", reason))
 }
 
-func (st *statsTask) shouldCleanupRejectedStatsResultFiles() bool {
-	if st.meta == nil || st.meta.collections == nil {
-		return false
+func (st *statsTask) shouldCleanupRejectedStatsResultFiles(ctx context.Context) (bool, error) {
+	if st.handler == nil {
+		return false, merr.WrapErrServiceInternalMsg("collection handler is nil")
 	}
-	collection, ok := st.meta.collections.Get(st.GetCollectionID())
-	if !ok {
-		return false
+	collection, err := st.handler.GetCollection(ctx, st.GetCollectionID())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		// The collection has already been dropped, so ordinary dropped-segment GC
+		// owns its files and this task no longer needs an external cleanup anchor.
+		return false, nil
 	}
-	return collection.IsExternal()
+	if err != nil {
+		return false, err
+	}
+	if collection == nil {
+		return false, merr.WrapErrServiceInternalMsg("collection lookup returned nil, collectionID: %d", st.GetCollectionID())
+	}
+	return collection.IsExternal(), nil
 }
 
-func (st *statsTask) cleanupRejectedStatsResultFiles(ctx context.Context, result *workerpb.StatsResult) {
-	if st.meta == nil || st.meta.chunkManager == nil {
-		return
-	}
-
+func (st *statsTask) cleanupRejectedStatsResultFiles(ctx context.Context, result *workerpb.StatsResult) error {
 	files, err := collectRejectedStatsResultFiles(result)
 	if err != nil {
-		mlog.Warn(ctx, "failed to collect rejected stats result files",
-			mlog.FieldTaskID(st.GetTaskID()),
-			mlog.FieldSegmentID(st.GetSegmentID()),
-			mlog.Err(err))
+		return merr.Wrap(err, "failed to collect rejected stats result files")
 	}
 	if len(files) == 0 {
-		return
+		return nil
+	}
+	if st.meta == nil || st.meta.chunkManager == nil {
+		return merr.WrapErrServiceInternalMsg("chunk manager is unavailable")
 	}
 	if err := st.meta.chunkManager.MultiRemove(ctx, files); err != nil {
-		mlog.Warn(ctx, "failed to cleanup rejected stats result files",
-			mlog.FieldTaskID(st.GetTaskID()),
-			mlog.FieldSegmentID(st.GetSegmentID()),
-			mlog.Strings("files", files),
-			mlog.Err(err))
+		return merr.Wrap(err, "failed to remove rejected stats result files")
 	}
+	return nil
 }
 
 func collectRejectedStatsResultFiles(result *workerpb.StatsResult) ([]string, error) {
@@ -418,7 +459,11 @@ func collectRejectedStatsResultFiles(result *workerpb.StatsResult) ([]string, er
 }
 
 func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
-	st.tryDropTaskOnWorker(cluster)
+	ctx := st.meta.ctx
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	st.tryDropTaskOnWorker(ctx, cluster)
 }
 
 // Helper for empty segment handling
@@ -451,9 +496,8 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get collection info")
 	}
-	// GetCollection can return (nil, nil) on a cache miss; merr.Wrap(nil) would
-	// be nil and silently submit a malformed request, so guard collInfo
-	// separately with a typed not-found.
+	// Guard an incomplete broker response separately so a malformed request is
+	// never submitted to the worker.
 	if collInfo == nil {
 		return nil, merr.WrapErrCollectionNotFound(segment.GetCollectionID())
 	}
@@ -474,22 +518,20 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 
 	// Create the request
 	req := &workerpb.CreateStatsRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		TaskID:          st.GetTaskID(),
-		CollectionID:    segment.GetCollectionID(),
-		PartitionID:     segment.GetPartitionID(),
-		InsertChannel:   segment.GetInsertChannel(),
-		SegmentID:       segment.GetID(),
-		StorageConfig:   createStorageConfig(),
-		Schema:          collInfo.Schema,
-		SubJobType:      st.GetSubJobType(),
-		TargetSegmentID: st.GetTargetSegmentID(),
-		InsertLogs:      segment.GetBinlogs(),
-		StartLogID:      start,
-		EndLogID:        end,
-		NumRows:         segment.GetNumOfRows(),
-		// update version after check
-		TaskVersion:                      st.GetVersion(),
+		ClusterID:                        Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskID:                           st.GetTaskID(),
+		CollectionID:                     segment.GetCollectionID(),
+		PartitionID:                      segment.GetPartitionID(),
+		InsertChannel:                    segment.GetInsertChannel(),
+		SegmentID:                        segment.GetID(),
+		StorageConfig:                    createStorageConfig(),
+		Schema:                           collInfo.Schema,
+		SubJobType:                       st.GetSubJobType(),
+		TargetSegmentID:                  st.GetTargetSegmentID(),
+		InsertLogs:                       segment.GetBinlogs(),
+		StartLogID:                       start,
+		EndLogID:                         end,
+		NumRows:                          segment.GetNumOfRows(),
 		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
 		TaskSlot:                         st.taskSlot,
@@ -500,6 +542,23 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 		ManifestPath:                     segment.GetManifestPath(),
 	}
+	// Keep UseV3StatsAttemptPath at its false proto default throughout the rolling
+	// upgrade. A dynamic check of only currently-online nodes is not a safe
+	// cutover: an older QueryNode may reconnect after nested paths are published,
+	// and an older DataNode still writes the shared directory. Enable it only in a
+	// follow-up release where every supported upgrade source can read and write
+	// the attempt layout. Until then V3 retries remain compatible but do not have
+	// object-path isolation from a late legacy writer.
+	// TODO: Known technical debt (object-write fencing): while the attempt layout
+	// is disabled, both old and new DataNodes write the same field directory.
+	// Fresh task IDs fence metadata publication only; best-effort Drop can leave
+	// an old attempt uploading over the replacement's published files, including
+	// mismatched metadata and shards in the legacy multi-file stats format.
+	// Enable UseV3StatsAttemptPath once all supported readers and writers can use
+	// it, or require confirmed termination of the old writer before retrying into
+	// the shared directory. Until then, V3 stats retries are not crash-safe at the
+	// object-storage layer. This is a known correctness gap, not only a wire
+	// compatibility limitation.
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
 	return req, nil
@@ -642,10 +701,10 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 }
 
 // commitJSONKeyStats is the JsonKeyIndexJob analog of commitTextIndexStats.
-// The manifest requires absolute stat-file paths, while the result ships
-// manifest-relative paths (kept relative for the SegmentInfo dual-write and read
-// reconstruction), so it rebuilds the absolute form against the segment's stable
-// base path — exactly the conversion the worker applied before it stopped baking.
+// The manifest requires absolute stat-file paths. Workers normally return paths
+// relative to the field stats directory (including any task-attempt directory), while
+// some producers may return complete object keys; jsonKeyStatEntriesForManifest
+// accepts both.
 func (st *statsTask) commitJSONKeyStats(ctx context.Context, result *workerpb.StatsResult) error {
 	segment := st.meta.GetSegment(ctx, st.GetSegmentID())
 	if !canCommitStatsManifestDelta(segment) {
@@ -721,11 +780,11 @@ func pinnedScalarIndexVersion(textStats map[int64]*datapb.TextIndexStats) int32 
 	return 0
 }
 
-// jsonKeyStatEntriesForManifest rebuilds JSON key StatEntries with absolute file
-// paths for the manifest transaction. The segment base path is version-independent,
-// so reconstructing against the current manifest yields the same physical location
-// the worker uploaded to. It clones so the caller's manifest-relative result (reused
-// for the SegmentInfo dual-write) is left untouched.
+// jsonKeyStatEntriesForManifest normalizes JSON key StatEntries to absolute file
+// paths for the manifest transaction. Workers may return paths relative to the
+// field stats directory, including the taskID/version attempt directory. Complete object
+// keys are also accepted for compatibility. It clones so the caller's result
+// (reused for the SegmentInfo dual-write) is left untouched.
 func jsonKeyStatEntriesForManifest(manifestPath string, jsonStats map[int64]*datapb.JsonKeyStats) ([]packed.StatEntry, error) {
 	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
@@ -735,9 +794,7 @@ func jsonKeyStatEntriesForManifest(manifestPath string, jsonStats map[int64]*dat
 	for fieldID, stats := range jsonStats {
 		cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
 		prefix := fmt.Sprintf("%s/_stats/json_stats.%d", basePath, fieldID)
-		for i, f := range cloned.GetFiles() {
-			cloned.Files[i] = prefix + "/" + f
-		}
+		cloned.Files = metautil.BuildStatsFilePaths(prefix, cloned.GetFiles())
 		manifestStats[fieldID] = cloned
 	}
 	return packed.JSONKeyStatEntries(manifestStats), nil
@@ -798,6 +855,15 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 			return modPack.fail(errStatsResultDiscarded)
 		}
 		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
+			// Segment publication and the terminal task-state write are separate
+			// catalog operations. If publication succeeded but the state write did
+			// not, the next poll returns the same worker result with its old base.
+			// Seeing the result manifest as current proves that this exact result
+			// was already applied; treat it as an idempotent replay instead of
+			// deleting files now referenced by the segment.
+			if result.GetManifest() != "" && current.GetManifestPath() == result.GetManifest() {
+				return false
+			}
 			mlog.Info(ctx, "discard stale stats result",
 				mlog.FieldTaskID(taskID),
 				mlog.FieldSegmentID(segmentID),

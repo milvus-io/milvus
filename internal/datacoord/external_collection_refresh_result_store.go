@@ -62,6 +62,8 @@ func (s *externalCollectionRefreshResultStore) Save(
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
 ) (externalCollectionRefreshResultRef, error) {
+	// Preserve TaskVersion for rollback compatibility with older readers. Fresh
+	// task IDs, rather than this field, identify attempts in current DataCoord.
 	result := &datapb.ExternalCollectionRefreshTaskResult{
 		CollectionId:    task.GetCollectionId(),
 		JobId:           task.GetJobId(),
@@ -144,8 +146,7 @@ func (s *externalCollectionRefreshResultStore) Load(
 	}
 	if result.GetCollectionId() != task.GetCollectionId() ||
 		result.GetJobId() != task.GetJobId() ||
-		result.GetTaskId() != task.GetTaskId() ||
-		result.GetTaskVersion() != task.GetVersion() {
+		result.GetTaskId() != task.GetTaskId() {
 		return nil, merr.WrapErrDataIntegrityMsg(
 			"external refresh result identity mismatch for task %d",
 			task.GetTaskId(),
@@ -192,6 +193,8 @@ func (s *externalCollectionRefreshResultStore) resultPath(
 		strconv.FormatInt(task.GetCollectionId(), 10),
 		strconv.FormatInt(task.GetJobId(), 10),
 		strconv.FormatInt(task.GetTaskId(), 10),
+		// Keep the legacy version path component for rollback compatibility. It
+		// no longer provides attempt isolation; fresh task IDs do that.
 		strconv.FormatInt(task.GetVersion(), 10),
 		hex.EncodeToString(checksum)+".pb",
 	)

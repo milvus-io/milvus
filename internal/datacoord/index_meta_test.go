@@ -1439,7 +1439,7 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 	sc.On("AlterSegmentIndexes",
 		mock.Anything,
 		mock.Anything,
-	).Return(nil)
+	).Return(nil).Maybe()
 
 	indexBuildInfo := newSegmentIndexBuildInfo()
 	indexBuildInfo.Add(&model.SegmentIndex{
@@ -1503,7 +1503,7 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 	return m
 }
 
-func TestMeta_UpdateVersion(t *testing.T) {
+func TestMeta_AssignTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 	ec := catalogmocks.NewDataCoordCatalog(t)
 	ec.On("AlterSegmentIndexes",
@@ -1512,19 +1512,101 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.AssignTask(buildID, nodeID)
 		assert.NoError(t, err)
+		job, ok := m.GetIndexJob(buildID)
+		require.True(t, ok)
+		assert.Equal(t, nodeID, job.NodeID)
+		assert.Equal(t, int64(1), job.IndexVersion)
+		assert.Equal(t, commonpb.IndexState_InProgress, job.IndexState)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.AssignTask(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID+1, nodeID)
+		err := m.AssignTask(buildID+1, nodeID)
 		assert.Error(t, err)
+	})
+}
+
+func TestMeta_ReplaceRetryTask(t *testing.T) {
+	newBuildID := buildID + 100
+	setRetry := func(m *indexMeta) {
+		old, ok := m.segmentBuildInfo.Get(buildID)
+		require.True(t, ok)
+		old.IndexState = commonpb.IndexState_Retry
+		byIndex, ok := m.segmentIndexes.Get(segID)
+		require.True(t, ok)
+		current, ok := byIndex.Get(indexID)
+		require.True(t, ok)
+		current.IndexState = commonpb.IndexState_Retry
+	}
+
+	t.Run("catalog failure keeps old logical mapping", func(t *testing.T) {
+		m := updateSegmentIndexMeta(t)
+		setRetry(m)
+		catalogErr := errors.New("update failed")
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(catalogErr).Once()
+		m.catalog = catalog
+
+		replacement, replaced, err := m.ReplaceRetryTask(context.Background(), buildID, newBuildID)
+		assert.ErrorIs(t, err, catalogErr)
+		assert.False(t, replaced)
+		assert.Nil(t, replacement)
+		_, oldExists := m.GetIndexJob(buildID)
+		assert.True(t, oldExists)
+		_, newExists := m.GetIndexJob(newBuildID)
+		assert.False(t, newExists)
+		logical := m.GetSegmentIndexes(collID, segID)
+		require.Contains(t, logical, indexID)
+		assert.Equal(t, buildID, logical[indexID].BuildID)
+	})
+
+	t.Run("success atomically transfers logical mapping", func(t *testing.T) {
+		m := updateSegmentIndexMeta(t)
+		setRetry(m)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything,
+			mock.MatchedBy(func(action metastore.UpdateAction) bool {
+				entry, ok := action.Entry.(metastore.SegmentIndexEntry)
+				return ok && action.Type == metastore.ActionDelete && entry.Index.BuildID == buildID
+			}),
+			mock.MatchedBy(func(action metastore.UpdateAction) bool {
+				entry, ok := action.Entry.(metastore.SegmentIndexEntry)
+				return ok && action.Type == metastore.ActionAdd && entry.Index.BuildID == newBuildID
+			})).Return(nil).Once()
+		m.catalog = catalog
+
+		replacement, replaced, err := m.ReplaceRetryTask(context.Background(), buildID, newBuildID)
+		require.NoError(t, err)
+		require.True(t, replaced)
+		require.NotNil(t, replacement)
+		assert.Equal(t, newBuildID, replacement.BuildID)
+		assert.Equal(t, commonpb.IndexState_Unissued, replacement.IndexState)
+		assert.Zero(t, replacement.NodeID)
+		assert.Zero(t, replacement.IndexVersion)
+		_, oldExists := m.GetIndexJob(buildID)
+		assert.False(t, oldExists)
+		newTask, newExists := m.GetIndexJob(newBuildID)
+		require.True(t, newExists)
+		logical := m.GetSegmentIndexes(collID, segID)
+		require.Contains(t, logical, indexID)
+		assert.Equal(t, newBuildID, logical[indexID].BuildID)
+
+		// A late result for the retired BuildID has no metadata entry to mutate.
+		require.NoError(t, m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: buildID,
+			State:   commonpb.IndexState_Finished,
+		}))
+		current, ok := m.GetIndexJob(newBuildID)
+		require.True(t, ok)
+		assert.Equal(t, commonpb.IndexState_Unissued, current.IndexState)
+		assert.Equal(t, newTask, current)
 	})
 }
 

@@ -273,7 +273,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// schema version == 0: no consistency stats emitted
 	t.Run("schema version 0 emits no consistency stats", func(t *testing.T) {
 		collectionID := int64(9001)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 0},
 		})
@@ -291,7 +291,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// schema version > 0 but no healthy segments: no consistency stats emitted
 	t.Run("no healthy segments emits no consistency stats", func(t *testing.T) {
 		collectionID := int64(9002)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 1},
 		})
@@ -310,7 +310,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// L0 segment must not be counted in the consistency gate
 	t.Run("L0 segment excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9003)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 2},
 		})
@@ -335,7 +335,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// importing segment must not affect the consistency gate
 	t.Run("importing segment excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9004)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 3},
 		})
@@ -358,7 +358,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// all segments consistent: consistent == total
 	t.Run("all segments consistent", func(t *testing.T) {
 		collectionID := int64(9005)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 5},
 		})
@@ -378,7 +378,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// partial segments consistent: consistent < total
 	t.Run("partial segments consistent", func(t *testing.T) {
 		collectionID := int64(9006)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 7},
 		})
@@ -404,7 +404,7 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// permanently block schema-change DDLs under any write traffic.
 	t.Run("growing segments excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9007)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 9},
 		})
@@ -717,18 +717,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		mixCoord := mocks.NewMixCoord(t)
-		svr.mixCoord = mixCoord
 		channelName := "ch"
-		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionName:      "test_collection",
-				CollectionID:        req.CollectionID,
-				Schema:              &schemapb.CollectionSchema{},
-				VirtualChannelNames: []string{fmt.Sprintf("%s%d", channelName, req.CollectionID)},
-			}, nil
-		})
 
 		type testCase struct {
 			collID          int64
@@ -778,10 +767,11 @@ func TestGetSegmentsByStates(t *testing.T) {
 				expected:     []int64{9, 10},
 			},
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         1,
-			Partitions: []int64{1, 2},
-			Schema:     nil,
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            1,
+			Partitions:    []int64{1, 2},
+			Schema:        nil,
+			VChannelNames: []string{"ch1"},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -789,10 +779,11 @@ func TestGetSegmentsByStates(t *testing.T) {
 				},
 			},
 		})
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         2,
-			Partitions: []int64{3},
-			Schema:     nil,
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            2,
+			Partitions:    []int64{3},
+			Schema:        nil,
+			VChannelNames: []string{"ch2"},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -1044,7 +1035,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		vecFieldID := int64(201)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID: 0,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -1251,7 +1242,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 			defer closeTestServer(t, svr)
 			schema := newTestSchema()
 			if test.collStartPos != nil {
-				svr.meta.AddCollection(&collectionInfo{
+				svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 					ID:             0,
 					Schema:         schema,
 					StartPositions: test.collStartPos,
@@ -1341,8 +1332,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1446,9 +1438,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1514,13 +1507,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1588,9 +1585,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1621,9 +1615,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1665,9 +1660,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1704,9 +1700,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1809,21 +1806,27 @@ func TestGetCompactionState(t *testing.T) {
 				{State: datapb.CompactionTaskState_completed},
 				{State: datapb.CompactionTaskState_completed},
 				{State: datapb.CompactionTaskState_failed, PlanID: 1},
+				// timeout predates the retrying state. Nothing writes it any
+				// more, and a record that carries it is settled -- same as the
+				// old code read it.
 				{State: datapb.CompactionTaskState_timeout, PlanID: 2},
 				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
+				// retrying is what keeps a trigger running: the attempt is over
+				// but cleanup still owes it a rebuild under the same trigger ID.
+				{State: datapb.CompactionTaskState_retrying, PlanID: 3},
+				{State: datapb.CompactionTaskState_retrying},
 			})
-		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+		mockHandler := newCompactionInspector(context.Background(), mockMeta, nil, nil, nil, nil, newMockVersionManager())
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, commonpb.CompactionState_Executing, resp.GetState())
-		assert.EqualValues(t, 3, resp.GetExecutingPlanNo())
+		assert.EqualValues(t, 5, resp.GetExecutingPlanNo(),
+			"3 executing plus the 2 attempts still owed a rebuild")
 		assert.EqualValues(t, 2, resp.GetCompletedPlanNo())
 		assert.EqualValues(t, 1, resp.GetFailedPlanNo())
-		assert.EqualValues(t, 4, resp.GetTimeoutPlanNo())
+		assert.EqualValues(t, 2, resp.GetTimeoutPlanNo())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1842,11 +1845,6 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("target size zero routes to ordinary manual compaction", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
-			ID:     1,
-			Schema: &schemapb.CollectionSchema{},
-		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.MatchedBy(func(signal *compactionSignal) bool {
@@ -1857,7 +1855,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.compactionTriggerManager = mockTriggerManager
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler.EXPECT().getCompactionTasksNumByTriggerID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1872,11 +1870,6 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
-			ID:     1,
-			Schema: &schemapb.CollectionSchema{},
-		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
 		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.MatchedBy(func(req *milvuspb.ManualCompactionRequest) bool {
@@ -1884,7 +1877,7 @@ func TestManualCompaction(t *testing.T) {
 		})).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler.EXPECT().getCompactionTasksNumByTriggerID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1995,11 +1988,6 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
-			ID:     1,
-			Schema: &schemapb.CollectionSchema{},
-		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))
@@ -2686,12 +2674,13 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 }
 
 func Test_CheckHealth(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(449684528748778322, &collectionInfo{
-		ID:            449684528748778322,
-		VChannelNames: []string{"ch1", "ch2"},
-	})
-	collections.Insert(2, nil)
+	const collectionID = int64(449684528748778322)
+	handler := &mockHandler{collectionGetter: func(_ context.Context, id UniqueID) (*collectionInfo, error) {
+		if id == collectionID {
+			return &collectionInfo{ID: id}, nil
+		}
+		return nil, merr.WrapErrCollectionNotFound(id)
+	}}
 
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -2707,7 +2696,6 @@ func Test_CheckHealth(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.meta = &meta{
-			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
@@ -2717,6 +2705,7 @@ func Test_CheckHealth(t *testing.T) {
 				},
 			},
 		}
+		svr.handler = handler
 
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -2729,7 +2718,6 @@ func Test_CheckHealth(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.meta = &meta{
-			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
@@ -2747,6 +2735,7 @@ func Test_CheckHealth(t *testing.T) {
 				},
 			},
 		}
+		svr.handler = handler
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2803,23 +2792,20 @@ func Test_initGarbageCollection(t *testing.T) {
 	})
 }
 
-func TestLoadCollectionFromRootCoord(t *testing.T) {
+func TestGetCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
-	s := &Server{
-		broker: broker,
-		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-	}
+	s := &Server{broker: broker}
 
 	t.Run("has collection fail with error", func(t *testing.T) {
 		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
 			Return(false, errors.New("has collection error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		_, err := s.getCollectionFromRootCoord(context.TODO(), 0)
 		assert.Error(t, err, "has collection error")
 	})
 
 	t.Run("has collection with not found", func(t *testing.T) {
 		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		_, err := s.getCollectionFromRootCoord(context.TODO(), 0)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
 	})
@@ -2829,7 +2815,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	t.Run("describeCollectionInternal fail", func(t *testing.T) {
 		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(nil, errors.New("describeCollectionInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		_, err := s.getCollectionFromRootCoord(context.TODO(), 0)
 		assert.Error(t, err, "describeCollectionInternal error")
 	})
 
@@ -2840,18 +2826,43 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
 		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
 			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		_, err := s.getCollectionFromRootCoord(context.TODO(), 0)
 		assert.Error(t, err, "ShowPartitionsInternal error")
 	})
 
 	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
 	t.Run("ok", func(t *testing.T) {
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		collection, err := s.getCollectionFromRootCoord(context.TODO(), 0)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
-		_, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
+		require.NotNil(t, collection)
+		assert.Equal(t, int64(1), collection.ID)
+		assert.Equal(t, []int64{2000}, collection.Partitions)
 	})
+}
+
+func TestServerHandlerGetCollectionDoesNotCache(t *testing.T) {
+	brk := broker.NewMockBroker(t)
+	brk.EXPECT().HasCollection(mock.Anything, int64(100)).Return(true, nil).Twice()
+
+	describeCall := 0
+	brk.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).
+		RunAndReturn(func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+			describeCall++
+			return &milvuspb.DescribeCollectionResponse{
+				CollectionID: 100,
+				Schema:       &schemapb.CollectionSchema{Version: int32(describeCall)},
+			}, nil
+		}).Twice()
+	brk.EXPECT().ShowPartitionsInternal(mock.Anything, int64(100)).Return([]int64{10}, nil).Twice()
+
+	handler := newServerHandler(&Server{broker: brk})
+	first, err := handler.GetCollection(context.Background(), 100)
+	require.NoError(t, err)
+	second, err := handler.GetCollection(context.Background(), 100)
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), first.Schema.GetVersion())
+	require.Equal(t, int32(2), second.Schema.GetVersion())
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {

@@ -32,8 +32,11 @@ import (
 // RootCoord remains the authoritative schema owner and avoids stale-cache
 // overwrites that can occur when DataCoord broadcasts full schema directly.
 func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID int64, externalSource, externalSpec string) error {
-	coll := s.meta.GetClonedCollectionInfo(collectionID)
-	if coll == nil {
+	coll, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if coll == nil || coll.Schema == nil {
 		return merr.WrapErrCollectionNotFound(collectionID)
 	}
 
@@ -51,7 +54,7 @@ func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID in
 
 	mlog.Info(ctx, "updated external schema via RootCoord after refresh",
 		mlog.FieldCollectionID(collectionID),
-		mlog.String("externalSource", externalSource),
+		mlog.String("externalSource", externalspec.RedactExternalSource(externalSource)),
 		mlog.String("externalSpec", externalspec.RedactExternalSpecForLog(externalSpec)))
 	return nil
 }

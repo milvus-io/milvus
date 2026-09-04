@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -81,6 +82,27 @@ func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollectionAbnormal
 	})
 	res := suite.meta.GetCompactionTasksByCollection(101)
 	suite.Equal(1, len(res))
+}
+
+func (suite *CompactionTaskMetaSuite) TestReplaceCompactionTask() {
+	oldTask := &datapb.CompactionTask{TriggerID: 1, PlanID: 10}
+	newTask := &datapb.CompactionTask{TriggerID: 1, PlanID: 20}
+	suite.NoError(suite.meta.SaveCompactionTask(context.TODO(), oldTask))
+
+	suite.catalog.EXPECT().Update(mock.Anything,
+		mock.MatchedBy(func(action metastore.UpdateAction) bool {
+			entry, ok := action.Entry.(metastore.CompactionTaskEntry)
+			return ok && action.Type == metastore.ActionDelete && entry.Task.GetPlanID() == oldTask.GetPlanID()
+		}),
+		mock.MatchedBy(func(action metastore.UpdateAction) bool {
+			entry, ok := action.Entry.(metastore.CompactionTaskEntry)
+			return ok && action.Type == metastore.ActionAdd && entry.Task.GetPlanID() == newTask.GetPlanID()
+		})).Return(nil).Once()
+
+	suite.NoError(suite.meta.ReplaceCompactionTask(context.TODO(), oldTask, newTask))
+	tasks := suite.meta.GetCompactionTasksByTriggerID(oldTask.GetTriggerID())
+	suite.Require().Len(tasks, 1)
+	suite.Equal(newTask.GetPlanID(), tasks[0].GetPlanID())
 }
 
 func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {

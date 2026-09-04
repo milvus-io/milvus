@@ -21,6 +21,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -32,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -74,10 +78,6 @@ func (s *ImportInspectorSuite) SetupTest() {
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, broker)
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
-		ID:     s.collectionID,
-		Schema: newTestSchema(),
-	})
 	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
 	scheduler := task2.NewMockGlobalScheduler(s.T())
@@ -238,27 +238,139 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 	s.NoError(err)
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	for _, id := range task.(*importTask).GetSegmentIDs() {
+	originSegmentIDs := append([]int64(nil), task.(*importTask).GetSegmentIDs()...)
+	for _, id := range originSegmentIDs {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Importing, IsImporting: true},
 		}
 		err = s.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 	}
-	for _, id := range task.(*importTask).GetSegmentIDs() {
+	for _, id := range originSegmentIDs {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.NotNil(segment)
 	}
+	const sortedOutputID = int64(6)
+	err = s.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             sortedOutputID,
+		State:          commonpb.SegmentState_Flushed,
+		IsImporting:    true,
+		CompactionFrom: []int64{originSegmentIDs[0]},
+	}))
+	s.NoError(err)
+
+	// Cleanup must read the compaction edge only after the origin is dropped.
+	// At that point a concurrent sort either already published its output, or
+	// its completion will reject the unhealthy origin.
+	checkedOrigins := make(map[int64]bool)
+	var getCompactionTo func(*meta, int64) ([]*SegmentInfo, bool)
+	mockGetCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(
+		func(meta *meta, originID int64) ([]*SegmentInfo, bool) {
+			origin := meta.GetSegment(context.TODO(), originID)
+			s.Require().NotNil(origin)
+			s.Equal(commonpb.SegmentState_Dropped, origin.GetState())
+			checkedOrigins[originID] = true
+			return getCompactionTo(meta, originID)
+		}).Origin(&getCompactionTo).Build()
+	defer mockGetCompactionTo.UnPatch()
 
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	s.inspector.inspect()
-	for _, id := range task.(*importTask).GetSegmentIDs() {
+	s.Len(checkedOrigins, len(originSegmentIDs))
+	for _, id := range append(originSegmentIDs, sortedOutputID) {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+		s.False(segment.GetIsImporting())
 	}
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
-	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
+	s.Empty(task.(*importTask).GetSegmentIDs())
+	s.Empty(task.(*importTask).GetSortedSegmentIDs())
+}
+
+func (s *ImportInspectorSuite) TestProcessPreImportRetryPublishesFreshID() {
+	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	s.alloc.EXPECT().AllocID(mock.Anything).Return(int64(12), nil).Once()
+
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 10, State: internalpb.ImportJobState_PreImporting,
+	}}
+	s.NoError(s.importMeta.AddJob(context.TODO(), job))
+	oldTask := &preImportTask{alloc: s.alloc, importMeta: s.importMeta, tr: timerecord.NewTimeRecorder("preimport retry")}
+	oldTask.task.Store(&datapb.PreImportTask{
+		JobID: 10, TaskID: 11, CollectionID: s.collectionID,
+		State: datapb.ImportTaskStateV2_Retry, NodeID: NullNodeID, TaskVersion: 2,
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), oldTask))
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).
+		Run(func(task task2.Task) {
+			s.Equal(int64(12), task.GetTaskID())
+		}).Once()
+
+	s.inspector.inspect()
+	s.Nil(s.importMeta.GetTask(context.TODO(), int64(11)))
+	updated := s.importMeta.GetTask(context.TODO(), int64(12))
+	s.Require().NotNil(updated)
+	s.Equal(datapb.ImportTaskStateV2_Pending, updated.GetState())
+	s.Equal(int64(3), updated.GetTaskVersion())
+	s.Equal(datapb.ImportTaskStateV2_Retry, oldTask.GetState())
+}
+
+func (s *ImportInspectorSuite) TestRetryAttemptCapFailsJob() {
+	key := Params.DataCoordCfg.ImportMaxAttempts.Key
+	Params.Save(key, "2")
+	defer Params.Reset(key)
+
+	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 20}}
+	s.NoError(s.importMeta.AddJob(context.TODO(), job))
+	task := &preImportTask{importMeta: s.importMeta, tr: timerecord.NewTimeRecorder("spent retry")}
+	task.task.Store(&datapb.PreImportTask{
+		JobID: 20, TaskID: 21, CollectionID: s.collectionID,
+		State: datapb.ImportTaskStateV2_Retry, TaskVersion: 1, Reason: "worker unavailable",
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.inspector.inspect()
+	updatedJob := s.importMeta.GetJob(context.TODO(), job.GetJobID())
+	s.Equal(internalpb.ImportJobState_Failed, updatedJob.GetState())
+	s.Contains(updatedJob.GetReason(), "attempt limit (2)")
+	// The checker owns task settlement and cleanup after the job decision.
+	s.Equal(datapb.ImportTaskStateV2_Retry, s.importMeta.GetTask(context.TODO(), task.GetTaskID()).GetState())
+}
+
+func (s *ImportInspectorSuite) TestRetryAttemptCapDecisionFailsStopAfterCatalogFailure() {
+	key := Params.DataCoordCfg.ImportMaxAttempts.Key
+	Params.Save(key, "1")
+	defer Params.Reset(key)
+
+	// AddJob succeeds, then the terminal decision gets an ambiguous response.
+	// Fail-stop leaves the Retry task as durable debt for restart recovery.
+	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(errors.New("mock save job err")).Once()
+	s.catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 30}}
+	s.NoError(s.importMeta.AddJob(context.TODO(), job))
+	task := &preImportTask{importMeta: s.importMeta, tr: timerecord.NewTimeRecorder("spent retry")}
+	task.task.Store(&datapb.PreImportTask{
+		JobID: 30, TaskID: 31, CollectionID: s.collectionID,
+		State: datapb.ImportTaskStateV2_Retry,
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
+
+	s.inspector.inspect()
+	s.True(fatalCalled)
+	s.NotEqual(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(datapb.ImportTaskStateV2_Retry, s.importMeta.GetTask(context.TODO(), task.GetTaskID()).GetState())
 }
 
 func (s *ImportInspectorSuite) TestReloadFromMeta() {
@@ -328,7 +440,7 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	_ = s.importMeta.AddTask(context.TODO(), pendingImportTask)
 
 	// Mock scheduler expectations
-	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(3)
 	s.inspector.reloadFromMeta()
 }
 

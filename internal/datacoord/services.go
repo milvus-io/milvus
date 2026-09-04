@@ -38,6 +38,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -248,13 +249,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			mlog.Uint32("count", r.GetCount()),
 		)
 
-		// Load the collection info from Root Coordinator, if it is not found in server meta.
-		// Note: this request wouldn't be received if collection didn't exist.
-		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
-		if err != nil {
-			mlog.Warn(context.TODO(), "cannot get collection schema", mlog.Err(err))
-		}
-
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
@@ -412,7 +406,11 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 
 	// Calculate schema version consistency proportion
 	// Only report when schema version > 0 (i.e., AlterCollectionSchema has been called)
-	collection := s.meta.GetCollection(req.CollectionID)
+	collection, err := s.handler.GetCollection(ctx, req.CollectionID)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	if collection != nil && collection.Schema != nil && collection.Schema.GetVersion() > 0 {
 		collectionSchemaVersion := collection.Schema.GetVersion()
 		// Growing segments are excluded from the consistency gate as a workaround until
@@ -661,7 +659,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 		incomingStorageVersion := req.GetStorageVersion()
-		if err := s.validateTextSegmentStorage(req, incomingStorageVersion); err != nil {
+		if err := s.validateTextSegmentStorage(ctx, req, incomingStorageVersion); err != nil {
 			mlog.Warn(context.TODO(), "invalid TEXT segment storage format", mlog.Err(err))
 			return merr.Status(err), nil
 		}
@@ -761,11 +759,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return merr.Success(), nil
 }
 
-func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, storageVersion int64) error {
+func (s *Server) validateTextSegmentStorage(ctx context.Context, req *datapb.SaveBinlogPathsRequest, storageVersion int64) error {
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
 		return nil
 	}
-	textFieldIDs := s.meta.collectionTextFieldIDs(req.GetCollectionID())
+	textFieldIDs, err := s.meta.collectionTextFieldIDs(ctx, req.GetCollectionID())
+	if err != nil {
+		return err
+	}
 	if len(textFieldIDs) == 0 {
 		return nil
 	}
@@ -1381,7 +1382,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
+	taskCnt := s.compactionInspector.getCompactionTasksNumByTriggerID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
@@ -1773,35 +1774,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	// get collection info from cache
-	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
-
-	properties := make(map[string]string)
-	for _, pair := range req.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
-	}
-
-	// cache miss and update cache
-	if clonedColl == nil {
-		collInfo := &collectionInfo{
-			ID:             req.GetCollectionID(),
-			Schema:         req.GetSchema(),
-			Partitions:     req.GetPartitionIDs(),
-			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
-			DatabaseID:     req.GetDbID(),
-			DatabaseName:   req.GetSchema().GetDbName(),
-			VChannelNames:  req.GetVChannels(),
-		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
-	}
-
-	clonedColl.Properties = properties
-	// add field will change the schema
-	clonedColl.Schema = req.GetSchema()
-	s.meta.AddCollection(clonedColl)
+	// RootCoord owns collection metadata. This compatibility callback remains
+	// as an acknowledgement point, but DataCoord has no collection cache to
+	// update.
 	return merr.Success(), nil
 }
 
@@ -1813,7 +1788,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		}, nil
 	}
 
-	if err := CheckCheckPointsHealth(s.meta); err != nil {
+	if err := CheckCheckPointsHealth(ctx, s.meta, s.handler); err != nil {
 		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
@@ -2242,11 +2217,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
-	// Resolve collection identity for the broadcast lock set (also validates
-	// collection existence). Read from the datacoord-local meta cache via
-	// handler.GetCollection — avoids a cross-component RPC to MixCoord on every
-	// CreateSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Resolve the current collection identity from RootCoord for the broadcast
+	// lock set; this also validates that the collection still exists.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
@@ -2390,10 +2362,8 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// Dropping a snapshot must serialize against concurrent DropCollection / AlterCollection
 	// on the owning collection, otherwise DropSnapshot can race with a cascade drop path.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every DropSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Resolve it from RootCoord instead of retaining a second metadata copy in
+	// DataCoord.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "DropSnapshot failed to resolve collection", mlog.Err(err))
@@ -2799,10 +2769,8 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 	// collection to exist before we can acquire the locks that serialize Pin
 	// against DropSnapshot / DropCollection.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every PinSnapshotData, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Resolve it from RootCoord instead of retaining a second metadata copy in
+	// DataCoord.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "PinSnapshotData failed to resolve collection", mlog.Err(err))
@@ -3032,23 +3000,11 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 	}, nil
 }
 
-// broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
-// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
-// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
-// before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
-func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
+// appendCommitImportMessage appends the CommitImport fence through an already
+// locked broadcaster. Keeping lock acquisition in commitImport ensures the
+// durable Committing write and WAL publication share one DDL critical section.
+func appendCommitImportMessage(ctx context.Context, b broadcaster.BroadcastAPI, job ImportJob) error {
 	vchannels := job.GetVchannels()
-	if len(vchannels) == 0 {
-		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
-	}
-
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
 			CollectionId: job.GetCollectionID(),
@@ -3058,8 +3014,59 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
-	_, err = broadcaster.Broadcast(ctx, msg)
+	_, err := b.Broadcast(ctx, msg)
 	return err
+}
+
+// commitImport acquires the existing collection DDL lock before publishing the
+// durable commit intent. This prevents a later collection DDL from being
+// ordered between Committing and creation of the CommitImport broadcast task.
+func (s *Server) commitImport(ctx context.Context, job ImportJob) error {
+	if len(job.GetVchannels()) == 0 {
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
+	}
+	metaCtx := s.ctx
+	if metaCtx == nil {
+		metaCtx = ctx
+	}
+	b, err := s.startBroadcastWithCollectionID(metaCtx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+
+	if err := s.importMeta.UpdateJob(metaCtx, job.GetJobID(),
+		UpdateJobState(internalpb.ImportJobState_Committing)); err != nil {
+		// A failed catalog response is ambiguous. Continuing could let a
+		// timeout overwrite a durable commit intent with Failed. A canceled
+		// request is not a safe shutdown signal while the server is still alive.
+		if metaCtx.Err() == nil {
+			mlog.Fatal(ctx, "import commit intent publication failed; terminating process",
+				mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+		}
+		return err
+	}
+
+	updated := s.importMeta.GetJob(metaCtx, job.GetJobID())
+	if updated == nil {
+		return merr.WrapErrImportSysFailedMsg("job %d not found after entering commit phase", job.GetJobID())
+	}
+	if updated.GetState() == internalpb.ImportJobState_Completed {
+		return nil
+	}
+	if updated.GetState() != internalpb.ImportJobState_Committing {
+		return merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d is in state %s, cannot commit", job.GetJobID(), updated.GetState()))
+	}
+
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		uncommittedDuration := updated.GetTR().RecordSpan()
+		mlog.Info(ctx, "import job uncommitted stage done",
+			mlog.FieldJobID(updated.GetJobID()),
+			mlog.Duration("jobTimeCost/uncommitted", uncommittedDuration))
+	}
+	mlog.Info(ctx, "committing import job via WAL broadcast", mlog.FieldJobID(updated.GetJobID()))
+	return appendCommitImportMessage(metaCtx, b, updated)
 }
 
 // errRollbackImportNoVchannels marks a rollback that can never be delivered: the job
@@ -3138,7 +3145,9 @@ func (s *Server) validateAndExecuteImportAction(
 }
 
 // CommitImport commits a 2PC import job so that the imported data becomes visible.
-// It transitions the job from Uncommitted → Committing by broadcasting a CommitImport WAL message.
+// It persists Uncommitted → Committing before broadcasting a CommitImport WAL
+// message. The import checker replays that durable intent until every vchannel
+// has committed.
 // The call is idempotent: if the job is already Committing or Completed it returns success.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
@@ -3154,8 +3163,7 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 			}
 		},
 		func(ctx context.Context, job ImportJob) error {
-			mlog.Info(context.TODO(), "committing import job via WAL broadcast")
-			return s.broadcastCommitImportMessage(ctx, job)
+			return s.commitImport(ctx, job)
 		},
 	)
 }
@@ -3215,7 +3223,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
 
 	commitTs := req.GetCommitTimestamp()
-	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
+	metaCtx := s.ctx
+	if metaCtx == nil {
+		metaCtx = ctx
+	}
+	err := s.importMeta.HandleCommitVchannel(metaCtx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
 		// Set CommitTimestamp and clear isImporting in a single call per segment.
 		ops := make([]UpdateOperator, 0, len(segIDs)*2)
@@ -3247,10 +3259,17 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 		if !ok {
 			continue
 		}
-		// Collect all candidate segment IDs from this task (safe copies).
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		// Collect all candidate segment IDs from this task (safe copies):
+		// origins plus their sorted outputs, discovered through the
+		// compactionTo edge.
+		candidates := append([]int64{}, it.GetSegmentIDs()...)
+		for _, originID := range it.GetSegmentIDs() {
+			if outputs, _ := s.meta.GetCompactionTo(originID); len(outputs) > 0 {
+				for _, output := range outputs {
+					candidates = append(candidates, output.GetID())
+				}
+			}
+		}
 		for _, segID := range candidates {
 			seg := s.meta.GetSegment(ctx, segID)
 			if seg == nil {

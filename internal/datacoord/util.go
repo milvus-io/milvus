@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
@@ -353,16 +354,20 @@ func getTotalBinlogRows(segment *SegmentInfo, fieldID int64) int64 {
 	return total
 }
 
-func CheckCheckPointsHealth(meta *meta) error {
+func CheckCheckPointsHealth(ctx context.Context, meta *meta, handler Handler) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
 		if collectionID == -1 {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
+			mlog.RatedWarn(ctx, rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
-		if meta.GetCollection(collectionID) == nil {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
+		collection, err := handler.GetCollection(ctx, collectionID)
+		if errors.Is(err, merr.ErrCollectionNotFound) || (err == nil && collection == nil) {
+			mlog.RatedWarn(ctx, rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
+		}
+		if err != nil {
+			return err
 		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
 		lag := time.Since(ts)
@@ -588,8 +593,28 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 	return max(defaultSlots/8, 1)
 }
 
+// enableSortCompaction reports whether sort compaction runs at all. Sort is
+// always on; the only remaining gate is the global dataCoord.enableCompaction
+// switch, which stops the trigger producers of new compaction work (flush
+// publishing invisible segments, trigger-based sort planning) while still
+// letting already-owed segments drain through the inspector.
 func enableSortCompaction() bool {
-	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+	return paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+}
+
+// sortCompactionAllowed reports whether a sort compaction may be planned for
+// this segment right now. The switch gates only new work: a segment already
+// published invisible is owed a sort no switch can disown -- sorting is its
+// only path to being served -- while sorting a visible segment is an
+// optimization the switch controls.
+func sortCompactionAllowed(segment *SegmentInfo) bool {
+	return segment.GetIsInvisible() || enableSortCompaction()
+}
+
+// segmentAwaitsSort reports whether downstream work (indexing) should wait for
+// this segment's sorted replacement instead of taking the segment as it is.
+func segmentAwaitsSort(segment *SegmentInfo) bool {
+	return !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && sortCompactionAllowed(segment)
 }
 
 // stringifyBinlogs is used for logging, it's not used for other purposes.

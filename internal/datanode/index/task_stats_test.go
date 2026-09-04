@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -313,6 +315,55 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 	})
 }
 
+func (s *TaskStatsSuite) TestComputeStatsBasePath() {
+	manifest := packed.MarshalManifestPath("files/insert_log/1/2/3", 7)
+	v3Request := &workerpb.CreateStatsRequest{
+		TaskID:         42,
+		TaskVersion:    9,
+		StorageVersion: storage.StorageV3,
+	}
+
+	// The wire flag defaults to false, keeping the pre-3.0.2 layout exactly.
+	textPath, err := computeStatsBasePath(v3Request, manifest, "text_index", 100)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/text_index.100", textPath)
+	jsonPath, err := computeStatsBasePath(v3Request, manifest, "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/json_stats.101", jsonPath)
+
+	v3Request.UseV3StatsAttemptPath = true
+	originalVersion := common.Version
+	defer func() { common.Version = originalVersion }()
+	common.Version = semver.MustParse("3.0.1")
+	textPath, err = computeStatsBasePath(v3Request, manifest, "text_index", 100)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/text_index.100", textPath)
+
+	common.Version = common.MinVersionForV3StatsAttemptPath
+	textPath, err = computeStatsBasePath(v3Request, manifest, "text_index", 100)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/text_index.100/42", textPath)
+	jsonPath, err = computeStatsBasePath(v3Request, manifest, "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/json_stats.101/42", jsonPath)
+
+	// The legacy V2 layout is kept byte-for-byte compatible. Older persisted
+	// segment metadata still derives paths from both task ID and version.
+	v2Request := &workerpb.CreateStatsRequest{
+		TaskID:          42,
+		TaskVersion:     9,
+		CollectionID:    1,
+		PartitionID:     2,
+		TargetSegmentID: 3,
+		StorageVersion:  storage.StorageV2,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "files"},
+	}
+	legacyPath, err := computeStatsBasePath(v2Request, "", "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal(metautil.BuildJSONKeyStatsPrefix("files", common.JSONStatsDataFormatVersion,
+		42, 9, 1, 2, 3, 101), legacyPath)
+}
+
 func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	const fieldID = int64(101)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -396,9 +447,9 @@ func TestStandaloneJSONKeyJobSkipsManifestBake(t *testing.T) {
 	basePath := t.TempDir() + "/insert_log/1/2/103"
 	baseManifest := packed.MarshalManifestPath(basePath, 1)
 
-	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
+	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string, storedFiles []string) {
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
 		req := &workerpb.CreateStatsRequest{
 			ClusterID:              clusterID,
 			TaskID:                 taskID,
@@ -438,15 +489,19 @@ func TestStandaloneJSONKeyJobSkipsManifestBake(t *testing.T) {
 		err := st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
 			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
 		require.NoError(t, err)
-		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+		stored := mgr.GetStatsTaskInfo(clusterID, taskID)
+		return baked, stored.Manifest, stored.JSONKeyStatsLogs[fieldID].GetFiles()
 	}
 
-	baked, storedManifest := run(indexpb.StatsSubJob_JsonKeyIndexJob)
+	baked, storedManifest, storedFiles := run(indexpb.StatsSubJob_JsonKeyIndexJob)
 	require.False(t, baked, "standalone JsonKeyIndexJob must not pre-bake the manifest")
 	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+	require.Equal(t, []string{"json-stats"}, storedFiles,
+		"standalone result must stay field-relative for old DataCoord compatibility")
 
-	baked, _ = run(indexpb.StatsSubJob_Sort)
+	baked, _, storedFiles = run(indexpb.StatsSubJob_Sort)
 	require.True(t, baked, "Sort sub-job must bake stats into the target-segment manifest inline")
+	require.Equal(t, []string{basePath + "/_stats/json_stats.500/json-stats"}, storedFiles)
 }
 
 // TestStandaloneTextIndexJobSkipsManifestBake is the text-index analog of
@@ -466,7 +521,7 @@ func TestStandaloneTextIndexJobSkipsManifestBake(t *testing.T) {
 
 	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
 		req := &workerpb.CreateStatsRequest{
 			ClusterID:       clusterID,
 			TaskID:          taskID,

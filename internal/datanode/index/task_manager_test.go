@@ -19,6 +19,7 @@ package index
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -85,12 +86,12 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsTaskState", func() {
-		s.manager.StoreStatsTaskState(s.cluster, s.taskID, indexpb.JobState_JobStateFinished, "finished")
+		s.manager.StoreStatsTaskState(s.cluster, s.taskID, 0, indexpb.JobState_JobStateFinished, "finished")
 		s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetStatsTaskState(s.cluster, s.taskID))
 	})
 
 	s.Run("storeStatsResult", func() {
-		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
+		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, 0, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
@@ -99,7 +100,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsTextIndexResult", func() {
-		s.manager.StoreStatsTextIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+		s.manager.StoreStatsTextIndexResult(s.cluster, s.taskID, 0, 1, 2, 3, "ch1",
 			map[int64]*datapb.TextIndexStats{
 				100: {
 					FieldID:    100,
@@ -115,7 +116,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsJsonIndexResult", func() {
-		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, 0, 1, 2, 3, "ch1",
 			jsonKeyStatsLogs, baseManifest, manifest)
 	})
 
@@ -157,6 +158,85 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 }
 
+func (s *statsTaskInfoSuite) Test_RemoveExpiredTasks() {
+	manager := NewTaskManager(context.Background())
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
+
+	indexCtx, indexCancel := context.WithCancel(context.Background())
+	defer indexCancel()
+	analyzeCtx, analyzeCancel := context.WithCancel(context.Background())
+	defer analyzeCancel()
+	statsCtx, statsCancel := context.WithCancel(context.Background())
+	defer statsCancel()
+	_, freshCancel := context.WithCancel(context.Background())
+	defer freshCancel()
+	runningCtx, runningCancel := context.WithCancel(context.Background())
+	defer runningCancel()
+	runningIndexCtx, runningIndexCancel := context.WithCancel(context.Background())
+	defer runningIndexCancel()
+	runningStatsCtx, runningStatsCancel := context.WithCancel(context.Background())
+	defer runningStatsCancel()
+
+	manager.LoadOrStoreIndexTask("cluster", 1, &IndexTaskInfo{
+		Cancel: indexCancel, StartedAt: cutoff, State: commonpb.IndexState_Finished,
+	})
+	manager.LoadOrStoreAnalyzeTask("cluster", 2, &AnalyzeTaskInfo{
+		Cancel: analyzeCancel, StartedAt: cutoff, State: indexpb.JobState_JobStateFailed,
+	})
+	manager.LoadOrStoreStatsTask("cluster", 3, &StatsTaskInfo{
+		Cancel: statsCancel, StartedAt: cutoff, State: indexpb.JobState_JobStateRetry,
+	})
+	manager.LoadOrStoreIndexTask("cluster", 4, &IndexTaskInfo{
+		Cancel: freshCancel, StartedAt: cutoff.Add(time.Second), State: commonpb.IndexState_Finished,
+	})
+	manager.LoadOrStoreAnalyzeTask("cluster", 5, &AnalyzeTaskInfo{
+		Cancel: runningCancel, StartedAt: cutoff.Add(-time.Hour), State: indexpb.JobState_JobStateInProgress,
+	})
+	manager.LoadOrStoreIndexTask("cluster", 6, &IndexTaskInfo{
+		Cancel: runningIndexCancel, StartedAt: cutoff.Add(-time.Hour), State: commonpb.IndexState_InProgress,
+	})
+	manager.LoadOrStoreStatsTask("cluster", 7, &StatsTaskInfo{
+		Cancel: runningStatsCancel, StartedAt: cutoff.Add(-time.Hour), State: indexpb.JobState_JobStateInProgress,
+	})
+	manager.LoadOrStoreIndexTask("cluster", 8, &IndexTaskInfo{
+		StartedAt: cutoff.Add(-time.Hour), State: commonpb.IndexState_Unissued,
+	})
+	manager.LoadOrStoreAnalyzeTask("cluster", 9, &AnalyzeTaskInfo{
+		StartedAt: cutoff.Add(-time.Hour), State: indexpb.JobState_JobStateRetry,
+	})
+	manager.LoadOrStoreStatsTask("cluster", 10, &StatsTaskInfo{
+		StartedAt: cutoff.Add(-time.Hour), State: indexpb.JobState_JobStateInit,
+	})
+
+	s.Equal(9, manager.RemoveExpiredTasks(context.Background(), cutoff))
+	s.Nil(manager.GetIndexTaskInfo("cluster", 1))
+	s.Nil(manager.GetAnalyzeTaskInfo("cluster", 2))
+	s.Nil(manager.GetStatsTaskInfo("cluster", 3))
+	s.NotNil(manager.GetIndexTaskInfo("cluster", 4))
+	s.Nil(manager.GetAnalyzeTaskInfo("cluster", 5))
+	s.Nil(manager.GetIndexTaskInfo("cluster", 6))
+	s.Nil(manager.GetStatsTaskInfo("cluster", 7))
+	s.Nil(manager.GetIndexTaskInfo("cluster", 8))
+	s.Nil(manager.GetAnalyzeTaskInfo("cluster", 9))
+	s.Nil(manager.GetStatsTaskInfo("cluster", 10))
+
+	for _, ctx := range []context.Context{indexCtx, analyzeCtx, statsCtx} {
+		select {
+		case <-ctx.Done():
+		default:
+			s.Fail("reclaiming an expired task must cancel its context")
+		}
+	}
+	for _, ctx := range []context.Context{runningCtx, runningIndexCtx, runningStatsCtx} {
+		select {
+		case <-ctx.Done():
+		default:
+			s.Fail("reclaiming an expired running task must cancel its context")
+		}
+	}
+}
+
 func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	buildID := int64(200)
 	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
@@ -184,4 +264,55 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	s.Equal(int64(8), reloaded.CostCPUNum)
 	s.Equal(int64(0), reloaded.ExecEndMs)
 	s.Equal(int64(0), reloaded.CostTimeMs)
+}
+
+func (s *statsTaskInfoSuite) Test_LateAttemptCannotOverwriteReplacement() {
+	const (
+		oldVersion = int64(1)
+		newVersion = int64(2)
+	)
+
+	oldIndexID, newIndexID := int64(301), int64(302)
+	s.manager.LoadOrStoreIndexTask(s.cluster, oldIndexID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
+	s.manager.LoadOrStoreIndexTask(s.cluster, newIndexID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
+	s.manager.StoreIndexTaskState(s.cluster, oldIndexID, commonpb.IndexState_Failed, "old attempt")
+	s.manager.StoreIndexFilesAndStatistic(s.cluster, oldIndexID, []string{"old"}, 1, 1, 1, 1,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)
+	indexInfo := s.manager.GetIndexTaskInfo(s.cluster, newIndexID)
+	s.Equal(commonpb.IndexState_InProgress, indexInfo.State)
+	s.Empty(indexInfo.FileKeys)
+	s.manager.StoreIndexTaskState(s.cluster, newIndexID, commonpb.IndexState_Finished, "")
+	s.Equal(commonpb.IndexState_Finished, s.manager.GetIndexTaskInfo(s.cluster, newIndexID).State)
+	s.NotEmpty(s.manager.DeleteIndexTaskInfos(s.ctx, []Key{{ClusterID: s.cluster, TaskID: oldIndexID}}))
+	s.Nil(s.manager.GetIndexTaskInfo(s.cluster, oldIndexID))
+	s.NotNil(s.manager.GetIndexTaskInfo(s.cluster, newIndexID))
+
+	oldAnalyzeID, newAnalyzeID := int64(303), int64(304)
+	s.manager.LoadOrStoreAnalyzeTask(s.cluster, oldAnalyzeID, &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress})
+	s.manager.LoadOrStoreAnalyzeTask(s.cluster, newAnalyzeID, &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress})
+	s.manager.StoreAnalyzeFilesAndStatistic(s.cluster, oldAnalyzeID, "old-centroids")
+	s.manager.StoreAnalyzeTaskState(s.cluster, oldAnalyzeID, indexpb.JobState_JobStateFailed, "old attempt")
+	analyzeInfo := s.manager.GetAnalyzeTaskInfo(s.cluster, newAnalyzeID)
+	s.Equal(indexpb.JobState_JobStateInProgress, analyzeInfo.State)
+	s.Empty(analyzeInfo.CentroidsFile)
+	s.manager.StoreAnalyzeTaskState(s.cluster, newAnalyzeID, indexpb.JobState_JobStateFinished, "")
+	s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetAnalyzeTaskInfo(s.cluster, newAnalyzeID).State)
+	s.NotEmpty(s.manager.DeleteAnalyzeTaskInfos(s.ctx, []Key{{ClusterID: s.cluster, TaskID: oldAnalyzeID}}))
+	s.Nil(s.manager.GetAnalyzeTaskInfo(s.cluster, oldAnalyzeID))
+	s.NotNil(s.manager.GetAnalyzeTaskInfo(s.cluster, newAnalyzeID))
+
+	statsID := int64(305)
+	s.manager.LoadOrStoreStatsTask(s.cluster, statsID, &StatsTaskInfo{
+		Version: newVersion,
+		State:   indexpb.JobState_JobStateInProgress,
+	})
+	s.manager.StorePKSortStatsResult(s.cluster, statsID, oldVersion, 1, 2, 3, "old", 4, nil, nil, nil, "old-manifest")
+	s.manager.StoreStatsTaskState(s.cluster, statsID, oldVersion, indexpb.JobState_JobStateFailed, "old attempt")
+	statsInfo := s.manager.GetStatsTaskInfo(s.cluster, statsID)
+	s.Equal(indexpb.JobState_JobStateInProgress, statsInfo.State)
+	s.Empty(statsInfo.Manifest)
+	s.manager.StoreStatsTaskState(s.cluster, statsID, newVersion, indexpb.JobState_JobStateFinished, "")
+	s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetStatsTaskInfo(s.cluster, statsID).State)
+	s.Nil(s.manager.DeleteStatsTaskInfoIfVersion(s.ctx, Key{ClusterID: s.cluster, TaskID: statsID}, oldVersion))
+	s.NotNil(s.manager.GetStatsTaskInfo(s.cluster, statsID))
 }

@@ -267,7 +267,9 @@ func TestStatsResolverManifest(t *testing.T) {
 	bfPath := filepath.Join(bp, "_stats/bloom_filter.100/42")
 	bm25Path := filepath.Join(bp, "_stats/bm25.200/43")
 	jsonPath := filepath.Join(bp, "_stats/json_stats.300/shared_key_index/.managed.json_0")
-	textPath := filepath.Join(bp, "_stats/text_index.400/9001/7/milvus_packed_inverted_index.v3")
+	textAttemptPath := filepath.Join(bp, "_stats/text_index.400/9001/7/milvus_packed_inverted_index.v3")
+	textLegacyPath := filepath.Join(bp, "_stats/text_index.401/milvus_packed_inverted_index.v3")
+	textFlatAttemptPath := filepath.Join(bp, "_stats/text_index.402/milvus_packed_inverted_index.9002.3.v3")
 	newManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
 		{
 			Key:      "bloom_filter.100",
@@ -291,12 +293,32 @@ func TestStatsResolverManifest(t *testing.T) {
 		},
 		{
 			Key:   "text_index.400",
-			Files: []string{textPath},
+			Files: []string{textAttemptPath},
 			Metadata: map[string]string{
 				"version":     "7",
 				"build_id":    "9001",
 				"log_size":    "1024",
 				"memory_size": "2048",
+			},
+		},
+		{
+			Key:   "text_index.401",
+			Files: []string{textLegacyPath},
+			Metadata: map[string]string{
+				"version":     "1",
+				"build_id":    "8001",
+				"log_size":    "512",
+				"memory_size": "1024",
+			},
+		},
+		{
+			Key:   "text_index.402",
+			Files: []string{textFlatAttemptPath},
+			Metadata: map[string]string{
+				"version":     "3",
+				"build_id":    "9002",
+				"log_size":    "256",
+				"memory_size": "512",
 			},
 		},
 	})
@@ -341,7 +363,15 @@ func TestStatsResolverManifest(t *testing.T) {
 		require.Contains(t, result.TextIndexStats, int64(400))
 		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
 		assert.Equal(t, int64(7), result.TextIndexStats[400].GetVersion())
-		assert.Equal(t, filepath.ToSlash(filepath.Dir(textPath)), filepath.ToSlash(result.TextBasePaths[400]))
+		assert.Equal(t, filepath.ToSlash(filepath.Dir(textAttemptPath)), filepath.ToSlash(result.TextBasePaths[400]))
+
+		require.Contains(t, result.TextIndexStats, int64(401))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[401].GetFiles())
+		assert.Equal(t, filepath.ToSlash(filepath.Dir(textLegacyPath)), filepath.ToSlash(result.TextBasePaths[401]))
+
+		require.Contains(t, result.TextIndexStats, int64(402))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.9002.3.v3"}, result.TextIndexStats[402].GetFiles())
+		assert.Equal(t, filepath.ToSlash(filepath.Dir(textFlatAttemptPath)), filepath.ToSlash(result.TextBasePaths[402]))
 	})
 
 	t.Run("TextAndJSONIndexStatsWithBasePaths returns json stats with metadata placeholder", func(t *testing.T) {

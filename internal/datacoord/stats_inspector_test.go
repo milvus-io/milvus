@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -147,7 +146,6 @@ func (s *statsInspectorSuite) SetupTest() {
 	})
 
 	s.mt = &meta{
-		collections: collections,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				10: {
@@ -239,18 +237,25 @@ func (s *statsInspectorSuite) SetupTest() {
 	}
 	s.cluster = session.NewMockCluster(s.T())
 
-	gs := task.NewMockGlobalScheduler(s.T())
+	gs := newOwnershipScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
-	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(0).Maybe()
 	s.scheduler = gs
+	collectionHandler := &mockHandler{collectionGetter: func(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
+		collection, ok := collections.Get(collectionID)
+		if !ok {
+			return nil, merr.WrapErrCollectionNotFound(collectionID)
+		}
+		return collection, nil
+	}}
 
 	s.inspector = newStatsInspector(
 		s.ctx,
 		s.mt,
 		s.scheduler,
+		s.cluster,
 		s.alloc,
-		nil,
+		collectionHandler,
 		nil,
 		newIndexEngineVersionManager(),
 	)
@@ -300,7 +305,8 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
 	}
-	collection := s.mt.GetCollection(1)
+	collection, err := s.inspector.handler.GetCollection(s.ctx, 1)
+	s.Require().NoError(err)
 	collection.Schema.FileResourceIds = []int64{7}
 	resourceBroker := broker.NewMockBroker(s.T())
 	resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(resources, nil).Once()
@@ -353,24 +359,41 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
-	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
+	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
 
-	s.Run("allow at limit", func() {
+	s.Run("skip at limit", func() {
+		s.mt.statsTaskMeta.tasks.Insert(900, &indexpb.StatsTask{
+			TaskID: 900,
+			State:  indexpb.JobState_JobStateInit,
+		})
+
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit).Once()
-		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 		s.inspector.scheduler = scheduler
+		s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
 		err := s.inspector.SubmitStatsTask(20, 20, indexpb.StatsSubJob_TextIndexJob, true, nil)
 		s.NoError(err)
-		s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+		s.Equal(1, s.mt.statsTaskMeta.GetPendingTaskCount())
 	})
 
-	s.Run("skip over limit", func() {
+	s.Run("skip durable init and retry over limit", func() {
+		s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[int64, *indexpb.StatsTask]()
+		s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+		s.mt.statsTaskMeta.tasks.Insert(901, &indexpb.StatsTask{
+			TaskID: 901,
+			State:  indexpb.JobState_JobStateInit,
+		})
+		s.mt.statsTaskMeta.tasks.Insert(902, &indexpb.StatsTask{
+			TaskID: 902,
+			State:  indexpb.JobState_JobStateRetry,
+		})
+
+		// Neither durable task is owned by this scheduler. Admission must still
+		// stop before allocating an ID or enqueueing another wrapper.
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit + 1).Once()
 		s.inspector.scheduler = scheduler
-		// A strict allocator asserts the admission check runs before task ID allocation.
 		s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
 		err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_TextIndexJob, true, nil)
@@ -457,15 +480,21 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
-// Every trigger loop must give up as soon as the scheduler is backlogged instead
-// of walking the remaining collections. The call count is what proves it: the
-// text and JSON loops each ask once for the first collection they look at and
-// then return, while the BM25 loop returns before asking because BM25 is not
-// docked yet. Walking on (continue) would ask once per collection instead.
-func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
+// Every trigger loop must give up when durable Init/Retry debt is already over
+// the limit, even if the scheduler owns none of those tasks.
+func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenMetaBacklogged() {
+	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
+	s.mt.statsTaskMeta.tasks.Insert(901, &indexpb.StatsTask{
+		TaskID: 901,
+		State:  indexpb.JobState_JobStateInit,
+	})
+	s.mt.statsTaskMeta.tasks.Insert(902, &indexpb.StatsTask{
+		TaskID: 902,
+		State:  indexpb.JobState_JobStateRetry,
+	})
+
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).
-		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
@@ -479,8 +508,8 @@ func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged()
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
-// The loop keeps submitting while the pending count is at the limit and stops on
-// the first segment that would exceed it, mid-collection.
+// The loop stops as soon as the pending count reaches the configured limit,
+// including in the middle of a collection.
 func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimit() {
 	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
@@ -491,23 +520,21 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 			packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
 	}
 
-	pending := 0
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).RunAndReturn(func(taskcommon.Type) int { return pending })
-	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
+	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 	s.inspector.scheduler = scheduler
 
 	s.inspector.triggerJSONKeyIndexStatsTask()
 
-	// pending 0 -> allowed, 1 -> allowed (== limit), 2 -> skipped (> limit).
+	// pending 0 -> allowed, 1 -> skipped because the strict limit is reached.
 	submitted := 0
 	for _, segmentID := range segmentIDs {
 		if s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
 			submitted++
 		}
 	}
-	s.Equal(2, submitted)
-	s.Equal(2, pending)
+	s.Equal(1, submitted)
+	s.Equal(1, s.mt.statsTaskMeta.GetPendingTaskCount())
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
@@ -706,6 +733,35 @@ func (s *statsInspectorSuite) TestCleanupStatsTasksLoop() {
 	s.inspector.loopWg.Wait()
 }
 
+func (s *statsInspectorSuite) TestCleanupStatsTaskWaitsForWorkerDrop() {
+	const (
+		taskID = int64(1201)
+		nodeID = int64(11)
+	)
+	task := &indexpb.StatsTask{
+		TaskID:     taskID,
+		SegmentID:  10,
+		NodeID:     nodeID,
+		State:      indexpb.JobState_JobStateFinished,
+		CanRecycle: true,
+		SubJobType: indexpb.StatsSubJob_TextIndexJob,
+	}
+	s.mt.statsTaskMeta.tasks.Insert(taskID, task)
+
+	cluster := s.cluster.(*session.MockCluster)
+	cluster.EXPECT().DropStats(nodeID, taskID).
+		Return(merr.WrapErrServiceUnavailableMsg("worker temporarily unavailable")).Once()
+
+	err := s.inspector.cleanupStatsTask(taskID)
+	s.Error(err)
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTask(taskID))
+	s.catalog.AssertNotCalled(s.T(), "DropStatsTask", mock.Anything, taskID)
+
+	cluster.EXPECT().DropStats(nodeID, taskID).Return(merr.WrapErrNodeNotFound(nodeID)).Once()
+	s.NoError(s.inspector.cleanupStatsTask(taskID))
+	s.Nil(s.mt.statsTaskMeta.GetStatsTask(taskID))
+}
+
 func (s *statsInspectorSuite) TestReloadFromMeta() {
 	enqueueCount := 0
 	scheduler := &mockeyStatsSchedulerTarget{}
@@ -728,6 +784,44 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 	// Test reloading
 	s.inspector.reloadFromMeta()
 	s.Equal(1, enqueueCount)
+}
+
+func (s *statsInspectorSuite) TestRetryUsesFreshTaskID() {
+	oldTaskID := int64(900)
+	oldTask := &indexpb.StatsTask{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    20,
+		TaskID:       oldTaskID,
+		Version:      7,
+		NodeID:       99,
+		SubJobType:   indexpb.StatsSubJob_TextIndexJob,
+		State:        indexpb.JobState_JobStateRetry,
+		FailReason:   "worker unavailable",
+	}
+	s.mt.statsTaskMeta.tasks.Insert(oldTaskID, oldTask)
+	s.mt.statsTaskMeta.segmentID2Tasks.Insert(
+		createSecondaryIndexKey(oldTask.GetSegmentID(), oldTask.GetSubJobType().String()), oldTask)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	var enqueued task.Task
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		enqueued = t
+	}).Once()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.enqueueActiveTasks(true)
+
+	s.Require().NotNil(enqueued)
+	s.NotEqual(oldTaskID, enqueued.GetTaskID())
+	s.Nil(s.mt.statsTaskMeta.GetStatsTask(oldTaskID))
+	replacement := s.mt.statsTaskMeta.GetStatsTask(enqueued.GetTaskID())
+	s.Require().NotNil(replacement)
+	s.Equal(indexpb.JobState_JobStateInit, replacement.GetState())
+	s.Zero(replacement.GetVersion())
+	s.Zero(replacement.GetNodeID())
+	s.Same(replacement, s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
 }
 
 func (s *statsInspectorSuite) TestReloadFromMetaExternalStatsTask() {

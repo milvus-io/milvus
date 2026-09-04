@@ -195,7 +195,7 @@ func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProp
 	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
 	bucketName := loonPropertyString(properties, prefix+"bucket_name")
 	if bucketName == "" {
-		return "", merr.WrapErrServiceInternalMsg("resolve external source relative path: missing bucket_name for %s", extfs.Source)
+		return "", merr.WrapErrServiceInternalMsg("resolve external source relative path: missing bucket_name")
 	}
 	address := loonPropertyString(properties, prefix+"address")
 	addressHost, err := propertyAddressHost(address)

@@ -992,6 +992,70 @@ func (m *indexMeta) GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool) {
 	return nil, false
 }
 
+// ReplaceRetryTask atomically transfers one segment/index pair from an ended
+// build attempt to a fresh BuildID. The pair remains represented by exactly one
+// SegmentIndex record, so a late result for oldBuildID has no metadata entry it
+// can update.
+func (m *indexMeta) ReplaceRetryTask(ctx context.Context, oldBuildID, newBuildID UniqueID) (*model.SegmentIndex, bool, error) {
+	if oldBuildID == newBuildID {
+		return nil, false, merr.WrapErrServiceInternalMsg("replacement index build ID must differ from %d", oldBuildID)
+	}
+
+	m.keyLock.Lock(oldBuildID)
+	defer m.keyLock.Unlock(oldBuildID)
+
+	old, ok := m.segmentBuildInfo.Get(oldBuildID)
+	if !ok || old == nil || old.IsDeleted || old.IndexState != commonpb.IndexState_Retry {
+		return nil, false, nil
+	}
+	if _, exists := m.segmentBuildInfo.Get(newBuildID); exists {
+		return nil, false, merr.WrapErrServiceInternalMsg("replacement index build ID %d already exists", newBuildID)
+	}
+
+	segmentIndexes, ok := m.segmentIndexes.Get(old.SegmentID)
+	if !ok {
+		return nil, false, merr.WrapErrServiceInternalMsg("segment index map for segment %d is missing", old.SegmentID)
+	}
+	current, ok := segmentIndexes.Get(old.IndexID)
+	if !ok || current == nil || current.BuildID != oldBuildID {
+		// Another committed record already owns this segment/index pair. Do not
+		// revive the stale retry record.
+		return nil, false, nil
+	}
+
+	replacement := model.CloneSegmentIndex(old)
+	replacement.BuildID = newBuildID
+	replacement.NodeID = 0
+	replacement.IndexVersion = 0
+	replacement.IndexState = commonpb.IndexState_Unissued
+	replacement.FailReason = ""
+	replacement.IsDeleted = false
+	replacement.CreatedUTCTime = uint64(time.Now().Unix())
+	replacement.IndexFileKeys = nil
+	replacement.IndexSerializedSize = 0
+	replacement.IndexMemSize = 0
+	replacement.CurrentIndexVersion = 0
+	replacement.FinishedUTCTime = 0
+	replacement.CurrentScalarIndexVersion = 0
+
+	if err := m.catalog.Update(ctx,
+		metastore.DropSegmentIndex(old),
+		metastore.AddSegmentIndex(replacement)); err != nil {
+		return nil, false, err
+	}
+
+	m.segmentBuildInfo.Remove(oldBuildID)
+	segmentIndexes.Insert(old.IndexID, replacement)
+	m.segmentBuildInfo.Add(replacement)
+
+	mlog.Info(ctx, "replaced index retry task with a fresh build ID",
+		mlog.Int64("oldBuildID", oldBuildID),
+		mlog.Int64("newBuildID", newBuildID),
+		mlog.FieldSegmentID(old.SegmentID),
+		mlog.FieldIndexID(old.IndexID))
+	return model.CloneSegmentIndex(replacement), true, nil
+}
+
 func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1007,24 +1071,33 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	return true
 }
 
-// UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
-func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
+// AssignTask persists the worker owner and running state before Create. A fresh
+// BuildID identifies every retry, so IndexVersion is only a legacy path/API
+// marker. New attempts always use one, matching the first-attempt value used by
+// older DataCoord versions, but never increment or compare it for ownership.
+func (m *indexMeta) AssignTask(buildID, nodeID UniqueID) error {
 	m.keyLock.Lock(buildID)
 	defer m.keyLock.Unlock(buildID)
 
-	mlog.Info(m.ctx, "IndexCoord metaTable UpdateVersion receive", mlog.Int64("buildID", buildID), mlog.Int64("nodeID", nodeID))
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IndexVersion++
 		segIdx.NodeID = nodeID
+		segIdx.IndexVersion = 1
+		segIdx.IndexState = commonpb.IndexState_InProgress
+		segIdx.FailReason = ""
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
-	return m.updateSegIndexMeta(segIdx, updateFunc)
+	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+	mlog.Info(m.ctx, "assigned index task",
+		mlog.FieldBuildID(buildID), mlog.FieldNodeID(nodeID))
+	return nil
 }
 
 func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState, failReason string) error {

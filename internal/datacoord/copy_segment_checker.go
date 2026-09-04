@@ -22,15 +22,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -54,7 +58,7 @@ import (
 // 4. Completed/Failed → GC: Remove job and tasks after retention period
 //
 // TASK CREATION:
-// - Pending jobs are split into tasks (max segments per task configurable)
+// - Executing jobs are checked for task creation and completion
 // - Each task contains lightweight ID mappings (source segment → target segment)
 // - Tasks are assigned to DataNodes by the inspector component
 //
@@ -85,14 +89,19 @@ type CopySegmentChecker interface {
 // This runs as a background service in DataCoord, checking all copy segment jobs
 // periodically and progressing them through their state machine.
 type copySegmentChecker struct {
-	ctx      context.Context     // Context for lifecycle management
-	meta     *meta               // Segment metadata for state updates
-	broker   broker.Broker       // Broker for coordinator communication
-	alloc    allocator.Allocator // ID allocator for creating tasks
-	copyMeta CopySegmentMeta     // Copy segment job/task metadata store
+	ctx       context.Context      // Context for lifecycle management
+	meta      *meta                // Segment metadata for state updates
+	broker    broker.Broker        // Broker for coordinator communication
+	alloc     allocator.Allocator  // ID allocator for creating tasks
+	copyMeta  CopySegmentMeta      // Copy segment job/task metadata store
+	cluster   session.Cluster      // Worker cluster, for retrying a drop the scheduler could not land
+	scheduler task.GlobalScheduler // Fences worker callbacks before terminal task GC
 
-	closeOnce sync.Once     // Ensures Close is called only once
-	closeChan chan struct{} // Channel for signaling shutdown
+	lifecycleMu sync.Mutex
+	started     bool
+	stopped     bool
+	wg          sync.WaitGroup
+	closeChan   chan struct{} // Channel for signaling shutdown
 }
 
 // NewCopySegmentChecker creates a new copy segment job checker.
@@ -106,6 +115,8 @@ type copySegmentChecker struct {
 //   - broker: Broker for coordinator communication
 //   - alloc: ID allocator for creating task IDs
 //   - copyMeta: Copy segment job/task metadata store
+//   - cluster: DataNode RPC dispatcher used by terminal cleanup
+//   - scheduler: Global task scheduler that drains callbacks before cleanup
 //
 // Returns:
 //   - CopySegmentChecker: Initialized checker ready to start
@@ -115,6 +126,8 @@ func NewCopySegmentChecker(
 	broker broker.Broker,
 	alloc allocator.Allocator,
 	copyMeta CopySegmentMeta,
+	cluster session.Cluster,
+	scheduler task.GlobalScheduler,
 ) CopySegmentChecker {
 	return &copySegmentChecker{
 		ctx:       ctx,
@@ -122,13 +135,15 @@ func NewCopySegmentChecker(
 		broker:    broker,
 		alloc:     alloc,
 		copyMeta:  copyMeta,
+		cluster:   cluster,
+		scheduler: scheduler,
 		closeChan: make(chan struct{}),
 	}
 }
 
 // Start begins the background checker loop that drives job state transitions.
 //
-// This runs in a goroutine and periodically checks all copy segment jobs,
+// This starts tracked goroutines that periodically check all copy segment jobs,
 // progressing them through their state machine. The loop continues until
 // Close() is called.
 //
@@ -144,8 +159,52 @@ func NewCopySegmentChecker(
 //
 // Tick interval: Configured by CopySegmentCheckInterval parameter (default: 2 seconds)
 func (c *copySegmentChecker) Start() {
+	c.lifecycleMu.Lock()
+	if c.started || c.stopped {
+		c.lifecycleMu.Unlock()
+		return
+	}
+	c.started = true
+	c.wg.Add(2)
+	c.lifecycleMu.Unlock()
+
 	checkInterval := Params.DataCoordCfg.CopySegmentCheckInterval.GetAsDuration(time.Second)
 	mlog.Info(c.ctx, "start copy segment checker", mlog.Duration("checkInterval", checkInterval))
+
+	go func() {
+		defer c.wg.Done()
+		c.runGCLoop(checkInterval)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.runStateMachineLoop(checkInterval)
+	}()
+}
+
+// runGCLoop is isolated from job progression because each worker drop attempt
+// is a synchronous RPC. It checks closeChan between jobs so shutdown waits
+// for at most the RPC already in flight, not the whole retained-job backlog.
+func (c *copySegmentChecker) runGCLoop(checkInterval time.Duration) {
+	gcTicker := time.NewTicker(checkInterval)
+	defer gcTicker.Stop()
+	for {
+		select {
+		case <-c.closeChan:
+			return
+		case <-gcTicker.C:
+			for _, job := range c.copyMeta.GetJobBy(c.ctx) {
+				select {
+				case <-c.closeChan:
+					return
+				default:
+				}
+				c.checkGC(job)
+			}
+		}
+	}
+}
+
+func (c *copySegmentChecker) runStateMachineLoop(checkInterval time.Duration) {
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
@@ -170,8 +229,6 @@ func (c *copySegmentChecker) Start() {
 				}
 				// Check timeout for all states
 				c.tryTimeoutJob(job)
-				// Check GC for terminal states (Completed/Failed)
-				c.checkGC(job)
 			}
 
 			// Report statistics and metrics
@@ -184,9 +241,13 @@ func (c *copySegmentChecker) Start() {
 // Close stops the checker gracefully.
 // This can be called multiple times safely (only closes once).
 func (c *copySegmentChecker) Close() {
-	c.closeOnce.Do(func() {
+	c.lifecycleMu.Lock()
+	if !c.stopped {
+		c.stopped = true
 		close(c.closeChan)
-	})
+	}
+	c.lifecycleMu.Unlock()
+	c.wg.Wait()
 }
 
 // ============================================================================
@@ -217,7 +278,7 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
 	}
 	if len(jobs) > 0 {
-		mlog.Info(c.ctx, "copy segment job stats", mlog.Any("stateNum", stateNum))
+		mlog.Debug(c.ctx, "copy segment job stats", mlog.Any("stateNum", stateNum))
 	}
 }
 
@@ -289,20 +350,13 @@ func (c *copySegmentChecker) LogTaskStats() {
 // Idempotency and crash recovery:
 //   - Task creation is a multi-step sequence (per-group AllocID + AddTask, then
 //     the Executing transition), each step persisted individually. A failure
-//     mid-way (etcd hiccup, DataCoord restart) leaves the job Pending with only
-//     a subset of tasks persisted.
-//   - To be resume-safe, each round creates tasks only for source segments not
-//     yet covered by persisted tasks, then (re-)applies the idempotent
-//     Pending → Executing transition.
+//     mid-way leaves the job Pending with only a subset of tasks persisted.
+//   - Each round creates tasks only for source segments not already covered by
+//     persisted tasks, then retries the Pending -> Executing transition.
 func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
-	// Step 0: Re-read the cached job. The `job` argument is a snapshot taken
-	// before this function ran, but tasks of a Pending job can already be
-	// dispatched (the inspector does not filter by job state) and a concurrent
-	// failure (markTaskAndJobFailed) may have moved the job to a terminal
-	// state and released its snapshot pin. Creating more tasks for such a job
-	// would be wasted work at best.
+	// Re-read because the argument is a snapshot taken before this function ran.
 	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
 	if current == nil {
 		log.Info(c.ctx, "job no longer exists, skip pending check")
@@ -314,11 +368,11 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
-	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleasePin(c.ctx, job.GetJobId(),
+			datapb.CopySegmentJobState_CopySegmentJobPending,
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 			UpdateCopyJobReason("no segments to copy")); err != nil {
 			log.Error(c.ctx, "failed to update empty job state to Completed", mlog.Err(err))
@@ -326,8 +380,6 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
-	// Step 2: Compute source segments already covered by persisted tasks,
-	// so a partially created job resumes instead of duplicating tasks.
 	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	coveredSourceIDs := make(map[int64]struct{})
 	for _, task := range tasks {
@@ -340,11 +392,8 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return !covered
 	})
 
-	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
 	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
-
-	// Step 4: Create task for each group
 	for i, group := range groups {
 		taskID, err := c.alloc.AllocID(c.ctx)
 		if err != nil {
@@ -352,7 +401,6 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			return
 		}
 
-		// Create task with lightweight ID mappings
 		task := &copySegmentTask{
 			copyMeta: c.copyMeta,
 			tr:       timerecord.NewTimeRecorder("copy segment task"),
@@ -372,9 +420,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			CompleteTs:   0,
 		})
 
-		// Save task to metadata store
-		err = c.copyMeta.AddTask(c.ctx, task)
-		if err != nil {
+		if err := c.copyMeta.AddTask(c.ctx, task); err != nil {
 			log.Warn(c.ctx, "failed to add copy segment task",
 				mlog.Int("groupIndex", i),
 				mlog.Int("segmentCount", len(group)),
@@ -387,13 +433,6 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			mlog.Int("segmentCount", len(group)))
 	}
 
-	// Step 5: Update job state to Executing. This also runs when all segments
-	// were already covered (groups is empty), retrying a transition that a
-	// previous round failed to persist.
-	// The transition is state-guarded (Pending -> Executing only): a task
-	// dispatched during Step 4 can fail concurrently, and markTaskAndJobFailed
-	// then moves the job to Failed and releases its snapshot pin. An
-	// unconditional update here would resurrect that Failed job as Executing.
 	updated, err := c.copyMeta.UpdateJobInState(c.ctx, job.GetJobId(),
 		datapb.CopySegmentJobState_CopySegmentJobPending,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting),
@@ -487,7 +526,8 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		log.Warn(c.ctx, "copy segment job has failed tasks",
 			mlog.Int("failedTasks", failedTasks),
 			mlog.Int("totalTasks", totalTasks))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleasePin(c.ctx, job.GetJobId(),
+			datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks))); err != nil {
 			log.Error(c.ctx, "failed to update job state to Failed", mlog.Err(err))
@@ -503,7 +543,6 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		return
 	}
 
-	// Step 6: All tasks completed - collect total rows and finish job
 	var totalRows int64
 	for _, task := range tasks {
 		for _, mapping := range task.GetIdMappings() {
@@ -515,34 +554,27 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		}
 	}
 
-	c.finishJob(job, totalRows)
-	log.Info(c.ctx, "all copy segment tasks completed, job finished")
+	c.finishJob(job, totalRows, tasks)
 }
 
-// finishJob completes the job by updating segments to Flushed and marking job as Completed.
+// finishJob completes the job by publishing all target segments and the job in
+// one catalog update.
 //
 // This is called when all tasks have completed successfully. It performs the final
 // steps to make the copied segments visible for querying.
 //
 // Process flow:
 //  1. Collect all target segment IDs from task ID mappings
-//  2. Update each target segment state to Flushed (makes them queryable)
-//  3. Update job state to Completed with completion timestamp and total rows
-//  4. Record job latency metrics
+//  2. Update every target to Flushed and not-importing
+//  3. Update the job to Completed with completion timestamp and total rows
+//  4. Commit those changes atomically, then record job latency metrics
 //
 // Why update segments to Flushed:
 //   - Copied segments start in Growing state (not queryable)
 //   - Flushed state makes them available for query operations
 //   - This is the final step to complete the restore operation
-//
-// Parameters:
-//   - job: The job to finish
-//   - totalRows: Total row count across all copied segments
-func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
+func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64, tasks []CopySegmentTask) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
-
-	// Step 1: Collect all target segment IDs from task ID mappings
-	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	targetSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		for _, mapping := range task.GetIdMappings() {
@@ -550,52 +582,21 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	// Step 2: Update segment states to Flushed (make them visible for query)
-	var flushFailures int
-	if len(targetSegmentIDs) > 0 {
-		for _, segID := range targetSegmentIDs {
-			segment := c.meta.GetSegment(c.ctx, segID)
-			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
-				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
-					log.Error(c.ctx, "failed to update segment state to Flushed",
-						mlog.FieldSegmentID(segID),
-						mlog.Err(err))
-					flushFailures++
-				} else {
-					log.Info(c.ctx, "updated segment state to Flushed",
-						mlog.FieldSegmentID(segID))
-				}
-			}
-		}
-	}
-
-	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
-	if flushFailures > 0 {
-		reason := fmt.Sprintf("%d/%d segments failed to flush to Flushed state", flushFailures, len(targetSegmentIDs))
-		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
-			mlog.Int("flushFailures", flushFailures),
-			mlog.Int("totalSegments", len(targetSegmentIDs)))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(reason)); err != nil {
-			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
-		}
-		return
-	}
-
-	// Step 4: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())
-	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+	applied, err := c.copyMeta.CompleteJob(c.ctx, job.GetJobId(), targetSegmentIDs,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 		UpdateCopyJobCompleteTs(completeTs),
 		UpdateCopyJobTotalRows(totalRows))
 	if err != nil {
-		log.Error(c.ctx, "failed to update job state to Completed", mlog.Err(err))
+		// All targets remain importing, so retrying this final catalog operation
+		// on the next checker interval is safe and does not expose a partial job.
+		log.Error(c.ctx, "failed to publish completed copy segment job", mlog.Err(err))
+		return
+	}
+	if !applied {
 		return
 	}
 
-	// Step 4: Record metrics
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
 	log.Info(c.ctx, "copy segment job completed",
@@ -608,7 +609,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 // State Machine: Failed Job Handling
 // ============================================================================
 
-// checkFailedJob marks all pending/in-progress tasks as failed when job fails.
+// checkFailedJob stops active tasks and drops every target of a failed job.
 //
 // This ensures that when a job fails (due to timeout or task failures),
 // all remaining tasks are also marked as failed. This prevents orphaned
@@ -626,30 +627,42 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
-	// Find all Pending/InProgress tasks
 	allTasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	tasks := lo.Filter(allTasks, func(t CopySegmentTask, _ int) bool {
 		return t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending ||
 			t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress
 	})
 
-	if len(tasks) == 0 {
-		return
+	if len(tasks) > 0 {
+		log.Warn(c.ctx, "copy segment job has failed, marking all tasks as failed",
+			mlog.String("reason", job.GetReason()),
+			mlog.Int("taskCount", len(tasks)))
+
+		for _, task := range tasks {
+			err := c.copyMeta.UpdateTask(c.ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+				UpdateCopyTaskReason(job.GetReason()))
+			if err != nil {
+				log.Warn(c.ctx, "failed to update task state to failed",
+					WrapCopySegmentTaskLog(task, mlog.Err(err))...)
+			}
+		}
 	}
 
-	log.Warn(c.ctx, "copy segment job has failed, marking all tasks as failed",
-		mlog.String("reason", job.GetReason()),
-		mlog.Int("taskCount", len(tasks)))
-
-	// Mark each task as failed
-	for _, task := range tasks {
-		err := c.copyMeta.UpdateTask(c.ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(job.GetReason()))
-		if err != nil {
-			log.Warn(c.ctx, "failed to update task state to failed",
-				WrapCopySegmentTaskLog(task, mlog.Err(err))...)
+	// Use the job mapping as the cleanup inventory because task creation may
+	// have stopped after only a prefix of the mappings was scheduled.
+	operators := make([]UpdateOperator, 0, len(job.GetIdMappings())*2)
+	for _, mapping := range job.GetIdMappings() {
+		if mapping == nil || c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()) == nil {
+			continue
 		}
+		operators = append(operators,
+			UpdateStatusOperator(mapping.GetTargetSegmentId(), commonpb.SegmentState_Dropped),
+			UpdateIsImporting(mapping.GetTargetSegmentId(), false))
+	}
+	if err := c.meta.UpdateSegmentsInfo(c.ctx, operators...); err != nil {
+		log.Warn(c.ctx, "failed to retire targets of failed copy segment job; will retry",
+			mlog.Err(err))
 	}
 }
 
@@ -682,7 +695,7 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	mlog.Warn(c.ctx, "copy segment job timeout",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.Time("timeoutTime", timeoutTime))
-	if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+	if _, err := c.copyMeta.UpdateJobStateAndReleasePin(c.ctx, job.GetJobId(), job.GetState(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 		UpdateCopyJobReason("timeout")); err != nil {
 		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
@@ -700,15 +713,16 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 //  1. Check if job is in terminal state (Completed/Failed)
 //  2. Check if cleanup time has passed
 //  3. For each task:
-//     a. Skip if job failed and task has segments in metadata (wait for cleanup)
-//     b. Skip if task is still assigned to a node (wait for unassignment)
-//     c. Remove task from metadata
+//     a. Retain it while a failed job still has unretired mapped targets
+//     b. If it is assigned, ask its worker to drop it
+//     c. Retain it when the drop fails, so the next GC round retries
+//     d. Remove it after the drop succeeds or its worker is gone
 //  4. If all tasks removed, remove job from metadata
 //
 // Why wait conditions:
 //   - Failed jobs with segments: Wait for segment cleanup before removing task metadata
-//   - Tasks on nodes: Wait for inspector to unassign before removing
-//   - This ensures all resources are properly cleaned before removing metadata
+//   - Tasks on nodes: Wait until the drop is acknowledged or the worker is gone
+//   - This preserves durable retry evidence while worker cleanup is still uncertain
 //
 // Retention period: Configured by CopySegmentTaskRetention parameter (default: 10800s = 3 hours)
 func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
@@ -718,53 +732,47 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 		return
 	}
 
+	// Terminal job metadata is the durable owner of a permanent restore pin.
+	// Retry release on every checker round and never GC the job while PinId is
+	// still present; otherwise a transient unpin failure would become permanent.
+	if err := c.copyMeta.ReleaseJobPin(c.ctx, job.GetJobId()); err != nil {
+		mlog.Warn(c.ctx, "failed to release terminal copy segment job pin; will retry",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())
 	if time.Now().After(cleanupTime) {
 		log := mlog.With(mlog.FieldJobID(job.GetJobId()))
-		GCRetention := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
+		gcRetention := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 		log.Info(c.ctx, "copy segment job has reached GC retention",
-			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("GCRetention", GCRetention))
+			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("gcRetention", gcRetention))
 
 		tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 		shouldRemoveJob := true
 
-		for _, task := range tasks {
-			// If job failed and task has target segments in meta, don't remove yet
-			// (wait for segments to be cleaned up first)
-			if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
-				hasSegments := false
-				for _, mapping := range task.GetIdMappings() {
-					segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId())
-					if segment != nil {
-						hasSegments = true
-						break
-					}
-				}
-				if hasSegments {
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			for _, mapping := range job.GetIdMappings() {
+				if mapping != nil && c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()) != nil {
 					shouldRemoveJob = false
-					continue
+					break
 				}
 			}
-
-			// If task is still assigned to a node, don't remove yet
-			// (wait for inspector to unassign)
-			if task.GetNodeId() != NullNodeID {
-				shouldRemoveJob = false
-				continue
-			}
-
-			// Remove task from metadata
-			err := c.copyMeta.RemoveTask(c.ctx, task.GetTaskId())
-			if err != nil {
-				log.Warn(c.ctx, "failed to remove copy segment task during GC",
-					WrapCopySegmentTaskLog(task, mlog.Err(err))...)
-				shouldRemoveJob = false
-				continue
-			}
-			log.Info(c.ctx, "copy segment task removed", WrapCopySegmentTaskLog(task)...)
 		}
 
-		// Remove job only if all tasks removed
+		for _, task := range tasks {
+			select {
+			case <-c.closeChan:
+				return
+			default:
+			}
+			if !c.cleanupTaskForGC(job, task.GetTaskId()) {
+				shouldRemoveJob = false
+			}
+		}
+
+		// Remove job only after every task is gone and segment GC has removed
+		// every failed target named by the job's authoritative mapping list.
 		if !shouldRemoveJob {
 			return
 		}
@@ -776,4 +784,58 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 		}
 		log.Info(c.ctx, "copy segment job removed")
 	}
+}
+
+func (c *copySegmentChecker) cleanupTaskForGC(job CopySegmentJob, taskID int64) bool {
+	cleaned := false
+	cleanup := func() {
+		// Create may have persisted an assignment while Finalize waited for its
+		// callback. Resolve worker ownership only after that callback drains.
+		latest := c.copyMeta.GetTask(c.ctx, taskID)
+		if latest == nil {
+			cleaned = true
+			return
+		}
+		// A failed job retires its targets from the job's authoritative mapping
+		// list, not from task state. Retain the task record while any mapped
+		// target is still present so the failure evidence and the retry
+		// inventory survive until segment GC has retired every target.
+		// This mirrors import's failed-task segment anchor.
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			for _, mapping := range job.GetIdMappings() {
+				if mapping != nil && c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()) != nil {
+					mlog.Info(c.ctx, "retain copy segment task until failed targets are retired",
+						WrapCopySegmentTaskLog(latest, mlog.Int64("targetSegmentID", mapping.GetTargetSegmentId()))...)
+					return
+				}
+			}
+		}
+		if isNodeAssigned(latest.GetNodeId()) {
+			if c.cluster == nil {
+				mlog.Warn(c.ctx, "cannot drop assigned copy segment task during GC",
+					WrapCopySegmentTaskLog(latest)...)
+				return
+			}
+			err := c.cluster.DropCopySegment(latest.GetNodeId(), taskID)
+			if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+				mlog.Warn(c.ctx, "failed to drop copy segment task during GC",
+					WrapCopySegmentTaskLog(latest, mlog.Err(err))...)
+				return
+			}
+		}
+		if err := c.copyMeta.RemoveTask(c.ctx, taskID); err != nil {
+			mlog.Warn(c.ctx, "failed to remove copy segment task during GC",
+				WrapCopySegmentTaskLog(latest, mlog.Err(err))...)
+			return
+		}
+		mlog.Info(c.ctx, "copy segment task removed", WrapCopySegmentTaskLog(latest)...)
+		cleaned = true
+	}
+	if c.scheduler == nil {
+		// Tests that do not exercise scheduler concurrency use the direct path.
+		cleanup()
+	} else {
+		c.scheduler.Finalize(taskID, cleanup)
+	}
+	return cleaned
 }

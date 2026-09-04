@@ -97,7 +97,10 @@ func NewStatsTask(ctx context.Context,
 	pluginContext *indexcgopb.StoragePluginContext,
 ) *statsTask {
 	return &statsTask{
-		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		// Keep accepting the legacy versioned wire identity during rolling
+		// upgrades. New DataCoord attempts always use a fresh task ID and send
+		// version zero, so retry identity no longer depends on this field.
+		ident:         fmt.Sprintf("%s/%d/%d", req.GetClusterID(), req.GetTaskID(), req.GetTaskVersion()),
 		ctx:           ctx,
 		cancel:        cancel,
 		req:           req,
@@ -132,7 +135,7 @@ func (st *statsTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
-	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), state, failReason)
+	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), st.req.GetTaskVersion(), state, failReason)
 }
 
 func (st *statsTask) GetState() indexpb.JobState {
@@ -350,6 +353,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.req.GetTaskVersion(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -669,6 +673,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.req.GetTaskVersion(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -792,11 +797,25 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			}
 
 			mu.Lock()
+			statsFiles := lo.Keys(statsResult.Files)
+			if st.req.GetStorageVersion() == storage.StorageV3 {
+				fullPaths := metautil.BuildStatsFilePaths(statsBasePath, statsFiles)
+				if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort {
+					statsFiles = fullPaths
+				} else {
+					// Keep the standalone worker result compatible with older DataCoords,
+					// which prepend the field directory themselves. When enabled, the
+					// attempt subdirectory remains in this relative path.
+					statsFiles = lo.Map(fullPaths, func(file string, _ int) string {
+						return metautil.ExtractJSONKeyStatsRelativePath(file)
+					})
+				}
+			}
 			jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
 				FieldID:                field.GetFieldID(),
 				Version:                version,
 				BuildID:                taskID,
-				Files:                  lo.Keys(statsResult.Files),
+				Files:                  statsFiles,
 				JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
 				MemorySize:             statsResult.MemSize,
 				LogSize:                logSize,
@@ -805,7 +824,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 			log.Info(ctx, "field enable json key index, create json key index done",
 				mlog.Int64("field id", field.GetFieldID()),
-				mlog.Strings("files", lo.Keys(statsResult.Files)),
+				mlog.Strings("files", statsFiles),
 				mlog.Int64("memorySize", statsResult.MemSize),
 				mlog.Int64("logSize", logSize),
 			)
@@ -822,10 +841,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	// DataCoord, which runs the manifest transaction itself (CommitSegmentManifest,
 	// rebased onto the segment's current manifest) and reconstructs the absolute paths
 	// there; baking here would commit against a possibly stale base, so the worker skips it.
-	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
-	// before registering with manifest (loon library expects absolute paths).
-	// Use a separate copy for manifest so the original stats retain relative paths
-	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
+	// C++ Upload() returns relative paths. Sort converts them to full paths above;
+	// BuildStatsFilePaths also accepts relative input for rolling compatibility.
+	// The loon manifest always receives absolute paths.
 	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort && st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
@@ -834,9 +852,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			for i, f := range cloned.GetFiles() {
-				cloned.Files[i] = basePath + "/" + f
-			}
+			cloned.Files = metautil.BuildStatsFilePaths(basePath, cloned.GetFiles())
 			manifestStats[fieldID] = cloned
 		}
 		statEntries := packed.JSONKeyStatEntries(manifestStats)
@@ -855,6 +871,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	st.manager.StoreJSONKeyStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.req.GetTaskVersion(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -872,14 +889,25 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 // computeStatsBasePath computes the remote base path for stats files.
 // V2 segments use the traditional top-level directory paths (text_log/, json_stats/).
-// V3 segments use basePath/_stats/{type}.{fieldID} under the segment's manifest base path.
+// V3 stats keep the legacy field directory throughout the current rolling
+// upgrade. The attempt layout remains implemented for a later cutover where
+// every supported QueryNode and DataNode can read and write it. Old DataCoords
+// and DataNodes naturally keep the legacy path because the wire flag defaults
+// to false.
 func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string, statsType string, fieldID int64) (string, error) {
 	if req.GetStorageVersion() == storage.StorageV3 {
 		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
 			return "", merr.Wrapf(err, "failed to unmarshal manifest path for %s basePath", statsType)
 		}
-		return fmt.Sprintf("%s/_stats/%s.%d", basePath, statsType, fieldID), nil
+		fieldBasePath := fmt.Sprintf("%s/_stats/%s.%d", basePath, statsType, fieldID)
+		if req.GetUseV3StatsAttemptPath() && !common.Version.LT(common.MinVersionForV3StatsAttemptPath) {
+			// Retries allocate a fresh task ID, so the task ID alone isolates
+			// one attempt's objects from a late writer of the attempt it
+			// replaces; the wire task version stays at its compatibility zero.
+			return fmt.Sprintf("%s/%d", fieldBasePath, req.GetTaskID()), nil
+		}
+		return fieldBasePath, nil
 	}
 	// V2: compute traditional path
 	rootPath := req.GetStorageConfig().GetRootPath()
