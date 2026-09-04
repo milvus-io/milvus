@@ -68,6 +68,12 @@ func (kv *ReliableWriteMetaKv) MultiSaveAndRemoveWithPrefix(ctx context.Context,
 	}, len(preds) == 0)
 }
 
+func (kv *ReliableWriteMetaKv) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
+		return kv.MetaKv.MultiSaveAndRemoveMixed(ctx, saves, removals, prefixRemovals, preds...)
+	})
+}
+
 func (kv *ReliableWriteMetaKv) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
 	var result bool
 	err := kv.retryWithBackoff(ctx, func(ctx context.Context) error {

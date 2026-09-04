@@ -64,14 +64,10 @@ func (b *Builder) Remove(key string) {
 
 // RemovePrefix records a prefix delete.
 //
-// Asymmetry to know before mixing: an op set that combines exact removals
-// (Remove) and prefix removals (RemovePrefix) commits fine on the chunked
-// fallback path (each kind is flushed with its own method) but is REJECTED on
-// the atomic path (commitAtomic) - a single etcd txn cannot express both
-// without widening the exact deletes to prefixes. So the same mixed set may
-// succeed or error depending only on whether it fits the txn limit. No Update
-// caller emits RemovePrefix today; if one does, either keep exact and prefix
-// removals in separate Update calls, or teach commitAtomic to split them.
+// Mixing exact removals (Remove) and prefix removals (RemovePrefix) in one op
+// set is supported on both commit paths: the atomic path routes the mix
+// through MultiSaveAndRemoveMixed (one txn, each delete keeps its shape), and
+// the chunked fallback flushes each kind with its own method.
 func (b *Builder) RemovePrefix(prefix string) {
 	b.ops = append(b.ops, op{key: prefix, kind: opDelPrefix})
 }

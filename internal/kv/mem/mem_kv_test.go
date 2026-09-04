@@ -259,3 +259,12 @@ func TestPredicates(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
+
+func TestMultiSaveAndRemoveMixedRejectsSaveUnderRemovedPrefix(t *testing.T) {
+	kv := NewMemoryKV()
+
+	err := kv.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/a-1/c3": "new"}, nil, []string{"mix/a-1/"})
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}

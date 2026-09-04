@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -149,7 +149,7 @@ var (
 )
 
 // implementation assertion
-var _ kv.MetaKv = (*txnTiKV)(nil)
+var _ kvpkg.MetaKv = (*txnTiKV)(nil)
 
 // txnTiKV implements MetaKv and TxnKV interface. It supports processing multiple kvs within one transaction.
 type txnTiKV struct {
@@ -639,6 +639,102 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		return loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removals", removals))
+	return nil
+}
+
+// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+// @removals and removes every key under the prefixes in @prefixRemovals, all
+// in one transaction: the prefix scan and its deletes run inside the same txn
+// snapshot as the exact deletes and saves.
+func (kv *txnTiKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+
+	var loggingErr error
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveMixed() error", mlog.Any("saves", saves), mlog.Strings("removes", removals), mlog.Strings("prefixRemoves", prefixRemovals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)), mlog.Int("prefixRemoveLength", len(prefixRemovals)))
+
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+
+	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemoveMixed", func(txn *transaction.KVTxn) error {
+		for _, pred := range preds {
+			key := kv.GetPath(pred.Key())
+			val, err := txn.Get(ctx, []byte(key))
+			if err != nil {
+				if errors.Is(err, tikverr.ErrNotExist) {
+					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemoveMixed", pred.Key(), pred.TargetValue()), err.Error()))
+				}
+				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemoveMixed", pred.Key(), pred.TargetValue()), err.Error())
+			}
+			if !pred.IsTrue(val.Value) {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+			}
+		}
+
+		for _, key := range removals {
+			key = kv.GetPath(key)
+			if err := txn.Delete([]byte(key)); err != nil {
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveMixed", key), err)
+			}
+		}
+
+		// Remove keys with prefix
+		for _, prefix := range prefixRemovals {
+			prefix = kv.GetPath(prefix)
+			if err := func(prefix string) error {
+				// Get the start and end keys for the prefix range
+				startKey := []byte(prefix)
+				endKey := tikv.PrefixNextKey([]byte(prefix))
+
+				// Use Scan to iterate over keys in the prefix range
+				iter, err := txn.Iter(startKey, endKey)
+				if err != nil {
+					return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create iterater for %s during MultiSaveAndRemoveMixed()", prefix), err.Error())
+				}
+				defer iter.Close()
+
+				// Iterate over keys and delete them
+				for iter.Valid() {
+					key := iter.Key()
+					if err = txn.Delete(key); err != nil {
+						return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveMixed", string(key)), err)
+					}
+
+					// Move the iterator to the next key
+					if err = iter.Next(); err != nil {
+						return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to move Iterator after key %s for MultiSaveAndRemoveMixed", string(key)), err.Error())
+					}
+				}
+				return nil
+			}(prefix); err != nil {
+				return err
+			}
+		}
+
+		// Save key-value pairs
+		for key, value := range saves {
+			key = kv.GetPath(key)
+			// Check if value is empty or taking reserved EmptyValue
+			byteValue, err := convertEmptyStringToByte(value)
+			if err != nil {
+				return merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveMixed()", key, value))
+			}
+			if err = txn.Set([]byte(key), byteValue); err != nil {
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveMixed()", key, value), err)
+			}
+		}
+		return nil
+	}, kv.executeTxn)
+	if loggingErr != nil {
+		return loggingErr
+	}
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveMixed() operation", mlog.Any("saves", saves), mlog.Strings("removals", removals), mlog.Strings("prefixRemovals", prefixRemovals))
 	return nil
 }
 

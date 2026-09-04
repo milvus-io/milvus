@@ -27,7 +27,7 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -37,7 +37,7 @@ import (
 )
 
 // implementation assertion
-var _ kv.MetaKv = (*EmbedEtcdKV)(nil)
+var _ kvpkg.MetaKv = (*EmbedEtcdKV)(nil)
 
 const (
 	defaultRetryCount    = 3
@@ -558,6 +558,48 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete), clientv3.WithPrefix()))
+	}
+
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), value))
+	}
+
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+
+	resp, err := kv.client.Txn(ctx1).If(cmps...).Then(ops...).Commit()
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+
+	if !resp.Succeeded {
+		return merr.WrapErrIoFailedReason("failed to execute transaction")
+	}
+	return nil
+}
+
+// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+// @removals and removes every key under the prefixes in @prefixRemovals, all
+// in one transaction.
+func (kv *EmbedEtcdKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
+	cmps, err := parsePredicates(kv.rootPath, preds...)
+	if err != nil {
+		return err
+	}
+
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+len(prefixRemovals))
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete)))
+	}
+	for _, keyDelete := range prefixRemovals {
 		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete), clientv3.WithPrefix()))
 	}
 

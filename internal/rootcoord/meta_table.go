@@ -2083,12 +2083,16 @@ func validateRoleDescription(description string) error {
 	return rbacutil.ValidateRoleDescription(description, Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt())
 }
 
-// DropRole drop role info
+// DropRole drops the role record, its user-role mappings and every grant of
+// the role in one composite catalog write, so a crash can never leave
+// orphaned grants behind a deleted role.
 func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName string) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.DropRole(ctx, tenant, roleName)
+	return mt.catalog.Update(ctx, 0,
+		metastore.DropRoleGrants(tenant, roleName),
+		metastore.DropRole(tenant, roleName))
 }
 
 func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
