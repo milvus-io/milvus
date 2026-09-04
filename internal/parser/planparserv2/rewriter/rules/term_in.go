@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"math"
@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
-func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
 		col         *planpb.ColumnInfo
 		values      []*planpb.GenericValue
@@ -55,7 +55,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
-func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
 		col         *planpb.ColumnInfo
 		values      []*planpb.GenericValue
@@ -133,7 +133,7 @@ func notExpr(child *planpb.Expr) *planpb.Expr {
 }
 
 // AND: (a IN S) AND (a = v) with v in S -> a = v
-func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	type agg struct {
 		termIdxs []int
 		eqIdxs   []int
@@ -252,7 +252,7 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 
 // OR: (a IN S) OR (a = v) with v in S -> keep a IN S (drop equal)
 // Optional extension (not enabled here): if v not in S, could union.
-func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	type agg struct {
 		termIdx int
 		term    *planpb.TermExpr
@@ -351,7 +351,7 @@ func resolveInRangeComparisonType(col *planpb.ColumnInfo, value *planpb.GenericV
 }
 
 // AND: (a IN S) AND (range) -> filter S by range
-func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
 		col            *planpb.ColumnInfo
 		comparisonType schemapb.DataType
@@ -468,7 +468,7 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 }
 
 // OR: (a IN S1) OR (a IN S2) -> a IN union(S1, S2)
-func (v *visitor) combineOrInWithIn(parts []*planpb.Expr) []*planpb.Expr {
+func combineOrInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	type agg struct {
 		col    *planpb.ColumnInfo
 		idxs   []int
@@ -523,7 +523,7 @@ func (v *visitor) combineOrInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 }
 
 // AND: (a IN S1) AND (a IN S2) ... -> a IN intersection(S1, S2, ...)
-func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	type agg struct {
 		col    *planpb.ColumnInfo
 		idxs   []int
@@ -601,14 +601,18 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
-// AND: (a IN S) AND (a != d) -> remove d from S; empty -> false
-func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
+// AND: (a IN S) AND (a != d) -> remove d from S; empty -> false.
+// A singleton IN is represented by its stable form, a == v, so this rule also
+// accepts one equality operand as a singleton membership set.
+func combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
+		col       *planpb.ColumnInfo
+		termIdx   int
+		term      *planpb.TermExpr
+		equalIdxs []int
+		equalVals []*planpb.GenericValue
+		neqIdxs   []int
+		neqVals   []*planpb.GenericValue
 	}
 	groups := map[string]*group{}
 	others := []int{}
@@ -626,6 +630,21 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 			}
 			g.term = te
 			g.termIdx = idx
+			continue
+		}
+		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
+			g := groups[k]
+			if g == nil {
+				g = &group{col: ue.GetColumnInfo()}
+				groups[k] = g
+			}
+			g.equalIdxs = append(g.equalIdxs, idx)
+			g.equalVals = append(g.equalVals, ue.GetValue())
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
@@ -652,11 +671,21 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 		used[i] = true
 	}
 	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
+		membershipIdx := g.termIdx
+		var membershipValues []*planpb.GenericValue
+		if g.term != nil {
+			membershipValues = g.term.GetValues()
+		} else if len(g.equalIdxs) == 1 {
+			membershipIdx = g.equalIdxs[0]
+			membershipValues = g.equalVals
+		} else {
+			continue
+		}
+		if len(g.neqIdxs) == 0 {
 			continue
 		}
 		filtered := []*planpb.GenericValue{}
-		for _, tv := range g.term.GetValues() {
+		for _, tv := range membershipValues {
 			excluded := false
 			for _, dv := range g.neqVals {
 				if equalsGeneric(tv, dv) {
@@ -671,12 +700,14 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 		if len(filtered) == 0 && !canFoldPredicateToBoolConstant(g.col) {
 			continue
 		}
-		used[g.termIdx] = true
+		used[membershipIdx] = true
 		for _, ni := range g.neqIdxs {
 			used[ni] = true
 		}
 		if len(filtered) == 0 {
 			out = append(out, newAlwaysFalseExpr())
+		} else if len(filtered) == 1 {
+			out = append(out, newUnaryRangeExpr(g.col, planpb.OpType_Equal, filtered[0]))
 		} else {
 			out = append(out, newTermExpr(g.col, filtered))
 		}
@@ -689,14 +720,18 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 	return out
 }
 
-// OR: (a IN S) OR (a != d) -> if d ∈ S then true else (a != d)
-func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
+// OR: (a IN S) OR (a != d) -> if d ∈ S then true else (a != d).
+// A singleton IN is represented by its stable form, a == v, so this rule also
+// accepts one equality operand as a singleton membership set.
+func combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
+		col       *planpb.ColumnInfo
+		termIdx   int
+		term      *planpb.TermExpr
+		equalIdxs []int
+		equalVals []*planpb.GenericValue
+		neqIdxs   []int
+		neqVals   []*planpb.GenericValue
 	}
 	groups := map[string]*group{}
 	others := []int{}
@@ -714,6 +749,21 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 			g.term = te
 			g.termIdx = idx
+			continue
+		}
+		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
+			g := groups[k]
+			if g == nil {
+				g = &group{col: ue.GetColumnInfo()}
+				groups[k] = g
+			}
+			g.equalIdxs = append(g.equalIdxs, idx)
+			g.equalVals = append(g.equalVals, ue.GetValue())
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
@@ -740,13 +790,23 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 		used[i] = true
 	}
 	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
+		membershipIdx := g.termIdx
+		var membershipValues []*planpb.GenericValue
+		if g.term != nil {
+			membershipValues = g.term.GetValues()
+		} else if len(g.equalIdxs) == 1 {
+			membershipIdx = g.equalIdxs[0]
+			membershipValues = g.equalVals
+		} else {
+			continue
+		}
+		if len(g.neqIdxs) == 0 {
 			continue
 		}
 		// if any neq value is inside IN set -> true
 		containsAny := false
 		for _, dv := range g.neqVals {
-			for _, tv := range g.term.GetValues() {
+			for _, tv := range membershipValues {
 				if equalsGeneric(tv, dv) {
 					containsAny = true
 					break
@@ -760,14 +820,14 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			if !canFoldPredicateToBoolConstant(g.col) {
 				continue
 			}
-			used[g.termIdx] = true
+			used[membershipIdx] = true
 			for _, ni := range g.neqIdxs {
 				used[ni] = true
 			}
 			out = append(out, newAlwaysTrueExpr())
 		} else {
 			// drop the IN; keep != as-is
-			used[g.termIdx] = true
+			used[membershipIdx] = true
 		}
 	}
 	for i := range parts {
