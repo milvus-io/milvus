@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -152,6 +153,12 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrDataIntegrity) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				log.Warn(context.TODO(), "l0CompactionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				return
+			}
+		}
 		log.Warn(context.TODO(), "l0CompactionTask failed to get compaction result", mlog.Err(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
