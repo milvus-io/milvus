@@ -181,6 +181,7 @@ type Core struct {
 type FileResourceObserver interface {
 	CheckAllQnReady() error
 	InitMeta(meta IMetaTable)
+	IsEmpty() bool
 	Notify()
 	Sync() error
 }
@@ -245,14 +246,14 @@ func (c *Core) ServerExist(serverID int64) bool {
 
 func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 	c.proxyClientManager.SetProxyClients(sessions)
-	if c.fileResourceObserver != nil {
+	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
 }
 
 func (c *Core) addProxyClient(session *sessionutil.Session) {
 	c.proxyClientManager.AddProxyClient(session)
-	if c.fileResourceObserver != nil {
+	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
 }
