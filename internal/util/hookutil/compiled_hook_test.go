@@ -143,7 +143,7 @@ func (h *initRecordingHook) initParams() map[string]string {
 // A compiled-in hook is initialized the way a plug-in is: once, with the hook
 // configuration, before it is stored. It is the one call that tells the hook
 // it runs in the proxy process.
-func TestInitHookInitialisesTheCompiledInHookWithTheHookConfig(t *testing.T) {
+func TestInitHookInitializesTheCompiledInHookWithTheHookConfig(t *testing.T) {
 	paramtable.Init()
 	saveHookKey(t, "somekey", "someValue")
 	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
@@ -158,7 +158,7 @@ func TestInitHookInitialisesTheCompiledInHookWithTheHookConfig(t *testing.T) {
 
 // A hook that cannot initialize is a proxy that does not start, exactly as
 // for a plug-in.
-func TestInitHookFailsWhenTheCompiledInHookCannotInitialise(t *testing.T) {
+func TestInitHookFailsWhenTheCompiledInHookCannotInitialize(t *testing.T) {
 	paramtable.Init()
 	h := &initRecordingHook{initErr: errors.New("the internal port is taken")}
 	installHook(t, h)
