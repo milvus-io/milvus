@@ -418,6 +418,8 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
         const auto& field_type = std::get<1>(tup);
         const auto& element_type = std::get<2>(tup);
 
+        // Vector-index optional fields are scalar-only, so element
+        // nullability does not apply.
         auto field_datas = GetFieldDatasFromStorageV2(
             remote_files, field_id, field_type, element_type, false, 1, fs_);
 

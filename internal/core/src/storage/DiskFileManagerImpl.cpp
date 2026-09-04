@@ -872,11 +872,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
 
             auto vec_array = vec_array_data->value_at(physical_row);
             auto size = vec_array->byte_size();
-            if (size > 0) {
-                milvus::fastmem::FastMemcpy(
-                    buf.get() + buf_offset, vec_array->data(), size);
-            }
-            buf_offset += size;
 
             // Collect offsets information if needed (cumulative offsets)
             if (offsets != nullptr) {
@@ -884,6 +879,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                 size_t last_offset = offsets->back();
                 offsets->push_back(last_offset + vec_array->physical_length());
             }
+
+            if (size > 0) {
+                milvus::fastmem::FastMemcpy(
+                    buf.get() + buf_offset, vec_array->data(), size);
+            }
+            buf_offset += size;
             physical_row++;
         }
 
@@ -1369,6 +1370,8 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
         const auto& field_type = std::get<1>(tup);
         const auto& element_type = std::get<2>(tup);
 
+        // Vector-index optional fields are scalar-only, so element
+        // nullability does not apply.
         auto field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
                                                       field_id,
                                                       field_type,
