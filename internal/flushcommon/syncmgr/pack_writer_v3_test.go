@@ -22,6 +22,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -173,7 +174,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	parquetSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, "parquet")
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, parquetSplit, manifestPath)
 
-	gotInserts, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal("parquet", gotInserts[0].GetFormat())
@@ -181,6 +182,72 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	s.NoError(err)
 	s.Equal(basePath, writtenBasePath)
 	s.Greater(revision, int64(0))
+}
+
+func (s *PackWriterV3Suite) TestWriteTextTermFstAccumulatesManifestCoverage() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(790)
+	basePath := path.Join(common.SegmentInsertLogPath, metautil.JoinIDPath(collectionID, partitionID, segmentID))
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+
+	newPack := func(coverage uint64, terms [][]byte) *SyncPack {
+		return new(SyncPack).
+			WithCollectionID(collectionID).
+			WithPartitionID(partitionID).
+			WithSegmentID(segmentID).
+			WithTextTerms(&TextTermData{
+				CoverageTimestamp: coverage,
+				Fields: map[int64][][]byte{
+					101: terms,
+				},
+			})
+	}
+
+	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	_, _, _, _, _, manifest1, _, stats1, err := bw1.Write(context.Background(), newPack(100, [][]byte{[]byte("hello"), []byte("world")}))
+	s.Require().NoError(err)
+	s.Require().NotNil(stats1)
+
+	manifestStats1, err := packed.GetManifestStats(manifest1, s.storageConfig)
+	s.Require().NoError(err)
+	textStat1 := manifestStats1["text_log_v2.101"]
+	s.Require().Len(textStat1.Paths, 1)
+	s.Equal(textTermFstFormat, textStat1.Metadata["format"])
+	s.Equal("100", textStat1.Metadata["coverage_timestamp"])
+	s.Equal("2", textStat1.Metadata["fragment_term_count"])
+	firstData, err := packed.ReadFile(s.storageConfig, textStat1.Paths[0])
+	s.Require().NoError(err)
+	s.NotEmpty(firstData)
+	s.Contains(textStat1.Paths[0], "/_stats/text_log_v2.101/")
+	s.True(strings.HasSuffix(textStat1.Paths[0], ".fst"))
+	s.Equal(strconv.Itoa(len(firstData)), textStat1.Metadata["log_size"])
+	s.Equal(strconv.Itoa(len(firstData)), textStat1.Metadata["memory_size"])
+	s.EqualValues(len(firstData), stats1.GetStatsBinlogSize())
+
+	metacache.SetStatistics(bw1.PreparedStats())(seg)
+	metacache.UpdateManifestPath(manifest1)(seg)
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest1)
+	_, _, _, _, _, manifest2, _, stats2, err := bw2.Write(context.Background(), newPack(200, nil))
+	s.Require().NoError(err)
+	s.Require().NotNil(stats2)
+
+	manifestStats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
+	s.Require().NoError(err)
+	textStat2 := manifestStats2["text_log_v2.101"]
+	s.Require().Len(textStat2.Paths, 2)
+	s.Equal("200", textStat2.Metadata["coverage_timestamp"])
+	s.Equal("0", textStat2.Metadata["fragment_term_count"])
+	emptyData, err := packed.ReadFile(s.storageConfig, textStat2.Paths[1])
+	s.Require().NoError(err)
+	s.NotEmpty(emptyData)
+	s.Equal(strconv.Itoa(len(firstData)+len(emptyData)), textStat2.Metadata["log_size"])
+	s.Equal(strconv.Itoa(len(firstData)+len(emptyData)), textStat2.Metadata["memory_size"])
+	s.EqualValues(len(firstData)+len(emptyData), stats2.GetStatsBinlogSize())
 }
 
 func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch() {
@@ -222,7 +289,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 		WithSegmentID(segmentID).
 		WithChannelName(channelName).
 		WithInsertData(genInsertData(5, s.schema))
-	_, _, _, _, firstManifestPath, _, _, err := bw.Write(context.Background(), firstPack)
+	_, _, _, _, _, firstManifestPath, _, _, err := bw.Write(context.Background(), firstPack)
 	s.Require().NoError(err)
 
 	format, err := packed.ResolveManifestSingleWriterFormat(firstManifestPath, s.storageConfig, nil, "")
@@ -245,7 +312,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 		WithSegmentID(segmentID).
 		WithChannelName(channelName).
 		WithInsertData(genInsertData(5, s.schema))
-	_, _, _, _, secondManifestPath, _, _, err := bw.Write(context.Background(), secondPack)
+	_, _, _, _, _, secondManifestPath, _, _, err := bw.Write(context.Background(), secondPack)
 	s.Require().NoError(err)
 
 	format, err = packed.ResolveManifestSingleWriterFormat(secondManifestPath, s.storageConfig, nil, "")
@@ -315,7 +382,7 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 }
 
@@ -349,7 +416,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -375,7 +442,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -396,7 +463,7 @@ func (s *PackWriterV3Suite) TestInvalidManifestPath() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, invalidManifestPath)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -438,7 +505,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	gotInserts, gotDeletes, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, gotDeletes, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
 	// For V3, delta summary is returned for compaction trigger (no path, only stats)
@@ -551,7 +618,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
+	_, _, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
 	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
@@ -570,7 +637,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
-	_, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
+	_, _, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 
 	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
@@ -588,7 +655,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 		WithBatchRows(int64(batchRows))
 
 	bw3 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest2)
-	_, _, _, _, manifest3, _, _, err := bw3.Write(context.Background(), pack3)
+	_, _, _, _, _, manifest3, _, _, err := bw3.Write(context.Background(), pack3)
 	s.Require().NoError(err)
 
 	stats3, err := packed.GetManifestStats(manifest3, s.storageConfig)
@@ -635,7 +702,7 @@ func (s *PackWriterV3Suite) TestWrite_PropagatesPriorStatsReadError() {
 		WithInsertData(genInsertDataWithPKOffset(batchRows, 0, s.schema)).
 		WithBatchRows(int64(batchRows))
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
+	_, _, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
 	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
@@ -650,7 +717,7 @@ func (s *PackWriterV3Suite) TestWrite_PropagatesPriorStatsReadError() {
 		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows, s.schema)).
 		WithFlush()
 	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
-	_, _, _, _, _, _, _, err = bw2.Write(context.Background(), pack2)
+	_, _, _, _, _, _, _, _, err = bw2.Write(context.Background(), pack2)
 	s.Require().Error(err, "flush must fail when prior-batch stats read fails, not commit a truncated compound blob")
 }
 
@@ -728,7 +795,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 		WithBM25Stats(makeBM25Stats())
 
 	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
+	_, _, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
 	s.Require().NoError(err)
 	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
@@ -748,7 +815,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 		WithBM25Stats(makeBM25Stats())
 
 	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
-	_, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
+	_, _, _, _, _, manifest2, _, _, err := bw2.Write(context.Background(), pack2)
 	s.Require().NoError(err)
 
 	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
@@ -804,7 +871,7 @@ func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	_, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, writtenManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.Require().NoError(err)
 	_, newVer, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.Require().NoError(err)
@@ -881,7 +948,7 @@ func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
 
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
-	_, _, _, _, newManifestPath, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, newManifestPath, _, _, err := bw.Write(context.Background(), pack)
 	s.Require().NoError(err)
 	_, newVer, err := packed.UnmarshalManifestPath(newManifestPath)
 	s.Require().NoError(err)

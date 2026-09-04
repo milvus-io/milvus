@@ -73,7 +73,7 @@ func (s *SegmentInfo) EnsureStats() *datapb.Statistics {
 	if stats := s.GetStats(); stats != nil {
 		return stats
 	}
-	return storage.BuildStatsFromFieldBinlogs(s.GetBinlogs(), s.GetStatslogs(), s.GetBm25Statslogs(), s.GetDeltalogs())
+	return storage.BuildStatsFromFieldBinlogs(s.GetBinlogs(), s.GetStatslogs(), s.GetBm25Statslogs(), s.GetTextLogV2(), s.GetDeltalogs())
 }
 
 func (s *SegmentInfo) GetResidualSegmentSize() int64 {
@@ -113,7 +113,7 @@ func (s *SegmentInfo) GetEarliestTs() uint64 {
 // struct-literal construction path that bypasses this constructor.
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	if info.Stats == nil {
-		info.Stats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Statslogs(), info.GetDeltalogs())
+		info.Stats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Statslogs(), info.GetTextLogV2(), info.GetDeltalogs())
 	}
 	s := &SegmentInfo{
 		SegmentInfo: info,
@@ -353,6 +353,17 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 	for _, statsLogs := range s.GetStatslogs() {
 		for _, l := range statsLogs.GetBinlogs() {
 			if l.GetLogID() == logID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *SegmentInfo) IsTextLogV2Exists(logID int64) bool {
+	for _, fieldLogs := range s.GetTextLogV2() {
+		for _, log := range fieldLogs.GetBinlogs() {
+			if log.GetLogID() == logID {
 				return true
 			}
 		}

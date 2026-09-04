@@ -41,7 +41,7 @@ import (
 // bump-schema produce fresh segments without deltas) and non-nil only for
 // L0 compaction outputs, which carry only deltas and no inserts.
 func buildCompactionOutputStats(insertLogs, deltalogs []*datapb.FieldBinlog, statsBlobSize int64) *datapb.Statistics {
-	s := storage.BuildStatsFromFieldBinlogs(insertLogs, nil, nil, deltalogs)
+	s := storage.BuildStatsFromFieldBinlogs(insertLogs, nil, nil, nil, deltalogs)
 	s.StatsBinlogSize = statsBlobSize
 	return s
 }

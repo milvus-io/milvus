@@ -2,6 +2,7 @@ package writebuffer
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -127,9 +128,12 @@ func (m *bufferManager) memoryCheck() {
 
 	for {
 		var total int64
-		var candidate WriteBuffer
-		var candiSize int64
-		var candiChan string
+		type candidate struct {
+			buffer  WriteBuffer
+			size    int64
+			channel string
+		}
+		candidates := make([]candidate, 0)
 
 		select {
 		case <-m.ch.CloseCh():
@@ -141,10 +145,8 @@ func (m *bufferManager) memoryCheck() {
 		m.buffers.Range(func(chanName string, buf WriteBuffer) bool {
 			size := buf.MemorySize()
 			total += size
-			if size > candiSize {
-				candiSize = size
-				candidate = buf
-				candiChan = chanName
+			if size > 0 {
+				candidates = append(candidates, candidate{buffer: buf, size: size, channel: chanName})
 			}
 			return true
 		})
@@ -158,10 +160,24 @@ func (m *bufferManager) memoryCheck() {
 			return
 		}
 
-		if candidate != nil {
-			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
-			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].size > candidates[j].size })
+		progress := false
+		for _, candidate := range candidates {
+			candidate.buffer.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+			remaining := candidate.buffer.MemorySize()
+			if remaining < candidate.size {
+				mlog.Info(context.TODO(), "notify writebuffer to sync",
+					mlog.String("channel", candidate.channel),
+					mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candidate.size))))
+				progress = true
+				break
+			}
+			mlog.Warn(context.TODO(), "force sync made no write-buffer memory progress",
+				mlog.String("channel", candidate.channel),
+				mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candidate.size))))
+		}
+		if !progress {
+			return
 		}
 	}
 }

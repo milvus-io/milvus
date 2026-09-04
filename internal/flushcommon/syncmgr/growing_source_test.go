@@ -170,6 +170,31 @@ func TestGrowingSourceSyncTaskHandleErrorIsIdempotent(t *testing.T) {
 	)))
 }
 
+func TestGrowingSourceSyncTaskTracksUncommittedTextTerms(t *testing.T) {
+	terms := &TextTermData{
+		CoverageTimestamp: 200,
+		Fields: map[int64][][]byte{
+			101: {[]byte("fuzzy")},
+		},
+	}
+	task := NewGrowingSourceSyncTask().WithTextTerms(terms)
+	require.Same(t, terms, task.UncommittedTextTerms())
+
+	// A committed data manifest does not imply that its FST stat update was
+	// committed. Keep the generation until the manifest update succeeds.
+	task.WithCommittedFlush("data-manifest", nil)
+	require.Equal(t, "data-manifest", task.CommittedManifestPath())
+	require.Same(t, terms, task.UncommittedTextTerms())
+
+	// On an ack retry, Run starts at data-manifest and may successfully publish
+	// a newer FST manifest before SaveBinlogPaths fails. The next retry must use
+	// the newer manifest and must not append the same term generation again.
+	task.manifestPath = "data-and-fst-manifest"
+	task.textTermsCommitted = true
+	require.Equal(t, "data-and-fst-manifest", task.CommittedManifestPath())
+	require.Nil(t, task.UncommittedTextTerms())
+}
+
 func pkStatsAsOracle(stats *storage.PrimaryKeyStats) *storage.PkStatistics {
 	return &storage.PkStatistics{
 		PkFilter: stats.BF,

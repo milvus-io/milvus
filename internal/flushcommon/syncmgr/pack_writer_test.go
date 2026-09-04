@@ -145,7 +145,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotInserts, gotDeltas, gotStats, gotBm25Stats, gotSize, err := bw.Write(context.Background(), tt.pack)
+			gotInserts, gotDeltas, gotStats, gotBm25Stats, _, gotSize, err := bw.Write(context.Background(), tt.pack)
 			if err != tt.wantErr {
 				t.Errorf("BulkPackWriter.Write() error = %v, wantErr %v", err, tt.wantErr)
 				return

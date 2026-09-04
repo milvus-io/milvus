@@ -70,6 +70,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 					wb.mut.Unlock()
 					return err
 				}
+				wb.bufferTextTerms(inData.segmentID, inData.textTerms, endPos.GetTimestamp())
 				continue
 			}
 		}
@@ -79,6 +80,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			wb.mut.Unlock()
 			return err
 		}
+		wb.bufferTextTerms(inData.segmentID, inData.textTerms, endPos.GetTimestamp())
 	}
 
 	// In streaming service mode, flushed segments no longer maintain a bloom filter.

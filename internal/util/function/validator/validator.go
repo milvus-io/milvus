@@ -17,18 +17,25 @@
 package validator
 
 import (
+	"strconv"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName string, disableRuntimeCheck bool) error {
+	if err := typeutil.ValidateFuzzyBM25Functions(coll); err != nil {
+		return err
+	}
+
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -249,8 +256,18 @@ func CheckFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	}
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		if len(function.GetParams()) != 0 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function accepts no params")
+		seenEnableFuzzy := false
+		for _, param := range function.GetParams() {
+			if param.GetKey() != common.EnableFuzzyKey {
+				return merr.WrapErrParameterInvalidMsg("BM25 function does not support param %q", param.GetKey())
+			}
+			if seenEnableFuzzy {
+				return merr.WrapErrParameterInvalidMsg("duplicate function param key %q", common.EnableFuzzyKey)
+			}
+			seenEnableFuzzy = true
+			if _, err := strconv.ParseBool(param.GetValue()); err != nil {
+				return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %s", common.EnableFuzzyKey, param.GetValue())
+			}
 		}
 	case schemapb.FunctionType_TextEmbedding:
 		if len(function.GetParams()) == 0 {

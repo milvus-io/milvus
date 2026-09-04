@@ -946,6 +946,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
 		l0wb := wb.(*l0WriteBuffer)
+		l0wb.mut.Lock()
+		l0wb.bufferTextTerms(1010, []*msgpb.TextTermBatch{{
+			InputFieldId: common.StartOfUserFieldID + 2,
+			Terms:        [][]byte{[]byte("retry-term")},
+		}}, 200)
+		l0wb.mut.Unlock()
 		futures := l0wb.syncSegments(context.Background(), []int64{1010})
 		s.Require().Len(futures, 1)
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
@@ -962,6 +968,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.EqualValues(0, segment.FlushedRows())
 		s.EqualValues(0, segment.SyncingRows())
 		s.EqualValues(10, segment.BufferRows())
+		l0wb.mut.Lock()
+		restoredTerms := l0wb.yieldTextTerms(1010)
+		l0wb.mut.Unlock()
+		s.Require().NotNil(restoredTerms)
+		s.EqualValues(200, restoredTerms.CoverageTimestamp)
+		s.Equal([][]byte{[]byte("retry-term")}, restoredTerms.Fields[common.StartOfUserFieldID+2])
 
 		futures = l0wb.syncSegments(context.Background(), []int64{1010})
 		s.Require().Len(futures, 1)

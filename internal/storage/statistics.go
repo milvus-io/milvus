@@ -213,8 +213,8 @@ func cloneColumnGroups(groups map[int64]*datapb.ColumnGroupStatistics) map[int64
 
 // Digest folds one sync task's writes into the cumulative state. inserts are
 // the sync's insert FieldBinlogs (one per column group), delta its delta
-// FieldBinlog (nil if none), statsBlobSize the bloom-filter/BM25 blob bytes
-// this sync produced, rows the sync's insert row count, and tsFrom/tsTo the
+// FieldBinlog (nil if none), statsBlobSize the bloom-filter/BM25/Text Log V2
+// bytes this sync produced, rows the sync's insert row count, and tsFrom/tsTo the
 // batch's insert timestamp range. Every member field of a non-empty insert
 // FieldBinlog gets a NullCounts entry (zero included) — the presence contract
 // the index task relies on.
@@ -392,7 +392,7 @@ func (c *StatisticsCollector) Clone() *StatisticsCollector {
 // This treats every row in a binlog as sharing the file's TimestampTo
 // (upward bias) — a best-effort approximation for V2; the live collector
 // produces row-level quantiles.
-func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datapb.FieldBinlog) *datapb.Statistics {
+func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, textLogV2, deltalogs []*datapb.FieldBinlog) *datapb.Statistics {
 	s := &datapb.Statistics{}
 
 	// TimestampFrom (min) and TimestampTo (max) come from iterating every
@@ -467,6 +467,11 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 		}
 	}
 	for _, fb := range bm25logs {
+		for _, l := range fb.GetBinlogs() {
+			s.StatsBinlogSize += l.GetMemorySize()
+		}
+	}
+	for _, fb := range textLogV2 {
 		for _, l := range fb.GetBinlogs() {
 			s.StatsBinlogSize += l.GetMemorySize()
 		}

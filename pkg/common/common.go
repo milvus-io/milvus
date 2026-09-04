@@ -180,6 +180,10 @@ const (
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`
 
+	// SegmentTextLogV2Path stores Text Log V2 artifacts. The first supported
+	// artifact format is the field-level analyzed-term FST used by fuzzy BM25.
+	SegmentTextLogV2Path = `text_log_v2`
+
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
 
@@ -188,7 +192,9 @@ const (
 	OffsetMapping    = `offset_mapping`
 	Centroids        = "centroids"
 
-	// TextIndexPath storage path const for text index
+	// TextIndexPath stores Text Log V1, the existing Tantivy TextMatchIndex.
+	// It coexists with SegmentTextLogV2Path until Text Log V2 covers the V1
+	// feature set and migration lifecycle.
 	TextIndexPath = "text_log"
 
 	// JSONIndexPath storage path const for json index
@@ -259,6 +265,11 @@ const (
 const (
 	EnableAnalyzerKey = `enable_analyzer`
 	AnalyzerParamKey  = `analyzer_params`
+)
+
+// Function params
+const (
+	EnableFuzzyKey = `enable_fuzzy`
 )
 
 //  Collection properties key

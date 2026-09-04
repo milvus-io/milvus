@@ -1088,6 +1088,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 				DataType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "max_length", Value: "1024"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
 				},
 			},
 			{
@@ -1103,6 +1104,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 				Type:           schemapb.FunctionType_BM25,
 				InputFieldIds:  []int64{101},
 				OutputFieldIds: []int64{102},
+				Params:         []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
 			},
 			{
 				Name:          "rerank",
@@ -1163,6 +1165,10 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	assert.Len(t, result, 1)
 	assert.Contains(t, result[0].bm25Stats, int64(102))
 	assert.Equal(t, int64(3), result[0].bm25Stats[102].NumRow())
+	assert.Len(t, result[0].textTerms, 1)
+	assert.EqualValues(t, 101, result[0].textTerms[0].GetInputFieldId())
+	assert.ElementsMatch(t, [][]byte{[]byte("bm25"), []byte("hello"), []byte("legacy"), []byte("message"), []byte("milvus"), []byte("world")}, result[0].textTerms[0].GetTerms())
 	assert.NotNil(t, insertMsg.GetFieldsData()[2])
 	assert.Equal(t, int64(102), insertMsg.GetFieldsData()[2].GetFieldId())
+	assert.Equal(t, result[0].textTerms, insertMsg.GetTextTermBatches())
 }

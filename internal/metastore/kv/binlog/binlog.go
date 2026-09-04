@@ -45,6 +45,10 @@ func CompressSaveBinlogPaths(req *datapb.SaveBinlogPathsRequest) error {
 	if err != nil {
 		return err
 	}
+	err = CompressFieldBinlogs(req.GetField2TextLogV2())
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -150,6 +154,10 @@ func DecompressBinLogs(s *datapb.SegmentInfo) error {
 	if err != nil {
 		return err
 	}
+	err = DecompressBinLog(storage.TextLogV2Binlog, collectionID, partitionID, segmentID, s.GetTextLogV2())
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -212,6 +220,8 @@ func BuildLogPathWithRootPath(chunkManagerRootPath string, binlogType storage.Bi
 		return metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID), nil
 	case storage.BM25Binlog:
 		return metautil.BuildBm25LogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID), nil
+	case storage.TextLogV2Binlog:
+		return metautil.BuildTextLogV2Path(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID), nil
 	}
 	// should not happen
 	return "", merr.WrapErrParameterInvalidMsg("invalid binlog type")
@@ -225,7 +235,7 @@ func GetLogIDFromBingLogPath(logPath string) (int64, error) {
 		return 0, merr.WrapErrParameterInvalidMsg("invalid binlog path: %s", logPath)
 	}
 	var err error
-	logPathStr := logPath[(idx + 1):]
+	logPathStr := strings.TrimSuffix(logPath[(idx+1):], ".fst")
 	logID, err = strconv.ParseInt(logPathStr, 10, 64)
 	if err != nil {
 		return 0, err

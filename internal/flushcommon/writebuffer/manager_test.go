@@ -311,6 +311,34 @@ func (s *ManagerSuite) TestMemoryCheck() {
 	wb.AssertExpectations(s.T())
 }
 
+func (s *ManagerSuite) TestMemoryCheckTriesNextChannelAfterNoProgress() {
+	param := paramtable.Get()
+	s.Require().NoError(param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true"))
+	s.Require().NoError(param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0.7"))
+	s.T().Cleanup(func() {
+		s.Require().NoError(param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key))
+		s.Require().NoError(param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key))
+	})
+
+	memoryLimit := int64(hardware.GetMemoryCount())
+	stalledSize := int64(float64(memoryLimit) * 0.6)
+	progressSize := int64(float64(memoryLimit) * 0.2)
+	stalled := NewMockWriteBuffer(s.T())
+	stalled.EXPECT().MemorySize().Return(stalledSize).Maybe()
+	stalled.EXPECT().EvictBuffer(mock.Anything).Once()
+
+	remaining := atomic.NewInt64(progressSize)
+	progress := NewMockWriteBuffer(s.T())
+	progress.EXPECT().MemorySize().RunAndReturn(func() int64 { return remaining.Load() }).Maybe()
+	progress.EXPECT().EvictBuffer(mock.Anything).Run(func(...SyncPolicy) { remaining.Store(0) }).Once()
+
+	s.manager.buffers.Insert("stalled", stalled)
+	s.manager.buffers.Insert("progress", progress)
+	s.manager.memoryCheck()
+	stalled.AssertExpectations(s.T())
+	progress.AssertExpectations(s.T())
+}
+
 func (s *ManagerSuite) TestStopDuringMemoryCheck() {
 	manager := s.manager
 	param := paramtable.Get()

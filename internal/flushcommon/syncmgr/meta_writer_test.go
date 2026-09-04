@@ -73,23 +73,43 @@ func (s *MetaWriterSuite) TestNormalSave() {
 				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
 			},
 		},
+		TextLogV2: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Format:  textTermFstFormat,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "text-term-existing"}},
+			},
+		},
 	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
 	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
+	task.textLogV2 = map[int64]*datapb.FieldBinlog{
+		1: {
+			FieldID: 1,
+			Format:  textTermFstFormat,
+			Binlogs: []*datapb.Binlog{{LogID: 2, LogPath: "text-term-new"}},
+		},
+	}
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
 			s.Equal(1, len(req.Field2BinlogPaths))
 			s.Equal(1, len(req.Field2Bm25LogPaths))
 			s.Equal(1, len(req.Field2StatslogPaths))
 			s.Equal(1, len(req.Deltalogs))
+			s.Len(req.GetField2TextLogV2(), 2)
+			s.Equal("text-term-existing", req.GetField2TextLogV2()[0].GetBinlogs()[0].GetLogPath())
+			s.Equal("text-term-new", req.GetField2TextLogV2()[1].GetBinlogs()[0].GetLogPath())
 			return nil
 		})
 
 	err := s.writer.UpdateSync(ctx, task)
 	s.NoError(err)
+	s.Len(seg.TextLogV2(), 2)
 }
 
 func (s *MetaWriterSuite) TestReturnError() {

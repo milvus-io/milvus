@@ -236,7 +236,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// L0 imports carry only deletes; non-L0 imports carry inserts.
 			importStats := info.GetStats()
 			if importStats == nil {
-				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), info.GetDeltalogs())
+				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), nil, info.GetDeltalogs())
 			}
 			var minTs, maxTs uint64
 			isL0Import := importutilv2.IsL0Import(job.GetOptions())

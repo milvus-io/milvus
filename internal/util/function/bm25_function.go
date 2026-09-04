@@ -171,7 +171,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}, nil
 }
 
-func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
+func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32, terms map[string]struct{}) error {
 	tokenizer, err := v.tokenizer.Clone()
 	if err != nil {
 		return err
@@ -194,6 +194,9 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 			// TODO More Hash Option
 			hash := typeutil.HashString2LessUint32(token)
 			embeddingMap[hash] += 1
+			if terms != nil {
+				terms[token] = struct{}{}
+			}
 		}
 		tokenStream.Destroy()
 		dst[i] = embeddingMap
@@ -202,29 +205,40 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 }
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	output, _, err := v.batchRun(false, inputs...)
+	return output, err
+}
+
+func (v *BM25FunctionRunner) BatchRunWithTextTerms(inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
+	return v.batchRun(true, inputs...)
+}
+
+func (v *BM25FunctionRunner) batchRun(collectTerms bool, inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
+		return nil, nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function received more than one input column")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function batch input not string list")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function batch input not string list")
 	}
 
 	rowNum := len(text)
 	embedData := make([]map[uint32]float32, rowNum)
 	wg := sync.WaitGroup{}
 	concurrency := getAnalyzerRunnerConcurrency()
+	termSets := make([]map[string]struct{}, concurrency)
 
 	errCh := make(chan error, concurrency)
 	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
+		chunk := i
 		start := j
 		end := start + rowNum/concurrency
 		if i < rowNum%concurrency {
@@ -233,7 +247,12 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := v.run(text[start:end], embedData[start:end])
+			var terms map[string]struct{}
+			if collectTerms {
+				terms = make(map[string]struct{})
+				termSets[chunk] = terms
+			}
+			err := v.run(text[start:end], embedData[start:end], terms)
 			if err != nil {
 				errCh <- err
 				return
@@ -246,11 +265,25 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	close(errCh)
 	for err := range errCh {
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	return []any{buildSparseFloatArray(embedData)}, nil
+	output := []any{buildSparseFloatArray(embedData)}
+	if !collectTerms {
+		return output, nil, nil
+	}
+
+	terms := make(map[string]struct{})
+	for _, termSet := range termSets {
+		for term := range termSet {
+			terms[term] = struct{}{}
+		}
+	}
+	return output, []AnalyzedTextTermBatch{{
+		InputFieldID: v.inputField.GetFieldID(),
+		Terms:        sortedTermBytes(terms),
+	}}, nil
 }
 
 func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerToken, withDetail bool, withHash bool) error {

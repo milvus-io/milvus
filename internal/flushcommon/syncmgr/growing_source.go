@@ -392,6 +392,12 @@ type GrowingSourceSyncTask struct {
 	insertBinlogs map[int64]*datapb.FieldBinlog
 	bm25Stats     map[int64]*storage.BM25Stats
 	singlePKStats *storage.PrimaryKeyStats
+	textTerms     *TextTermData
+	// textTermsCommitted is set only after the manifest version containing the
+	// FST stat entries is published. A data flush may already have produced a
+	// manifest when FST publication fails; the write buffer must carry the
+	// still-uncommitted generation into the committed-flush retry.
+	textTermsCommitted bool
 
 	committedManifestPath  string
 	committedBM25Stats     map[int64]*storage.BM25Stats
@@ -497,6 +503,12 @@ func (t *GrowingSourceSyncTask) WithCommittedPKStats(pkStats *storage.PrimaryKey
 	return t
 }
 
+func (t *GrowingSourceSyncTask) WithTextTerms(terms *TextTermData) *GrowingSourceSyncTask {
+	t.textTerms = terms
+	t.textTermsCommitted = false
+	return t
+}
+
 func (t *GrowingSourceSyncTask) WithAllocator(allocator allocator.Interface) *GrowingSourceSyncTask {
 	t.allocator = allocator
 	return t
@@ -555,10 +567,15 @@ func (t *GrowingSourceSyncTask) HasCommittedFlush() bool {
 }
 
 func (t *GrowingSourceSyncTask) CommittedManifestPath() string {
-	if t.committedManifestPath != "" {
-		return t.committedManifestPath
+	// Run starts from committedManifestPath on an ack retry, but may publish a
+	// newer manifest while attaching the text-term FST. If the following
+	// SaveBinlogPaths call fails, the retry must retain that latest manifest;
+	// returning the original committed path would lose the already-committed
+	// FST update while UncommittedTextTerms correctly returns nil.
+	if t.manifestPath != "" {
+		return t.manifestPath
 	}
-	return t.manifestPath
+	return t.committedManifestPath
 }
 
 func (t *GrowingSourceSyncTask) CommittedBM25Stats() map[int64]*storage.BM25Stats {
@@ -580,6 +597,16 @@ func (t *GrowingSourceSyncTask) CommittedPKStats() *storage.PrimaryKeyStats {
 		return t.committedPKStats
 	}
 	return t.singlePKStats
+}
+
+// UncommittedTextTerms returns the frozen term generation that still needs to
+// be attached to the committed growing-source manifest. Once the manifest
+// update succeeds, retries must not append the same generation again.
+func (t *GrowingSourceSyncTask) UncommittedTextTerms() *TextTermData {
+	if t.textTermsCommitted {
+		return nil
+	}
+	return t.textTerms
 }
 
 func (t *GrowingSourceSyncTask) BatchRows() int64 {
@@ -711,6 +738,24 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 				return err
 			}
 		}
+	}
+	if t.textTerms != nil {
+		entries, textTermSize, err := buildTextTermManifestEntries(
+			t.manifestPath,
+			t.storageConfig,
+			t.allocator,
+			t.textTerms,
+		)
+		if err != nil {
+			return err
+		}
+		manifestPath, err := packed.AddStatsToManifest(t.manifestPath, t.storageConfig, entries)
+		if err != nil {
+			return err
+		}
+		t.manifestPath = manifestPath
+		t.flushedSize += textTermSize
+		t.textTermsCommitted = true
 	}
 	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
 		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",

@@ -19,11 +19,13 @@ package syncmgr
 import (
 	"context"
 	"path"
+	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -69,29 +71,73 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
 	bm25Stats map[int64]*datapb.FieldBinlog,
+	textTerms map[int64]*datapb.FieldBinlog,
 	size int64,
 	err error,
 ) {
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, stats, bm25Stats, textTerms, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, stats, bm25Stats, textTerms, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, stats, bm25Stats, textTerms, size, err
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, stats, bm25Stats, textTerms, size, err
+	}
+	if textTerms, err = bw.writeTextTerms(ctx, pack); err != nil {
+		mlog.Error(ctx, "failed to write text term FST", mlog.Err(err))
+		return inserts, deltas, stats, bm25Stats, textTerms, size, err
 	}
 
 	size = bw.sizeWritten
 
-	return inserts, deltas, stats, bm25Stats, size, err
+	return inserts, deltas, stats, bm25Stats, textTerms, size, err
+}
+
+const textTermFstFormat = textindex.MilvusTextFstFormat
+
+func (bw *BulkPackWriter) writeTextTerms(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+	logs := make(map[int64]*datapb.FieldBinlog)
+	if pack.textTerms == nil {
+		return logs, nil
+	}
+	for fieldID, terms := range pack.textTerms.Fields {
+		artifact, err := textindex.BuildTextFst(terms)
+		if err != nil {
+			return nil, merr.Wrapf(err, "build text term FST for field %d", fieldID)
+		}
+		id, err := bw.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		key := path.Join(
+			metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID),
+			strconv.FormatInt(id, 10)+".fst",
+		)
+		blob := &storage.Blob{
+			Value:      artifact.Data,
+			RowNum:     artifact.TermCount,
+			MemorySize: int64(len(artifact.Data)),
+		}
+		binlog, err := bw.writeLog(ctx, blob, common.SegmentTextLogV2Path, key, pack)
+		if err != nil {
+			return nil, err
+		}
+		binlog.TimestampTo = pack.textTerms.CoverageTimestamp
+		logs[fieldID] = &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Format:  textTermFstFormat,
+			Binlogs: []*datapb.Binlog{binlog},
+		}
+	}
+	return logs, nil
 }
 
 func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte) error {

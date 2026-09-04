@@ -62,7 +62,6 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		outputField: outputField,
 		analyzers:   make(map[string]analyzer.Analyzer),
 	}
-
 	var m map[string]json.RawMessage
 	var mFileName string
 
@@ -122,10 +121,18 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	return runner, nil
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
+func (v *MultiAnalyzerBM25FunctionRunner) resolveAnalyzerName(name string) string {
 	if alias, ok := v.alias[name]; ok {
 		name = alias
 	}
+	if _, ok := v.analyzers[name]; ok {
+		return name
+	}
+	return "default"
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
+	name = v.resolveAnalyzerName(name)
 
 	if analyzer, ok := analyzers[name]; ok {
 		return analyzer, nil
@@ -140,10 +147,10 @@ func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map
 		return analyzers[name], nil
 	}
 
-	return v.getAnalyzer("default", analyzers)
+	return nil, merr.WrapErrServiceInternalMsg("resolved analyzer %s is not configured", name)
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst []map[uint32]float32) error {
+func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst []map[uint32]float32, terms map[string]struct{}) error {
 	cloneAnalyzers := map[string]analyzer.Analyzer{}
 	defer func() {
 		for _, analyzer := range cloneAnalyzers {
@@ -174,6 +181,9 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 			// TODO More Hash Option
 			hash := typeutil.HashString2LessUint32(token)
 			embeddingMap[hash] += 1
+			if terms != nil {
+				terms[token] = struct{}{}
+			}
 		}
 		tokenStream.Destroy()
 		dst[i] = embeddingMap
@@ -182,38 +192,49 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	output, _, err := v.batchRun(false, inputs...)
+	return output, err
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) BatchRunWithTextTerms(inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
+	return v.batchRun(true, inputs...)
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
+		return nil, nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) != 2 {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer must received two input column")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer must received two input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer text input must be string list")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer text input must be string list")
 	}
 
 	analyzer, ok := inputs[1].([]string)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer input analyzer name must be string list")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer input analyzer name must be string list")
 	}
 
 	if len(text) != len(analyzer) {
-		return nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer input text and analyzer name must have same length")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function with multi analyzer input text and analyzer name must have same length")
 	}
 
 	rowNum := len(text)
 	embedData := make([]map[uint32]float32, rowNum)
 	wg := sync.WaitGroup{}
 	concurrency := getAnalyzerRunnerConcurrency()
+	termSets := make([]map[string]struct{}, concurrency)
 
 	errCh := make(chan error, concurrency)
 	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
+		chunk := i
 		start := j
 		end := start + rowNum/concurrency
 		if i < rowNum%concurrency {
@@ -222,7 +243,12 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := v.run(text[start:end], analyzer[start:end], embedData[start:end])
+			var terms map[string]struct{}
+			if collectTerms {
+				terms = make(map[string]struct{})
+				termSets[chunk] = terms
+			}
+			err := v.run(text[start:end], analyzer[start:end], embedData[start:end], terms)
 			if err != nil {
 				errCh <- err
 				return
@@ -235,11 +261,25 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	close(errCh)
 	for err := range errCh {
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	return []any{buildSparseFloatArray(embedData)}, nil
+	output := []any{buildSparseFloatArray(embedData)}
+	if !collectTerms {
+		return output, nil, nil
+	}
+
+	merged := make(map[string]struct{})
+	for _, termSet := range termSets {
+		for term := range termSet {
+			merged[term] = struct{}{}
+		}
+	}
+	return output, []AnalyzedTextTermBatch{{
+		InputFieldID: v.inputFields[0].GetFieldID(),
+		Terms:        sortedTermBytes(merged),
+	}}, nil
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []string, dst [][]*milvuspb.AnalyzerToken, withDetail bool, withHash bool) error {

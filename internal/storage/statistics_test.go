@@ -27,7 +27,7 @@ import (
 )
 
 func TestBuildStatsFromFieldBinlogs_Empty(t *testing.T) {
-	s := BuildStatsFromFieldBinlogs(nil, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(nil, nil, nil, nil, nil)
 	require.NotNil(t, s)
 	assert.Zero(t, s.GetInsertBinlogSize())
 	assert.Zero(t, s.GetInsertBinlogCount())
@@ -70,7 +70,7 @@ func TestBuildStatsFromFieldBinlogs_InsertAggregates(t *testing.T) {
 			&datapb.Binlog{MemorySize: 75, EntriesNum: 6, TimestampFrom: 30, TimestampTo: 40},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.EqualValues(t, 100+200+50+75, s.GetInsertBinlogSize())
 	assert.EqualValues(t, 4, s.GetInsertBinlogCount())
 	assert.EqualValues(t, 10, s.GetTimestampFrom())
@@ -93,7 +93,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampFromIgnoresZero(t *testing.T) {
 			&datapb.Binlog{MemorySize: 10, EntriesNum: 1, TimestampFrom: 50, TimestampTo: 60},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.EqualValues(t, 50, s.GetTimestampFrom())
 	assert.EqualValues(t, 60, s.GetTimestampTo())
 }
@@ -113,7 +113,7 @@ func TestBuildStatsFromFieldBinlogs_StatsAndDelta(t *testing.T) {
 			&datapb.Binlog{MemorySize: 256, EntriesNum: 5, TimestampFrom: 50, TimestampTo: 250},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(nil, statslogs, nil, deltalogs)
+	s := BuildStatsFromFieldBinlogs(nil, statslogs, nil, nil, deltalogs)
 	assert.EqualValues(t, 3072, s.GetStatsBinlogSize())
 	assert.EqualValues(t, 384, s.GetDeltaBinlogSize())
 	assert.EqualValues(t, 8, s.GetDeleteNumRows())
@@ -122,16 +122,19 @@ func TestBuildStatsFromFieldBinlogs_StatsAndDelta(t *testing.T) {
 	assert.EqualValues(t, 250, s.GetDeltaTimestampTo())
 }
 
-func TestBuildStatsFromFieldBinlogs_StatsIncludesBM25(t *testing.T) {
+func TestBuildStatsFromFieldBinlogs_StatsIncludesBM25AndTextLogV2(t *testing.T) {
 	statslogs := []*datapb.FieldBinlog{
 		fieldBinlog(100, &datapb.Binlog{MemorySize: 1024}),
 	}
 	bm25logs := []*datapb.FieldBinlog{
 		fieldBinlog(101, &datapb.Binlog{MemorySize: 512}, &datapb.Binlog{MemorySize: 256}),
 	}
-	// StatsBinlogSize is the bloom-filter + BM25 footprint: both arrays sum in.
-	s := BuildStatsFromFieldBinlogs(nil, statslogs, bm25logs, nil)
-	assert.EqualValues(t, 1024+512+256, s.GetStatsBinlogSize())
+	textLogV2 := []*datapb.FieldBinlog{
+		fieldBinlog(102, &datapb.Binlog{MemorySize: 128}),
+	}
+	// StatsBinlogSize includes every segment-owned stats artifact.
+	s := BuildStatsFromFieldBinlogs(nil, statslogs, bm25logs, textLogV2, nil)
+	assert.EqualValues(t, 1024+512+256+128, s.GetStatsBinlogSize())
 }
 
 func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_SingleBinlog(t *testing.T) {
@@ -143,7 +146,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_SingleBinlog(t *testing.T
 			&datapb.Binlog{EntriesNum: 100, TimestampTo: 500, TimestampFrom: 100},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.Equal(t, []int64{500, 500, 500, 500, 500}, s.GetTimestampQuantiles())
 }
 
@@ -161,7 +164,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_MultipleBinlogs(t *testin
 			&datapb.Binlog{EntriesNum: 10, TimestampTo: 50},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.Equal(t, []int64{10, 20, 30, 40, 50}, s.GetTimestampQuantiles())
 }
 
@@ -180,7 +183,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_FirstFieldOnly(t *testing
 			&datapb.Binlog{EntriesNum: 10, TimestampTo: 999},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	// Only field 100's binlog is used → all percentiles → 100.
 	assert.Equal(t, []int64{100, 100, 100, 100, 100}, s.GetTimestampQuantiles())
 }
@@ -196,7 +199,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_ZeroEntriesSkipped(t *tes
 			&datapb.Binlog{EntriesNum: 10, TimestampTo: 100},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.Equal(t, []int64{100, 100, 100, 100, 100}, s.GetTimestampQuantiles())
 }
 
@@ -213,7 +216,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_UnsortedBinlogs(t *testin
 			&datapb.Binlog{EntriesNum: 10, TimestampTo: 20},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.Equal(t, []int64{10, 20, 30, 40, 50}, s.GetTimestampQuantiles())
 }
 
@@ -229,7 +232,7 @@ func TestBuildStatsFromFieldBinlogs_TimestampQuantiles_UnevenSizes(t *testing.T)
 			&datapb.Binlog{EntriesNum: 5, TimestampTo: 30},
 		),
 	}
-	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	s := BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	assert.Equal(t, []int64{10, 10, 10, 10, 30}, s.GetTimestampQuantiles())
 }
 
@@ -450,7 +453,7 @@ func TestBuildStatsFromFieldBinlogs_NullCountsCompletion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := BuildStatsFromFieldBinlogs(tc.binlogs, nil, nil, nil)
+			s := BuildStatsFromFieldBinlogs(tc.binlogs, nil, nil, nil, nil)
 			assert.Equal(t, tc.want, s.GetNullCounts())
 		})
 	}
@@ -526,33 +529,33 @@ func TestBuildStatsFromFieldBinlogs_Formats(t *testing.T) {
 		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
 			{FieldID: 0, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
 			{FieldID: 1, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		assert.Equal(t, []string{"parquet"}, s.GetFormats())
 	})
 	t.Run("mixed formats sorted", func(t *testing.T) {
 		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
 			{FieldID: 0, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
 			{FieldID: 1, Format: "lance", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		assert.Equal(t, []string{"lance", "parquet"}, s.GetFormats())
 	})
 	t.Run("empty format ignored", func(t *testing.T) {
 		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
 			{FieldID: 0, Format: "", Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
 			{FieldID: 1, Format: "parquet", Binlogs: []*datapb.Binlog{{MemorySize: 200}}},
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		assert.Equal(t, []string{"parquet"}, s.GetFormats())
 	})
 	t.Run("no format at all", func(t *testing.T) {
 		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
 			{FieldID: 0, Binlogs: []*datapb.Binlog{{MemorySize: 100}}},
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		assert.Empty(t, s.GetFormats())
 	})
 	t.Run("format collected even with empty binlogs", func(t *testing.T) {
 		s := BuildStatsFromFieldBinlogs([]*datapb.FieldBinlog{
 			{FieldID: 0, Format: "parquet"},
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		assert.Equal(t, []string{"parquet"}, s.GetFormats())
 	})
 }

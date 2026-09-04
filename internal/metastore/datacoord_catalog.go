@@ -28,6 +28,7 @@ type BinlogsUpdateMask struct {
 	WithoutDeltalogs     bool // if true, the deltalogs will not be updated
 	WithoutStatslogs     bool // if true, the statslogs will not be updated
 	WithoutBm25Statslogs bool // if true, the bm25 statslogs will not be updated
+	WithoutTextLogV2     bool // if true, text term FST logs will not be updated
 }
 
 func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
@@ -56,6 +57,13 @@ func (m *BinlogsIncrement) GetUpdateBm25Statslogs() []*datapb.FieldBinlog {
 		return nil
 	}
 	return m.cloneBinlogs(m.Segment.GetBm25Statslogs())
+}
+
+func (m *BinlogsIncrement) GetUpdateTextLogV2() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutTextLogV2 {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetTextLogV2())
 }
 
 func (m *BinlogsIncrement) cloneBinlogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {

@@ -36,11 +36,10 @@ type ManifestStat struct {
 	Metadata map[string]string
 }
 
-// StatsBinlogSizeFromManifest returns a StorageV3 segment's bloom-filter + BM25
-// blob footprint recorded in the manifest — the StatsBinlogSize aggregate for a
-// segment whose stats live in the manifest rather than statslog KV arrays.
-// Text/JSON index stats are excluded: they are not part of the bloom+BM25
-// stats-binlog footprint (mirrors the writer's per-sync statsBlobSize).
+// StatsBinlogSizeFromManifest returns a StorageV3 segment's bloom-filter, BM25,
+// and Text Log V2 footprint recorded in the manifest — the StatsBinlogSize
+// aggregate for a segment whose stats live in the manifest rather than statslog
+// KV arrays. Text/JSON index stats are excluded.
 func StatsBinlogSizeFromManifest(manifestPath string, storageConfig *indexpb.StorageConfig) (int64, error) {
 	stats, err := GetManifestStats(manifestPath, storageConfig)
 	if err != nil {
@@ -49,7 +48,7 @@ func StatsBinlogSizeFromManifest(manifestPath string, storageConfig *indexpb.Sto
 	var total int64
 	for key, stat := range stats {
 		prefix, _, ok := ParseStatKey(key)
-		if !ok || (prefix != "bloom_filter" && prefix != "bm25") {
+		if !ok || (prefix != "bloom_filter" && prefix != "bm25" && prefix != "text_log_v2") {
 			continue
 		}
 		memStr, ok := stat.Metadata["memory_size"]

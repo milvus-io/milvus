@@ -18,6 +18,7 @@ package binlog
 
 import (
 	"math/rand"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -287,4 +289,34 @@ func TestBinlog_Compress(t *testing.T) {
 	invaildType := storage.BinlogType(100)
 	err = DecompressBinLog(invaildType, 1, 1, 1, segmentInfo.Binlogs)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestTextLogV2BinlogCompressAndDecompress(t *testing.T) {
+	paramtable.Init()
+	root := paramtable.Get().MinioCfg.RootPath.GetValue()
+	textTermPath := metautil.BuildTextLogV2Path(root, 10, 20, 30, 40, 50)
+	assert.Equal(t, path.Join(root, common.SegmentTextLogV2Path, "10/20/30/40/50.fst"), textTermPath)
+	req := &datapb.SaveBinlogPathsRequest{
+		Field2TextLogV2: []*datapb.FieldBinlog{{
+			FieldID: 40,
+			Format:  "milvus_text_fst_v1",
+			Binlogs: []*datapb.Binlog{{LogPath: textTermPath}},
+		}},
+	}
+
+	err := CompressSaveBinlogPaths(req)
+	assert.NoError(t, err)
+	assert.Empty(t, req.GetField2TextLogV2()[0].GetBinlogs()[0].GetLogPath())
+	assert.EqualValues(t, 50, req.GetField2TextLogV2()[0].GetBinlogs()[0].GetLogID())
+
+	segment := &datapb.SegmentInfo{
+		CollectionID: 10,
+		PartitionID:  20,
+		ID:           30,
+		TextLogV2:    req.GetField2TextLogV2(),
+	}
+	err = DecompressBinLogs(segment)
+	assert.NoError(t, err)
+	assert.Equal(t, textTermPath, segment.GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, "milvus_text_fst_v1", segment.GetTextLogV2()[0].GetFormat())
 }

@@ -625,6 +625,19 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			label:             metrics.DeleteFileLabel,
 		},
 		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentTextLogV2Path),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
+				if err != nil {
+					log.Warn(ctx, "garbageCollector find dirty text term FST", mlog.String("filePath", objectInfo.FilePath), mlog.Err(err))
+					return false
+				}
+				return segment != nil && segment.IsTextLogV2Exists(logID)
+			},
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             common.SegmentTextLogV2Path,
+		},
+		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.TextIndexPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				if segment == nil {
@@ -1249,6 +1262,11 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 		}
 	}
 	for _, flog := range sinfo.GetBm25Statslogs() {
+		for _, l := range flog.GetBinlogs() {
+			logs[l.GetLogPath()] = struct{}{}
+		}
+	}
+	for _, flog := range sinfo.GetTextLogV2() {
 		for _, l := range flog.GetBinlogs() {
 			logs[l.GetLogPath()] = struct{}{}
 		}

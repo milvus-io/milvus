@@ -65,8 +65,9 @@ func (bw *BulkPackWriterV2) PreparedStats() *metacache.SegmentStats {
 // after the DataCoord ack. The clone is stashed as preparedStats and its
 // Publish() returned to DataCoord, so the two are one object. Shared by V2 and
 // the embedding V3 writer; only the statsBlobSize source differs (V2 sums the
-// returned stats/bm25 arrays, V3 tracks bw.statsBlobSize). digested is false for
-// an empty sync, where the publish returns the segment's prior cumulative value.
+// returned stats/BM25/Text Log V2 arrays, V3 tracks bw.statsBlobSize). digested
+// is false for an empty sync, where the publish returns the segment's prior
+// cumulative value.
 func (bw *BulkPackWriterV2) finalizeStats(
 	pack *SyncPack,
 	digested bool,
@@ -110,6 +111,7 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
 	bm25Stats map[int64]*datapb.FieldBinlog,
+	textTerms map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
 	segmentStats *datapb.Statistics,
@@ -131,12 +133,16 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return
 	}
+	if textTerms, err = bw.writeTextTerms(ctx, pack); err != nil {
+		mlog.Error(ctx, "failed to write text term FST", mlog.Err(err))
+		return
+	}
 
 	size = bw.sizeWritten
 
-	// V2 returns the stats / bm25Stats arrays, so statsBlobSize is summed from
-	// them here, then finalizeStats produces the cumulative Statistics.
-	digested := len(inserts) > 0 || len(stats) > 0 || len(bm25Stats) > 0 || len(deltas.GetBinlogs()) > 0
+	// V2 returns the stats / BM25 / Text Log V2 arrays, so statsBlobSize is
+	// summed from them here, then finalizeStats produces cumulative Statistics.
+	digested := len(inserts) > 0 || len(stats) > 0 || len(bm25Stats) > 0 || len(textTerms) > 0 || len(deltas.GetBinlogs()) > 0
 	var statsBlobSize int64
 	if digested {
 		for _, fb := range stats {
@@ -145,6 +151,11 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 			}
 		}
 		for _, fb := range bm25Stats {
+			for _, l := range fb.GetBinlogs() {
+				statsBlobSize += l.GetMemorySize()
+			}
+		}
+		for _, fb := range textTerms {
 			for _, l := range fb.GetBinlogs() {
 				statsBlobSize += l.GetMemorySize()
 			}

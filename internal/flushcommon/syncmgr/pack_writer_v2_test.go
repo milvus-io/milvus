@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -151,11 +152,53 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	gotInserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
 	s.Equal(gotInserts[101].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/101/2")
+}
+
+func (s *PackWriterV2Suite) TestWriteTextTermFst() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(790)
+	coverage := uint64(998877)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+
+	pack := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithTextTerms(&TextTermData{
+			CoverageTimestamp: coverage,
+			Fields: map[int64][][]byte{
+				101: {[]byte("world"), []byte("hello"), []byte("hello")},
+			},
+		})
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+
+	_, _, _, _, textTerms, _, _, stats, err := bw.Write(context.Background(), pack)
+	s.Require().NoError(err)
+	s.Require().Contains(textTerms, int64(101))
+	fieldLog := textTerms[101]
+	s.Equal(textTermFstFormat, fieldLog.GetFormat())
+	s.Require().Len(fieldLog.GetBinlogs(), 1)
+	binlog := fieldLog.GetBinlogs()[0]
+	s.EqualValues(2, binlog.GetEntriesNum())
+	s.Equal(coverage, binlog.GetTimestampTo())
+	s.Contains(binlog.GetLogPath(), "/text_log_v2/123/456/790/101/")
+	s.True(strings.HasSuffix(binlog.GetLogPath(), ".fst"))
+	data, err := s.cm.Read(context.Background(), binlog.GetLogPath())
+	s.Require().NoError(err)
+	s.NotEmpty(data)
+	s.EqualValues(len(data), binlog.GetMemorySize())
+	s.EqualValues(len(data), binlog.GetLogSize())
+	s.Require().NotNil(stats)
+	s.EqualValues(len(data), stats.GetStatsBinlogSize())
 }
 
 func (s *PackWriterV2Suite) TestWriteFeedsSegmentStatistics() {
@@ -185,7 +228,7 @@ func (s *PackWriterV2Suite) TestWriteFeedsSegmentStatistics() {
 
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, published, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, published, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 
 	// Write returns this sync's cumulative Statistics; the metaCache collector
@@ -229,7 +272,7 @@ func (s *PackWriterV2Suite) TestWritePublishesCumulativeStats() {
 	}
 
 	// first sync
-	_, _, _, _, _, _, segStats1, err := bw.Write(context.Background(), newPack())
+	_, _, _, _, _, _, _, segStats1, err := bw.Write(context.Background(), newPack())
 	s.NoError(err)
 	s.NotNil(segStats1)
 	first := segStats1.GetInsertBinlogCount()
@@ -244,7 +287,7 @@ func (s *PackWriterV2Suite) TestWritePublishesCumulativeStats() {
 	// deterministic (same schema → same column groups) so it doubles exactly;
 	// the byte size only has to grow, since genInsertData produces different
 	// random data (variable-length array field) each sync.
-	_, _, _, _, _, _, segStats2, err := bw.Write(context.Background(), newPack())
+	_, _, _, _, _, _, _, segStats2, err := bw.Write(context.Background(), newPack())
 	s.NoError(err)
 	s.NotNil(segStats2)
 	s.Equal(2*first, segStats2.GetInsertBinlogCount())
@@ -267,7 +310,7 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 }
 
@@ -296,7 +339,7 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -313,7 +356,7 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -334,7 +377,7 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 

@@ -178,6 +178,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := checkFieldSchema(schema.GetFields()); err != nil {
 		return err
 	}
+	if err := typeutil.ValidateFuzzyBM25Functions(schema); err != nil {
+		return err
+	}
 
 	// Validate default
 	if err := timestamptz.CheckAndRewriteTimestampTzDefaultValue(schema); err != nil {

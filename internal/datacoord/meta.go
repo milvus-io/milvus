@@ -1160,7 +1160,7 @@ func RevertSegmentPartitionStatsVersionOperator(segmentID int64) UpdateOperator 
 }
 
 // Add binlogs in segmentInfo
-func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs, textLogV2 []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1168,11 +1168,11 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 				mlog.Int64("segmentID", segmentID))
 			return false
 		}
-
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
+		segment.TextLogV2 = mergeFieldBinlogs(segment.GetTextLogV2(), textLogV2)
 		// Stats is array-derived and the arrays just changed. SaveBinlogPaths
 		// always chains UpdateSegmentStats next to repopulate Stats from the
 		// new arrays under the same write lock — this nil-out marks the
@@ -1188,6 +1188,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 				WithoutDeltalogs:     len(deltalogs) == 0,
 				WithoutStatslogs:     len(statslogs) == 0,
 				WithoutBm25Statslogs: len(bm25logs) == 0,
+				WithoutTextLogV2:     len(textLogV2) == 0,
 			},
 		}
 		return true
@@ -1247,6 +1248,7 @@ func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment 
 			WithoutDeltalogs:     false,
 			WithoutStatslogs:     true,
 			WithoutBm25Statslogs: true,
+			WithoutTextLogV2:     true,
 		},
 	}
 	return true
@@ -1450,7 +1452,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		// is the right semantic for these paths: they don't carry a
 		// writer-reported V3 stats override, and the segment is being
 		// (re)initialized with the supplied arrays.
-		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs)
+		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, nil, deltalogs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1476,13 +1478,13 @@ func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) Update
 		if requestStats != nil {
 			segment.Stats = requestStats
 		} else {
-			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
+			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetTextLogV2(), segment.GetDeltalogs())
 		}
 		return true
 	}
 }
 
-func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs, textLogV2 []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		modPack.fromSaveBinlogPathSegmentID = segmentID
 		segment := modPack.Get(segmentID)
@@ -1491,11 +1493,11 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 				mlog.Int64("segmentID", segmentID))
 			return false
 		}
-
 		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
 		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
 		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
+		segment.TextLogV2 = mergeFieldBinlogs(nil, textLogV2)
 		// Stats invalidated; UpdateSegmentStats is chained next under the
 		// same write lock to repopulate from the replaced arrays.
 		segment.Stats = nil
@@ -1580,7 +1582,7 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 		segment.DataVersion++
 
 		// Backfill column-group commit only mutates segment.Binlogs; skipping
-		// Deltalogs / Statslogs / Bm25Statslogs avoids rewriting their KVs on
+		// Deltalogs / Statslogs / Bm25Statslogs / TextLogV2 avoids rewriting their KVs on
 		// every call and the write amplification that comes with it.
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
@@ -1588,6 +1590,7 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 				WithoutDeltalogs:     true,
 				WithoutStatslogs:     true,
 				WithoutBm25Statslogs: true,
+				WithoutTextLogV2:     true,
 			},
 			DroppedBinlogFieldIDs: droppedFieldIDs,
 		}
@@ -2370,7 +2373,7 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 // Falls back to the provided fallback positions if binlog timestamps are unavailable
 // (e.g., legacy segments without TimestampFrom/TimestampTo populated).
 func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
-	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil, nil)
 	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
 	if minTs > 0 && maxTs > 0 {
 		return &msgpb.MsgPosition{

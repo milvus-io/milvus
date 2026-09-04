@@ -691,9 +691,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			req.GetField2StatslogPaths(),
 			req.GetDeltalogs(),
 			req.GetField2Bm25LogPaths(),
+			req.GetField2TextLogV2(),
 		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
 	} else {
-		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
+		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths(), req.GetField2TextLogV2()),
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
@@ -926,6 +927,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2TextLogV2 := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2InsertChannel := make(map[UniqueID]string)
 	segmentsNumOfRows := make(map[UniqueID]int64)
 	segment2TextStatsLogs := make(map[UniqueID]map[UniqueID]*datapb.TextIndexStats)
@@ -1003,6 +1005,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 
 		segment2TextStatsLogs[id] = segment.GetTextStatsLogs()
+		segment2TextLogV2[id] = segment.GetTextLogV2()
 
 		if segment.EnsureStats().GetDeltaBinlogCount() > 0 {
 			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
@@ -1019,6 +1022,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			Deltalogs:     segment2DeltaBinlogs[segmentID],
 			InsertChannel: segment2InsertChannel[segmentID],
 			TextStatsLogs: segment2TextStatsLogs[segmentID],
+			TextLogV2:     segment2TextLogV2[segmentID],
 		}
 		binlogs = append(binlogs, sbl)
 	}

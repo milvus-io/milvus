@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1112,6 +1113,41 @@ func TestFunctionRunnerManagerMaterializeUsesLifecycleKeyVersion(t *testing.T) {
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.EqualValues(t, 1, message.mustBodyCalls.Load())
 	require.EqualValues(t, 1, message.overwriteCalls.Load())
+}
+
+func TestFillFunctionFieldsMaterializesFuzzyBM25Terms(t *testing.T) {
+	schema := newBM25SignatureTestSchema()
+	schema.Fields[1].TypeParams = append(schema.Fields[1].TypeParams,
+		&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+	schema.Functions[0].Params = append(schema.Functions[0].Params,
+		&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "true"})
+	runner, err := NewBM25FunctionRunner(schema, schema.Functions[0])
+	require.NoError(t, err)
+	defer runner.Close()
+
+	body := newBM25InsertRequest("hello world", "hello fuzzy")
+	changed, err := FillFunctionFields([]FunctionRunner{runner}, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, HasFieldData(body.GetFieldsData(), 102))
+	require.Len(t, body.GetTextTermBatches(), 1)
+	require.EqualValues(t, 101, body.GetTextTermBatches()[0].GetInputFieldId())
+	require.Equal(t, [][]byte{[]byte("fuzzy"), []byte("hello"), []byte("world")}, body.GetTextTermBatches()[0].GetTerms())
+
+	changed, err = FillFunctionFields([]FunctionRunner{runner}, body)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Len(t, body.GetTextTermBatches(), 1)
+
+	// A rolling-upgrade/retry message may already contain the BM25 output but
+	// still be missing the new sidecar. Re-run analysis to fill only the terms.
+	fieldCount := len(body.GetFieldsData())
+	body.TextTermBatches = nil
+	changed, err = FillFunctionFields([]FunctionRunner{runner}, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, body.GetFieldsData(), fieldCount)
+	require.Len(t, body.GetTextTermBatches(), 1)
 }
 
 func TestFunctionRunnerManagerMaterializeLatestSkipsMissingLifecycleKey(t *testing.T) {

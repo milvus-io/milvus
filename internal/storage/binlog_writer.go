@@ -44,6 +44,8 @@ const (
 	StatsBinlog
 	// BM25 BinlogType for bm25 stats data
 	BM25Binlog
+	// TextLogV2Binlog stores Text Log V2 artifacts for non-manifest storage.
+	TextLogV2Binlog
 )
 
 const (
@@ -65,6 +67,8 @@ func (b BinlogType) String() string {
 		return "StatsBinlog"
 	case BM25Binlog:
 		return "BM25"
+	case TextLogV2Binlog:
+		return "TextLogV2"
 	}
 	return "BinlogType"
 }

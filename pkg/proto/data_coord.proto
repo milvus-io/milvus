@@ -475,10 +475,14 @@ message SegmentInfo {
   // instead of iterating Binlogs/Statslogs/Deltalogs for scheduling
   // decisions (compaction, load balancing, GC). See message Statistics.
   Statistics stats = 38;
-
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+
+  // text_log_v2 stores Text Log V2 artifacts for non-manifest storage.
+  // The first format is the analyzed-term FST used by fuzzy BM25. Storage V3
+  // keeps Text Log V2 in the LOON manifest instead of this FieldBinlog array.
+  repeated FieldBinlog text_log_v2 = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -565,6 +569,10 @@ message SaveBinlogPathsRequest {
   // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
   // from req.Field2StatslogPaths via the iteration helper.
   Statistics stats = 19;
+  // Text Log V2 artifacts for non-manifest storage. Storage V3 publishes the
+  // artifacts through manifest_path in the same manifest lifecycle as data,
+  // delta logs, and other statistics.
+  repeated FieldBinlog field2TextLogV2 = 20;
 }
 
 message CheckPoint {
@@ -612,6 +620,8 @@ message SegmentBinlogs {
   repeated FieldBinlog deltalogs = 5;
   string insert_channel = 6;
   map<int64, TextIndexStats> textStatsLogs = 7;
+  // Text Log V2 artifacts for non-manifest storage.
+  repeated FieldBinlog text_log_v2 = 8;
 }
 
 message FieldBinlog{

@@ -60,6 +60,12 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	if len(pack.bm25Binlogs) > 0 {
 		deltaBm25StatsBinlogs = append(segment.Bm25logs(), lo.MapToSlice(pack.bm25Binlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })...)
 	}
+	textLogV2 := segment.TextLogV2()
+	if len(pack.textLogV2) > 0 {
+		textLogV2 = append(textLogV2, lo.MapToSlice(pack.textLogV2, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog {
+			return fieldBinlog
+		})...)
+	}
 
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
@@ -94,6 +100,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		mlog.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
 		mlog.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
 		mlog.Int("bm25logNum", lo.SumBy(deltaBm25StatsBinlogs, getBinlogNum)),
+		mlog.Int("textLogV2Num", lo.SumBy(textLogV2, getBinlogNum)),
 		mlog.String("manifestPath", pack.manifestPath),
 		mlog.String("vChannelName", pack.channelName),
 	)
@@ -110,6 +117,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		Field2BinlogPaths:   insertFieldBinlogs,
 		Field2StatslogPaths: statsFieldBinlogs,
 		Field2Bm25LogPaths:  deltaBm25StatsBinlogs,
+		Field2TextLogV2:     textLogV2,
 		Deltalogs:           deltaFieldBinlogs,
 
 		CheckPoints: checkPoints,
@@ -164,6 +172,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		metacache.UpdateStatslogs(statsFieldBinlogs),
 		metacache.UpdateDeltalogs(deltaFieldBinlogs),
 		metacache.UpdateBm25logs(deltaBm25StatsBinlogs),
+		metacache.UpdateTextLogV2(textLogV2),
 	), metacache.WithSegmentIDs(pack.segmentID))
 	return nil
 }
@@ -218,8 +227,9 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 	tsFrom, tsTo := insertBinlogTimestampRange(task.insertBinlogs)
 	statsClone.Digest(task.insertBinlogs, nil, 0, task.batchRows, tsFrom, tsTo)
 	stats := statsClone.Publish()
-	// V3 stats (bloom-filter / BM25 footprint) live in the manifest, not in
-	// statslog KV arrays; source StatsBinlogSize from the just-committed manifest.
+	// V3 stats (bloom-filter / BM25 / Text Log V2 footprint) live in the
+	// manifest, not in statslog KV arrays; source StatsBinlogSize from the
+	// just-committed manifest.
 	if stats != nil && task.storageConfig != nil && task.manifestPath != "" {
 		if statsBlobSize, err := packed.StatsBinlogSizeFromManifest(task.manifestPath, task.storageConfig); err != nil {
 			// Degrade gracefully: keep the collector's StatsBinlogSize rather than

@@ -128,6 +128,13 @@ func TestGetSegmentSize(t *testing.T) {
 				},
 			},
 		},
+		TextLogV2: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogID: 2, MemorySize: 2},
+				},
+			},
+		},
 		Deltalogs: []*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{
@@ -137,11 +144,11 @@ func TestGetSegmentSize(t *testing.T) {
 		},
 	})
 
-	assert.Equal(t, int64(3), segment.getSegmentSize())
-	assert.Equal(t, int64(3), segment.getSegmentSize())
+	assert.Equal(t, int64(5), segment.getSegmentSize())
+	assert.Equal(t, int64(5), segment.getSegmentSize())
 	assert.Equal(t, int64(1), segment.getFieldBinlogSize(1))
 	// field 2 has no binlogs, fallback to getSegmentSize
-	assert.Equal(t, int64(3), segment.getFieldBinlogSize(2))
+	assert.Equal(t, int64(5), segment.getFieldBinlogSize(2))
 }
 
 func TestIsDeltaLogExists(t *testing.T) {
@@ -358,7 +365,7 @@ func TestGetEarliestTs_AfterCloneWithReplacedBinlogs(t *testing.T) {
 			{Binlogs: []*datapb.Binlog{{TimestampFrom: 3000, TimestampTo: 4000}}},
 			{Binlogs: []*datapb.Binlog{{TimestampFrom: 2500, TimestampTo: 3500}}},
 		}
-		s.Stats = storage.BuildStatsFromFieldBinlogs(s.GetBinlogs(), s.GetStatslogs(), s.GetBm25Statslogs(), s.GetDeltalogs())
+		s.Stats = storage.BuildStatsFromFieldBinlogs(s.GetBinlogs(), s.GetStatslogs(), s.GetBm25Statslogs(), s.GetTextLogV2(), s.GetDeltalogs())
 	})
 
 	// Stats now reflects the new arrays: min(TimestampFrom) → 2500.

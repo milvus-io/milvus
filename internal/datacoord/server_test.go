@@ -1566,6 +1566,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 					},
 				},
 			},
+			Field2TextLogV2: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Format:  "milvus_text_fst_v1",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "/text_log_v2/0/1/10089/101/9",
+						},
+					},
+				},
+			},
 			Flushed: true,
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
@@ -1614,6 +1625,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		for i, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
 			assert.Equal(t, int64(i+1), binlog.GetLogID())
 		}
+		assert.Len(t, resp.GetBinlogs()[0].GetTextLogV2(), 1)
+		assert.EqualValues(t, 101, resp.GetBinlogs()[0].GetTextLogV2()[0].GetFieldID())
+		assert.Equal(t, "milvus_text_fst_v1", resp.GetBinlogs()[0].GetTextLogV2()[0].GetFormat())
+		assert.EqualValues(t, 9, resp.GetBinlogs()[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogID())
+		assert.Empty(t, resp.GetBinlogs()[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t)

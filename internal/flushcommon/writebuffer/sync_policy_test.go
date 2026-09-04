@@ -137,6 +137,23 @@ func (s *SyncPolicySuite) TestOlderBufferPolicy() {
 	}
 }
 
+func (s *SyncPolicySuite) TestOldestBufferPolicySkipsIneligibleGrowingSegment() {
+	policy := GetOldestBufferPolicy(1).(*oldestBufferPolicy)
+	progress := map[int64]*growingSourceProgress{
+		100: {batches: []growingSourceProgressBatch{{startPosition: &msgpb.MsgPosition{Timestamp: 1}}}},
+		200: {batches: []growingSourceProgressBatch{{startPosition: &msgpb.MsgPosition{Timestamp: 2}}}},
+	}
+	terms := map[int64]*segmentTextTermBuffer{
+		100: newSegmentTextTermBuffer(),
+		200: newSegmentTextTermBuffer(),
+	}
+	terms[100].Buffer([]*msgpb.TextTermBatch{{InputFieldId: 101, Terms: [][]byte{[]byte("oldest")}}}, 1)
+	terms[200].Buffer([]*msgpb.TextTermBatch{{InputFieldId: 101, Terms: [][]byte{[]byte("next")}}}, 2)
+
+	ids := policy.selectSegments(nil, progress, terms, func(segmentID int64) bool { return segmentID != 100 })
+	s.Equal([]int64{200}, ids)
+}
+
 func TestSyncPolicy(t *testing.T) {
 	suite.Run(t, new(SyncPolicySuite))
 }

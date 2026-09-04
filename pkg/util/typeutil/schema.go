@@ -4179,6 +4179,100 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 	return isFunctionInputFieldOfType(coll, field, schemapb.FunctionType_BM25)
 }
 
+// IsFuzzyEnabledBM25Function reports whether a BM25 function enables fuzzy
+// term expansion. Schema validation rejects malformed and duplicate values.
+func IsFuzzyEnabledBM25Function(function *schemapb.FunctionSchema) bool {
+	if function == nil || function.GetType() != schemapb.FunctionType_BM25 {
+		return false
+	}
+	for _, param := range function.GetParams() {
+		if param.GetKey() != common.EnableFuzzyKey {
+			continue
+		}
+		enabled, err := strconv.ParseBool(param.GetValue())
+		return err == nil && enabled
+	}
+	return false
+}
+
+// IsFuzzyEnabledBM25InputField reports whether a field is consumed by at
+// least one fuzzy-enabled BM25 function. Segment FSTs remain field-scoped, so
+// callers use this helper to deduplicate shared inputs across functions.
+func IsFuzzyEnabledBM25InputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	if coll == nil || field == nil {
+		return false
+	}
+	for _, function := range coll.GetFunctions() {
+		if !IsFuzzyEnabledBM25Function(function) {
+			continue
+		}
+		for _, fieldID := range function.GetInputFieldIds() {
+			if field.GetFieldID() != 0 && field.GetFieldID() == fieldID {
+				return true
+			}
+		}
+		for _, fieldName := range function.GetInputFieldNames() {
+			if field.GetName() == fieldName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ValidateFuzzyBM25Functions validates the enable_fuzzy BM25 function
+// parameter and the analyzed text field that backs its Segment FST.
+func ValidateFuzzyBM25Functions(coll *schemapb.CollectionSchema) error {
+	if coll == nil {
+		return nil
+	}
+
+	for _, function := range coll.GetFunctions() {
+		var value string
+		count := 0
+		for _, param := range function.GetParams() {
+			if param.GetKey() == common.EnableFuzzyKey {
+				value = param.GetValue()
+				count++
+			}
+		}
+		if count == 0 {
+			continue
+		}
+		if function.GetType() != schemapb.FunctionType_BM25 {
+			return merr.WrapErrParameterInvalidMsg("%s is supported only by BM25 functions", common.EnableFuzzyKey)
+		}
+		if count > 1 {
+			return merr.WrapErrParameterInvalidMsg("duplicate function param key %q", common.EnableFuzzyKey)
+		}
+
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %s", common.EnableFuzzyKey, value)
+		}
+		if !enabled {
+			continue
+		}
+		if len(function.GetInputFieldNames()) != 1 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function %s with %s enabled must have exactly one input field", function.GetName(), common.EnableFuzzyKey)
+		}
+		field := GetFieldByName(coll, function.GetInputFieldNames()[0])
+		if field == nil && len(function.GetInputFieldIds()) == 1 {
+			field = GetFieldByID(coll, function.GetInputFieldIds()[0])
+		}
+		if field == nil {
+			return merr.WrapErrParameterInvalidMsg("BM25 function %s with %s enabled references an unknown input field", function.GetName(), common.EnableFuzzyKey)
+		}
+		if !IsStringType(field.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("BM25 function %s with %s enabled must use a VARCHAR/TEXT input field", function.GetName(), common.EnableFuzzyKey)
+		}
+		if !CreateFieldSchemaHelper(field).EnableAnalyzer() {
+			return merr.WrapErrParameterInvalidMsg("BM25 function %s with %s enabled requires input field %s to set %s to true", function.GetName(), common.EnableFuzzyKey, field.GetName(), common.EnableAnalyzerKey)
+		}
+	}
+	return nil
+}
+
 // IsMinHashFunctionInputField reports whether field is the input of a MinHash
 // function. Like BM25, MinHash tokenizes the input text through the field's
 // analyzer, so its analyzer params must not change after backfill or stored

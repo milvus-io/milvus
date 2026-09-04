@@ -5024,6 +5024,83 @@ func TestIsBM25FunctionOutputField(t *testing.T) {
 	assert.False(t, IsBM25FunctionOutputField(unmarkedOutputSchema.Fields[1], unmarkedOutputSchema))
 }
 
+func TestValidateFuzzyBM25Functions(t *testing.T) {
+	buildSchema := func(dataType schemapb.DataType, fuzzyValue string, params ...*commonpb.KeyValuePair) *schemapb.CollectionSchema {
+		var functionParams []*commonpb.KeyValuePair
+		if fuzzyValue != "" {
+			functionParams = []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: fuzzyValue}}
+		}
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", DataType: dataType, TypeParams: params},
+				{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name:             "bm25",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{100},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{101},
+				OutputFieldNames: []string{"sparse"},
+				Params:           functionParams,
+			}},
+		}
+	}
+
+	t.Run("enabled", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_VarChar, "true",
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		require.NoError(t, ValidateFuzzyBM25Functions(schema))
+		assert.True(t, IsFuzzyEnabledBM25Function(schema.Functions[0]))
+		assert.True(t, IsFuzzyEnabledBM25InputField(schema, schema.Fields[0]))
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_Int64, "false")
+		require.NoError(t, ValidateFuzzyBM25Functions(schema))
+	})
+
+	t.Run("field param does not enable function", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_VarChar, "",
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"},
+			&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "true"})
+		require.NoError(t, ValidateFuzzyBM25Functions(schema))
+		assert.False(t, IsFuzzyEnabledBM25Function(schema.Functions[0]))
+		assert.False(t, IsFuzzyEnabledBM25InputField(schema, schema.Fields[0]))
+	})
+
+	t.Run("invalid boolean", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_VarChar, "invalid")
+		require.ErrorContains(t, ValidateFuzzyBM25Functions(schema), "should be a boolean")
+	})
+
+	t.Run("non text field", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_Int64, "true",
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		require.ErrorContains(t, ValidateFuzzyBM25Functions(schema), "VARCHAR/TEXT")
+	})
+
+	t.Run("analyzer disabled", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_Text, "true")
+		require.ErrorContains(t, ValidateFuzzyBM25Functions(schema), common.EnableAnalyzerKey)
+	})
+
+	t.Run("non bm25 function", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_VarChar, "true",
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		schema.Functions[0].Type = schemapb.FunctionType_TextEmbedding
+		require.ErrorContains(t, ValidateFuzzyBM25Functions(schema), "only by BM25")
+	})
+
+	t.Run("duplicate param", func(t *testing.T) {
+		schema := buildSchema(schemapb.DataType_VarChar, "true",
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		schema.Functions[0].Params = append(schema.Functions[0].Params,
+			&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "false"})
+		require.ErrorContains(t, ValidateFuzzyBM25Functions(schema), "duplicate")
+	})
+}
+
 func TestIsBm25FunctionInputField(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{

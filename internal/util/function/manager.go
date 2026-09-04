@@ -679,7 +679,7 @@ func materializeWithRunnerEntries(
 	outputFieldIDs []int64,
 	body *msgpb.InsertRequest,
 ) (bool, error) {
-	if len(outputFieldIDs) == 0 || HasAllFieldDataByID(body.GetFieldsData(), outputFieldIDs) {
+	if len(outputFieldIDs) == 0 {
 		return false, nil
 	}
 
@@ -1163,19 +1163,48 @@ func FillFunctionFields(runners []FunctionRunner, body *msgpb.InsertRequest) (bo
 			return false, merr.WrapErrFunctionFailedMsg("function should have exactly one output field, got %d", len(outputFields))
 		}
 		outputField := outputFields[0]
-		if HasFieldData(body.GetFieldsData(), outputField.GetFieldID()) {
+		needsOutput := !HasFieldData(body.GetFieldsData(), outputField.GetFieldID())
+		needsTextTerms := fuzzyEnabled(runner) && !hasTextTermBatchForField(body.GetTextTermBatches(), runner.GetInputFields()[0].GetFieldID())
+		if !needsOutput && !needsTextTerms {
 			continue
 		}
 
-		output, err := RunFunction(runner, body)
+		var (
+			output      *schemapb.FieldData
+			termBatches []*msgpb.TextTermBatch
+			err         error
+		)
+		if needsTextTerms {
+			output, termBatches, err = RunFunctionWithTextTerms(runner, body)
+		} else {
+			output, err = RunFunction(runner, body)
+		}
 		if err != nil {
 			return false, err
 		}
-		body.FieldsData = append(body.FieldsData, output)
+		if needsOutput {
+			body.FieldsData = append(body.FieldsData, output)
+		}
+		if needsTextTerms {
+			body.TextTermBatches = append(body.TextTermBatches, termBatches...)
+		}
 		changed = true
 	}
 
 	return changed, nil
+}
+
+func fuzzyEnabled(runner FunctionRunner) bool {
+	return typeutil.IsFuzzyEnabledBM25Function(runner.GetSchema())
+}
+
+func hasTextTermBatchForField(batches []*msgpb.TextTermBatch, fieldID int64) bool {
+	for _, batch := range batches {
+		if batch.GetInputFieldId() == fieldID {
+			return true
+		}
+	}
+	return false
 }
 
 func IsEmbeddingFunctionType(functionType schemapb.FunctionType) bool {
@@ -1199,6 +1228,39 @@ func RunFunction(runner FunctionRunner, body *msgpb.InsertRequest) (*schemapb.Fi
 	if err != nil {
 		return nil, err
 	}
+	return buildFunctionOutput(runner, output)
+}
+
+func RunFunctionWithTextTerms(runner FunctionRunner, body *msgpb.InsertRequest) (*schemapb.FieldData, []*msgpb.TextTermBatch, error) {
+	inputIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	})
+	inputData, err := getStringFieldData(body.GetFieldsData(), inputIDs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	materializer, ok := runner.(TextTermMaterializer)
+	if !ok {
+		return nil, nil, merr.WrapErrServiceInternalMsg("fuzzy BM25 runner does not support text term materialization")
+	}
+	output, batches, err := materializer.BatchRunWithTextTerms(inputData...)
+	if err != nil {
+		return nil, nil, err
+	}
+	fieldData, err := buildFunctionOutput(runner, output)
+	if err != nil {
+		return nil, nil, err
+	}
+	termBatches := lo.Map(batches, func(batch AnalyzedTextTermBatch, _ int) *msgpb.TextTermBatch {
+		return &msgpb.TextTermBatch{
+			InputFieldId: batch.InputFieldID,
+			Terms:        batch.Terms,
+		}
+	})
+	return fieldData, termBatches, nil
+}
+
+func buildFunctionOutput(runner FunctionRunner, output []any) (*schemapb.FieldData, error) {
 	if len(output) == 0 {
 		return nil, merr.WrapErrFunctionFailedMsg("function runner returned empty output")
 	}

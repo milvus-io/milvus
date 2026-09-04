@@ -94,6 +94,26 @@ func (s *BM25FunctionRunnerSuite) TestBatchRun() {
 	s.Error(err)
 }
 
+func (s *BM25FunctionRunnerSuite) TestBatchRunWithTextTerms() {
+	runner, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
+		Name:           "test",
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	})
+	s.Require().NoError(err)
+	defer runner.Close()
+
+	materializer, ok := runner.(TextTermMaterializer)
+	s.Require().True(ok)
+	output, batches, err := materializer.BatchRunWithTextTerms([]string{"test string", "test string 2"})
+	s.Require().NoError(err)
+	s.Require().Len(output, 1)
+	s.Require().Len(batches, 1)
+	s.EqualValues(101, batches[0].InputFieldID)
+	s.Equal([][]byte{[]byte("2"), []byte("string"), []byte("test")}, batches[0].Terms)
+}
+
 func (s *BM25FunctionRunnerSuite) TestBatchAnalyze() {
 	runner, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
 		Name:           "test",
@@ -190,7 +210,7 @@ func (s *BM25FunctionRunnerSuite) TestRunReleasesTokenStreamsPerInput() {
 	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
 	dst := make([]map[uint32]float32, 3)
 
-	err := runner.run([]string{"a", "b", "c"}, dst)
+	err := runner.run([]string{"a", "b", "c"}, dst, nil)
 
 	s.NoError(err)
 	s.Equal(int32(0), active.Load())

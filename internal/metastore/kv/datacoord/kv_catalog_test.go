@@ -312,8 +312,8 @@ func Test_ListSegments(t *testing.T) {
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
 			}
-			// return empty bm25log list
-			if strings.HasPrefix(s, SegmentBM25logPathPrefix) {
+			// return empty optional stats lists
+			if strings.HasPrefix(s, SegmentBM25logPathPrefix) || strings.HasPrefix(s, SegmentTextLogV2PathPrefix) {
 				return nil
 			}
 			return errors.New("should not reach here")
@@ -383,6 +383,55 @@ func Test_AddSegments(t *testing.T) {
 
 		err := catalog.AddSegment(context.TODO(), invalidSegment)
 		assert.Error(t, err)
+	})
+
+	t.Run("persist and recover text term fst logs", func(t *testing.T) {
+		segment := proto.Clone(segment1).(*datapb.SegmentInfo)
+		segment.TextLogV2 = []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Format:  "milvus_text_fst_v1",
+			Binlogs: []*datapb.Binlog{{
+				LogID:       12345,
+				EntriesNum:  7,
+				TimestampTo: 998877,
+			}},
+		}}
+
+		savedKvs := make(map[string]string)
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, values map[string]string) error {
+			maps.Copy(savedKvs, values)
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		require.NoError(t, catalog.AddSegment(context.Background(), segment))
+		textTermKey := buildFieldTextLogV2Path(collectionID, partitionID, segmentID, 101)
+		require.Contains(t, savedKvs, textTermKey)
+		persistedField := &datapb.FieldBinlog{}
+		require.NoError(t, proto.Unmarshal([]byte(savedKvs[textTermKey]), persistedField))
+		assert.EqualValues(t, 101, persistedField.GetFieldID())
+		assert.Equal(t, "milvus_text_fst_v1", persistedField.GetFormat())
+		assert.EqualValues(t, 12345, persistedField.GetBinlogs()[0].GetLogID())
+
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, prefix string, paginationSize int, f func([]byte, []byte) error) error {
+				for key, value := range savedKvs {
+					if strings.HasPrefix(key, prefix) {
+						if err := f([]byte(key), []byte(value)); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			})
+		recovered, err := catalog.ListSegments(context.Background(), collectionID)
+		require.NoError(t, err)
+		require.Len(t, recovered, 1)
+		require.Len(t, recovered[0].GetTextLogV2(), 1)
+		assert.Equal(t, "milvus_text_fst_v1", recovered[0].GetTextLogV2()[0].GetFormat())
+		assert.EqualValues(t, 12345, recovered[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogID())
+		assert.Empty(t, recovered[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	})
 
 	t.Run("save error", func(t *testing.T) {
@@ -532,6 +581,7 @@ func Test_AlterSegments(t *testing.T) {
 				WithoutDeltalogs:     true,
 				WithoutStatslogs:     true,
 				WithoutBm25Statslogs: true,
+				WithoutTextLogV2:     true,
 			},
 		})
 		assert.NoError(t, err)
@@ -587,6 +637,7 @@ func Test_AlterSegments(t *testing.T) {
 		assert.Empty(t, persisted.GetStatslogs(), "V3 persisted SegmentInfo must have empty Statslogs")
 		assert.Empty(t, persisted.GetDeltalogs(), "V3 persisted SegmentInfo must have empty Deltalogs")
 		assert.Empty(t, persisted.GetBm25Statslogs(), "V3 persisted SegmentInfo must have empty Bm25Statslogs")
+		assert.Empty(t, persisted.GetTextLogV2(), "V3 persisted SegmentInfo must have empty TextLogV2")
 	})
 
 	t.Run("save large ops successfully", func(t *testing.T) {
@@ -716,9 +767,10 @@ func Test_DropSegment(t *testing.T) {
 		deltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 		statelogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 		bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBM25logPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		textLogV2Prefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentTextLogV2PathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 
-		assert.Equal(t, 5, len(removedKvs))
-		for _, k := range []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix} {
+		assert.Equal(t, 6, len(removedKvs))
+		for _, k := range []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix, textLogV2Prefix} {
 			_, ok := removedKvs[k]
 			assert.True(t, ok)
 		}

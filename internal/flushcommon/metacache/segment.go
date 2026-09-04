@@ -48,6 +48,7 @@ type SegmentInfo struct {
 	statslogs        []*datapb.FieldBinlog
 	deltalogs        []*datapb.FieldBinlog
 	bm25logs         []*datapb.FieldBinlog
+	textLogV2        []*datapb.FieldBinlog
 	currentSplit     []storagecommon.ColumnGroup
 	manifestPath     string
 
@@ -139,6 +140,10 @@ func (s *SegmentInfo) Bm25logs() []*datapb.FieldBinlog {
 	return s.bm25logs
 }
 
+func (s *SegmentInfo) TextLogV2() []*datapb.FieldBinlog {
+	return s.textLogV2
+}
+
 func (s *SegmentInfo) ManifestPath() string {
 	return s.manifestPath
 }
@@ -171,6 +176,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		statslogs:        s.statslogs,
 		deltalogs:        s.deltalogs,
 		bm25logs:         s.bm25logs,
+		textLogV2:        s.textLogV2,
 		currentSplit:     s.currentSplit,
 		manifestPath:     s.manifestPath,
 		flushSourceMode:  s.flushSourceMode,
@@ -216,6 +222,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		statslogs:        info.GetStatslogs(),
 		deltalogs:        info.GetDeltalogs(),
 		bm25logs:         info.GetBm25Statslogs(),
+		textLogV2:        info.GetTextLogV2(),
 		currentSplit:     currentSplit,
 		manifestPath:     info.GetManifestPath(),
 	}

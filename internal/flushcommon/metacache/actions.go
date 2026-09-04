@@ -162,6 +162,12 @@ func UpdateBm25logs(bm25logs []*datapb.FieldBinlog) SegmentAction {
 	}
 }
 
+func UpdateTextLogV2(logs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.textLogV2 = logs
+	}
+}
+
 func UpdateState(state commonpb.SegmentState) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.state = state

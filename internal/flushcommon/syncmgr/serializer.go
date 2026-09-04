@@ -42,6 +42,7 @@ type SyncPack struct {
 	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
 	bm25Stats  map[int64]*storage.BM25Stats
+	textTerms  *TextTermData
 
 	// statistics
 	tsFrom        typeutil.Timestamp
@@ -62,6 +63,14 @@ type SyncPack struct {
 	errHandler func(err error)
 }
 
+// TextTermData is one frozen generation of analyzed terms for a segment.
+// Fields are keyed by input field ID. Each value is the union of all terms
+// emitted for that field, including terms from every multi-analyzer branch.
+type TextTermData struct {
+	Fields            map[int64][][]byte
+	CoverageTimestamp uint64
+}
+
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
 	p.insertData = lo.Filter(insertData, func(inData *storage.InsertData, _ int) bool {
 		return inData != nil
@@ -76,6 +85,11 @@ func (p *SyncPack) WithDeleteData(deltaData *storage.DeleteData) *SyncPack {
 
 func (p *SyncPack) WithBM25Stats(stats map[int64]*storage.BM25Stats) *SyncPack {
 	p.bm25Stats = stats
+	return p
+}
+
+func (p *SyncPack) WithTextTerms(terms *TextTermData) *SyncPack {
+	p.textTerms = terms
 	return p
 }
 
@@ -148,4 +162,5 @@ func (p *SyncPack) ReleaseData() {
 	p.insertData = nil
 	p.deltaData = nil
 	p.bm25Stats = nil
+	p.textTerms = nil
 }

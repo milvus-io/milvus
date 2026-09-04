@@ -111,6 +111,7 @@ add_subdirectory( futures )
 add_subdirectory( rescores )
 add_subdirectory( plan )
 add_subdirectory( minhash )
+add_subdirectory( textindex )
 
 milvus_add_pkg_config("milvus_core")
 
@@ -133,7 +134,7 @@ if (MILVUS_USE_PCH)
         milvus_common milvus_config milvus_monitor milvus_storage milvus_index
         milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
         milvus_exec milvus_futures milvus_rescores
-        milvus_plan)
+        milvus_plan milvus_textindex)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
     endforeach()
 endif()
@@ -155,6 +156,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_rescores>
     $<TARGET_OBJECTS:milvus_plan>
     $<TARGET_OBJECTS:milvus_minhash>
+    $<TARGET_OBJECTS:milvus_textindex>
 )
 
 set(LINK_TARGETS
