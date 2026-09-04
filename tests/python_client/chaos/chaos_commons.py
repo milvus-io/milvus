@@ -136,8 +136,7 @@ def reconnect(connections, alias="default", timeout=360):
             log.debug(f"fail to connect, error: {str(e)}")
             time.sleep(10)
         end = time.time()
-    else:
-        log.info(f"failed to reconnect after {timeout} seconds")
+    log.info(f"failed to reconnect after {timeout} seconds")
     return connections.connect(alias)
 
 

@@ -114,7 +114,7 @@ class TestOperations(TestBase):
 
         threads = []
         for i in range(collection_num):
-            c_name = collection_name if collection_name else f"DB_{db_name}_Collection_{i}_Checker"
+            c_name = collection_name or f"DB_{db_name}_Collection_{i}_Checker"
             thread = threading.Thread(target=worker, args=(c_name,))
             threads.append(thread)
             thread.start()
