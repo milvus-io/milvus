@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -694,13 +695,27 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 	require.True(s.T(), ok, "manifest must contain bloom filter stats under key %q", bfKey)
 	require.NotEmpty(s.T(), bfStat.Paths)
 
-	basePath := path.Join(dir, common.SegmentInsertLogPath,
+	basePath := path.Join(common.SegmentInsertLogPath,
 		metautil.JoinIDPath(s.collectionID, s.partitionID, s.segmentID))
 	for _, p := range bfStat.Paths {
 		assert.True(s.T(), strings.HasPrefix(p, basePath+"/_stats/"),
 			"bloom filter stat path %q must be under basePath/_stats/, got path outside basePath", p)
 		assert.NotContains(s.T(), p, "stats_log",
 			"bloom filter stat path must not use legacy stats_log/ layout")
+	}
+
+	// Reader-side check: the resolver returns paths RELATIVE to the loon
+	// filesystem root (localStorage.path). A querynode resolves them through
+	// a LocalChunkManager rooted at localStorage.path, so verify the stats
+	// are actually readable through that exact path — i.e. the localStorage.path
+	// prefix is applied exactly once, not doubled (#53051).
+	cm := NewLocalChunkManager(objectstorage.RootPath(dir))
+	for _, p := range bfStat.Paths {
+		assert.False(s.T(), path.IsAbs(p),
+			"reader-facing stat path %q must stay relative to the loon filesystem root", p)
+		_, err := cm.Read(s.ctx, p)
+		assert.NoError(s.T(), err,
+			"reader must resolve stat path %q against localStorage.path", p)
 	}
 }
 

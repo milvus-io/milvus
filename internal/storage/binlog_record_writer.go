@@ -59,6 +59,40 @@ type BinlogRecordWriter interface {
 	Schema() *schemapb.CollectionSchema
 }
 
+// manifestBaseRoot returns the key prefix all V3 writers and readers share.
+// The loon filesystem root differs by storage type:
+//   - local: the filesystem is rooted at localStorage.path, so keys stay
+//     relative to it — neither minio.rootPath nor the absolute localStorage.path
+//     may be prepended (see #53051, #53052).
+//   - remote: the filesystem is rooted at the bucket, so the logical
+//     minio.rootPath is part of the object key.
+func manifestBaseRoot(storageConfig *indexpb.StorageConfig) string {
+	if storageConfig.GetStorageType() == "local" {
+		return ""
+	}
+	return storageConfig.GetRootPath()
+}
+
+// SegmentManifestBasePath returns the loon manifest base path for a segment's
+// insert log: {root}/insert_log/<collectionID>/<partitionID>/<segmentID>.
+// Every primary-storage V3 writer (flush, compaction, import) plus the reader
+// must derive this path identically, otherwise segments are written under one
+// key and read back under another.
+func SegmentManifestBasePath(storageConfig *indexpb.StorageConfig, collectionID, partitionID, segmentID UniqueID) string {
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	return path.Join(manifestBaseRoot(storageConfig), common.SegmentInsertLogPath, k)
+}
+
+// SegmentPartitionBasePath returns the partition-level base path used for TEXT
+// LOB files: {root}/insert_log/<collectionID>/<partitionID>. It shares the
+// same root rule as SegmentManifestBasePath so LOB references written by
+// mix/clustering compaction resolve to the same files the reader reconstructs
+// from the manifest base.
+func SegmentPartitionBasePath(storageConfig *indexpb.StorageConfig, collectionID, partitionID UniqueID) string {
+	k := metautil.JoinIDPath(collectionID, partitionID)
+	return path.Join(manifestBaseRoot(storageConfig), common.SegmentInsertLogPath, k)
+}
+
 type packedBinlogRecordWriterBase struct {
 	// attributes
 	collectionID         UniqueID
@@ -477,8 +511,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
 
 		var err error
-		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
-		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+		pw.basePath = SegmentManifestBasePath(pw.storageConfig, pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.writer, err = newPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, true, pw.textRefsAsBinary, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed record writer")
@@ -710,8 +743,7 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
 
 		var err error
-		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
-		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+		pw.basePath = SegmentManifestBasePath(pw.storageConfig, pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed text writer")
