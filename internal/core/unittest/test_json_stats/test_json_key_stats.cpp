@@ -518,6 +518,26 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestNestedJson) {
     VerifyJsonType("/nested/double_DOUBLE", JSONType::DOUBLE);
 }
 
+TEST_F(JsonKeyStatsUploadLoadTest, TestInvalidTypedArrayThrowsJsonKeyInvalid) {
+    const std::string invalid_json = R"({"row": [1 2]})";
+
+    InitContext();
+    PrepareData({invalid_json});
+
+    try {
+        BuildAndUpload();
+        FAIL() << "expected invalid typed JSON array to fail";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::JsonKeyInvalid);
+        const std::string message = error.what();
+        EXPECT_NE(message.find("segment 3"), std::string::npos);
+        EXPECT_NE(message.find("field 101"), std::string::npos);
+        EXPECT_NE(message.find("row 0"), std::string::npos);
+        EXPECT_NE(message.find("key /row"), std::string::npos);
+        EXPECT_NE(message.find("array: [1 2]"), std::string::npos);
+    }
+}
+
 TEST_F(JsonKeyStatsUploadLoadTest, TestComplexJson) {
     std::vector<std::string> json_strings = {
         R"({

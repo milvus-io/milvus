@@ -162,6 +162,38 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+TEST_F(BsonBuilderTest, LegacyNonFiniteArrayValuesBecomeNull) {
+    auto array_node = builder_->CreateValueNode(
+        R"([NaN, Infinity, -Infinity, "NaN", "escaped \"NaN\" Infinity", {"Infinity":NaN}, [Infinity]])",
+        JSONType::ARRAY);
+
+    auto array_view = array_node.bson_value.value().view().get_array().value;
+    ASSERT_EQ(std::distance(array_view.begin(), array_view.end()), 7);
+    EXPECT_EQ(array_view[0].type(), bsoncxx::type::k_null);
+    EXPECT_EQ(array_view[1].type(), bsoncxx::type::k_null);
+    EXPECT_EQ(array_view[2].type(), bsoncxx::type::k_null);
+    EXPECT_EQ(array_view[3].get_string().value, "NaN");
+    EXPECT_EQ(array_view[4].get_string().value, "escaped \"NaN\" Infinity");
+    EXPECT_EQ(array_view[5].get_document().value["Infinity"].type(),
+              bsoncxx::type::k_null);
+    EXPECT_EQ(array_view[6].get_array().value[0].type(), bsoncxx::type::k_null);
+}
+
+TEST_F(BsonBuilderTest, LegacyNonFiniteFallbackKeepsMalformedJsonInvalid) {
+    const auto expect_json_key_invalid = [this](const std::string& value) {
+        try {
+            builder_->CreateValueNode(value, JSONType::ARRAY);
+            FAIL() << "expected malformed JSON array to be rejected";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::JsonKeyInvalid);
+        }
+    };
+
+    expect_json_key_invalid(R"([NaN "missing comma"])");
+    expect_json_key_invalid(R"([NaNsuffix])");
+    expect_json_key_invalid(R"([NaN,])");
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);
