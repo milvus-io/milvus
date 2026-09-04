@@ -20,9 +20,37 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+var _ mlog.ObjectMarshaler = Params{}
+
+// MarshalLogObject logs every tunable under the lowerCamel form of its json
+// tag, plus the non-secret locator fields of StorageConfig. The credentials in
+// StorageConfig are never logged.
+func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
+	enc.AddInt64("storageVersion", p.StorageVersion)
+	enc.AddString("storageFormat", p.StorageFormat)
+	enc.AddUint64("binlogMaxSize", p.BinLogMaxSize)
+	enc.AddBool("useMergeSort", p.UseMergeSort)
+	enc.AddInt("maxSegmentMergeSort", p.MaxSegmentMergeSort)
+	enc.AddFloat64("preferSegmentSizeRatio", p.PreferSegmentSizeRatio)
+	enc.AddInt("bloomFilterApplyBatchSize", p.BloomFilterApplyBatchSize)
+	enc.AddBool("useLoonFfi", p.UseLoonFFI)
+	enc.AddFloat64("lobHoleRatioThreshold", p.LOBHoleRatioThreshold)
+	enc.AddInt64("textInlineThreshold", p.TextInlineThreshold)
+	enc.AddInt64("textMaxLobFileBytes", p.TextMaxLobFileBytes)
+	enc.AddInt64("textFlushThresholdBytes", p.TextFlushThresholdBytes)
+	if cfg := p.StorageConfig; cfg != nil {
+		enc.AddString("storageType", cfg.GetStorageType())
+		enc.AddString("storageAddress", cfg.GetAddress())
+		enc.AddString("storageBucket", cfg.GetBucketName())
+		enc.AddString("storageRootPath", cfg.GetRootPath())
+	}
+	return nil
+}
 
 type Params struct {
 	StorageVersion            int64                  `json:"storage_version,omitempty"`

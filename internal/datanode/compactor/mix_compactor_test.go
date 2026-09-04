@@ -40,8 +40,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -135,6 +137,25 @@ func (s *MixCompactionTaskStorageV1Suite) prepareMissingBM25OutputSegments(isSor
 			IsSorted:     isSorted,
 		})
 	}
+}
+
+func TestMixCompactionDoesNotLogPluginContext(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	s.prepareMissingBM25OutputSegments(false)
+	s.task.plan.PluginContext = []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "sentinel-ezk"},
+	}
+	s.task.plan.JsonParams = `{"storage_config":{"secret_access_key":"sentinel-sk"}}`
+
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug", DisableTimestamp: true})
+	_, err := s.task.Compact()
+	s.NoError(err)
+
+	logged := sink.String()
+	// segmentNum is emitted only by the rewritten "compact start" line.
+	s.Contains(logged, "segmentNum=3")
+	s.NotContains(logged, "sentinel-ezk")
+	s.NotContains(logged, "sentinel-sk")
 }
 
 func TestMixCompactionMaterializesMissingBM25OutputNoDelete(t *testing.T) {
