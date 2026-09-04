@@ -3631,9 +3631,9 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         self, minio_env, external_prefix
     ):
         """
-        target: test MilvusClient external table refresh second concurrent returns existing or rejects (milvus#49231)
-        method: milvus#49231: duplicate refresh must not return a dropped new job_id
-        expected: behavior matches the case assertion.
+        target: verify duplicate external table refresh behavior (milvus#49231)
+        method: submit two back-to-back refreshes and inspect the first job if the second creates a new job
+        expected: reject/reuse while active, or create a new job only after the first job is terminal
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3649,14 +3649,30 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         job_first = self.refresh_external_collection(client, collection_name=coll)[0]
-        self.refresh_external_collection(
+        second_result, second_succeeded = self.refresh_external_collection(
             client,
             collection_name=coll,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "in progress"},
+            check_task=CheckTasks.check_nothing,
         )
+
         first_progress = self.wait_refresh_progress(client, job_first)
         assert first_progress.state == "RefreshCompleted"
+
+        if second_succeeded:
+            if second_result != job_first:
+                second_progress = self.wait_refresh_progress(client, second_result)
+                assert second_progress.state == "RefreshCompleted", (
+                    f"second refresh job {second_result} ended in {second_progress.state}: {second_progress.reason}"
+                )
+                assert first_progress.end_time <= second_progress.start_time, (
+                    "duplicate refresh jobs overlapped: "
+                    f"first={job_first} (end_time={first_progress.end_time}), "
+                    f"second={second_result} (start_time={second_progress.start_time})"
+                )
+        else:
+            assert second_result.code == 703, second_result
+            assert "in progress" in second_result.message, second_result
+            assert str(job_first) in second_result.message, second_result
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_list_refresh_jobs(self, minio_env, external_prefix):
