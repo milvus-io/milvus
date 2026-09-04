@@ -600,14 +600,19 @@ func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkTracksRealProgress
 // rg-a's task open until rg-b caught up. rg-a's task must finish anyway, and
 // rg-b's must stay open even though a sibling is done.
 //
-// Deleting the `loaded = progress[traceID] >= 100 && !targetNotReady`
-// assignment leaves rg-a's task open, which is the interference this change
-// exists to remove.
+// Deleting the `loaded = progress[traceID] >= 100 && ...` assignment leaves
+// rg-a's task open, which is the interference this change exists to remove.
 func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup() {
 	s.registerLoadingCollection(700, 70, "700-dmc0", 2, 1, 2)
 	s.putReplica(700, 7001, 1, rgA)
 	s.putDelegator(700, 1, "700-dmc0", 1, 2)
 	s.putReplica(700, 7002, 2, rgB)
+
+	// The current target is promoted, which is the gate every scoped task
+	// shares; this test is about the other term of the decision, so the gate is
+	// satisfied for both tasks and only their own progress separates them.
+	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 700)
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 700))
 
 	s.ob.LoadCollection(s.ctx, 700, rgA)
 	s.ob.LoadCollection(s.ctx, 700, rgB)
@@ -627,23 +632,35 @@ func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup(
 	s.True(s.ob.loadTasks.Contain(keyB), "a lagging resource group must not be finished by a loaded sibling")
 }
 
-// TestScopedTaskWaitsForCurrentTargetPromotion asserts that finishing on the
-// per-resource-group percentage did not lose the guarantee the replaced rule
-// gave for free. That percentage is measured against the next target, so it
-// reaches 100 before targetObserver.Check has promoted the current target. A
-// task that finished at that moment would leave the collection below Loaded
-// with nothing left to drive the promotion.
+// TestScopedTaskWaitsForCurrentTargetPromotion asserts that a scoped task does
+// not declare its resource group loaded until the current target has been
+// promoted. The per-resource-group percentage is measured against the NEXT
+// target, so it reaches 100 while the promotion is still pending -- and until
+// it lands, the group cannot serve: shard leader readiness is measured against
+// the CURRENT target. Finishing there would drop the group's supervision (its
+// timeout and teardown) at the moment it is carrying everything but answering
+// nothing.
 //
-// Deleting the `&& !targetNotReady` term makes the first half finish the task
-// while the current target is still absent.
+// The fixture is the shape the expansion path actually produces: a collection
+// that is already loaded, all partitions at 100, with a resource group just
+// added to it. That is why the gate cannot be read off the partitions -- they
+// are all at 100 and are skipped -- and is asked of the target manager
+// directly.
 func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion() {
-	s.registerLoadingCollection(800, 80, "800-dmc0", 1, 1, 2)
-	s.putReplica(800, 8001, 1, rgA)
-	s.putDelegator(800, 1, "800-dmc0", 1, 2)
+	s.registerLoadingCollection(800, 80, "800-dmc0", 2, 801, 802)
+	s.putReplica(800, 8001, 81, rgA)
+	s.putDelegator(800, 81, "800-dmc0", 801, 802)
+	s.markCollectionLoaded(800, 80)
+	// rg-b was just added and has already picked up every target of the next
+	// target, while the promotion of the current target is still pending.
+	s.putReplica(800, 8002, 82, rgB)
+	s.putDelegator(800, 82, "800-dmc0", 801, 802)
 
-	s.ob.LoadCollection(s.ctx, 800, rgA)
-	key := s.taskKey(800, rgA)
+	s.ob.LoadCollection(s.ctx, 800, rgB)
+	key := s.taskKey(800, rgB)
 	s.Require().EqualValues(100, s.ob.observeResourceGroupProgress(s.ctx)[key])
+	s.Require().EqualValues(100, s.meta.GetPartitionLoadPercentage(s.ctx, 80),
+		"the partitions are all loaded, so the gate cannot come from them")
 	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 800, 80))
 
 	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
@@ -658,7 +675,6 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 
 	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
 	s.False(s.ob.loadTasks.Contain(key), "a scoped task must finish once its resource group is loaded and promoted")
-	s.EqualValues(100, s.meta.GetPartitionLoadPercentage(s.ctx, 80))
 }
 
 // TestAReplicaThatHasNotReportedMakesTheGroupUnknown is the min-across-replicas
