@@ -465,6 +465,12 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 func (s *CollectionObserverRGSuite) TestLastResourceGroupTimeoutReleasesCollection() {
 	s.registerLoadingCollection(500, 50, "500-dmc0", 1, 1, 2)
 	s.putReplica(500, 5001, 1, rgB)
+	// A delegator of this collection reports from a node that is not in rg-b's
+	// replica, so the distribution has something to say about the collection
+	// while rg-b still carries none of its targets: a real 0, which is what
+	// makes this a stall rather than the unknown of a coordinator that has just
+	// restarted.
+	s.putDelegator(500, 2, "500-dmc0", 1, 2)
 
 	s.ob.LoadCollection(s.ctx, 500, rgB)
 	key := s.taskKey(500, rgB)
@@ -475,6 +481,37 @@ func (s *CollectionObserverRGSuite) TestLastResourceGroupTimeoutReleasesCollecti
 	s.Empty(s.meta.GetByCollection(s.ctx, 500))
 	s.Nil(s.meta.GetCollection(s.ctx, 500), "the last resource group's timeout must release the collection")
 	s.False(s.ob.loadTasks.Contain(key))
+}
+
+// TestLoadTimeoutNeverUnloadsAServingCollection pins the hard limit on the
+// teardown. The resource group here really is stalled -- its delegator reports
+// the channel and never picks the segments up, so the percentage is a genuine,
+// constant 33 -- and it is the collection's only group. Releasing it would take
+// the collection's last replicas and its load meta with them, and every query
+// would fail until an operator noticed and reloaded.
+//
+// A load timeout may shrink an expansion that never came up. It may not unload
+// a collection that is serving, however the percentage was arrived at. The task
+// is dropped instead, and the collection keeps the replicas it has.
+func (s *CollectionObserverRGSuite) TestLoadTimeoutNeverUnloadsAServingCollection() {
+	s.registerLoadingCollection(1100, 1101, "1100-dmc0", 1, 11001, 11002)
+	s.putReplica(1100, 110001, 21, rgA)
+	s.putDelegator(1100, 21, "1100-dmc0")
+	s.markCollectionLoaded(1100, 1101)
+
+	s.ob.LoadCollection(s.ctx, 1100, rgA)
+	key := s.taskKey(1100, rgA)
+	s.Require().EqualValues(33, s.ob.observeResourceGroupProgress(s.ctx)[key],
+		"the group must be reporting a real, stalled percentage for this to be a timeout at all")
+	s.backdateTaskWatermark(key, 33, time.Hour)
+
+	s.ob.Observe(s.ctx)
+
+	s.Len(s.replicaIDsInRG(1100, rgA), 1,
+		"a load timeout must never take the last replicas of a collection that is serving")
+	s.NotNil(s.meta.GetCollection(s.ctx, 1100), "nor its load meta")
+	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1100).GetStatus())
+	s.False(s.ob.loadTasks.Contain(key), "the task is dropped instead, so the teardown is not retried forever")
 }
 
 // TestResourceGroupWatermarkTracksRealProgress asserts the watermark is written
@@ -580,4 +617,119 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 
 func TestCollectionObserverRG(t *testing.T) {
 	suite.Run(t, new(CollectionObserverRGSuite))
+}
+
+// TestResourceGroupWatermarkRefreshesOnRegression asserts that a load which
+// goes backwards and then forwards again is not torn down. A resource group
+// can legitimately regress -- a delegator restarts, or a freshly flushed
+// segment enters the next target -- and the percentage then climbs back
+// through values it has already visited. A watermark that only ever ratchets
+// up would stop refreshing the moment the load dropped below its old peak, and
+// the load timeout would release a resource group that is making progress the
+// whole time.
+func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkRefreshesOnRegression() {
+	s.registerLoadingCollection(900, 90, "900-dmc0", 1, 1, 2)
+	s.putReplica(900, 9001, 1, rgA)
+
+	s.ob.LoadCollection(s.ctx, 900, rgA)
+	key := s.taskKey(900, rgA)
+
+	// The group peaked at 94, then dropped to 70: the drop is progress moving,
+	// so the clock restarts on it.
+	s.backdateTaskWatermark(key, 94, time.Hour)
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.ob.observeResourceGroupTimeout(s.ctx, key, task, 70)
+
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.EqualValues(70, task.LastProgress, "a regression must be recorded, not ignored")
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+		"a regression is the load moving, so it must refresh the watermark")
+	s.Len(s.replicaIDsInRG(900, rgA), 1)
+
+	// Climbing back to 80 -- still below the old peak of 94 -- refreshes it too.
+	s.backdateTaskWatermark(key, 70, time.Hour)
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.ob.observeResourceGroupTimeout(s.ctx, key, task, 80)
+
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.EqualValues(80, task.LastProgress)
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+		"a rise below the old peak is still the load moving")
+	s.Len(s.replicaIDsInRG(900, rgA), 1,
+		"a resource group that keeps moving must never be released by the load timeout")
+	s.True(s.ob.loadTasks.Contain(key))
+}
+
+// TestUnreadableResourceGroupIsNeverTornDown drives the whole tick -- the scan
+// that publishes the percentage and the timeout that consumes it -- against a
+// resource group whose percentage cannot be read at all. Every tick backdates
+// the watermark by an hour against a ten minute timeout, so a task that let the
+// clock run would be released on the first pass.
+//
+// The group here is not registered with the resource manager, which is one of
+// the ways the read fails outright; the collection itself has reported, so this
+// is the read-failure half of "unknown" rather than the nothing-reported-yet
+// half.
+func (s *CollectionObserverRGSuite) TestUnreadableResourceGroupIsNeverTornDown() {
+	s.registerLoadingCollection(901, 91, "901-dmc0", 1, 911, 912)
+	s.putReplica(901, 9010, 11, rgA)
+	s.putDelegator(901, 11, "901-dmc0", 911, 912)
+
+	s.ob.LoadCollection(s.ctx, 901, "no-such-rg")
+	key := s.taskKey(901, "no-such-rg")
+	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+		"a percentage that could not be read must be published as unknown, not as a figure")
+
+	for i := 0; i < 3; i++ {
+		s.backdateTaskWatermark(key, 60, time.Hour)
+
+		s.ob.Observe(s.ctx)
+
+		s.Require().True(s.ob.loadTasks.Contain(key),
+			"a resource group nobody could read must not be released by the load timeout")
+		task, ok := s.ob.loadTasks.Get(key)
+		s.Require().True(ok)
+		s.EqualValues(60, task.LastProgress, "an unreadable tick must not overwrite the last known percentage")
+		s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+			"an unreadable tick pauses the clock rather than letting it run")
+		s.Len(s.replicaIDsInRG(901, rgA), 1)
+		s.NotNil(s.meta.GetCollection(s.ctx, 901))
+	}
+}
+
+// TestNothingReportedYetIsUnknown covers the other half of "unknown": a
+// collection no QueryNode has reported on since this coordinator started. Every
+// resource group of it would read 0 -- "carries none of its targets" -- and 0
+// there is a guess, not a measurement. Once a delegator does report, the figure
+// is real and the clock starts from that tick.
+func (s *CollectionObserverRGSuite) TestNothingReportedYetIsUnknown() {
+	s.registerLoadingCollection(902, 92, "902-dmc0", 1, 921, 922)
+	s.putReplica(902, 9020, 12, rgA)
+	// No delegator anywhere: the distribution says nothing about collection 902.
+
+	s.ob.LoadCollection(s.ctx, 902, rgA)
+	key := s.taskKey(902, rgA)
+	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+		"with nothing reported for the collection, the percentage is unknown rather than 0")
+
+	s.backdateTaskWatermark(key, 0, time.Hour)
+	s.ob.Observe(s.ctx)
+	s.Require().True(s.ob.loadTasks.Contain(key),
+		"a resource group nothing has reported on must not be released by the load timeout")
+	s.Len(s.replicaIDsInRG(902, rgA), 1)
+
+	// One delegator reports, carrying the channel and one of the two segments.
+	s.putDelegator(902, 12, "902-dmc0", 921)
+
+	s.ob.Observe(s.ctx)
+
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.EqualValues(66, task.LastProgress, "the first informative observation is recorded as it is")
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+		"the timeout is measured from the first tick that learned something")
 }
