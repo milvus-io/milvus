@@ -49,6 +49,48 @@ func TestGetStateFromError(t *testing.T) {
 	t.Run("transient segcore error still retries", func(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(merr.SegcoreError(2045, "transient storage error")))
 	})
+
+	// Caller-input failures are a property of the request or of the source data, so
+	// the task fails identically on every worker and on every attempt. Retrying them
+	// turns one bad document into an unbounded re-dispatch loop.
+	t.Run("caller input segcore errors are terminal", func(t *testing.T) {
+		for _, tc := range []struct {
+			code int32
+			name string
+		}{
+			{2025, "JsonKeyInvalid"},
+			{2023, "DataIsEmpty"},
+			{2032, "DimNotMatch"},
+			{2007, "DataTypeInvalid"},
+			{2028, "ExprInvalid"},
+		} {
+			assert.Equalf(t, indexpb.JobState_JobStateFailed,
+				getStateFromError(merr.SegcoreError(tc.code, tc.name)),
+				"segcore code %d (%s) must fail instead of retrying", tc.code, tc.name)
+		}
+	})
+
+	t.Run("input error survives wrapping", func(t *testing.T) {
+		err := errors.Wrap(merr.SegcoreError(2025, "bad json"), "failed to build json key index")
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
+	})
+
+	t.Run("parameter invalid raised by the task itself is terminal", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(merr.WrapErrParameterInvalidMsg("data insert path must be not empty")))
+	})
+
+	t.Run("cancel retries and pretend-finished finishes", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(errCancel))
+		assert.Equal(t, indexpb.JobState_JobStateFinished, getStateFromError(merr.SegcoreError(2033, "cluster skip")))
+	})
+
+	t.Run("system errors are unaffected", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.WrapErrServiceInternalMsg("internal")))
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(merr.WrapErrIoKeyNotFound("some/key")))
+	})
 }
 
 type fakeTaskState int

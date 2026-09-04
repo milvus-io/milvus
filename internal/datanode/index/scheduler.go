@@ -224,6 +224,14 @@ func getStateFromError(err error) indexpb.JobState {
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
+	} else if merr.GetErrorType(err) == merr.InputError {
+		// The request or the source data is itself what fails the build, so the task
+		// fails identically on every worker and on every attempt. Fail it once instead
+		// of re-dispatching forever. This covers the segcore codes that
+		// classifySegcoreError already tags as caller input (JsonKeyInvalid,
+		// DataIsEmpty, DimNotMatch, ...) as well as the ParameterInvalid errors the
+		// task itself raises.
+		return indexpb.JobState_JobStateFailed
 	}
 	return indexpb.JobState_JobStateRetry
 }
