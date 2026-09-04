@@ -42,7 +42,7 @@ func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChann
 	paramtable.Init()
 	resource.InitForTest(t)
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
