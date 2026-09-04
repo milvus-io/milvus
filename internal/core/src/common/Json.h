@@ -20,6 +20,7 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -112,6 +113,20 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
 using document = simdjson::ondemand::document;
 template <typename T>
 using value_result = simdjson::simdjson_result<T>;
+
+struct JsonStringOrInt64 {
+    enum class Kind : uint8_t {
+        NoProbeValue,
+        String,
+        Int64,
+        OtherNumber,
+    };
+
+    Kind kind{Kind::NoProbeValue};
+    std::string_view string_value{};
+    int64_t int64_value{};
+};
+
 class Json {
  public:
     Json() = default;
@@ -280,6 +295,60 @@ class Json {
             return doc().get_number();
         }
         return doc().at_pointer(pointer).get_number();
+    }
+
+    // Parse the document and resolve the JSON pointer exactly once, then
+    // classify the value for callers that accept only strings or int64s.
+    // string_value must be consumed before the next ondemand parse on this
+    // thread because simdjson may store decoded strings in its parser buffer.
+    JsonStringOrInt64
+    at_string_or_int64(std::string_view pointer) const {
+        const auto extract = [](auto&& value) {
+            auto type = value.type();
+            if (type.error()) {
+                return JsonStringOrInt64{};
+            }
+
+            switch (type.value()) {
+                case simdjson::ondemand::json_type::string: {
+                    auto str = value.get_string(false);
+                    if (str.error()) {
+                        return JsonStringOrInt64{};
+                    }
+                    return JsonStringOrInt64{
+                        JsonStringOrInt64::Kind::String, str.value(), 0};
+                }
+                case simdjson::ondemand::json_type::number: {
+                    auto number = value.get_number();
+                    if (number.error()) {
+                        return JsonStringOrInt64{};
+                    }
+                    auto n = number.value();
+                    if (n.is_int64()) {
+                        return JsonStringOrInt64{
+                            JsonStringOrInt64::Kind::Int64, {}, n.get_int64()};
+                    }
+                    return JsonStringOrInt64{
+                        JsonStringOrInt64::Kind::OtherNumber, {}, 0};
+                }
+                default:
+                    return JsonStringOrInt64{};
+            }
+        };
+
+        auto document = doc();
+        if (document.error()) {
+            return {};
+        }
+        if (pointer.empty()) {
+            return extract(document.value());
+        }
+
+        auto value = document.value().at_pointer(pointer);
+        if (value.error()) {
+            return {};
+        }
+        return extract(value.value());
     }
 
     value_result<std::string>

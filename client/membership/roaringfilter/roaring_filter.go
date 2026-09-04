@@ -93,15 +93,25 @@ const (
 	EstimatedLowContainerOverheadBytes = 64
 )
 
-// Build deduplicates members into a portable Roaring64 bitmap and wraps it in
-// an MRB1 envelope.
+// Build deduplicates int64 members into a portable Roaring64 bitmap and wraps
+// it in an MRB1 envelope. It retains the original []int64 API; callers with a
+// narrower signed slice can use BuildSigned to avoid widening the whole input.
 func Build(members []int64) ([]byte, error) {
+	return BuildSigned(members)
+}
+
+// BuildSigned deduplicates signed integer members into a portable Roaring64
+// bitmap and wraps it in an MRB1 envelope. Narrow signed values are extended to
+// int64 before their two's-complement bits become Roaring keys. The conversion
+// happens as each value is consumed, so callers do not need an intermediate
+// []int64 allocation.
+func BuildSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64](members []T) ([]byte, error) {
 	var sortedKeys []uint64
 	ascending, highContainerCount, lowContainerCount := memberContainerCounts(members)
 	if !ascending {
 		sortedKeys = make([]uint64, len(members))
 		for i, member := range members {
-			sortedKeys[i] = uint64(member)
+			sortedKeys[i] = uint64(int64(member))
 		}
 		slices.Sort(sortedKeys)
 		highContainerCount, lowContainerCount = sortedKeyContainerCounts(sortedKeys)
@@ -128,7 +138,7 @@ func Build(members []int64) ([]byte, error) {
 			// Add extends the last container or appends a new one, so this is
 			// linear and, unlike the sort path, allocates nothing per member.
 			for _, member := range members {
-				bitmap.Add(uint64(member))
+				bitmap.Add(uint64(int64(member)))
 			}
 		} else {
 			bitmap.AddMany(sortedKeys)
@@ -178,15 +188,15 @@ func Build(members []int64) ([]byte, error) {
 // memberContainerCounts reports whether members is already non-decreasing in
 // the unsigned key space and, when it is, counts distinct high-32 children and
 // Roaring32 low containers without allocating. Equal keys are duplicates.
-func memberContainerCounts(members []int64) (bool, uint64, uint64) {
+func memberContainerCounts[T ~int | ~int8 | ~int16 | ~int32 | ~int64](members []T) (bool, uint64, uint64) {
 	if len(members) == 0 {
 		return true, 0, 0
 	}
-	previous := uint64(members[0])
+	previous := uint64(int64(members[0]))
 	highContainerCount := uint64(1)
 	lowContainerCount := uint64(1)
 	for i := 1; i < len(members); i++ {
-		key := uint64(members[i])
+		key := uint64(int64(members[i]))
 		if key < previous {
 			return false, 0, 0
 		}

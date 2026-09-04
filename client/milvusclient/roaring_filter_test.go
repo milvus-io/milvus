@@ -106,3 +106,72 @@ func TestRoaringBitmapBlobTemplateMarshaling(t *testing.T) {
 	require.True(t, ok, "RoaringBitmapBlob must marshal as native protobuf bytes")
 	require.Equal(t, []byte(blob), bytesValue.BytesVal)
 }
+
+var benchmarkRoaringBitmapBlobSink RoaringBitmapBlob
+
+func makeSignedMembers[T ~int32 | ~int64](n int, shuffled bool) []T {
+	members := make([]T, n)
+	for i := range members {
+		value := i
+		if shuffled {
+			value = (i*2053)%n - n/2
+		}
+		members[i] = T(value)
+	}
+	return members
+}
+
+func roaringBitmapBlobAllocsPerRun(members any) (float64, error) {
+	var err error
+	allocs := testing.AllocsPerRun(20, func() {
+		benchmarkRoaringBitmapBlobSink, err = NewRoaringBitmapBlob(members)
+	})
+	return allocs, err
+}
+
+func TestNewRoaringBitmapBlobNarrowAllocationParity(t *testing.T) {
+	for _, shuffled := range []bool{false, true} {
+		name := "ordered"
+		if shuffled {
+			name = "shuffled"
+		}
+		t.Run(name, func(t *testing.T) {
+			int32Members := makeSignedMembers[int32](4096, shuffled)
+			int64Members := makeSignedMembers[int64](4096, shuffled)
+			int32Allocs, err := roaringBitmapBlobAllocsPerRun(int32Members)
+			require.NoError(t, err)
+			int64Allocs, err := roaringBitmapBlobAllocsPerRun(int64Members)
+			require.NoError(t, err)
+			require.Equal(t, int64Allocs, int32Allocs,
+				"a narrow input must not allocate an intermediate []int64")
+		})
+	}
+}
+
+func benchmarkNewRoaringBitmapBlob(b *testing.B, members any) {
+	b.Helper()
+	blob, err := NewRoaringBitmapBlob(members)
+	if err != nil {
+		b.Fatal(err)
+	}
+	benchmarkRoaringBitmapBlobSink = blob
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		blob, err := NewRoaringBitmapBlob(members)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkRoaringBitmapBlobSink = blob
+	}
+}
+
+func BenchmarkNewRoaringBitmapBlobInt32Shuffled(b *testing.B) {
+	members := makeSignedMembers[int32](64*1024, true)
+	benchmarkNewRoaringBitmapBlob(b, members)
+}
+
+func BenchmarkNewRoaringBitmapBlobInt64Shuffled(b *testing.B) {
+	members := makeSignedMembers[int64](64*1024, true)
+	benchmarkNewRoaringBitmapBlob(b, members)
+}
