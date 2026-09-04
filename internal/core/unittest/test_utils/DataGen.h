@@ -120,8 +120,18 @@ struct GeneratedData {
                 if (field_meta.is_vector() &&
                     field_meta.get_data_type() !=
                         DataType::VECTOR_SPARSE_U32_F32) {
+                    // NOTE: for nullable vector fields the underlying proto
+                    // buffer only holds valid_count * dim elements (compact
+                    // storage -- see the nullable overload of
+                    // CreateVectorDataArrayFrom in segcore/Utils.cpp), not
+                    // num_rows * dim. Deriving `len` from the actual buffer
+                    // size (rather than assuming num_rows * dim) keeps this
+                    // correct for both nullable and non-nullable fields and
+                    // avoids reading past the end of the proto buffer.
                     if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                        int len = raw_->num_rows() * field_meta.get_dim();
+                        int len = target_field_data.vectors()
+                                      .float_vector()
+                                      .data_size();
                         ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
                             target_field_data.vectors()
@@ -131,14 +141,18 @@ struct GeneratedData {
                         std::copy_n(src_data, len, ret.data());
                     } else if (field_meta.get_data_type() ==
                                DataType::VECTOR_BINARY) {
-                        int len = raw_->num_rows() * (field_meta.get_dim() / 8);
+                        int len =
+                            target_field_data.vectors().binary_vector().size();
                         ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
                             target_field_data.vectors().binary_vector().data());
                         std::copy_n(src_data, len, ret.data());
                     } else if (field_meta.get_data_type() ==
                                DataType::VECTOR_FLOAT16) {
-                        int len = raw_->num_rows() * field_meta.get_dim();
+                        int len = target_field_data.vectors()
+                                      .float16_vector()
+                                      .size() /
+                                  sizeof(T);
                         ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
                             target_field_data.vectors()
@@ -147,7 +161,10 @@ struct GeneratedData {
                         std::copy_n(src_data, len, ret.data());
                     } else if (field_meta.get_data_type() ==
                                DataType::VECTOR_BFLOAT16) {
-                        int len = raw_->num_rows() * field_meta.get_dim();
+                        int len = target_field_data.vectors()
+                                      .bfloat16_vector()
+                                      .size() /
+                                  sizeof(T);
                         ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
                             target_field_data.vectors()
@@ -156,7 +173,9 @@ struct GeneratedData {
                         std::copy_n(src_data, len, ret.data());
                     } else if (field_meta.get_data_type() ==
                                DataType::VECTOR_INT8) {
-                        int len = raw_->num_rows() * field_meta.get_dim();
+                        int len =
+                            target_field_data.vectors().int8_vector().size() /
+                            sizeof(T);
                         ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
                             target_field_data.vectors().int8_vector().data());
