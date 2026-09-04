@@ -1197,14 +1197,14 @@ func Test_checkValidModArith(t *testing.T) {
 	t.Run("mod with integers is valid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 		assert.NoError(t, err)
 	})
 
 	t.Run("mod with float left is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
 	})
@@ -1212,7 +1212,7 @@ func Test_checkValidModArith(t *testing.T) {
 	t.Run("mod with float right is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
 			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			schemapb.DataType_Float, schemapb.DataType_None, "", "")
 		assert.Error(t, err)
 	})
 
@@ -1220,8 +1220,34 @@ func Test_checkValidModArith(t *testing.T) {
 		// Non-mod operations should not be validated by this function
 		err := checkValidModArith(planpb.ArithOpType_Add,
 			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			schemapb.DataType_Float, schemapb.DataType_None, "", "")
 		assert.NoError(t, err)
+	})
+
+	t.Run("mod with named float left names the field and its type", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Double, schemapb.DataType_None,
+			schemapb.DataType_Int64, schemapb.DataType_None, "price", "qty")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.Contains(t, err.Error(), "field 'price' is Double")
+	})
+
+	t.Run("mod with named float right names the field and its type", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Int64, schemapb.DataType_None,
+			schemapb.DataType_Double, schemapb.DataType_None, "qty", "price")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "field 'price' is Double")
+		assert.NotContains(t, err.Error(), "'qty'")
+	})
+
+	t.Run("mod with named integer array element field reports element type", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Array, schemapb.DataType_Double,
+			schemapb.DataType_Int64, schemapb.DataType_None, "prices", "qty")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "field 'prices' is Array[Double]")
 	})
 }
 
@@ -1240,21 +1266,21 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		t.Run(op.String()+" with integers is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with integer array element is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Array, schemapb.DataType_Int32,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with float left is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Float, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				schemapb.DataType_Int64, schemapb.DataType_None, "", "")
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
 		})
@@ -1262,11 +1288,52 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		t.Run(op.String()+" with double right is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
 				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Double, schemapb.DataType_None)
+				schemapb.DataType_Double, schemapb.DataType_None, "", "")
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
 		})
+
+		t.Run(op.String()+" with named float left names the field and its type", func(t *testing.T) {
+			err := checkValidModArith(op,
+				schemapb.DataType_Double, schemapb.DataType_None,
+				schemapb.DataType_Int64, schemapb.DataType_None, "price", "mask")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+			assert.Contains(t, err.Error(), "field 'price' is Double")
+		})
 	}
+}
+
+// Test_columnDisplayName covers columnDisplayName's fallback-to-"" cases
+// individually, since checkValidModArith call sites only exercise the two
+// most common ones (a real column, and a literal with no ColumnInfo).
+func Test_columnDisplayName(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+	int64FieldID := int64(generatedFieldIDBase) + int64(schemapb.DataType_Int64)
+
+	t.Run("nil schema returns empty", func(t *testing.T) {
+		expr := toColumnExpr(&planpb.ColumnInfo{FieldId: int64FieldID, DataType: schemapb.DataType_Int64})
+		assert.Equal(t, "", columnDisplayName(nil, expr))
+	})
+
+	t.Run("nil expr returns empty", func(t *testing.T) {
+		assert.Equal(t, "", columnDisplayName(schema, nil))
+	})
+
+	t.Run("literal value expr has no backing column", func(t *testing.T) {
+		expr := toValueExpr(NewInt(1))
+		assert.Equal(t, "", columnDisplayName(schema, expr))
+	})
+
+	t.Run("unknown field id returns empty", func(t *testing.T) {
+		expr := toColumnExpr(&planpb.ColumnInfo{FieldId: -1, DataType: schemapb.DataType_Int64})
+		assert.Equal(t, "", columnDisplayName(schema, expr))
+	})
+
+	t.Run("known field id resolves its schema name", func(t *testing.T) {
+		expr := toColumnExpr(&planpb.ColumnInfo{FieldId: int64FieldID, DataType: schemapb.DataType_Int64})
+		assert.Equal(t, "Int64Field", columnDisplayName(schema, expr))
+	})
 }
 
 // Test_castRangeValue tests value casting for range operations

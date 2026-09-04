@@ -746,20 +746,70 @@ func hexDigit(n uint32) byte {
 	return byte(n-10) + 'a'
 }
 
-func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+// checkValidModArith validates that both operands of a modulo/bitwise operator
+// can convert to an integer type. leftName/rightName are the schema field name
+// backing each operand when it is a direct column reference, or "" when the
+// operand is a literal or a nested expression with no single backing field;
+// the error message includes the name when known.
+func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType, leftName, rightName string) error {
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
+		if !canConvertToIntegerType(leftType, leftElementType) {
+			return newArithTypeMismatchErr("modulo", leftName, leftType, leftElementType)
+		}
+		if !canConvertToIntegerType(rightType, rightElementType) {
+			return newArithTypeMismatchErr("modulo", rightName, rightType, rightElementType)
 		}
 	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
 		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
+		if !canConvertToIntegerType(leftType, leftElementType) {
+			return newArithTypeMismatchErr("bitwise operations", leftName, leftType, leftElementType)
+		}
+		if !canConvertToIntegerType(rightType, rightElementType) {
+			return newArithTypeMismatchErr("bitwise operations", rightName, rightType, rightElementType)
 		}
 	default:
 	}
 	return nil
+}
+
+// newArithTypeMismatchErr reports the offending operand of an integer-only
+// arithmetic operator. When name is known it names the field so the caller
+// does not have to guess which side of the expression is wrong.
+func newArithTypeMismatchErr(opDesc, name string, dataType, elementType schemapb.DataType) error {
+	typeName := formatDataTypeWithElement(dataType, elementType)
+	if name == "" {
+		return merr.WrapErrQueryPlanMsg("%s can only apply on integer types, got %s", opDesc, typeName)
+	}
+	return merr.WrapErrQueryPlanMsg("%s can only apply on integer types, but field '%s' is %s", opDesc, name, typeName)
+}
+
+// formatDataTypeWithElement renders an array type as "Array[ElementType]",
+// matching getDataType's display for ExprWithType, so an array-typed field in
+// an error message reads the same way whether it started as one or not.
+func formatDataTypeWithElement(dataType, elementType schemapb.DataType) string {
+	if typeutil.IsArrayType(dataType) {
+		return fmt.Sprintf("%s[%s]", dataType, elementType)
+	}
+	return dataType.String()
+}
+
+// columnDisplayName returns the schema field name backing expr, or "" when
+// expr is not a direct column reference (a literal, or a nested expression
+// with no single backing field) or schema is unavailable.
+func columnDisplayName(schema *typeutil.SchemaHelper, expr *ExprWithType) string {
+	if schema == nil || expr == nil {
+		return ""
+	}
+	info := toColumnInfo(expr)
+	if info == nil {
+		return ""
+	}
+	field, err := schema.GetFieldFromID(info.GetFieldId())
+	if err != nil {
+		return ""
+	}
+	return field.GetName()
 }
 
 func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {

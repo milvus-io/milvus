@@ -526,8 +526,11 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			lDataType = expr.GetColumnInfo().GetElementType()
 		}
 
+		// No SchemaHelper is available at template-fill time (only field IDs, not
+		// names, survive into the plan by this point), so the field name is
+		// omitted here; checkValidModArith falls back to a type-only message.
 		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
-			rDataType, schemapb.DataType_None); err != nil {
+			rDataType, schemapb.DataType_None, "", ""); err != nil {
 			return err
 		}
 
