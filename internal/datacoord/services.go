@@ -793,28 +793,26 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 			committed, err := s.meta.UpdateSegmentsInfoAndDataView(ctx, flushView, operators...)
 			if err != nil {
+				// Catalog failures were already retried in-function until
+				// durably published; reaching here means the error is not
+				// recoverable (e.g. context canceled). Release the prepared
+				// snapshot and surface the error.
 				abortView()
 				mlog.Error(ctx, "save binlog, checkpoints and DataView failed", mlog.Err(err))
 				return merr.Status(err), nil
 			}
-			if !committed {
-				// Nothing was persisted: no SegmentMeta mutation pending AND
-				// no DataView snapshot to publish (the Collection's DataViews
-				// were dropped while this flush was in flight). Discard the
-				// prepared in-memory snapshot - committing it would serve a
-				// version that does not exist in etcd. This is success, not
-				// an error: the flush path deliberately does no recompute
-				// here. When a DataView snapshot does need publishing,
-				// UpdateSegmentsInfoAndDataView persists it even if the
-				// SegmentMeta update short-circuits (replayed flush of an
-				// already-flushed segment), and any catalog failure surfaces
-				// as an error that the SaveBinlogPaths caller retries
-				// indefinitely until the streaming_version is durably
-				// published.
-				abortView()
-			} else {
+			if committed {
 				commitView()
 			}
+			// !committed: no SegmentMeta mutation pending AND no DataView
+			// snapshot to publish (the Collection's DataViews were dropped
+			// while this flush was in flight). Nothing was persisted, so
+			// there is nothing to commit in memory either - this is success,
+			// not an error: the flush path deliberately does no recompute
+			// here, and the in-function retry already guarantees a durable
+			// streaming_version whenever a snapshot did need publishing.
+			// PrepareFlush returned no-op callbacks for this case, so no
+			// abort is needed.
 		} else {
 			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 				mlog.Error(ctx, "save binlog and checkpoints failed", mlog.Err(err))

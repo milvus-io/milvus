@@ -2070,12 +2070,13 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // ran. The DataView snapshot is persisted even when the SegmentMeta update
 // short-circuits (updatePack == nil, e.g. a replayed flush of an
 // already-flushed segment): the flush must synchronously advance
-// streaming_version, and any failure to persist is surfaced as an error so
-// the SaveBinlogPaths caller retries until the version is durably published.
-// Only when both sides are empty (no SegmentMeta mutation and no DataView
-// snapshot) does it return (false, nil); the caller then aborts any prepared
-// in-memory snapshot instead of committing a version that does not exist in
-// etcd.
+// streaming_version. Catalog failures are retried in-function until the
+// version is durably published (catalog.Update is an idempotent KV
+// overwrite, so an in-function retry is safe; retrying the whole
+// SaveBinlogPaths from the caller would not be idempotent). Only when both
+// sides are empty (no SegmentMeta mutation and no DataView snapshot) does it
+// return (false, nil); the caller then discards any prepared in-memory
+// snapshot instead of committing a version that does not exist in etcd.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2111,7 +2112,16 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	if dataView != nil {
 		actions = append(actions, metastore.SaveDataView(dataView))
 	}
-	if err := m.catalog.Update(ctx, actions...); err != nil {
+	// The flush publish must keep retrying: catalog.Update is an idempotent
+	// overwrite of the same actions, so an in-function retry converges to a
+	// durable streaming_version without replaying caller-side effects
+	// (retrying SaveBinlogPaths from the caller is not idempotent).
+	// retry.Do short-circuits InputError-typed errors unless an explicit
+	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+	if err := retry.Do(ctx, func() error {
+		return m.catalog.Update(ctx, actions...)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+		retry.RetryErr(func(error) bool { return true })); err != nil {
 		mlog.Error(ctx, "meta update: update flush segments info and DataView - failed to store into Etcd",
 			mlog.Err(err))
 		return false, err
