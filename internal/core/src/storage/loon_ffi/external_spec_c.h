@@ -24,8 +24,8 @@ extern "C" {
  * produced by loon_properties_create from StorageConfig), this function
  * parses external_source + external_spec and appends:
  *   - extfs.{collection_id}.* storage-layer properties (credentials,
- *     endpoint, process-local IOPS policy, AWS-form rewrite, Tier-1/2
- *     derivation)
+ *     explicit endpoint mapping, process-local IOPS policy, AWS-form
+ *     rewrite, Tier-1/2 derivation)
  *   - format-layer properties derived from spec.format (e.g.
  *     iceberg.snapshot_id when format="iceberg-table")
  *

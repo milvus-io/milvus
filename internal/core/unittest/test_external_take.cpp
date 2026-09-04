@@ -3117,6 +3117,41 @@ TEST(InjectExtfsAllowlist, AllowlistedKeyIsApplied) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "true");
 }
 
+TEST(InjectExtfsAllowlist, EndpointURLSelectsExplicitEndpointMode) {
+    struct Case {
+        std::string endpoint_url;
+        std::string expected_address;
+        std::string expected_use_ssl;
+    };
+    std::vector<Case> cases = {
+        {"http://rook-ceph-rgw.storage.svc:80",
+         "http://rook-ceph-rgw.storage.svc:80",
+         "false"},
+        {"HTTPS://s3.example.com/", "https://s3.example.com", "true"},
+    };
+
+    for (const auto& c : cases) {
+        milvus_storage::api::Properties props;
+        const int64_t coll_id = 42;
+        std::string spec =
+            R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws","region":"us-west-2","endpoint_url":")" +
+            c.endpoint_url + R"("}})";
+
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://my-bucket/object", spec);
+
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.expected_address);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "my-bucket");
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")),
+                  c.expected_use_ssl);
+        // endpoint_url is a public alias for address, not a milvus-storage
+        // property. It must never be forwarded under the extfs namespace.
+        EXPECT_EQ(props.count("extfs.42.endpoint_url"), 0u);
+    }
+}
+
 TEST(InjectExtfsAllowlist, UnknownKeyIsDropped) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
