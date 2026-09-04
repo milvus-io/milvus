@@ -210,7 +210,10 @@ message ShowCollectionsRequest {
     repeated int64 collectionIDs = 3;
     // When set, inMemory_percentages is the load progress of the replicas that
     // live in this resource group only, -1 for a collection that has no replica
-    // there. Empty keeps the collection-wide figure.
+    // there. A collection that is not loaded at all answers the same -1, with
+    // query_service_available false, refresh_progress 0 and empty load_fields,
+    // instead of the CollectionNotLoaded error the unscoped call returns.
+    // Empty keeps the collection-wide figure.
     string resource_group = 4;
 }
 

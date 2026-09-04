@@ -95,7 +95,6 @@ func TestDropDatabaseTask(t *testing.T) {
 		mixCoord: rc,
 		result:   nil,
 	}
-
 	t.Run("ok", func(t *testing.T) {
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)

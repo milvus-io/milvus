@@ -589,7 +589,10 @@ type ShowCollectionsRequest struct {
 	CollectionIDs []int64 `protobuf:"varint,3,rep,packed,name=collectionIDs,proto3" json:"collectionIDs,omitempty"`
 	// When set, inMemory_percentages is the load progress of the replicas that
 	// live in this resource group only, -1 for a collection that has no replica
-	// there. Empty keeps the collection-wide figure.
+	// there. A collection that is not loaded at all answers the same -1, with
+	// query_service_available false, refresh_progress 0 and empty load_fields,
+	// instead of the CollectionNotLoaded error the unscoped call returns.
+	// Empty keeps the collection-wide figure.
 	ResourceGroup string `protobuf:"bytes,4,opt,name=resource_group,json=resourceGroup,proto3" json:"resource_group,omitempty"`
 }
 
