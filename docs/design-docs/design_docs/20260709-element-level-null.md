@@ -3,8 +3,8 @@
 ## Background
 
 Milvus already supports row-level null. For `Array` and `ArrayOfVector`, this
-means the whole value of a row can be null. This design adds null elements
-inside a valid row:
+means the entire row can be null. This design allows individual elements
+inside a valid row to be null:
 
 ```text
 int_array    = [1, null, 3]
@@ -33,13 +33,14 @@ array is null       row-level null
 array[0] is null    element-level null
 ```
 
-For a null row or an out-of-range element index, element expressions produce
-no match:
+Array element access evaluates to SQL `NULL` when the row is null, the index is
+out of range, or the selected element is null. Value predicates propagate that
+null result, while null predicates return valid booleans:
 
 ```text
-array[0] is null     -> false
-array[0] is not null -> false
-array[0] > 1         -> false
+array[index] > 1         -> invalid
+array[index] is null     -> valid true
+array[index] is not null -> valid false
 ```
 
 An element expression reads a value only after checking:
@@ -51,7 +52,7 @@ An element expression reads a value only after checking:
 Value operators skip null elements. `array_length` counts logical slots,
 including null slots.
 
-## Data Flow
+## Write Data Flow
 
 ```text
 SDK payload
@@ -197,10 +198,11 @@ type VectorArrayFieldData struct {
 }
 ```
 
-The struct-level `ValidData` is row validity. Element validity stays in each
-`Data[row].ValidData` proto message. Sorting, merging, result slicing, struct
-flattening, and conversion back to `InsertRecord` move the row message as a
-unit, preserving its child validity.
+The top-level `ValidData` member of `ArrayFieldData` or `VectorArrayFieldData`
+is row validity. Element validity stays in each `Data[row].ValidData` proto
+message. Sorting, merging, result slicing, struct flattening, and conversion
+back to `InsertRecord` move the row message as a unit, preserving its child
+validity.
 
 ## Storage V2
 

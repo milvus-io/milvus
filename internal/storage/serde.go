@@ -1248,12 +1248,14 @@ func deserializeNonElementNullableArrayOfVector(
 			byteWidth,
 		)
 	}
-	for j := start; j < end; j++ {
-		if binaryArray.IsNull(int(j)) {
-			return nil, merr.WrapErrStorageMsg(
-				"non-element-nullable ArrayOfVector contains null child at logical element %d",
-				j-start,
-			)
+	if binaryArray.NullN() > 0 {
+		for j := start; j < end; j++ {
+			if binaryArray.IsNull(int(j)) {
+				return nil, merr.WrapErrStorageMsg(
+					"non-element-nullable ArrayOfVector contains null child at logical element %d",
+					j-start,
+				)
+			}
 		}
 	}
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
@@ -302,6 +303,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 			if byteWidth <= 0 {
 				return 0, merr.WrapErrServiceInternalMsg("missing cached byte width for ArrayOfVector field %s", field.GetName())
 			}
+			// Binary children consume an int32 offset and one validity bit even when null.
+			childCount := end - start
+			totalSize += uint64(childCount) * uint64(arrow.Int32SizeBytes)
+			totalSize += uint64(bitutil.BytesForBits(childCount))
 			vb.Reserve(int(end - start))
 			for i := start; i < end; i++ {
 				idx := int(i)
