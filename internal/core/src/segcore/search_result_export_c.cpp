@@ -42,10 +42,14 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
+#include "segcore/arrow_field_utils.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/ThreadPools.h"
 
 using SearchResult = milvus::SearchResult;
+using milvus::segcore::EmptyExtraFieldArrowType;
+using milvus::segcore::FieldDataToArrow;
+using milvus::segcore::MilvusField;
 
 namespace {
 
@@ -108,27 +112,6 @@ AssertSearchResultReadLease(const SearchResult* result) {
     }
 }
 
-constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
-constexpr const char* kMilvusDataTypeMetadataKey = "milvus.data_type";
-
-std::shared_ptr<arrow::KeyValueMetadata>
-MilvusFieldMetadata(milvus::FieldId field_id, milvus::DataType data_type) {
-    return arrow::key_value_metadata(
-        {kMilvusFieldIDMetadataKey, kMilvusDataTypeMetadataKey},
-        {std::to_string(field_id.get()),
-         std::to_string(static_cast<int32_t>(data_type))});
-}
-
-std::shared_ptr<arrow::Field>
-MilvusField(const std::string& name,
-            const std::shared_ptr<arrow::DataType>& arrow_type,
-            bool nullable,
-            milvus::FieldId field_id,
-            milvus::DataType data_type) {
-    return arrow::field(
-        name, arrow_type, nullable, MilvusFieldMetadata(field_id, data_type));
-}
-
 void
 SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
                                 const milvus::FieldMeta& field_meta) {
@@ -166,36 +149,6 @@ SerializeSearchResultDataToCProto(
 std::string
 GroupByColumnName(milvus::FieldId field_id) {
     return "$group_by_" + std::to_string(field_id.get());
-}
-
-arrow::Result<std::shared_ptr<arrow::DataType>>
-EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta) {
-    switch (field_meta.get_data_type()) {
-        case milvus::DataType::BOOL:
-            return arrow::boolean();
-        case milvus::DataType::INT8:
-        case milvus::DataType::INT16:
-        case milvus::DataType::INT32:
-            return arrow::int32();
-        case milvus::DataType::INT64:
-        case milvus::DataType::TIMESTAMPTZ:
-            return arrow::int64();
-        case milvus::DataType::FLOAT:
-            return arrow::float32();
-        case milvus::DataType::DOUBLE:
-            return arrow::float64();
-        case milvus::DataType::STRING:
-        case milvus::DataType::VARCHAR:
-        case milvus::DataType::TEXT:
-            return arrow::utf8();
-        case milvus::DataType::JSON:
-            return arrow::binary();
-        case milvus::DataType::GEOMETRY:
-            return arrow::Status::NotImplemented(
-                "GEOMETRY extra field Arrow export is not implemented");
-        default:
-            return milvus::GetArrowDataType(field_meta.get_data_type());
-    }
 }
 
 std::vector<GroupByArrowInfo>
@@ -324,72 +277,6 @@ BuildEmptyBatch(milvus::query::Plan* plan,
     return arrow::RecordBatch::Make(arrow::schema(fields), 0, arrays);
 }
 
-// BuildFixedWidthArray builds an Arrow Array from a fixed-width protobuf repeated field.
-template <typename BuilderType, typename DataContainer>
-arrow::Result<std::shared_ptr<arrow::Array>>
-BuildFixedWidthArray(const DataContainer& data,
-                     const milvus::DataArray& field_data,
-                     size_t total_valid) {
-    AssertInfo(static_cast<size_t>(data.size()) >= total_valid,
-               "field data length {} is smaller than expected row count {}",
-               data.size(),
-               total_valid);
-    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
-    const bool has_valid_data = !valid_data.empty();
-    if (has_valid_data) {
-        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
-                   "valid_data length {} does not match expected row count {}",
-                   valid_data.size(),
-                   total_valid);
-    }
-
-    BuilderType builder;
-    ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
-    for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !valid_data[i]) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-            continue;
-        }
-        builder.UnsafeAppend(data[i]);
-    }
-    std::shared_ptr<arrow::Array> arr;
-    ARROW_RETURN_NOT_OK(builder.Finish(&arr));
-    return arr;
-}
-
-// BuildVarLenArray builds an Arrow Array from a variable-length protobuf repeated field.
-template <typename BuilderType, typename DataContainer>
-arrow::Result<std::shared_ptr<arrow::Array>>
-BuildVarLenArray(const DataContainer& data,
-                 const milvus::DataArray& field_data,
-                 size_t total_valid) {
-    AssertInfo(static_cast<size_t>(data.size()) >= total_valid,
-               "field data length {} is smaller than expected row count {}",
-               data.size(),
-               total_valid);
-    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
-    const bool has_valid_data = !valid_data.empty();
-    if (has_valid_data) {
-        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
-                   "valid_data length {} does not match expected row count {}",
-                   valid_data.size(),
-                   total_valid);
-    }
-
-    BuilderType builder;
-    ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
-    for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !valid_data[i]) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-            continue;
-        }
-        ARROW_RETURN_NOT_OK(builder.Append(data[i]));
-    }
-    std::shared_ptr<arrow::Array> arr;
-    ARROW_RETURN_NOT_OK(builder.Finish(&arr));
-    return arr;
-}
-
 // Build the $group_by Arrow array from SearchResult::composite_group_by_values_,
 // dispatching on the resolved element type. Each entry in `values` is an
 // std::optional<std::variant<monostate, ints..., bool, string>>; entries that
@@ -439,79 +326,6 @@ BuildGroupByArray(const std::vector<milvus::GroupByValueType>& values,
             return arrow::Status::NotImplemented(
                 "unsupported group-by element type in Arrow export");
     }
-}
-
-// Convert a protobuf FieldData (scalar) to an Arrow Array + Field.
-arrow::Result<
-    std::pair<std::shared_ptr<arrow::Field>, std::shared_ptr<arrow::Array>>>
-FieldDataToArrow(const std::string& field_name,
-                 const milvus::DataArray& field_data,
-                 size_t total_valid) {
-    if (!field_data.has_scalars()) {
-        return arrow::Status::NotImplemented(
-            "non-scalar output field not supported in Arrow export");
-    }
-    const auto& scalars = field_data.scalars();
-
-    if (scalars.has_bool_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::BooleanBuilder>(
-                scalars.bool_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::boolean()), arr);
-    }
-    if (scalars.has_int_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int32Builder>(
-                scalars.int_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int32()), arr);
-    }
-    if (scalars.has_long_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.long_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
-    }
-    if (scalars.has_timestamptz_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.timestamptz_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
-    }
-    if (scalars.has_float_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::FloatBuilder>(
-                scalars.float_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::float32()), arr);
-    }
-    if (scalars.has_double_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::DoubleBuilder>(
-                scalars.double_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::float64()), arr);
-    }
-    if (scalars.has_string_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildVarLenArray<arrow::StringBuilder>(
-                scalars.string_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::utf8()), arr);
-    }
-    if (scalars.has_json_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildVarLenArray<arrow::BinaryBuilder>(
-                scalars.json_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::binary()), arr);
-    }
-
-    return arrow::Status::NotImplemented(
-        "unsupported scalar type in Arrow export");
 }
 
 // Build Arrow RecordBatch from a SearchResult that has been filtered and had PKs filled.

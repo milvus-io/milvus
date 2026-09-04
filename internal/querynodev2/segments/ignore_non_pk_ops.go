@@ -19,10 +19,13 @@ package segments
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -186,12 +189,17 @@ func NewMergeByPKWithOffsetsOperator(
 // IgnoreNonPk pipeline: after PK merge + dedup + topK, fetch actual field data
 // only for the selected rows.
 //
+// When ArrowRetrieveEnabled is true, uses the Arrow code path which performs
+// a single CGO call returning an Arrow RecordBatch. Otherwise, falls back to
+// the per-segment proto serialization path.
+//
 // Input[0]: *MergedResultWithOffsets
 // Output[0]: *segcorepb.RetrieveResults (with IDs and full FieldsData)
 func NewFetchFieldsDataOperator(
 	validSegments []Segment,
 	manager *Manager,
 	retrievePlan *segcore.RetrievePlan,
+	fieldSchemaMap map[int64]*schemapb.FieldSchema,
 ) queryutil.Operator {
 	return queryutil.NewLambdaOperator(queryutil.OpFetchFields, func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 		merged := inputs[0].(*MergedResultWithOffsets)
@@ -205,88 +213,184 @@ func NewFetchFieldsDataOperator(
 			return []any{ret}, nil
 		}
 
-		// Group selections by segment index
-		groups := lo.GroupBy(merged.Selections, func(sel OffsetSelection) int {
-			return sel.SegmentIndex
-		})
-
-		// Parallel RetrieveByOffsets per segment
-		segmentResults := make([]*segcorepb.RetrieveResults, len(validSegments))
-		futures := make([]*conc.Future[any], 0, len(groups))
-		for segIdx, sels := range groups {
-			idx := segIdx
-			offsets := lo.Map(sels, func(sel OffsetSelection, _ int) int64 { return sel.Offset })
-			future := GetSQPool().Submit(func() (any, error) {
-				var r *segcorepb.RetrieveResults
-				var err error
-				if err := doOnSegment(ctx, manager, validSegments[idx], func(ctx context.Context, segment Segment) error {
-					r, err = segment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
-						RetrievePlan: retrievePlan,
-						Offsets:      offsets,
-					})
-					return err
-				}); err != nil {
-					return nil, err
-				}
-				segmentResults[idx] = r
-				return nil, nil
-			})
-			futures = append(futures, future)
+		if paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.GetAsBool() {
+			return fetchFieldsArrow(ctx, validSegments, retrievePlan, fieldSchemaMap, merged, ret)
 		}
-
-		// Must be BlockOnAll: if we fast-fail, cgo struct like `plan` could be used after free.
-		if err := conc.BlockOnAll(futures...); err != nil {
-			return nil, err
-		}
-
-		// Find a non-empty result to initialize FieldsData layout
-		for _, r := range segmentResults {
-			if r != nil && len(r.GetFieldsData()) != 0 {
-				ret.FieldsData = typeutil.PrepareResultFieldData(r.GetFieldsData(), int64(len(merged.Selections)))
-				break
-			}
-		}
-
-		if ret.FieldsData == nil {
-			return []any{ret}, nil
-		}
-
-		// Build FieldsData in PK-sorted order (matching selections order)
-		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(segmentResults))
-		for i, r := range segmentResults {
-			if r != nil {
-				idxComputers[i] = typeutil.NewFieldDataIdxComputer(r.GetFieldsData())
-			}
-		}
-
-		// Track consumption position per segment's RetrieveByOffsets result.
-		// RetrieveByOffsets returns results compacted: row 0, 1, 2, ...
-		segmentResOffset := make([]int64, len(segmentResults))
-		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-		var retSize int64
-
-		for _, sel := range merged.Selections {
-			r := segmentResults[sel.SegmentIndex]
-			if r == nil {
-				continue
-			}
-			fieldsData := r.GetFieldsData()
-			fieldIdxs := idxComputers[sel.SegmentIndex].Compute(segmentResOffset[sel.SegmentIndex])
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, segmentResOffset[sel.SegmentIndex], fieldIdxs...)
-			segmentResOffset[sel.SegmentIndex]++
-
-			if retSize > maxOutputSize {
-				return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
-			}
-		}
-
-		// Fill ElementIndices for element-level query
-		if merged.ElementLevel {
-			for _, sel := range merged.Selections {
-				ret.ElementIndices = append(ret.ElementIndices, sel.ElementIndices)
-			}
-		}
-
-		return []any{ret}, nil
+		return fetchFieldsProto(ctx, validSegments, manager, retrievePlan, merged, ret)
 	})
+}
+
+// fetchFieldsArrow retrieves fields via a single CGO call returning an Arrow
+// RecordBatch, then converts to proto.
+func fetchFieldsArrow(
+	ctx context.Context,
+	validSegments []Segment,
+	retrievePlan *segcore.RetrievePlan,
+	fieldSchemaMap map[int64]*schemapb.FieldSchema,
+	merged *MergedResultWithOffsets,
+	ret *segcorepb.RetrieveResults,
+) ([]any, error) {
+	rec, err := fetchFieldsAsRecord(ctx, validSegments, retrievePlan, merged)
+	if err != nil {
+		return nil, err
+	}
+	defer rec.Release()
+
+	fieldsData, err := segcore.ArrowFieldsToProto(rec, fieldSchemaMap)
+	if err != nil {
+		return nil, err
+	}
+	ret.FieldsData = fieldsData
+
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	var retSize int64
+	for _, fd := range ret.FieldsData {
+		retSize += int64(proto.Size(fd))
+	}
+	if retSize > maxOutputSize {
+		ret.FieldsData = nil
+		return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+	}
+
+	if merged.ElementLevel {
+		for _, sel := range merged.Selections {
+			ret.ElementIndices = append(ret.ElementIndices, sel.ElementIndices)
+		}
+	}
+	return []any{ret}, nil
+}
+
+// fetchFieldsProto retrieves fields via per-segment RetrieveByOffsets (proto
+// serialize/unmarshal), then interleaves rows in PK order.
+func fetchFieldsProto(
+	ctx context.Context,
+	validSegments []Segment,
+	manager *Manager,
+	retrievePlan *segcore.RetrievePlan,
+	merged *MergedResultWithOffsets,
+	ret *segcorepb.RetrieveResults,
+) ([]any, error) {
+	groups := lo.GroupBy(merged.Selections, func(sel OffsetSelection) int {
+		return sel.SegmentIndex
+	})
+
+	segmentResults := make([]*segcorepb.RetrieveResults, len(validSegments))
+	futures := make([]*conc.Future[any], 0, len(groups))
+	for segIdx, sels := range groups {
+		idx := segIdx
+		offsets := lo.Map(sels, func(sel OffsetSelection, _ int) int64 { return sel.Offset })
+		future := GetSQPool().Submit(func() (any, error) {
+			var r *segcorepb.RetrieveResults
+			var err error
+			if err := doOnSegment(ctx, manager, validSegments[idx], func(ctx context.Context, segment Segment) error {
+				r, err = segment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
+					RetrievePlan: retrievePlan,
+					Offsets:      offsets,
+				})
+				return err
+			}); err != nil {
+				return nil, err
+			}
+			segmentResults[idx] = r
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return nil, err
+	}
+
+	for _, r := range segmentResults {
+		if r != nil && len(r.GetFieldsData()) != 0 {
+			ret.FieldsData = typeutil.PrepareResultFieldData(r.GetFieldsData(), int64(len(merged.Selections)))
+			break
+		}
+	}
+
+	if ret.FieldsData == nil {
+		return []any{ret}, nil
+	}
+
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(segmentResults))
+	for i, r := range segmentResults {
+		if r != nil {
+			idxComputers[i] = typeutil.NewFieldDataIdxComputer(r.GetFieldsData())
+		}
+	}
+
+	segmentResOffset := make([]int64, len(segmentResults))
+	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	var retSize int64
+
+	for _, sel := range merged.Selections {
+		r := segmentResults[sel.SegmentIndex]
+		if r == nil {
+			continue
+		}
+		fieldsData := r.GetFieldsData()
+		fieldIdxs := idxComputers[sel.SegmentIndex].Compute(segmentResOffset[sel.SegmentIndex])
+		retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, segmentResOffset[sel.SegmentIndex], fieldIdxs...)
+		segmentResOffset[sel.SegmentIndex]++
+
+		if retSize > maxOutputSize {
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+		}
+	}
+
+	if merged.ElementLevel {
+		for _, sel := range merged.Selections {
+			ret.ElementIndices = append(ret.ElementIndices, sel.ElementIndices)
+		}
+	}
+
+	return []any{ret}, nil
+}
+
+// fetchFieldsAsRecord retrieves field data for the selected rows as a
+// single Arrow RecordBatch across all segments, ordered by
+// merged.Selections.
+func fetchFieldsAsRecord(
+	ctx context.Context,
+	validSegments []Segment,
+	retrievePlan *segcore.RetrievePlan,
+	merged *MergedResultWithOffsets,
+) (arrow.Record, error) {
+	type pinned struct {
+		ls *LocalSegment
+		cs segcore.CSegment
+	}
+	segs := make([]pinned, len(validSegments))
+	for i, seg := range validSegments {
+		ls := seg.(*LocalSegment)
+		if !ls.ptrLock.PinIf(state.IsNotReleased) {
+			for j := 0; j < i; j++ {
+				segs[j].ls.ptrLock.Unpin()
+			}
+			return nil, merr.WrapErrSegmentNotLoaded(ls.ID(), "segment released")
+		}
+		segs[i] = pinned{ls, ls.csegment}
+	}
+	defer func() {
+		for _, s := range segs {
+			s.ls.ptrLock.Unpin()
+		}
+	}()
+
+	cSegments := make([]segcore.CSegment, len(segs))
+	for i, s := range segs {
+		cSegments[i] = s.cs
+	}
+
+	segIndices := make([]int32, len(merged.Selections))
+	segOffsets := make([]int64, len(merged.Selections))
+	for i, sel := range merged.Selections {
+		segIndices[i] = int32(sel.SegmentIndex)
+		segOffsets[i] = sel.Offset
+	}
+
+	return retrySegmentReadGate(ctx, SegmentTypeSealed,
+		func() (arrow.Record, error) {
+			return segcore.FillRetrieveFieldsOrdered(ctx, cSegments, retrievePlan, segIndices, segOffsets)
+		}, waitSegmentReadGateRetry)
 }

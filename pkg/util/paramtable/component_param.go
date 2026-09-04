@@ -354,6 +354,8 @@ type commonConfig struct {
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
+	InterfaceZeroCopyEnabled ParamItem `refreshable:"true"`
+
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
@@ -1484,6 +1486,13 @@ The default matches the milvus-storage default.`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.InterfaceZeroCopyEnabled = ParamItem{
+		Key:          "common.interface.zeroCopy",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+	}
+	p.InterfaceZeroCopyEnabled.Init(base.mgr)
 
 	p.PreferIPv6LocalIP = ParamItem{
 		Key:          "common.preferIPv6",
