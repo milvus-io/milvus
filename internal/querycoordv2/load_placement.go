@@ -28,25 +28,38 @@ import (
 // completePlacementForOutOfScopeResourceGroups returns the per-resource-group
 // replica counts to record for this load request.
 //
-// A load request speaks only for the resource groups it names: the counts the
-// collection already has in the groups it did not name are carried through
-// alongside the requested ones. The result is the cumulative placement the
+// A load request that NAMES resource groups speaks only for those: the counts
+// the collection already has in the groups it did not name are carried through
+// alongside the requested ones. A request that names none speaks for the whole
+// placement, which is the native behavior, and gets back exactly what
+// AssignReplica produced. The result is the cumulative placement the
 // collection ends up with, so the reconciliation leaves those replicas where
 // they are, and the record it builds describes a placement that grew rather
 // than one that moved - which is what lets the load job recognize a request
 // that only adds resource groups as a pure expansion and keep the
 // collection's serving state intact.
 //
+// requestedResourceGroups is the list the REQUEST named, not the one the load
+// path defaulted: see getLoadReplicaConfigForRequest, which returns the two
+// separately, for why the difference decides the answer.
+//
 // expected is the non-nil map utils.AssignReplica just returned. It is never
 // mutated, because the caller may still log it.
 func completePlacementForOutOfScopeResourceGroups(
 	ctx context.Context,
 	collectionID int64,
-	resourceGroups []string,
+	requestedResourceGroups []string,
 	expected map[string]int,
 	current job.CurrentLoadConfig,
 ) map[string]int {
-	named := typeutil.NewSet(resourceGroups...)
+	if len(requestedResourceGroups) == 0 {
+		// The request states the whole placement, so what AssignReplica
+		// produced is the whole answer: carrying anything over would add
+		// replicas the request did not ask for.
+		return expected
+	}
+
+	named := typeutil.NewSet(requestedResourceGroups...)
 	completed := maps.Clone(expected)
 	carried := make([]string, 0)
 	for rgName, replicaNumber := range current.GetReplicaNumber() {
@@ -59,7 +72,7 @@ func completePlacementForOutOfScopeResourceGroups(
 	if len(carried) > 0 {
 		mlog.Info(ctx, "load request is scoped to the resource groups it names, keeping the placement of the others",
 			mlog.Int64("collectionID", collectionID),
-			mlog.Strings("requestedResourceGroups", resourceGroups),
+			mlog.Strings("requestedResourceGroups", requestedResourceGroups),
 			mlog.Strings("keptResourceGroups", carried),
 		)
 	}
