@@ -705,7 +705,6 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 
 		loaded := true
 		hasUpdate := false
-		targetNotReady := false
 
 		channelTargetNum, subChannelCount := ob.observeChannelStatus(ctx, task.CollectionID)
 
@@ -715,12 +714,8 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 			}
 			if ob.readyToObserve(ctx, partition.CollectionID) {
 				replicaNum := ob.meta.GetReplicaNumber(ctx, partition.GetCollectionID())
-				has, gated := ob.observePartitionLoadStatus(ctx, partition, replicaNum, channelTargetNum, subChannelCount)
-				if has {
+				if ob.observePartitionLoadStatus(ctx, partition, replicaNum, channelTargetNum, subChannelCount) {
 					hasUpdate = true
-				}
-				if gated {
-					targetNotReady = true
 				}
 			}
 			partition = ob.meta.GetPartition(ctx, partition.PartitionID)
@@ -740,15 +735,20 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 		// holds this task open forever, and a sibling already finished can
 		// close it while this resource group carries nothing.
 		//
-		// targetNotReady keeps the one guarantee the replaced check gave for
-		// free: partition.LoadPercentage only reaches 100 after
-		// targetObserver.Check has advanced the current target, whereas the
-		// per-resource-group percentage is measured against the next target and
-		// reaches 100 before that promotion. Finishing the task while the
-		// promotion is still pending would leave the collection below Loaded
-		// with nothing left to drive a retry.
+		// The current target is asked for directly, because the shape a scoped
+		// task actually has cannot be asked anything else: such a task is
+		// registered for a resource group added to a collection that is already
+		// loaded, so every partition sits at 100 and the loop above skips them
+		// all. It is asked at all because the per-resource-group percentage is
+		// measured against the NEXT target and so reaches 100 while the
+		// promotion of the current target is still pending -- and until that
+		// lands the group cannot serve, since shard leader readiness is
+		// measured against the current target. Finishing there would drop this
+		// group's supervision, its timeout and its teardown, at the moment it
+		// carries everything and answers nothing.
 		if task.ResourceGroup != "" {
-			loaded = progress[traceID] >= 100 && !targetNotReady
+			loaded = progress[traceID] >= 100 &&
+				ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID)
 		}
 
 		// all partition loaded, finish task
@@ -794,21 +794,16 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 	return channelTargetNum, subChannelCount
 }
 
-// observePartitionLoadStatus drives one partition's load progress. It returns:
-//
-//   - loadUpdated: a load-status update was persisted this tick, so the caller
-//     should refresh the collection-level status.
-//   - targetNotReady: the gated promotion of this partition's status was skipped
-//     this tick, because the next target is not populated yet or because
-//     targetObserver.Check refused to advance the current target. Only
-//     resource-group-scoped tasks read this; it tells them not to finish yet.
-func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) (loadUpdated bool, targetNotReady bool) {
+// observePartitionLoadStatus drives one partition's load progress and reports
+// whether a load-status update was persisted this tick, so the caller knows to
+// refresh the collection-level status.
+func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 
 	targetNum := len(segmentTargets) + channelTargetNum
 	if targetNum == 0 {
 		mlog.Info(ctx, "segments and channels in target are both empty, waiting for new target content")
-		return false, true
+		return false
 	}
 	mlog.RatedInfo(ctx, rate.Limit(10), "partition targets",
 		mlog.FieldCollectionID(partition.GetCollectionID()),
@@ -836,7 +831,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 
 	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
 		ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-		return false, false
+		return false
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
@@ -845,7 +840,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 			mlog.Warn(ctx, "failed to manual check current target, skip update load status",
 				mlog.FieldCollectionID(partition.GetCollectionID()),
 				mlog.FieldPartitionID(partition.GetPartitionID()))
-			return false, true
+			return false
 		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
@@ -863,7 +858,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		mlog.Int("loadSegmentCount", loadedCount-subChannelCount),
 	)
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("partition %d load percentage update: %d", partition.PartitionID, loadPercentage)))
-	return true, false
+	return true
 }
 
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
