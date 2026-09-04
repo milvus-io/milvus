@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <folly/SharedMutex.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -79,7 +80,7 @@ class SimpleGeometryCache {
         // Destroy the cached geometries (each calls GEOSGeom_destroy_r(ctx_,
         // ...)) while ctx_ is still alive, then release the context.
         {
-            std::lock_guard<std::shared_mutex> lock(mutex_);
+            std::lock_guard<folly::SharedMutexWritePriority> lock(mutex_);
             geometries_.clear();
         }
         if (ctx_ != nullptr) {
@@ -122,7 +123,7 @@ class SimpleGeometryCache {
     // data here (see the KNOWN LIMIT note on TryParseFromWkb).
     void
     AppendDataAt(size_t absolute_offset, const char* wkb_data, size_t size) {
-        std::lock_guard<std::shared_mutex> lock(mutex_);
+        std::lock_guard<folly::SharedMutexWritePriority> lock(mutex_);
 
         if (geometries_.size() <= absolute_offset) {
             // Default-constructed gap entries are invalid; a reader that
@@ -156,9 +157,9 @@ class SimpleGeometryCache {
     }
 
     // Get shared lock for batch operations (RAII)
-    std::shared_lock<std::shared_mutex>
+    std::shared_lock<folly::SharedMutexWritePriority>
     AcquireReadLock() const {
-        return std::shared_lock<std::shared_mutex>(mutex_);
+        return std::shared_lock<folly::SharedMutexWritePriority>(mutex_);
     }
 
     // Get Geometry by offset without locking (use with AcquireReadLock).
@@ -185,7 +186,7 @@ class SimpleGeometryCache {
     // Get total number of loaded geometries
     size_t
     Size() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
+        std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
         return geometries_.size();
     }
 
@@ -194,9 +195,10 @@ class SimpleGeometryCache {
     // would recursively acquire the non-reentrant shared_mutex: that is
     // undefined behavior per [thread.sharedmutex.requirements] regardless of
     // platform, and becomes a real deadlock on writer-preferring
-    // implementations once a writer is queued. (Not a claim about this
-    // build's std::shared_mutex: on Linux libstdc++ maps it to
-    // pthread_rwlock_t, whose glibc default is reader-preferring.)
+    // implementations once a writer is queued. Since #52191 mutex_ IS
+    // write-preferring (folly::SharedMutexWritePriority), so that deadlock
+    // is live, not hypothetical: never call a locking accessor while
+    // holding the read lock -- use SizeUnsafe()/GetByOffsetUnsafe().
     size_t
     SizeUnsafe() const {
         return geometries_.size();
@@ -206,7 +208,11 @@ class SimpleGeometryCache {
     // ctx_ is declared first so it is destroyed last (after geometries_),
     // guaranteeing the Geometry destructors still see a live context.
     GEOSContextHandle_t ctx_{nullptr};  // Context owned by this cache
-    mutable std::shared_mutex mutex_;   // For read/write operations
+    // Write-preferring: a continuous stream of overlapping readers (every
+    // GIS expression holds AcquireReadLock() across a whole batch) must not
+    // starve the growing-segment writer. std::shared_mutex maps to glibc's
+    // reader-preferring pthread_rwlock_t on Linux, which does. See #52191.
+    mutable folly::SharedMutexWritePriority mutex_;
     std::vector<Geometry> geometries_;  // Direct storage of Geometry objects
 };
 
