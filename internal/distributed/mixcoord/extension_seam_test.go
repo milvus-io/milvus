@@ -18,10 +18,13 @@ package grpcmixcoord
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -50,7 +53,9 @@ func (e *recordingEngine) Stop() error {
 func installEngine(t *testing.T, e extension.CoordinatorEngine) {
 	t.Helper()
 	extension.ResetForTest()
+	resetEngineLifecycleForTest()
 	t.Cleanup(extension.ResetForTest)
+	t.Cleanup(resetEngineLifecycleForTest)
 	extension.SetCoordinatorEngine(e)
 }
 
@@ -102,9 +107,94 @@ func TestServerStopStopsEngine(t *testing.T) {
 	engine := &recordingEngine{stopErr: errors.New("engine stop failed")}
 	installEngine(t, engine)
 	svr := newTestServer(t, &mockMix{})
+	assert.NoError(t, svr.start())
 	assert.NoError(t, svr.Stop(),
 		"an engine that fails to stop must not fail the coordinator shutdown")
 	assert.Equal(t, 1, engine.stopCount, "the coordinator must stop the engine exactly once")
+}
+
+// A standby is stopped without ever having been activated, so its engine was
+// never started, and the seam must not call Stop on an engine it never
+// started.
+func TestStopWithoutStartIsANoOp(t *testing.T) {
+	engine := &recordingEngine{}
+	installEngine(t, engine)
+	coord := &activatableCoord{}
+	svr := newTestServer(t, &coord.mockMix)
+	svr.mixCoord = coord
+	assert.NoError(t, svr.start())
+	require.Zero(t, engine.startCount, "not activated, so not started")
+
+	assert.NoError(t, svr.Stop())
+	assert.Zero(t, engine.stopCount, "an engine that was never started is not stopped")
+
+	coord.fire()
+	assert.Zero(t, engine.startCount, "an activation after shutdown began must not start an engine nothing will stop")
+}
+
+// blockingEngine is an engine whose Start does not return until Stop is
+// called, which is what a slow activation looks like from the seam.
+type blockingEngine struct {
+	recordingEngine
+	starting chan struct{} // closed once Start is running
+	release  chan struct{} // closed by Stop, which is what lets Start return
+	once     sync.Once
+}
+
+func newBlockingEngine() *blockingEngine {
+	return &blockingEngine{starting: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (e *blockingEngine) Start(ctx context.Context, coord extension.Coordinator) error {
+	close(e.starting)
+	<-e.release
+	return e.recordingEngine.Start(ctx, coord)
+}
+
+func (e *blockingEngine) Stop() error {
+	e.once.Do(func() { close(e.release) })
+	return e.recordingEngine.Stop()
+}
+
+// A shutdown must not wait for a slow Start: the engine's own Stop is what
+// ends it, so holding a lock across Start would deadlock the coordinator's
+// shutdown against its own activation.
+func TestStopDoesNotWaitForASlowStart(t *testing.T) {
+	engine := newBlockingEngine()
+	installEngine(t, engine)
+	coord := &activatableCoord{}
+	svr := newTestServer(t, &coord.mockMix)
+	svr.mixCoord = coord
+	require.NoError(t, svr.start())
+
+	activated := make(chan struct{})
+	go func() {
+		defer close(activated)
+		coord.fire()
+	}()
+	select {
+	case <-engine.starting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the activation never reached Start")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		stopCoordinatorEngine(context.Background())
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop must return while Start is still running, not wait for it")
+	}
+	select {
+	case <-activated:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop must be what ends the Start")
+	}
+	assert.Equal(t, 1, engine.stopCount)
+	assert.Equal(t, 1, engine.startCount)
 }
 
 type activatableCoord struct {
