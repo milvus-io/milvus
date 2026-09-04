@@ -45,8 +45,9 @@ func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
 }
 
 type appendValueDefault struct {
-	value       *schemapb.ValueField
-	geometryWKB []byte
+	value                  *schemapb.ValueField
+	geometryWKB            []byte
+	arrayOfVectorByteWidth int
 }
 
 func newAppendValueDefault(field *schemapb.FieldSchema) (appendValueDefault, error) {
@@ -58,6 +59,19 @@ func newAppendValueDefault(field *schemapb.FieldSchema) (appendValueDefault, err
 			return ret, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", field.GetName())
 		}
 		ret.geometryWKB = val
+	}
+	if field.GetDataType() == schemapb.DataType_ArrayOfVector && field.GetElementNullable() {
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return ret, merr.WrapErrAsSysError(
+				merr.Wrapf(err, "get dimension for ArrayOfVector field %s", field.GetName()),
+			)
+		}
+		byteWidth, err := getArrayOfVectorElementByteWidth(field.GetElementType(), int(dim))
+		if err != nil {
+			return ret, err
+		}
+		ret.arrayOfVectorByteWidth = byteWidth
 	}
 	return ret, nil
 }
@@ -252,18 +266,60 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		b.Append(true)
 
 		valuesArray := la.ListValues()
-		var totalSize uint64 = 0
+		var totalSize uint64
 		valueBuilder := b.ValueBuilder()
 		switch vb := valueBuilder.(type) {
 		case *array.FixedSizeBinaryBuilder:
+			if field.GetElementNullable() {
+				return 0, merr.WrapErrStorageMsg("element-nullable ArrayOfVector requires Binary child storage")
+			}
 			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
 			if !ok {
 				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
+			byteWidth := uint64(vb.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
+			vb.Reserve(int(end - start))
 			for i := start; i < end; i++ {
+				if fixedArray.IsNull(int(i)) {
+					return 0, merr.WrapErrStorageMsg(
+						"non-element-nullable ArrayOfVector contains null child at logical element %d",
+						i-start,
+					)
+				}
 				val := fixedArray.Value(int(i))
 				vb.Append(val)
-				totalSize += uint64(len(val))
+				totalSize += byteWidth
+			}
+		case *array.BinaryBuilder:
+			binaryArray, ok := valuesArray.(*array.Binary)
+			if !ok {
+				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+			}
+			if !field.GetElementNullable() {
+				return 0, merr.WrapErrStorageMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child storage")
+			}
+			byteWidth := appendDefault.arrayOfVectorByteWidth
+			if byteWidth <= 0 {
+				return 0, merr.WrapErrServiceInternalMsg("missing cached byte width for ArrayOfVector field %s", field.GetName())
+			}
+			vb.Reserve(int(end - start))
+			for i := start; i < end; i++ {
+				idx := int(i)
+				if binaryArray.IsNull(idx) {
+					vb.AppendNull()
+					continue
+				}
+				val := binaryArray.Value(idx)
+				if len(val) != byteWidth {
+					return 0, merr.WrapErrStorageMsg(
+						"ArrayOfVector child at logical element %d has byte width %d, expected %d",
+						i-start,
+						len(val),
+						byteWidth,
+					)
+				}
+				vb.Append(val)
+				totalSize += uint64(byteWidth)
 			}
 		default:
 			return 0, merr.WrapErrServiceInternalMsg("unsupported value builder type in ListBuilder: %T", valueBuilder)
@@ -290,7 +346,7 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
 		elementType = schema.GetElementType()
 	}
-	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)
+	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType, schema.GetElementNullable())
 	if schema.GetDataType() == schemapb.DataType_Text {
 		arrowType = arrow.BinaryTypes.Binary
 	} else if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
@@ -481,7 +537,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			// so the builder must use binary type to match what the reader returns.
 			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else {
-			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
+			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType, field.GetElementNullable())
 			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 		}
 		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
