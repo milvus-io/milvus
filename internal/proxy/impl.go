@@ -3243,7 +3243,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
-	newSearchReq := convertHybridSearchToSearch(request)
+	newSearchReq, hybridSubRequests := convertHybridSearchToSearch(request)
 	qt := &searchTask{
 		baseTask: baseTask{
 			metaCache: node.getMetaCache(),
@@ -3259,6 +3259,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			IsTopkReduce: optimizedSearch,
 		},
 		request:             newSearchReq,
+		hybridSubRequests:   hybridSubRequests,
 		tr:                  timerecord.NewTimeRecorder(method),
 		mixCoord:            node.mixCoord,
 		node:                node,

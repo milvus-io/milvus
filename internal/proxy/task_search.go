@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -103,8 +104,9 @@ type searchTask struct {
 	relatedDataSize   int64
 
 	// Rerank configuration metadata (nil means no rerank)
-	rerankMeta rerankMeta
-	rankParams *rankParams
+	rerankMeta        rerankMeta
+	rankParams        *rankParams
+	hybridSubRequests []hybridSubSearchRequest
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -128,6 +130,35 @@ type searchTask struct {
 	hybridElementLevel   bool
 
 	chMgr channelmgr.ChannelsMgr
+}
+
+// hybridSubSearchRequest keeps a public HybridSearch sub-request and its
+// function score together while the request is converted to the advanced
+// search representation. milvuspb.SubSearchRequest does not currently expose
+// a function_score field, so keeping a paired value here avoids relying on two
+// index-aligned slices inside the search task.
+type hybridSubSearchRequest struct {
+	request       *milvuspb.SubSearchRequest
+	functionScore *schemapb.FunctionScore
+}
+
+func validateHybridSubRequestFunctionScore(functionScore *schemapb.FunctionScore) error {
+	if len(functionScore.GetFunctions()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("hybrid sub-request function_score must contain at least one boost reranker")
+	}
+
+	for _, function := range functionScore.GetFunctions() {
+		if function == nil {
+			return merr.WrapErrParameterInvalidMsg("hybrid sub-request function_score contains an empty function")
+		}
+		rerankerName := rerank.GetRerankName(function)
+		if rerankerName != rerank.BoostName {
+			return merr.WrapErrParameterInvalidMsg(
+				"hybrid sub-request function_score only supports boost rerankers, got %q", rerankerName)
+		}
+	}
+
+	return nil
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -548,15 +579,32 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = false
 	}
 
-	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
-	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
-	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	subRequests := t.hybridSubRequests
+	if subRequests == nil {
+		subRequests = make([]hybridSubSearchRequest, 0, len(t.request.GetSubReqs()))
+		for _, subReq := range t.request.GetSubReqs() {
+			subRequests = append(subRequests, hybridSubSearchRequest{request: subReq})
+		}
+	}
+
+	t.SubReqs = make([]*internalpb.SubSearchRequest, len(subRequests))
+	t.queryInfos = make([]*planpb.QueryInfo, len(subRequests))
+	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(subRequests))
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
-	for index, subReq := range t.request.GetSubReqs() {
+	for index, hybridSubReq := range subRequests {
+		subReq := hybridSubReq.request
+		functionScore := t.request.GetFunctionScore()
+		if hybridSubReq.functionScore != nil {
+			if err := validateHybridSubRequestFunctionScore(hybridSubReq.functionScore); err != nil {
+				return merr.Wrapf(err, "invalid function_score for hybrid sub-request %d", index)
+			}
+			functionScore = hybridSubReq.functionScore
+		}
+
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
 		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(
-			subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues(), membershipPreflightBudget)
+			subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues(), membershipPreflightBudget, functionScore)
 		if err != nil {
 			return err
 		}
@@ -882,7 +930,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(
-		t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues(), nil)
+		t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues(), nil, t.request.GetFunctionScore())
 	if err != nil {
 		return err
 	}
@@ -1153,6 +1201,7 @@ func (t *searchTask) tryGeneratePlan(
 	dsl string,
 	exprTemplateValues map[string]*schemapb.TemplateValue,
 	membershipBudget *planparserv2.MembershipPreflightBudget,
+	functionScore *schemapb.FunctionScore,
 ) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
@@ -1185,7 +1234,7 @@ func (t *searchTask) tryGeneratePlan(
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
 	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook
-	if !hasFunctionRerank(t.request) {
+	if functionScore == nil && !hasFunctionRerank(t.request) {
 		searchType = searchInfo.DetermineSearchType(hasFilter)
 	}
 
@@ -1196,7 +1245,7 @@ func (t *searchTask) tryGeneratePlan(
 		annsFieldName,
 		searchInfo.planInfo,
 		exprTemplateValues,
-		t.request.GetFunctionScore(),
+		functionScore,
 		&planparserv2.ParserVisitorArgs{
 			Timezone:         t.resolvedTimezoneStr,
 			MembershipBudget: membershipBudget,

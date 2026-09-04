@@ -309,7 +309,7 @@ func TestConvertHybridSearchToSearchCopiesNamespace(t *testing.T) {
 		},
 	}
 
-	searchReq := convertHybridSearchToSearch(req)
+	searchReq, _ := convertHybridSearchToSearch(req)
 	require.NotNil(t, searchReq.Namespace)
 	assert.Equal(t, namespace, searchReq.GetNamespace())
 }
