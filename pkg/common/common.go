@@ -168,8 +168,9 @@ const (
 )
 
 const (
-	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
-	JSONStatsDataFormatVersion = 3
+	// Version 4: shared BSON may contain undefined sentinels for numeric values
+	// rejected by simdjson. Query nodes load JSON stats by exact format version.
+	JSONStatsDataFormatVersion = 4
 )
 
 // Search, Index parameter keys

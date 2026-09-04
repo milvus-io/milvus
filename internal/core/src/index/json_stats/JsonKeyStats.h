@@ -16,15 +16,16 @@
 
 #pragma once
 
+#include <map>
+#include <optional>
+#include <string>
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
 class CollectSingleJsonStatsInfoAccessor;
 
-#include <string>
 #include <boost/filesystem.hpp>
 
 #include "index/InvertedIndexTantivy.h"
-#include "common/jsmn.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "arrow/api.h"
 #include "index/json_stats/utils.h"
@@ -34,7 +35,25 @@ class CollectSingleJsonStatsInfoAccessor;
 #include "common/bson_view.h"
 #include "index/SkipIndex.h"
 
+namespace milvus {
+class Json;
+}
+
 namespace milvus::index {
+
+enum class JsonStatsValueState { VALID, INVALID_NUMBER };
+
+struct JsonStatsValue {
+    std::string raw_value;
+    std::optional<double> double_value;
+    JsonStatsValueState state{JsonStatsValueState::VALID};
+
+    bool
+    IsInvalidNumber() const {
+        return state == JsonStatsValueState::INVALID_NUMBER;
+    }
+};
+
 class JsonKeyStats : public ScalarIndex<std::string> {
  public:
     explicit JsonKeyStats(
@@ -381,7 +400,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  private:
     void
-    CollectSingleJsonStatsInfo(const char* json_str,
+    CollectSingleJsonStatsInfo(const milvus::Json& json,
                                std::map<JsonKey, KeyStatsInfo>& infos);
 
     std::string
@@ -397,9 +416,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas);
 
     void
-    TraverseJsonForStats(const char* json,
-                         jsmntok* tokens,
-                         int& index,
+    TraverseJsonForStats(simdjson::ondemand::value value,
                          std::vector<std::string>& path,
                          std::map<JsonKey, KeyStatsInfo>& infos);
 
@@ -430,7 +447,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     BuildKeyStats(const std::vector<FieldDataPtr>& field_datas);
 
     void
-    BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
+    BuildKeyStatsForRow(const milvus::Json& json, uint32_t row_id);
 
     void
     BuildKeyStatsForNullRow();
@@ -453,112 +470,16 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
-                const std::string& value,
-                std::map<JsonKey, std::string>& values);
+                JsonStatsValue value,
+                std::map<JsonKey, JsonStatsValue>& values);
 
     void
-    TraverseJsonForBuildStats(const char* json,
-                              jsmntok* tokens,
-                              int& index,
+    TraverseJsonForBuildStats(simdjson::ondemand::value value,
                               std::vector<std::string>& path,
-                              std::map<JsonKey, std::string>& values);
+                              std::map<JsonKey, JsonStatsValue>& values);
 
-    bool
-    IsBoolean(const std::string& str) {
-        return str == "true" || str == "false";
-    }
-
-    bool
-    IsInt8(const std::string& str) {
-        std::istringstream iss(str);
-        int8_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int8_t>::min() &&
-               num <= std::numeric_limits<int8_t>::max();
-    }
-
-    bool
-    IsInt16(const std::string& str) {
-        std::istringstream iss(str);
-        int16_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int16_t>::min() &&
-               num <= std::numeric_limits<int16_t>::max();
-    }
-
-    bool
-    IsInt32(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int32_t>::min() &&
-               num <= std::numeric_limits<int32_t>::max();
-    }
-
-    bool
-    IsInt64(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof();
-    }
-
-    bool
-    IsFloat(const std::string& str) {
-        try {
-            float d = std::stof(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    bool
-    IsDouble(const std::string& str) {
-        try {
-            double d = std::stod(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    bool
-    IsNull(const std::string& str) {
-        return str == "null";
-    }
-
-    JSONType
-    getType(const std::string& str) {
-        if (IsBoolean(str)) {
-            return JSONType::BOOL;
-            // TODO: add int8, int16, int32 support
-            // now we only support int64 for build performance
-            // } else if (IsInt8(str)) {
-            //     return JSONType::INT8;
-            // } else if (IsInt16(str)) {
-            //     return JSONType::INT16;
-            // } else if (IsInt32(str)) {
-            //     return JSONType::INT32;
-        } else if (IsInt64(str)) {
-            return JSONType::INT64;
-        } else if (IsFloat(str)) {
-            return JSONType::FLOAT;
-        } else if (IsDouble(str)) {
-            return JSONType::DOUBLE;
-        } else if (IsNull(str)) {
-            return JSONType::NONE;
-        }
-        LOG_DEBUG("unknown json type for string: {}", str);
-        return JSONType::UNKNOWN;
-    }
+    std::pair<JSONType, JsonStatsValue>
+    ParsePrimitiveValue(simdjson::ondemand::value value);
 
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
@@ -597,7 +518,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t max_shredding_columns_;
     double shredding_ratio_threshold_;
     int64_t write_batch_size_;
-
     std::map<JsonKey, JsonKeyLayoutType> key_types_;
     std::set<JsonKey> shared_keys_;
     std::set<JsonKey> column_keys_;

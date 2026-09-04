@@ -860,10 +860,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
-// number in a single parse.  Branches on actual type to preserve int64
-// precision; uint64 and double values fall back to double comparison,
-// consistent with the Tantivy index and JSON-stats paths.
+// Numeric GetType uses at_numeric() (get_number()) so unrepresentable JSON
+// numbers stay UNKNOWN.  The int64_t branch preserves integer precision;
+// uint64 and double values fall back to double comparison, consistent with
+// the Tantivy index and JSON-stats paths.
 // - 'cmp' must reference 'value' (auto-typed as int64_t or double).
 // Missing path and type mismatch are UNKNOWN/NULL under JSON 3VL semantics.
 #define UnaryRangeJSONCompare(cmp)                                     \
@@ -884,6 +884,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                                  : n.get_double();                     \
                 res[i] = (cmp);                                        \
             }                                                          \
+        } else if constexpr (std::is_same_v<GetType, double>) {        \
+            auto x = data[offset].at_numeric(pointer);                 \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value().as_double();                        \
+            res[i] = (cmp);                                            \
         } else {                                                       \
             auto x = data[offset].template at<GetType>(pointer);       \
             if (x.error()) {                                           \

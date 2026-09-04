@@ -131,6 +131,19 @@ BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data,
     return json_index;
 }
 
+TEST(JsonFlatIndexSafetyTest, RejectsUncoveredRowInsteadOfPublishingPartial) {
+    // serde_json/Tantivy cannot represent 1e400. Until JsonFlatIndex persists
+    // row coverage and query executors merge uncovered rows from raw JSON, the
+    // only safe behavior is to reject the whole build: an empty placeholder
+    // document would lose both /bad existence and the indexable /sibling key.
+    EXPECT_THROW(BuildInMemoryJsonFlatIndex({
+                     R"({"ok": 1})",
+                     R"({"bad": 1e400, "sibling": "must-not-be-lost"})",
+                     R"({"ok": 2})",
+                 }),
+                 std::exception);
+}
+
 class JsonFlatIndexTest : public ::testing::Test {
  protected:
     void

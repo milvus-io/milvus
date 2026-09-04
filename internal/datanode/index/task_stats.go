@@ -608,7 +608,11 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
 		log.Warn("create json key index failed dataformat invalid", zap.Int64("dataformat version", jsonKeyStatsDataFormat),
 			zap.Int64("code version", common.JSONStatsDataFormatVersion))
-		return nil
+		return merr.WrapErrServiceNotReadyMsg(
+			"json stats data format %d is incompatible with DataNode format %d",
+			jsonKeyStatsDataFormat,
+			common.JSONStatsDataFormatVersion,
+		)
 	}
 
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
