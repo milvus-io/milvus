@@ -113,10 +113,26 @@ func (s *CollectionObserverRGSuite) SetupTest() {
 	s.Require().Zero(s.ob.loadTasks.Len())
 
 	s.targetObserver.Start()
+	s.waitForTargetObserverInit()
 
 	// Long enough that nothing in these tests times out by wall clock; every
 	// timeout below is produced by explicitly backdating a timestamp.
 	paramtable.Get().Save(Params.QueryCoordCfg.LoadTimeoutSeconds.Key, "600")
+}
+
+// waitForTargetObserverInit returns once the target observer's initial pass
+// over meta is over. Start hands that pass to the observer's own goroutine and
+// returns; the pass reads every collection in meta and pulls its recovery info
+// from the broker, so if it ran late - after a test had put a collection into
+// meta that it never registered a broker expectation for - the mock would
+// panic on the observer's goroutine and fail whichever test happened to be
+// running. The observer answers a manual request only from the same loop, and
+// only after the pass it is in has finished, so a synchronous request that
+// touches nothing - releasing a collection that does not exist - is a wait for
+// exactly that.
+func (s *CollectionObserverRGSuite) waitForTargetObserverInit() {
+	const noSuchCollection = int64(-1)
+	s.targetObserver.ReleaseCollection(noSuchCollection)
 }
 
 func (s *CollectionObserverRGSuite) TearDownTest() {
