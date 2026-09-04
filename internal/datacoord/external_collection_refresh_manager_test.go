@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1174,6 +1175,44 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		prefixes, removes := chunkManager.snapshot()
 		assert.Empty(t, prefixes)
 		assert.Empty(t, removes)
+	})
+
+	t.Run("input_error_marks_job_failed_non_retriable", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"milvus-table"}`,
+			},
+		})
+		mt := &meta{collections: collections}
+
+		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
+		defer mockIsExternal.UnPatch()
+
+		inputErr := merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return(nil, "", inputErr).Build()
+		defer mockExplore.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		assert.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState(),
+			"input errors must transition the job to Failed, not loop in Init")
+		assert.Contains(t, job.GetFailReason(), "snapshot metadata JSON path")
 	})
 
 	t.Run("milvus_table_schema_error_marks_job_failed_non_retriable", func(t *testing.T) {
