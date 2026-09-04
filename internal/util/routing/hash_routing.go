@@ -19,8 +19,6 @@ package routing
 import (
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -204,7 +202,7 @@ func PlanSplit(modulus uint64, buckets []uint64) (*SplitPlan, error) {
 	if len(sorted) == 1 {
 		doubled := modulus * 2
 		if err := checkModulus(doubled); err != nil {
-			return nil, errors.Wrapf(err, "cannot split the single residue %d of a shard", sorted[0])
+			return nil, merr.Wrapf(err, "cannot split the single residue %d of a shard", sorted[0])
 		}
 		return &SplitPlan{
 			Modulus: doubled,
