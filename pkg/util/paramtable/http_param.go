@@ -149,13 +149,11 @@ string wherever one appears, including inside either kind of array.`,
 		Version:      "3.0.2",
 		Doc: `high-level restful api, project business errors to standard HTTP statuses instead of always returning
 200 with the error only in the body (v2 endpoints only; the body keeps the same code/message envelope either way).
-Mapping: input 400, auth 401/403, rate/quota 429, proven client cancellation 499, retriable system 503, incomplete
-request upload timeout 408, and server-side timeout/other system errors 500. Explicitly retriable statuses (503 and
-429 from RPC-borne limit codes) are advertised only for read operations, which mutate nothing and are safe to
-replay; mutations surface them as a generic 500 to avoid claiming that replay is safe. A 500 does not prevent a
-gateway configured to retry every 5xx, so clients and gateways must not automatically replay mutation routes
-without idempotency or proof that the request was not applied. Pre-execution limiter infrastructure 503 and HTTP
-pre-admission 429 can apply to both read and mutation routes because no business side effect has started.
+Mapping: explicit input 400, explicit authentication/authorization 401/403, HTTP-layer pre-execution rejection 429,
+proven client cancellation 499, incomplete request upload timeout 408, and every other error 500. The projection uses
+only facts proven at the HTTP boundary; downstream limit, retryable, timeout, and unknown errors all remain 500. A
+status does not prevent gateways from retrying, so mutation routes still require gateway retry exclusions or
+end-to-end idempotency when duplicate execution must be impossible.
 Off by default; enabling flips access-log method_status from Failed to HttpError<code>.`,
 		PanicIfEmpty: false,
 		Export:       true,

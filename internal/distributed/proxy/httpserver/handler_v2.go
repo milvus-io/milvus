@@ -437,19 +437,6 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
-		// Receive phase: read the raw body first and cache it (ShouldBindBodyWith
-		// below reuses gin.BodyBytesKey), then mark the body as received BEFORE
-		// decoding. A timeout during the CPU-heavy JSON decode of an already
-		// received body is then attributed to server-side processing (500),
-		// not a slow-client 408 that a gateway would auto-retry into the same decode.
-		if body, readErr := io.ReadAll(gCtx.Request.Body); readErr == nil {
-			gCtx.Set(gin.BodyBytesKey, body)
-			// mark received only on a successful read: a read failure is itself a
-			// receive-phase (client-side) problem and must stay a 408, not 500.
-			if rec, ok := gCtx.Writer.(*timeoutResponseRecorder); ok {
-				rec.bodyReceived.Store(true)
-			}
-		}
 		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
@@ -715,7 +702,8 @@ func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, i
 	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
-			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
+			recordErrorType(c, authErr)
+			HTTPReturn(c, projectedAuthorizationStatus(c, authErr), gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
@@ -755,14 +743,15 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		ctx = ginCtx.Request.Context()
 	}
 	if checkLimit {
-		_, err := CheckLimiter(ctx, req, pxy)
+		limited, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
-			if !isRateLimitClass(err) {
+			if !limited {
 				// Limiter infrastructure failure, not a quota decision — surface
 				// the real server error instead of masquerading as 429/1807.
 				hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
-				HTTPAbortReturn(ginCtx, projectedStatus(err), gin.H{
+				recordErrorType(ginCtx, err)
+				HTTPAbortReturn(ginCtx, projectedStatusForRequest(ginCtx, err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
 				})
@@ -798,7 +787,7 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
-			err = merr.Error(status)
+			err = errorFromStatusForHTTP(status)
 		}
 	}
 
@@ -808,11 +797,7 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		recordErrorType(ginCtx, err)
 		mlog.Warn(ctx, "high level restful api, grpc call failed", mlog.Err(err))
 		if !ignoreErr {
-			// Replay-safety identity is the ROUTE the client called (same key space
-			// as the timeout middleware), not this RPC step: a composite handler like
-			// createCollection must not advertise a retriable status for its load
-			// step when replaying means re-running the whole composite.
-			HTTPAbortReturn(ginCtx, projectedStatusForRequest(ginCtx, err, routeToMethod[ginCtx.FullPath()]), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(ginCtx, projectedStatusForRequest(ginCtx, err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
 	}
 	return response, err
@@ -1397,7 +1382,7 @@ func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		err = h.waitForFlush(ctx, dbName, httpReq.CollectionName, resp.(*milvuspb.FlushResponse))
 		if err != nil {
-			HTTPReturn(c, projectedStatusForRequest(c, err, routeToMethod[c.FullPath()]), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPReturn(c, projectedStatusForRequest(c, err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return resp, err
 		}
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -4143,7 +4128,8 @@ func (h *HandlersV2) checkImportPrivilege(ctx context.Context, c *gin.Context, d
 		CollectionName: collectionName,
 	})
 	if authErr != nil {
-		HTTPReturn(c, http.StatusForbidden, gin.H{
+		recordErrorType(c, authErr)
+		HTTPReturn(c, projectedAuthorizationStatus(c, authErr), gin.H{
 			HTTPReturnCode:    merr.Code(authErr),
 			HTTPReturnMessage: authErr.Error(),
 		})
