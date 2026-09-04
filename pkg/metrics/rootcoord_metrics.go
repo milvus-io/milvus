@@ -292,6 +292,7 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	RegisterQueryCoord(registry)
 	RegisterDataCoord(registry)
 	RegisterLoggingMetrics(registry)
+	RegisterQV(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {
