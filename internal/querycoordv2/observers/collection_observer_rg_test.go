@@ -191,6 +191,21 @@ func (s *CollectionObserverRGSuite) putReplica(collectionID, replicaID, nodeID i
 	})))
 }
 
+// putReplicaInUnknownResourceGroup adds a replica in a resource group the
+// resource manager does not know. The per-resource-group percentage refuses
+// such a group outright, which is how a read failure is reproduced without
+// touching the meta store.
+func (s *CollectionObserverRGSuite) putReplicaInUnknownResourceGroup(collectionID, replicaID, nodeID int64, rgName string) {
+	s.Require().False(s.meta.ContainResourceGroup(s.ctx, rgName))
+	s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+	s.Require().NoError(s.meta.Put(s.ctx, meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		ResourceGroup: rgName,
+		Nodes:         []int64{nodeID},
+	})))
+}
+
 // putDelegator makes nodeID the delegator of channel, holding segmentIDs.
 func (s *CollectionObserverRGSuite) putDelegator(collectionID, nodeID int64, channel string, segmentIDs ...int64) {
 	segments := make(map[int64]*querypb.SegmentDist, len(segmentIDs))
@@ -221,26 +236,53 @@ func (s *CollectionObserverRGSuite) backdateCollectionUpdatedAt(collectionID int
 // backdateTaskWatermark simulates a task whose own progress last moved age ago,
 // while sitting at the given percentage.
 func (s *CollectionObserverRGSuite) backdateTaskWatermark(key string, percentage int32, age time.Duration) {
-	task, ok := s.ob.loadTasks.Get(key)
+	s.backdateTaskWatermarkIn(s.ob, key, percentage, age)
+}
+
+// backdateTaskWatermarkIn is backdateTaskWatermark for an observer the test
+// built itself, which is how the restart tests get one whose constructor ran
+// against the state they set up.
+func (s *CollectionObserverRGSuite) backdateTaskWatermarkIn(ob *CollectionObserver, key string, percentage int32, age time.Duration) {
+	task, ok := ob.loadTasks.Get(key)
 	s.Require().True(ok)
 	task.LastProgress = percentage
 	task.LastProgressAt = time.Now().Add(-age)
-	s.ob.loadTasks.Insert(key, task)
+	ob.loadTasks.Insert(key, task)
 }
 
-// taskKey finds the key the observer filed the task for (collectionID, rgName)
-// under, without the test having to reproduce the key format.
-func (s *CollectionObserverRGSuite) taskKey(collectionID int64, rgName string) string {
+// findTask locates the key ob filed the task for (collectionID, rgName) under,
+// without the test having to reproduce the key format, and reports whether
+// there is one at all.
+func findTask(ob *CollectionObserver, collectionID int64, rgName string) (string, bool) {
 	found := ""
-	s.ob.loadTasks.Range(func(key string, task LoadTask) bool {
+	ob.loadTasks.Range(func(key string, task LoadTask) bool {
 		if task.CollectionID == collectionID && task.ResourceGroup == rgName {
 			found = key
 			return false
 		}
 		return true
 	})
+	return found, found != ""
+}
+
+// taskKey is findTask for the suite's own observer, on a task that must exist.
+func (s *CollectionObserverRGSuite) taskKey(collectionID int64, rgName string) string {
+	found, ok := findTask(s.ob, collectionID, rgName)
+	s.Require().True(ok)
 	s.Require().NotEmpty(found)
 	return found
+}
+
+// markCollectionLoaded finishes the load of a collection registered by
+// registerLoadingCollection: every partition at 100, the collection Loaded.
+// This is the state a collection is in when the incremental-expansion path
+// adds a resource group to it, and the only state in which a scoped task is
+// registered outside a test.
+func (s *CollectionObserverRGSuite) markCollectionLoaded(collectionID, partitionID int64) {
+	s.Require().NoError(s.meta.UpdatePartitionLoadPercent(s.ctx, partitionID, 100))
+	_, err := s.meta.UpdateCollectionLoadPercent(s.ctx, collectionID)
+	s.Require().NoError(err)
+	s.Require().Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, collectionID).GetStatus())
 }
 
 func (s *CollectionObserverRGSuite) replicaIDsInRG(collectionID int64, rgName string) []int64 {
@@ -435,14 +477,18 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 	s.registerLoadingCollection(400, 40, "400-dmc0", 2, 1, 2)
 	s.putReplica(400, 4001, 1, rgA)
 	s.putDelegator(400, 1, "400-dmc0", 1, 2)
-	s.putReplica(400, 4002, 2, rgB) // rg-b carries nothing and never will
+	s.putReplica(400, 4002, 2, rgB)
+	// rg-b's delegator is up and reports the channel, but never picks the two
+	// segments up: a stall this observer is entitled to judge, as opposed to a
+	// group that has told it nothing at all.
+	s.putDelegator(400, 2, "400-dmc0")
 
 	s.ob.LoadCollection(s.ctx, 400, rgB)
 	key := s.taskKey(400, rgB)
 
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
-	s.Require().EqualValues(0, progress[key])
-	s.backdateTaskWatermark(key, 0, time.Hour)
+	s.Require().EqualValues(33, progress[key])
+	s.backdateTaskWatermark(key, 33, time.Hour)
 
 	s.ob.observeTimeout(s.ctx, progress)
 
@@ -465,16 +511,15 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 func (s *CollectionObserverRGSuite) TestLastResourceGroupTimeoutReleasesCollection() {
 	s.registerLoadingCollection(500, 50, "500-dmc0", 1, 1, 2)
 	s.putReplica(500, 5001, 1, rgB)
-	// A delegator of this collection reports from a node that is not in rg-b's
-	// replica, so the distribution has something to say about the collection
-	// while rg-b still carries none of its targets: a real 0, which is what
-	// makes this a stall rather than the unknown of a coordinator that has just
-	// restarted.
-	s.putDelegator(500, 2, "500-dmc0", 1, 2)
+	// rg-b reports its channel and never loads the segments: a real, stalled
+	// percentage rather than the absence of evidence a fresh restart shows. The
+	// collection is still Loading, which is what lets the teardown take it --
+	// a collection that had reached Loaded would be kept.
+	s.putDelegator(500, 1, "500-dmc0")
 
 	s.ob.LoadCollection(s.ctx, 500, rgB)
 	key := s.taskKey(500, rgB)
-	s.backdateTaskWatermark(key, 0, time.Hour)
+	s.backdateTaskWatermark(key, 33, time.Hour)
 
 	s.ob.observeTimeout(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
 
@@ -571,7 +616,8 @@ func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup(
 
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
 	s.Require().EqualValues(100, progress[keyA])
-	s.Require().EqualValues(0, progress[keyB])
+	s.Require().EqualValues(-1, progress[keyB],
+		"rg-b has told this coordinator nothing, so its figure is unknown rather than 0")
 
 	s.ob.observeLoadStatus(s.ctx, progress)
 
@@ -613,6 +659,95 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
 	s.False(s.ob.loadTasks.Contain(key), "a scoped task must finish once its resource group is loaded and promoted")
 	s.EqualValues(100, s.meta.GetPartitionLoadPercentage(s.ctx, 80))
+}
+
+// TestAReplicaThatHasNotReportedMakesTheGroupUnknown is the min-across-replicas
+// shape. One resource group, two replicas -- the common HA layout -- one node
+// per replica. After a coordinator restart the first replica's node reports and
+// carries everything while the second's is still away: a pending pod, an image
+// pulling, a crash loop. The group's percentage is the MINIMUM over its
+// replicas, so it reads 0 for a group that is serving.
+//
+// A figure arrived at that way is not evidence, and the clock stays paused
+// until every replica of the group has told this coordinator something.
+func (s *CollectionObserverRGSuite) TestAReplicaThatHasNotReportedMakesTheGroupUnknown() {
+	s.registerLoadingCollection(1110, 1111, "1110-dmc0", 2, 11101, 11102)
+	s.putReplica(1110, 111001, 22, rgA)
+	s.putReplica(1110, 111002, 23, rgA)
+	s.putDelegator(1110, 22, "1110-dmc0", 11101, 11102)
+	s.markCollectionLoaded(1110, 1111)
+	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1110)
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1110))
+
+	s.ob.LoadCollection(s.ctx, 1110, rgA)
+	key := s.taskKey(1110, rgA)
+	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+		"one replica of the group has reported nothing, so the group's minimum is not a measurement")
+
+	s.backdateTaskWatermark(key, 0, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.Require().True(s.ob.loadTasks.Contain(key),
+		"a group whose replica has not reported must not be timed out on the 0 that produces")
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute, "the clock is paused, not running")
+	s.Len(s.replicaIDsInRG(1110, rgA), 2)
+	s.NotNil(s.meta.GetCollection(s.ctx, 1110))
+
+	// The second node comes up and reports.
+	s.putDelegator(1110, 23, "1110-dmc0", 11101, 11102)
+
+	s.ob.Observe(s.ctx)
+
+	s.False(s.ob.loadTasks.Contain(key),
+		"once every replica has reported and carries every target, the group is loaded and the task finishes")
+	s.Len(s.replicaIDsInRG(1110, rgA), 2)
+}
+
+// TestAnEmptyTargetMakesEveryGroupUnknown is the ungraceful-restart shape. The
+// current target is persisted only on a graceful stop and the next target has
+// to be pulled from datacoord, while QueryNodes reconnect and report their
+// distribution within seconds. So there is a window -- as long as datacoord is
+// away -- in which every group of every loaded collection is measured against
+// an empty target and scores 0.
+//
+// Nothing is measurable without a target, so nothing is judged: the clock stays
+// paused until the target is known again.
+func (s *CollectionObserverRGSuite) TestAnEmptyTargetMakesEveryGroupUnknown() {
+	s.registerLoadingCollection(1120, 1121, "1120-dmc0", 1, 11201, 11202)
+	s.putReplica(1120, 112001, 24, rgA)
+	s.putDelegator(1120, 24, "1120-dmc0", 11201, 11202)
+	s.markCollectionLoaded(1120, 1121)
+	// The restart: the distribution is back, the target is not.
+	s.targetMgr.RemoveCollection(s.ctx, 1120)
+	s.Require().False(s.targetMgr.IsNextTargetExist(s.ctx, 1120))
+
+	s.ob.LoadCollection(s.ctx, 1120, rgA)
+	key := s.taskKey(1120, rgA)
+	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+		"a percentage measured against a target nobody has is not a measurement")
+
+	s.backdateTaskWatermark(key, 0, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.Require().True(s.ob.loadTasks.Contain(key),
+		"a collection whose target is not known must not be timed out on the 0 that produces")
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute, "the clock is paused, not running")
+	s.Len(s.replicaIDsInRG(1120, rgA), 1)
+	s.NotNil(s.meta.GetCollection(s.ctx, 1120), "and above all it must not be unloaded")
+
+	// datacoord comes back and the target is rebuilt, then promoted.
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1120))
+	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1120)
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1120))
+
+	s.ob.Observe(s.ctx)
+
+	s.False(s.ob.loadTasks.Contain(key), "with the target known again the group reads 100 and the task finishes")
+	s.Len(s.replicaIDsInRG(1120, rgA), 1)
 }
 
 func TestCollectionObserverRG(t *testing.T) {
@@ -676,7 +811,7 @@ func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkRefreshesOnRegress
 // half.
 func (s *CollectionObserverRGSuite) TestUnreadableResourceGroupIsNeverTornDown() {
 	s.registerLoadingCollection(901, 91, "901-dmc0", 1, 911, 912)
-	s.putReplica(901, 9010, 11, rgA)
+	s.putReplicaInUnknownResourceGroup(901, 9010, 11, "no-such-rg")
 	s.putDelegator(901, 11, "901-dmc0", 911, 912)
 
 	s.ob.LoadCollection(s.ctx, 901, "no-such-rg")
@@ -696,7 +831,7 @@ func (s *CollectionObserverRGSuite) TestUnreadableResourceGroupIsNeverTornDown()
 		s.EqualValues(60, task.LastProgress, "an unreadable tick must not overwrite the last known percentage")
 		s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
 			"an unreadable tick pauses the clock rather than letting it run")
-		s.Len(s.replicaIDsInRG(901, rgA), 1)
+		s.Len(s.replicaIDsInRG(901, "no-such-rg"), 1)
 		s.NotNil(s.meta.GetCollection(s.ctx, 901))
 	}
 }
@@ -732,4 +867,163 @@ func (s *CollectionObserverRGSuite) TestNothingReportedYetIsUnknown() {
 	s.EqualValues(66, task.LastProgress, "the first informative observation is recorded as it is")
 	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
 		"the timeout is measured from the first tick that learned something")
+}
+
+// TestRecoveryRebuildsScopedTasksForEveryResourceGroup reproduces a querycoord
+// restart in the middle of an incremental resource group expansion. The scoped
+// task the expansion registered lived only in memory, so after the restart the
+// new resource group was observed by nothing: no timeout, no teardown, and a
+// replica number the collection never earns back.
+//
+// The rebuild gives a task to every resource group holding a replica of a
+// loaded collection, without asking how loaded each one is. Asking would be
+// pointless here: the constructor runs before any QueryNode has reported, so
+// the answer is 0 for all of them. The task is what tells them apart afterwards --
+// on the first tick that carries evidence, the group that was already serving
+// finishes and the one that is still loading stays.
+func (s *CollectionObserverRGSuite) TestRecoveryRebuildsScopedTasksForEveryResourceGroup() {
+	s.registerLoadingCollection(1000, 1001, "1000-dmc0", 2, 10001, 10002)
+	s.putReplica(1000, 100001, 11, rgA)
+	s.putDelegator(1000, 11, "1000-dmc0", 10001, 10002) // rg-a carries everything
+	s.putReplica(1000, 100002, 12, rgB)                 // rg-b was just added and carries nothing
+	s.putDelegator(1000, 12, "1000-dmc0")               // its delegator is up, with no segments
+	s.markCollectionLoaded(1000, 1001)
+	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1000)
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1000))
+
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+
+	keyB, ok := findTask(ob, 1000, rgB)
+	s.Require().True(ok, "the resource group that is still loading must be observed again after a restart")
+	keyA, ok := findTask(ob, 1000, rgA)
+	s.Require().True(ok, "and so is the one that was already serving: at construction they look alike")
+	_, hasUnscoped := findTask(ob, 1000, "")
+	s.True(hasUnscoped, "the collection-wide task recovery must be unchanged")
+
+	task, found := ob.loadTasks.Get(keyB)
+	s.Require().True(found)
+	s.EqualValues(querypb.LoadType_LoadCollection, task.LoadType)
+	s.EqualValues(-1, task.LastProgress, "a rebuilt task starts its watermark where a fresh one does")
+	s.False(task.LastProgressAt.IsZero(), "a rebuilt task starts its own clock now, not at the epoch")
+
+	// The first tick that carries evidence separates them.
+	ob.Observe(s.ctx)
+
+	s.False(ob.loadTasks.Contain(keyA), "the group that carries every target finishes on its first informative tick")
+	s.True(ob.loadTasks.Contain(keyB), "the group that does not keeps its task")
+	s.Len(s.replicaIDsInRG(1000, rgA), 1)
+	s.Len(s.replicaIDsInRG(1000, rgB), 1)
+}
+
+// TestRecoveredScopedTaskTimesOutLikeAFreshOne asserts the rebuilt task is a
+// task in full: it carries the timeout and the teardown, so a resource group
+// that never finishes loading is released after a restart exactly as it would
+// have been without one.
+func (s *CollectionObserverRGSuite) TestRecoveredScopedTaskTimesOutLikeAFreshOne() {
+	s.registerLoadingCollection(1010, 1011, "1010-dmc0", 2, 10101, 10102)
+	s.putReplica(1010, 101001, 13, rgA)
+	s.putDelegator(1010, 13, "1010-dmc0", 10101, 10102)
+	s.putReplica(1010, 101002, 14, rgB)
+	// rg-b's delegator reports the channel and stops there.
+	s.putDelegator(1010, 14, "1010-dmc0")
+	s.markCollectionLoaded(1010, 1011)
+
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	key, ok := findTask(ob, 1010, rgB)
+	s.Require().True(ok)
+
+	s.backdateTaskWatermarkIn(ob, key, 33, time.Hour)
+
+	ob.observeTimeout(s.ctx, ob.observeResourceGroupProgress(s.ctx))
+
+	s.Empty(s.replicaIDsInRG(1010, rgB), "a rebuilt task must release a resource group that never loads")
+	s.Len(s.replicaIDsInRG(1010, rgA), 1, "and must leave the serving resource group alone")
+	s.EqualValues(1, s.meta.GetCollection(s.ctx, 1010).GetReplicaNumber(),
+		"the replica number the expansion raised must come back down with the replicas")
+	s.False(ob.loadTasks.Contain(key))
+}
+
+// TestRebuiltTasksWaitForTheFirstInformativeObservation is the restart shape as
+// it really is. When the observer is built, the distribution manager is empty --
+// no QueryNode has reported yet, on a graceful restart as much as an ungraceful
+// one -- so every resource group of the collection reads 0 and the rebuild
+// registers a task for the group that has been serving all along as well as for
+// the one that lags.
+//
+// That is only safe because a percentage nothing has reported on is unknown,
+// and unknown pauses the clock: no rebuilt task can time out before one
+// informative observation. Without the pause this fixture releases the serving
+// group's replicas and, being the collection's last, deletes the collection's
+// load meta -- a silent unload of a serving collection after any restart where
+// the QueryNodes stay away longer than queryCoord.loadTimeoutSeconds.
+func (s *CollectionObserverRGSuite) TestRebuiltTasksWaitForTheFirstInformativeObservation() {
+	s.registerLoadingCollection(1040, 1041, "1040-dmc0", 2, 10401, 10402)
+	s.putReplica(1040, 104001, 18, rgA)
+	s.putReplica(1040, 104002, 19, rgB)
+	s.markCollectionLoaded(1040, 1041)
+	// A collection that was serving before the restart has a current target.
+	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1040)
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1040))
+
+	// The restart: the observer is built while the distribution is still empty.
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	keyA, ok := findTask(ob, 1040, rgA)
+	s.Require().True(ok, "with nothing reported, the rebuild cannot tell the serving group from the lagging one")
+	keyB, ok := findTask(ob, 1040, rgB)
+	s.Require().True(ok)
+
+	// Both clocks are already older than the timeout. Nothing may be released:
+	// not one tick has learned anything about this collection.
+	for _, key := range []string{keyA, keyB} {
+		s.backdateTaskWatermarkIn(ob, key, 0, time.Hour)
+	}
+	ob.Observe(s.ctx)
+
+	s.Len(s.replicaIDsInRG(1040, rgA), 1, "the serving resource group must survive a restart nobody has reported through")
+	s.Len(s.replicaIDsInRG(1040, rgB), 1)
+	s.NotNil(s.meta.GetCollection(s.ctx, 1040), "the collection must not be unloaded by the rebuild")
+	s.True(ob.loadTasks.Contain(keyA))
+	s.True(ob.loadTasks.Contain(keyB))
+
+	// The QueryNodes report: rg-a carries everything, rg-b two of three targets.
+	s.putDelegator(1040, 18, "1040-dmc0", 10401, 10402)
+	s.putDelegator(1040, 19, "1040-dmc0", 10401)
+
+	ob.Observe(s.ctx)
+
+	s.False(ob.loadTasks.Contain(keyA), "the serving group's task finishes on its first informative observation")
+	s.Len(s.replicaIDsInRG(1040, rgA), 1)
+	taskB, found := ob.loadTasks.Get(keyB)
+	s.Require().True(found, "the lagging group's task stays open")
+	s.EqualValues(66, taskB.LastProgress)
+	s.WithinDuration(time.Now(), taskB.LastProgressAt, time.Minute,
+		"the lagging group's timeout starts at the tick that learned something, not at the restart")
+
+	// Only a further full timeout without the figure moving releases it.
+	s.backdateTaskWatermarkIn(ob, keyB, 66, time.Hour)
+	ob.Observe(s.ctx)
+
+	s.Empty(s.replicaIDsInRG(1040, rgB), "a group that then really stalls is still released")
+	s.Len(s.replicaIDsInRG(1040, rgA), 1, "and its serving sibling is untouched")
+	s.NotNil(s.meta.GetCollection(s.ctx, 1040))
+	s.EqualValues(1, s.meta.GetCollection(s.ctx, 1040).GetReplicaNumber())
+	s.False(ob.loadTasks.Contain(keyB))
+}
+
+// TestRecoveryRegistersNoScopedTaskWhileTheCollectionIsStillLoading pins the
+// gate on the rebuild. A collection that is still loading is already watched
+// end to end by its collection-wide task, which owns the status promotion and
+// the timeout; adding scoped tasks beside it would put a second, independent
+// teardown on the same replicas. Scoped tasks exist for resource groups added
+// to a collection that is already serving, and the rebuild is scoped to that.
+func (s *CollectionObserverRGSuite) TestRecoveryRegistersNoScopedTaskWhileTheCollectionIsStillLoading() {
+	s.registerLoadingCollection(1020, 1021, "1020-dmc0", 1, 10201, 10202)
+	s.putReplica(1020, 102001, 15, rgA)
+
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+
+	_, hasScoped := findTask(ob, 1020, rgA)
+	s.False(hasScoped, "a loading collection is watched by its collection-wide task alone")
+	_, hasUnscoped := findTask(ob, 1020, "")
+	s.True(hasUnscoped)
 }
