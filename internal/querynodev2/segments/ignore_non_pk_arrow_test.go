@@ -108,15 +108,15 @@ func mustFindFieldByType(tb testing.TB, schema *schemapb.CollectionSchema, dt sc
 }
 
 type arrowFetchFixture struct {
-	ctx          context.Context
-	rootPath     string
-	chunkManager storage.ChunkManager
-	manager      *Manager
-	collection   *Collection
-	segments     []Segment
-	plan         *segcore.RetrievePlan
-	fieldSchemas []*schemapb.FieldSchema // in plan.OutputFieldIds order
-	merged       *MergedResultWithOffsets
+	ctx            context.Context
+	rootPath       string
+	chunkManager   storage.ChunkManager
+	manager        *Manager
+	collection     *Collection
+	segments       []Segment
+	plan           *segcore.RetrievePlan
+	fieldSchemaMap map[int64]*schemapb.FieldSchema // keyed by field ID
+	merged         *MergedResultWithOffsets
 }
 
 // setupArrowFetchFixture loads 2 sealed segments with rowsPerSegment rows
@@ -196,7 +196,11 @@ func setupArrowFetchFixture(tb testing.TB, rowsPerSegment int) *arrowFetchFixtur
 	floatField := mustFindFieldByType(tb, schema, schemapb.DataType_Float)
 	floatVecField := mustFindFieldByType(tb, schema, schemapb.DataType_FloatVector)
 
-	fieldSchemas := []*schemapb.FieldSchema{pkField, floatField, floatVecField}
+	fieldSchemaMap := map[int64]*schemapb.FieldSchema{
+		pkField.GetFieldID():       pkField,
+		floatField.GetFieldID():    floatField,
+		floatVecField.GetFieldID(): floatVecField,
+	}
 	outputFieldIDs := []int64{pkField.GetFieldID(), floatField.GetFieldID(), floatVecField.GetFieldID()}
 
 	plan, err := buildArrowTestRetrievePlan(collection.GetCCollection(), outputFieldIDs)
@@ -219,15 +223,15 @@ func setupArrowFetchFixture(tb testing.TB, rowsPerSegment int) *arrowFetchFixtur
 	}
 
 	return &arrowFetchFixture{
-		ctx:          ctx,
-		rootPath:     rootPath,
-		chunkManager: chunkManager,
-		manager:      manager,
-		collection:   collection,
-		segments:     segments,
-		plan:         plan,
-		fieldSchemas: fieldSchemas,
-		merged:       merged,
+		ctx:            ctx,
+		rootPath:       rootPath,
+		chunkManager:   chunkManager,
+		manager:        manager,
+		collection:     collection,
+		segments:       segments,
+		plan:           plan,
+		fieldSchemaMap: fieldSchemaMap,
+		merged:         merged,
 	}
 }
 
@@ -256,12 +260,12 @@ func TestFetchFieldsData_ArrowMatchesRetrieveByOffsets(t *testing.T) {
 	rec, err := fetchFieldsAsRecord(fx.ctx, fx.segments, fx.plan, fx.merged)
 	require.NoError(t, err)
 	defer rec.Release()
-	require.Equal(t, len(fx.fieldSchemas), int(rec.NumCols()), "Arrow record column count must match requested output fields")
+	require.Equal(t, len(fx.fieldSchemaMap), int(rec.NumCols()), "Arrow record column count must match requested output fields")
 	require.Equal(t, int64(len(fx.merged.Selections)), rec.NumRows())
 
-	arrowFieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemas)
+	arrowFieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 	require.NoError(t, err)
-	require.Len(t, arrowFieldsData, len(fx.fieldSchemas))
+	require.Len(t, arrowFieldsData, len(fx.fieldSchemaMap))
 
 	// Reference: per-segment RetrieveByOffsets + manual interleave.
 	offsetsBySegment := make([][]int64, len(fx.segments))
@@ -373,15 +377,15 @@ func BenchmarkFetchFieldsData_Arrow(b *testing.B) {
 		}
 
 		convertStart := time.Now()
-		fieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemas)
+		fieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 		convertNs += time.Since(convertStart).Nanoseconds()
 		rec.Release()
 
 		if err != nil {
 			b.Fatal(err)
 		}
-		if len(fieldsData) != len(fx.fieldSchemas) {
-			b.Fatalf("unexpected field count: got %d, want %d", len(fieldsData), len(fx.fieldSchemas))
+		if len(fieldsData) != len(fx.fieldSchemaMap) {
+			b.Fatalf("unexpected field count: got %d, want %d", len(fieldsData), len(fx.fieldSchemaMap))
 		}
 	}
 	b.StopTimer()
@@ -459,8 +463,8 @@ func BenchmarkFetchFieldsData_Proto(b *testing.B) {
 		}
 		interleaveNs += time.Since(interleaveStart).Nanoseconds()
 
-		if len(fieldsData) != len(fx.fieldSchemas) {
-			b.Fatalf("unexpected field count: got %d, want %d", len(fieldsData), len(fx.fieldSchemas))
+		if len(fieldsData) != len(fx.fieldSchemaMap) {
+			b.Fatalf("unexpected field count: got %d, want %d", len(fieldsData), len(fx.fieldSchemaMap))
 		}
 	}
 	b.StopTimer()
@@ -491,9 +495,9 @@ func BenchmarkOverheadRatio_SearchVsRetrieve(b *testing.B) {
 	}
 
 	topK := int64(10)
-	outputFieldIDs := make([]int64, len(fx.fieldSchemas))
-	for i, fs := range fx.fieldSchemas {
-		outputFieldIDs[i] = fs.GetFieldID()
+	outputFieldIDs := make([]int64, 0, len(fx.fieldSchemaMap))
+	for fid := range fx.fieldSchemaMap {
+		outputFieldIDs = append(outputFieldIDs, fid)
 	}
 	searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithOutputFields(
 		fx.collection.GetCCollection(), segIDs, 1, topK, outputFieldIDs,
@@ -540,7 +544,7 @@ func BenchmarkOverheadRatio_SearchVsRetrieve(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		_, err = segcore.ArrowFieldsToProto(rec, fx.fieldSchemas)
+		_, err = segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 		if err != nil {
 			b.Fatal(err)
 		}

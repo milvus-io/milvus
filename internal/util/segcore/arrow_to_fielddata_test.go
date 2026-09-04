@@ -29,12 +29,27 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
-func buildTestRecord(pool memory.Allocator, fields []arrow.Field, builders func([]array.Builder)) arrow.Record {
-	schema := arrow.NewSchema(fields, nil)
+func buildTestRecordWithFieldIDs(pool memory.Allocator, fields []arrow.Field, fieldIDs []int64, builders func([]array.Builder)) arrow.Record {
+	tagged := make([]arrow.Field, len(fields))
+	for i, f := range fields {
+		md := arrow.MetadataFrom(map[string]string{
+			"milvus.field_id": strconv.FormatInt(fieldIDs[i], 10),
+		})
+		tagged[i] = arrow.Field{Name: f.Name, Type: f.Type, Nullable: f.Nullable, Metadata: md}
+	}
+	schema := arrow.NewSchema(tagged, nil)
 	bldr := array.NewRecordBuilder(pool, schema)
 	defer bldr.Release()
 	builders(bldr.Fields())
 	return bldr.NewRecord()
+}
+
+func schemaMap(schemas ...*schemapb.FieldSchema) map[int64]*schemapb.FieldSchema {
+	m := make(map[int64]*schemapb.FieldSchema, len(schemas))
+	for _, s := range schemas {
+		m[s.GetFieldID()] = s
+	}
+	return m
 }
 
 func dimTypeParams(dim int) []*commonpb.KeyValuePair {
@@ -43,9 +58,10 @@ func dimTypeParams(dim int) []*commonpb.KeyValuePair {
 
 func TestArrowFieldsToProto_Int64(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64}},
+		[]int64{100},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.Int64Builder)
 			b.AppendValues([]int64{10, 20, 30}, nil)
@@ -53,10 +69,9 @@ func TestArrowFieldsToProto_Int64(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, "pk", result[0].GetFieldName())
@@ -67,9 +82,10 @@ func TestArrowFieldsToProto_Int64(t *testing.T) {
 
 func TestArrowFieldsToProto_Float32(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "score", Type: arrow.PrimitiveTypes.Float32}},
+		[]int64{101},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.Float32Builder)
 			b.AppendValues([]float32{1.5, 2.5, 3.5}, nil)
@@ -77,10 +93,9 @@ func TestArrowFieldsToProto_Float32(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 101, Name: "score", DataType: schemapb.DataType_Float},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 101, Name: "score", DataType: schemapb.DataType_Float},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, []float32{1.5, 2.5, 3.5}, result[0].GetScalars().GetFloatData().GetData())
@@ -88,9 +103,10 @@ func TestArrowFieldsToProto_Float32(t *testing.T) {
 
 func TestArrowFieldsToProto_Double(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "score", Type: arrow.PrimitiveTypes.Float64}},
+		[]int64{102},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.Float64Builder)
 			b.AppendValues([]float64{1.1, 2.2, 3.3}, nil)
@@ -98,10 +114,9 @@ func TestArrowFieldsToProto_Double(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 102, Name: "score", DataType: schemapb.DataType_Double},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 102, Name: "score", DataType: schemapb.DataType_Double},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, []float64{1.1, 2.2, 3.3}, result[0].GetScalars().GetDoubleData().GetData())
@@ -109,9 +124,10 @@ func TestArrowFieldsToProto_Double(t *testing.T) {
 
 func TestArrowFieldsToProto_Bool(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "flag", Type: arrow.FixedWidthTypes.Boolean}},
+		[]int64{103},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.BooleanBuilder)
 			b.AppendValues([]bool{true, false, true}, nil)
@@ -119,10 +135,9 @@ func TestArrowFieldsToProto_Bool(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 103, Name: "flag", DataType: schemapb.DataType_Bool},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 103, Name: "flag", DataType: schemapb.DataType_Bool},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, []bool{true, false, true}, result[0].GetScalars().GetBoolData().GetData())
@@ -130,9 +145,10 @@ func TestArrowFieldsToProto_Bool(t *testing.T) {
 
 func TestArrowFieldsToProto_String(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "name", Type: arrow.BinaryTypes.String}},
+		[]int64{104},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.StringBuilder)
 			b.AppendValues([]string{"alice", "bob", "carol"}, nil)
@@ -140,10 +156,9 @@ func TestArrowFieldsToProto_String(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 104, Name: "name", DataType: schemapb.DataType_VarChar},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 104, Name: "name", DataType: schemapb.DataType_VarChar},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, []string{"alice", "bob", "carol"}, result[0].GetScalars().GetStringData().GetData())
@@ -153,9 +168,10 @@ func TestArrowFieldsToProto_FloatVector(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 4
 	bytesPerVec := dim * 4
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{101},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			// Write 2 vectors of dim=4
@@ -170,13 +186,12 @@ func TestArrowFieldsToProto_FloatVector(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{
 			FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
 			TypeParams: dimTypeParams(dim),
 		},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
@@ -190,9 +205,10 @@ func TestArrowFieldsToProto_BinaryVector(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 16
 	bytesPerVec := dim / 8
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{105},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			b.Append([]byte{0xFF, 0x00})
@@ -201,13 +217,12 @@ func TestArrowFieldsToProto_BinaryVector(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{
 			FieldID: 105, Name: "vec", DataType: schemapb.DataType_BinaryVector,
 			TypeParams: dimTypeParams(dim),
 		},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
@@ -218,9 +233,10 @@ func TestArrowFieldsToProto_Float16Vector(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 4
 	bytesPerVec := dim * 2
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{106},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			b.Append(make([]byte, bytesPerVec))
@@ -233,13 +249,12 @@ func TestArrowFieldsToProto_Float16Vector(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{
 			FieldID: 106, Name: "vec", DataType: schemapb.DataType_Float16Vector,
 			TypeParams: dimTypeParams(dim),
 		},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
@@ -252,9 +267,10 @@ func TestArrowFieldsToProto_BFloat16Vector(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 4
 	bytesPerVec := dim * 2
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{107},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			b.Append(make([]byte, bytesPerVec))
@@ -267,13 +283,12 @@ func TestArrowFieldsToProto_BFloat16Vector(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{
 			FieldID: 107, Name: "vec", DataType: schemapb.DataType_BFloat16Vector,
 			TypeParams: dimTypeParams(dim),
 		},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
@@ -286,13 +301,14 @@ func TestArrowFieldsToProto_MultiColumn(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 768
 	bytesPerVec := dim * 4
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
 			{Name: "score", Type: arrow.PrimitiveTypes.Float32},
 			{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}},
 		},
+		[]int64{100, 101, 102},
 		func(bs []array.Builder) {
 			pkB := bs[0].(*array.Int64Builder)
 			pkB.AppendValues([]int64{1, 2}, nil)
@@ -312,12 +328,11 @@ func TestArrowFieldsToProto_MultiColumn(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-		{FieldID: 101, Name: "score", DataType: schemapb.DataType_Float},
-		{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: dimTypeParams(dim)},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		&schemapb.FieldSchema{FieldID: 101, Name: "score", DataType: schemapb.DataType_Float},
+		&schemapb.FieldSchema{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: dimTypeParams(dim)},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 3)
 	assert.Equal(t, []int64{1, 2}, result[0].GetScalars().GetLongData().GetData())
@@ -328,21 +343,21 @@ func TestArrowFieldsToProto_MultiColumn(t *testing.T) {
 
 func TestArrowFieldsToProto_EmptyRecord(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
 			{Name: "name", Type: arrow.BinaryTypes.String},
 		},
+		[]int64{100, 104},
 		func(bs []array.Builder) {},
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-		{FieldID: 104, Name: "name", DataType: schemapb.DataType_VarChar},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		&schemapb.FieldSchema{FieldID: 104, Name: "name", DataType: schemapb.DataType_VarChar},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 	assert.Empty(t, result[0].GetScalars().GetLongData().GetData())
@@ -354,9 +369,10 @@ func TestArrowFieldsToProto_EmptyRecord(t *testing.T) {
 // Int8/Int16/Int32 as arrow::int32 because protobuf uses int_data for all).
 func TestArrowFieldsToProto_Int8_via_Int32(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "age", Type: arrow.PrimitiveTypes.Int32}},
+		[]int64{109},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.Int32Builder)
 			b.AppendValues([]int32{-1, 0, 127}, nil)
@@ -364,10 +380,9 @@ func TestArrowFieldsToProto_Int8_via_Int32(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 109, Name: "age", DataType: schemapb.DataType_Int8},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 109, Name: "age", DataType: schemapb.DataType_Int8},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, schemapb.DataType_Int8, result[0].GetType())
@@ -378,9 +393,10 @@ func TestArrowFieldsToProto_Int8_via_Int32(t *testing.T) {
 // from arrow.Int32 columns.
 func TestArrowFieldsToProto_Int16_via_Int32(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "val", Type: arrow.PrimitiveTypes.Int32}},
+		[]int64{110},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.Int32Builder)
 			b.AppendValues([]int32{-32768, 0, 32767}, nil)
@@ -388,10 +404,9 @@ func TestArrowFieldsToProto_Int16_via_Int32(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 110, Name: "val", DataType: schemapb.DataType_Int16},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 110, Name: "val", DataType: schemapb.DataType_Int16},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, schemapb.DataType_Int16, result[0].GetType())
@@ -401,9 +416,10 @@ func TestArrowFieldsToProto_Int16_via_Int32(t *testing.T) {
 // TestArrowFieldsToProto_JSON verifies JSON fields from arrow.Binary columns.
 func TestArrowFieldsToProto_JSON(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "meta", Type: arrow.BinaryTypes.Binary}},
+		[]int64{108},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.BinaryBuilder)
 			b.Append([]byte(`{"a":1}`))
@@ -412,10 +428,9 @@ func TestArrowFieldsToProto_JSON(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, "meta", result[0].GetFieldName())
@@ -432,9 +447,10 @@ func TestArrowFieldsToProto_JSON(t *testing.T) {
 // an error instead of silently producing an empty field.
 func TestArrowFieldsToProto_UnmappedDataType(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "arr", Type: arrow.BinaryTypes.Binary}},
+		[]int64{111},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.BinaryBuilder)
 			b.Append([]byte{1, 2, 3})
@@ -442,10 +458,9 @@ func TestArrowFieldsToProto_UnmappedDataType(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 111, Name: "arr", DataType: schemapb.DataType_None},
-	}
-	_, err := ArrowFieldsToProto(rec, schemas)
+	_, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 111, Name: "arr", DataType: schemapb.DataType_None},
+	))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "arr")
 }
@@ -458,9 +473,10 @@ func TestArrowFieldsToProto_FloatVector_DimFallback(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 4
 	bytesPerVec := dim * 4
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{109},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			for i := 0; i < 2; i++ {
@@ -476,10 +492,9 @@ func TestArrowFieldsToProto_FloatVector_DimFallback(t *testing.T) {
 
 	// No TypeParams at all, so typeutil.GetDim fails and the fallback path
 	// (byteWidth / 4) must kick in.
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 109, Name: "vec", DataType: schemapb.DataType_FloatVector},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 109, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
@@ -495,9 +510,10 @@ func TestArrowFieldsToProto_BinaryVector_DimFallback(t *testing.T) {
 	pool := memory.NewGoAllocator()
 	dim := 16
 	bytesPerVec := dim / 8
-	rec := buildTestRecord(
+	rec := buildTestRecordWithFieldIDs(
 		pool,
 		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bytesPerVec}}},
+		[]int64{110},
 		func(bs []array.Builder) {
 			b := bs[0].(*array.FixedSizeBinaryBuilder)
 			b.Append([]byte{0xFF, 0x00})
@@ -506,10 +522,9 @@ func TestArrowFieldsToProto_BinaryVector_DimFallback(t *testing.T) {
 	)
 	defer rec.Release()
 
-	schemas := []*schemapb.FieldSchema{
-		{FieldID: 110, Name: "vec", DataType: schemapb.DataType_BinaryVector},
-	}
-	result, err := ArrowFieldsToProto(rec, schemas)
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 110, Name: "vec", DataType: schemapb.DataType_BinaryVector},
+	))
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())

@@ -24,6 +24,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "futures/Future.h"
@@ -100,6 +101,18 @@ BuildEmptyRetrieveBatch(milvus::query::RetrievePlan* plan, int64_t total_rows) {
     arrays.reserve(plan->field_ids_.size());
 
     for (auto field_id : plan->field_ids_) {
+        if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
+            auto arrow_type = arrow::int64();
+            ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
+            fields.push_back(MilvusField(
+                field_id.get() == 0 ? "RowID" : "Timestamp",
+                arrow_type,
+                false,
+                field_id,
+                milvus::DataType::INT64));
+            arrays.push_back(std::move(arr));
+            continue;
+        }
         auto& field_meta = plan->schema_->operator[](field_id);
         auto name = std::string(field_meta.get_name().get());
         ARROW_ASSIGN_OR_RAISE(auto arrow_type,
@@ -135,13 +148,25 @@ BuildRetrieveFieldsBatch(
     arrays.reserve(plan->field_ids_.size());
 
     for (auto field_id : plan->field_ids_) {
-        auto& field_meta = plan->schema_->operator[](field_id);
-        auto name = std::string(field_meta.get_name().get());
         auto it = ordered_fields.find(field_id);
         if (it == ordered_fields.end()) {
             return arrow::Status::Invalid(
                 "missing ordered field data for field id ", field_id.get());
         }
+        if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
+            auto name =
+                field_id.get() == 0 ? std::string("RowID") : std::string("Timestamp");
+            ARROW_ASSIGN_OR_RAISE(
+                auto converted,
+                FieldDataToArrow(name, *it->second, total_rows));
+            auto array = converted.second;
+            fields.push_back(MilvusField(
+                name, array->type(), false, field_id, milvus::DataType::INT64));
+            arrays.push_back(std::move(array));
+            continue;
+        }
+        auto& field_meta = plan->schema_->operator[](field_id);
+        auto name = std::string(field_meta.get_name().get());
         ARROW_ASSIGN_OR_RAISE(auto converted,
                               FieldDataToArrow(name, *it->second, total_rows));
         auto array = converted.second;
@@ -236,6 +261,30 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 for (auto field_id : plan->field_ids_) {
                     milvus::futures::throwIfCancelled(cancel_token);
+                    if (milvus::SystemProperty::Instance().IsSystem(
+                            field_id)) {
+                        auto system_type = milvus::SystemProperty::Instance()
+                                               .GetSystemFieldType(field_id);
+                        auto count = materialized.segment_offsets.size();
+                        milvus::FixedVector<int64_t> output(count);
+                        materialized.segment->bulk_subscript(
+                            &op_ctx,
+                            system_type,
+                            materialized.segment_offsets.data(),
+                            count,
+                            output.data());
+                        auto data_array = std::make_unique<DataArray>();
+                        data_array->set_field_id(field_id.get());
+                        data_array->set_type(
+                            milvus::proto::schema::DataType::Int64);
+                        auto* obj = data_array->mutable_scalars()
+                                        ->mutable_long_data();
+                        auto* raw =
+                            reinterpret_cast<const int64_t*>(output.data());
+                        obj->mutable_data()->Add(raw, raw + count);
+                        materialized.fields[field_id] = std::move(data_array);
+                        continue;
+                    }
                     auto& field_meta = plan->schema_->operator[](field_id);
                     std::unique_ptr<DataArray> data;
                     if (dynamic_field_id.has_value() &&
@@ -284,6 +333,10 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     continue;
                 }
                 for (auto field_id : plan->field_ids_) {
+                    if (milvus::SystemProperty::Instance().IsSystem(
+                            field_id)) {
+                        continue;
+                    }
                     auto& field_meta = plan->schema_->operator[](field_id);
                     if (!field_meta.is_vector() || !field_meta.is_nullable()) {
                         continue;
@@ -314,9 +367,81 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // Merge into ordered fields.
             std::map<FieldId, std::unique_ptr<DataArray>> ordered_fields;
             for (auto field_id : plan->field_ids_) {
+                if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
+                    auto merged = std::make_unique<DataArray>();
+                    merged->set_field_id(field_id.get());
+                    merged->set_type(
+                        milvus::proto::schema::DataType::Int64);
+                    auto* obj =
+                        merged->mutable_scalars()->mutable_long_data();
+                    for (int64_t i = 0; i < total_rows; ++i) {
+                        auto& base = result_pairs[i];
+                        auto it = base.fields_data_->find(field_id);
+                        AssertInfo(
+                            it != base.fields_data_->end(),
+                            "missing system field {} in segment data",
+                            field_id.get());
+                        auto val = it->second->scalars()
+                                       .long_data()
+                                       .data(base.src_offset_);
+                        obj->add_data(val);
+                    }
+                    ordered_fields[field_id] = std::move(merged);
+                    continue;
+                }
                 auto& field_meta = plan->schema_->operator[](field_id);
                 ordered_fields[field_id] =
                     MergeDataArray(result_pairs, field_meta);
+                if (field_meta.is_vector() && field_meta.is_nullable()) {
+                    auto& da = ordered_fields[field_id];
+                    auto& vecs = *da->mutable_vectors();
+                    bool has_subtype =
+                        vecs.has_float_vector() || vecs.has_binary_vector() ||
+                        vecs.has_float16_vector() ||
+                        vecs.has_bfloat16_vector() ||
+                        vecs.has_int8_vector() ||
+                        vecs.has_sparse_float_vector() ||
+                        vecs.has_vector_array();
+                    if (!has_subtype) {
+                        auto dt = field_meta.get_data_type();
+                        auto dim = milvus::IsSparseFloatVectorDataType(dt)
+                                       ? 0
+                                       : field_meta.get_dim();
+                        if (dim > 0) {
+                            vecs.set_dim(dim);
+                        }
+                        switch (dt) {
+                            case milvus::DataType::VECTOR_FLOAT:
+                                vecs.mutable_float_vector();
+                                break;
+                            case milvus::DataType::VECTOR_BINARY:
+                                vecs.mutable_binary_vector();
+                                break;
+                            case milvus::DataType::VECTOR_FLOAT16:
+                                vecs.mutable_float16_vector();
+                                break;
+                            case milvus::DataType::VECTOR_BFLOAT16:
+                                vecs.mutable_bfloat16_vector();
+                                break;
+                            case milvus::DataType::VECTOR_INT8:
+                                vecs.mutable_int8_vector();
+                                break;
+                            case milvus::DataType::VECTOR_SPARSE_U32_F32:
+                                vecs.mutable_sparse_float_vector();
+                                break;
+                            case milvus::DataType::VECTOR_ARRAY: {
+                                auto* obj = vecs.mutable_vector_array();
+                                obj->set_dim(dim);
+                                obj->set_element_type(
+                                    milvus::proto::schema::DataType(
+                                        field_meta.get_element_type()));
+                                break;
+                            }
+                            default:
+                                break;
+                        }
+                    }
+                }
             }
 
             auto batch_result =
