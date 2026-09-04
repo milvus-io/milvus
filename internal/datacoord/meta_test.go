@@ -2430,11 +2430,12 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}, nil).Once()
 		inspector := &indexInspector{handler: handler}
-		suite.True(inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
+		_, ok := inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
 			CollectionID: updated.GetCollectionID(),
 			FieldID:      102,
 			IndexID:      1,
-		}), "materialized function-output field must be index-eligible")
+		})
+		suite.True(ok, "materialized function-output field must be index-eligible")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {
