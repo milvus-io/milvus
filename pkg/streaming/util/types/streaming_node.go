@@ -51,8 +51,68 @@ func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
 
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
-	NodeInfo StreamingNodeInfo
-	Channels map[string]PChannelInfo
+	NodeInfo          StreamingNodeInfo
+	Channels          map[string]PChannelInfo
+	SecondaryChannels map[string]PChannelInfo
+	ShardAssignment   ShardAssignmentInfo
+}
+
+type ShardAssignmentInfo struct {
+	PChannelAssignments []PChannelShardAssignment
+}
+
+type PChannelShardAssignment struct {
+	PChannel string
+	Entries  []ShardAssignmentEntry
+}
+
+type ShardAssignmentEntry struct {
+	CollectionID int64
+	ShardIndex   int32
+	ReplicaID    int64
+}
+
+// NewShardAssignmentInfoFromProto creates a ShardAssignmentInfo from proto.
+func NewShardAssignmentInfoFromProto(proto *streamingpb.ShardAssignmentInfo) ShardAssignmentInfo {
+	if proto == nil {
+		return ShardAssignmentInfo{}
+	}
+	pchannelAssignments := make([]PChannelShardAssignment, 0, len(proto.PchannelAssignments))
+	for _, pchannelAssignment := range proto.PchannelAssignments {
+		entries := make([]ShardAssignmentEntry, 0, len(pchannelAssignment.Entries))
+		for _, entry := range pchannelAssignment.Entries {
+			entries = append(entries, ShardAssignmentEntry{
+				CollectionID: entry.GetCollectionId(),
+				ShardIndex:   entry.GetShardIndex(),
+				ReplicaID:    entry.GetReplicaId(),
+			})
+		}
+		pchannelAssignments = append(pchannelAssignments, PChannelShardAssignment{
+			PChannel: pchannelAssignment.GetPchannel(),
+			Entries:  entries,
+		})
+	}
+	return ShardAssignmentInfo{PChannelAssignments: pchannelAssignments}
+}
+
+// NewProtoFromShardAssignmentInfo creates a proto from ShardAssignmentInfo.
+func NewProtoFromShardAssignmentInfo(info ShardAssignmentInfo) *streamingpb.ShardAssignmentInfo {
+	pchannelAssignments := make([]*streamingpb.PChannelShardAssignment, 0, len(info.PChannelAssignments))
+	for _, pchannelAssignment := range info.PChannelAssignments {
+		entries := make([]*streamingpb.ShardAssignmentEntry, 0, len(pchannelAssignment.Entries))
+		for _, entry := range pchannelAssignment.Entries {
+			entries = append(entries, &streamingpb.ShardAssignmentEntry{
+				CollectionId: entry.CollectionID,
+				ShardIndex:   entry.ShardIndex,
+				ReplicaId:    entry.ReplicaID,
+			})
+		}
+		pchannelAssignments = append(pchannelAssignments, &streamingpb.PChannelShardAssignment{
+			Pchannel: pchannelAssignment.PChannel,
+			Entries:  entries,
+		})
+	}
+	return &streamingpb.ShardAssignmentInfo{PchannelAssignments: pchannelAssignments}
 }
 
 // NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.
