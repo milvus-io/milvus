@@ -15,6 +15,9 @@
 // limitations under the License.
 
 #include "ThreadPool.h"
+
+#include <algorithm>
+
 #include "log/Log.h"
 
 namespace milvus {
@@ -66,9 +69,7 @@ void
 ThreadPool::Init() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (int i = 0; i < min_threads_size_; i++) {
-        std::thread t(&ThreadPool::Worker, this);
-        assert(threads_.find(t.get_id()) == threads_.end());
-        threads_[t.get_id()] = std::move(t);
+        threads_.emplace_back(&ThreadPool::Worker, this);
         current_threads_size_++;
     }
 }
@@ -82,8 +83,8 @@ ThreadPool::ShutDown() {
     }
     condition_lock_.notify_all();
     for (auto& thread : threads_) {
-        if (thread.second.joinable()) {
-            thread.second.join();
+        if (thread.joinable()) {
+            thread.join();
         }
     }
     LOG_INFO("Finish shutting down {}", name_);
@@ -95,10 +96,13 @@ ThreadPool::FinishThreads() {
         std::thread::id id;
         auto dequeue = need_finish_threads_.dequeue(id);
         if (dequeue) {
-            auto iter = threads_.find(id);
+            auto iter = std::find_if(
+                threads_.begin(), threads_.end(), [id](const std::thread& t) {
+                    return t.get_id() == id;
+                });
             assert(iter != threads_.end());
-            if (iter->second.joinable()) {
-                iter->second.join();
+            if (iter->joinable()) {
+                iter->join();
             }
             threads_.erase(iter);
         }

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 #include <optional>
@@ -45,7 +46,8 @@ class DefaultValueChunkTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
     std::pair<milvus::cachinglayer::ResourceUsage,
               milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
     const std::string&
     key() const override;
     std::vector<
@@ -84,10 +86,12 @@ class DefaultValueChunkTranslator
 
     // Shared chunk buffer for primary cells (all have primary_cell_rows_).
     std::optional<milvus::ChunkBuffer> primary_buffer_;
+    mutable std::atomic<bool> primary_buffer_accounted_{false};
 
     // Separate buffer for tail cell if it has different row count.
     // Only used for variable-length types where buffer layout depends on row count.
     std::optional<milvus::ChunkBuffer> tail_buffer_;
+    mutable std::atomic<bool> tail_buffer_accounted_{false};
     int64_t tail_cell_rows_{0};
 
     // Whether this field type can share buffers across cells with different

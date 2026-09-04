@@ -72,8 +72,11 @@ InterimSealedIndexTranslator::cell_id_of(
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-InterimSealedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+InterimSealedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     int64_t size = vec_data_->DataByteSize();
     int64_t row_count = vec_data_->NumRows();
     // TODO: hack, move these estimate logic to knowhere

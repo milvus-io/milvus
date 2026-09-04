@@ -18,6 +18,25 @@
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev1translator {
+namespace {
+
+milvus::cachinglayer::ResourceUsage
+BufferResourceUsage(const milvus::ChunkBuffer& buffer) {
+    const auto size = static_cast<int64_t>(buffer.size);
+    if (buffer.guard && buffer.guard->is_file_backed()) {
+        return {0, size};
+    }
+    return {size, 0};
+}
+
+void
+AddUsage(milvus::cachinglayer::ResourceUsage& total,
+         const milvus::cachinglayer::ResourceUsage& usage) {
+    total.memory_bytes = SaturatingAdd(total.memory_bytes, usage.memory_bytes);
+    total.file_bytes = SaturatingAdd(total.file_bytes, usage.file_bytes);
+}
+
+}  // namespace
 
 DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     int64_t segment_id,
@@ -189,20 +208,30 @@ DefaultValueChunkTranslator::value_size() const {
 
 std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
-DefaultValueChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    // TODO: actually only the first cell is used, other cells share the same buffer,
-    // but for now we estimate the same size for all cells
-    auto value_size = this->value_size();
-    auto rows_begin = meta_.num_rows_until_chunk_[cid];
-    auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-    auto rows = rows_end - rows_begin;
-    auto cell_bytes = value_size * rows;
-    if (use_mmap_) {
-        return {{0, cell_bytes}, {0, cell_bytes}};
-    } else {
-        return {{cell_bytes, 0}, {cell_bytes, 0}};
+DefaultValueChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
     }
+
+    for (const auto cid : cids) {
+        AssertInfo(cid + 1 < meta_.num_rows_until_chunk_.size(),
+                   "cid out of range");
+    }
+
+    // Both buffers are built with the translator and remain alive regardless
+    // of which cell is requested. Cells are non-evictable, so the first loaded
+    // cell can own each backing buffer's cache charge for the slot lifetime.
+    milvus::cachinglayer::ResourceUsage usage;
+    if (primary_buffer_.has_value() &&
+        !primary_buffer_accounted_.load(std::memory_order_acquire)) {
+        AddUsage(usage, BufferResourceUsage(primary_buffer_.value()));
+    }
+    if (tail_buffer_.has_value() &&
+        !tail_buffer_accounted_.load(std::memory_order_acquire)) {
+        AddUsage(usage, BufferResourceUsage(tail_buffer_.value()));
+    }
+    return {usage, usage};
 }
 
 const std::string&
@@ -293,7 +322,27 @@ DefaultValueChunkTranslator::get_cells(
                     field_meta_, primary_buffer_.value(), 0);
             }
         }
+        // Every view defaults to zero charge. One stable, non-evictable owner
+        // below reports the shared backing buffer's actual resource usage.
+        chunk->SetCellSize({});
         res.emplace_back(cid, std::move(chunk));
+    }
+
+    if (res.empty()) {
+        return res;
+    }
+
+    milvus::cachinglayer::ResourceUsage owned_usage;
+    if (primary_buffer_.has_value() &&
+        !primary_buffer_accounted_.exchange(true, std::memory_order_acq_rel)) {
+        AddUsage(owned_usage, BufferResourceUsage(primary_buffer_.value()));
+    }
+    if (tail_buffer_.has_value() &&
+        !tail_buffer_accounted_.exchange(true, std::memory_order_acq_rel)) {
+        AddUsage(owned_usage, BufferResourceUsage(tail_buffer_.value()));
+    }
+    if (owned_usage.AnyGTZero()) {
+        res.front().second->SetCellSize(owned_usage);
     }
 
     return res;

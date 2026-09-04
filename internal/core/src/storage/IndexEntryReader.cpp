@@ -16,10 +16,7 @@
 
 #include "storage/IndexEntryReader.h"
 
-#include <fcntl.h>
-#include <unistd.h>
 #include <algorithm>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -89,6 +86,19 @@ EntryDownloadRangeCount(uint64_t size) {
         return 0;
     }
     return static_cast<size_t>((size - 1) / kEntryDownloadRangeSize + 1);
+}
+
+io::Priority
+WriterPriority(ThreadPoolPriority priority) {
+    switch (priority) {
+        case ThreadPoolPriority::HIGH:
+            return io::Priority::HIGH;
+        case ThreadPoolPriority::MIDDLE:
+            return io::Priority::MIDDLE;
+        case ThreadPoolPriority::LOW:
+            return io::Priority::LOW;
+    }
+    return io::Priority::MIDDLE;
 }
 
 void
@@ -386,8 +396,12 @@ IndexEntryReader::ReadFooterAndDirectory() {
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
-        AssertInfo(slice_size_ > 0,
-                   "Encrypted entry slice_size must be positive");
+        AssertInfo(
+            slice_size_ != 0 && slice_size_ % FileWriter::ALIGNMENT_BYTES == 0,
+            "Encrypted V3 index slice size must be a positive multiple "
+            "of {} bytes, got {}",
+            FileWriter::ALIGNMENT_BYTES,
+            slice_size_);
 
         for (const auto& entry : dir_json["entries"]) {
             EntryMeta meta;
@@ -608,30 +622,19 @@ IndexEntryReader::EntryDownloadState
 IndexEntryReader::PrepareEntryDownload(const std::string& name,
                                        const std::string& local_path,
                                        const EntryMeta& meta) {
-    int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    AssertInfo(fd != -1, "Failed to create file: {}", local_path);
-
     EntryDownloadState state;
     state.name = name;
-    state.fd = fd;
-
-    try {
-        if (meta.encrypted) {
-            state.expected_crc = meta.enc.crc32;
-            state.range_crcs.resize(meta.enc.slices.size());
-            auto trc_ret = ::ftruncate(fd, meta.enc.original_size);
-            AssertInfo(trc_ret == 0,
-                       "Failed to ftruncate file {}: {}",
-                       local_path,
-                       strerror(errno));
-        } else {
-            state.expected_crc = meta.plain.crc32;
-            size_t num_ranges = EntryDownloadRangeCount(meta.plain.size);
-            state.range_crcs.resize(num_ranges);
-        }
-    } catch (...) {
-        ::close(fd);
-        throw;
+    if (meta.encrypted) {
+        state.expected_crc = meta.enc.crc32;
+        state.range_crcs.resize(meta.enc.slices.size());
+        state.writer = std::make_unique<PositionedFileWriter>(
+            local_path, meta.enc.original_size, WriterPriority(priority_));
+    } else {
+        state.expected_crc = meta.plain.crc32;
+        size_t num_ranges = EntryDownloadRangeCount(meta.plain.size);
+        state.range_crcs.resize(num_ranges);
+        state.writer = std::make_unique<PositionedFileWriter>(
+            local_path, meta.plain.size, WriterPriority(priority_));
     }
 
     return state;
@@ -643,6 +646,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
     EntryDownloadState& state,
     std::vector<std::future<void>>& futures) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto* writer = state.writer.get();
     futures.reserve(futures.size() + (meta.encrypted ? meta.enc.slices.size()
                                                      : EntryDownloadRangeCount(
                                                            meta.plain.size)));
@@ -669,7 +673,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                                            collection_id,
                                            edek,
                                            slice,
-                                           fd = state.fd,
+                                           writer,
                                            this_output_offset,
                                            plain_len,
                                            i,
@@ -688,10 +692,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                            "Decrypted size mismatch: expected {}, got {}",
                            plain_len,
                            plain.size());
-                auto written = ::pwrite(
-                    fd, plain.data(), plain.size(), this_output_offset);
-                AssertInfo(written == static_cast<ssize_t>(plain.size()),
-                           "Failed to pwrite");
+                writer->WriteAt(this_output_offset, plain.data(), plain.size());
                 state.range_crcs[i] = {
                     Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
                                 plain.size()),
@@ -715,7 +716,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
             futures.push_back(pool.Submit([input,
                                            this_src_offset,
                                            len,
-                                           fd = state.fd,
+                                           writer,
                                            this_file_offset,
                                            this_range_idx,
                                            &state]() {
@@ -723,9 +724,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                 size_t n = input->ReadAt(
                     buf.data(), MILVUS_V3_MAGIC_SIZE + this_src_offset, len);
                 AssertInfo(n == len, "Failed to read data for file");
-                auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
-                AssertInfo(written == static_cast<ssize_t>(len),
-                           "Failed to pwrite");
+                writer->WriteAt(this_file_offset, buf.data(), len);
                 state.range_crcs[this_range_idx] = {
                     Crc32cValue(buf.data(), len), len};
             }));
@@ -754,8 +753,8 @@ IndexEntryReader::FinalizeEntryDownload(EntryDownloadState& state) {
                Crc32cToHex(state.expected_crc),
                Crc32cToHex(combined_crc));
 
-    ::close(state.fd);
-    state.fd = -1;
+    state.writer->Finish();
+    state.writer.reset();
 }
 
 void
@@ -778,10 +777,7 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
         FinalizeEntryDownload(state);
     } catch (...) {
         WaitForAllFutures(futures);
-        if (state.fd != -1) {
-            ::close(state.fd);
-            state.fd = -1;
-        }
+        state.writer.reset();
         throw;
     }
 }
@@ -797,13 +793,9 @@ IndexEntryReader::ReadEntriesToFiles(
     std::vector<EntryDownloadState> states;
     states.reserve(name_path_pairs.size());
 
-    // Helper to close all open fds in states
-    auto close_all_fds = [&states]() {
+    auto reset_all_writers = [&states]() {
         for (auto& s : states) {
-            if (s.fd != -1) {
-                ::close(s.fd);
-                s.fd = -1;
-            }
+            s.writer.reset();
         }
     };
 
@@ -830,13 +822,13 @@ IndexEntryReader::ReadEntriesToFiles(
         // Wait for ALL tasks to complete
         RethrowIfError(WaitForAllFutures(all_futures));
 
-        // Verify CRCs and close all file descriptors
+        // Verify CRCs and finish all writers
         for (auto& state : states) {
             FinalizeEntryDownload(state);
         }
     } catch (...) {
         WaitForAllFutures(all_futures);
-        close_all_fds();
+        reset_all_writers();
         throw;
     }
 }

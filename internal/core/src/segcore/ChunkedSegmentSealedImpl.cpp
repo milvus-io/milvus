@@ -1959,6 +1959,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
+        info_proto->current_scalar_index_version(),
         num_rows,
         info_proto->warmup_policy()};
 
