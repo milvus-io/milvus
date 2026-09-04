@@ -210,8 +210,98 @@ const (
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
 
+	// SnapshotRootPath storage path const for snapshot metadata and manifests.
+	// Layout: {rootPath}/snapshots/{collection_id}/{metadata|manifests}/...
+	SnapshotRootPath = "snapshots"
+
+	// WoodpeckerRootPath storage path const for the Woodpecker WAL, written
+	// under both minio.rootPath and localStorage.path.
+	WoodpeckerRootPath = "wp"
+
+	// LocalCacheRootPath storage path const for node-local caches (growing mmap,
+	// local chunk cache, bm25, file resources, expr cache), written under
+	// localStorage.path. Under common.storageType=local that path is also the
+	// ChunkManager root, which is why this is a top-level segment there.
+	// Layout: {localStorage.path}/cache/{nodeID}/{growing_mmap|local_chunk|...}/...
+	//
+	// This entry also covers everything segcore writes, which is why the C++
+	// segment names (raw_datas, ngram_log, tmp, rtree-index) are NOT listed
+	// separately: segcore's ChunkManager is initialized with
+	// pathutil.GetPath(LocalChunkPath, nodeID), i.e.
+	// {localStorage.path}/cache/{nodeID}/local_chunk (see
+	// internal/util/initcore/query_node.go and
+	// internal/datanode/index/init_segcore.go), so those directories sit under
+	// this subtree rather than at the storage root. Registering them at the root
+	// would deny paths Milvus never writes.
+	LocalCacheRootPath = "cache"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
+
+// InternalStorageRootSegments lists the top-level directories that Milvus
+// creates directly under the storage root path (ChunkManager.RootPath())
+// regardless of storage type. Segments that are rooted at localStorage.path
+// only live in LocalOnlyStorageRootSegments below.
+//
+// Import path validation in datacoord refuses ordinary imports that point into
+// any of these, so a directory missing from this list is a directory that bulk
+// import can read. When adding a new storage path constant above, add it here
+// too -- TestInternalStorageRootSegmentsIsExhaustive fails otherwise.
+//
+// Constants that are NOT top-level directories (leaf file names, sub-paths)
+// must be listed in that test's nonTopLevelSegments instead.
+//
+// Scope limit, deliberately stated: the guard test enforces that every storage
+// path constant declared in THIS file is classified. It cannot see a writer in
+// another package -- still less one in another language -- that joins a bare
+// string literal onto the storage root. Every omission found so far came from
+// human review, not from the guard: "wp" (Go, pkg/streaming), "cache" (Go,
+// internal/util/pathutil), and the four C++ segments (raw_datas, ngram_log, tmp,
+// rtree-index), which turned out to sit under the "cache" subtree rather than at
+// the root -- see LocalCacheRootPath above (milvus#51894 review). A green guard
+// is evidence that this file is self-consistent, NOT
+// that the registry is complete; a new writer under the shared root must add
+// its segment here by hand.
+var InternalStorageRootSegments = []string{
+	SegmentInsertLogPath,
+	SegmentDeltaLogPath,
+	SegmentStatslogPath,
+	SegmentIndexV0Path,
+	SegmentIndexV1Path,
+	SegmentBm25LogPath,
+	PartitionStatsPath,
+	AnalyzeStatsPath,
+	TextIndexPath,
+	JSONIndexPath,
+	JSONStatsPath,
+	SnapshotRootPath,
+	WoodpeckerRootPath,
+}
+
+// LocalOnlyStorageRootSegments lists top-level directories that are rooted at
+// localStorage.path rather than at the ChunkManager root.
+//
+// They coincide with the ChunkManager root only under common.storageType=local,
+// where datacoord's root IS localStorage.path. Under a remote (MinIO/S3) root
+// Milvus never writes these keys, so denying them there would reject caller
+// paths for no benefit. Consumers must therefore append this list only when the
+// storage type is local; see ValidateImportFilePaths.
+//
+// Woodpecker is deliberately NOT here: it writes under both minio.rootPath and
+// localStorage.path (pkg/streaming/walimpls/impls/wp/builder.go), so it belongs
+// in the unconditional list above.
+//
+// "mmap" is deliberately NOT here either, even though queryNode.mmap.mmapDirPath
+// formats to {localStorage.path}/mmap by default -- a sibling of "cache". The
+// directory is deprecated and nothing writes it: the value reaches segcore only
+// as CMmapConfig.json_stats_mmap_path (internal/util/initcore/init_core.go), and
+// the terminal consumer JsonKeyStats::Load ignores it, taking the local
+// ChunkManager root instead, i.e. {localStorage.path}/cache/{nodeID}/local_chunk,
+// which the "cache" entry already covers. Registering it would deny a path
+// Milvus never writes.
+var LocalOnlyStorageRootSegments = []string{
+	LocalCacheRootPath,
+}
 
 const (
 	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)

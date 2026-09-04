@@ -93,9 +93,33 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	// Must run before any option is read: checks read options as a repeated KV
+	// (first match wins) while the broadcast body folds them into a map (last
+	// value wins), so a duplicate key would validate under one value and
+	// execute under another.
+	if err := importutilv2.ValidateNoDuplicateKeys(options); err != nil {
+		return err
+	}
+
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
+		return err
+	}
+
+	// Keep ordinary imports out of Milvus's own storage directories.
+	//
+	// Deliberately NOT re-checked in createImportJobFromAck, unlike the L0 gate
+	// there, because this check is root-relative. It denies paths under THIS
+	// cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's storage
+	// roots together (ReplicateConfiguration carries connection params and
+	// pchannels only). With the same root on both sides -- the default, and the
+	// normal deployment -- the primary's check covers the secondary exactly;
+	// only under differing roots does the same key mean something different on
+	// each side. Recorded in the PR's Known limitations rather than guarded
+	// here, since reaching it also requires enableInReplicatingCluster=true,
+	// which defaults to false and refuses every import on a replicating cluster.
+	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
 		return err
 	}
 
