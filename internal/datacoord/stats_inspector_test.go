@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -301,7 +302,9 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
 	}
 	collection := s.mt.GetCollection(1)
 	collection.Schema.FileResourceIds = []int64{7}
-	s.Require().NoError(s.mt.UpdateFileResources(s.ctx, resources, 1))
+	resourceBroker := broker.NewMockBroker(s.T())
+	resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(resources, nil).Once()
+	s.mt.broker = resourceBroker
 
 	for _, testCase := range []struct {
 		name            string
