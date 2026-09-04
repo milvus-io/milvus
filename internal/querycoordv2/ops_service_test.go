@@ -158,6 +158,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.targetObserver,
 		&checkers.CheckerController{},
 		suite.proxyManager,
+		suite.nodeMgr,
 	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

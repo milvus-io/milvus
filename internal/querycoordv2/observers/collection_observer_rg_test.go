@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -107,7 +109,7 @@ func (s *CollectionObserverRGSuite) SetupTest() {
 	// Built before any collection is registered, so the recovery loop inside
 	// the constructor registers no task and every task in these tests is one
 	// the test itself asked for.
-	s.ob = NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	s.ob = NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
 	s.Require().Zero(s.ob.loadTasks.Len())
 
 	s.targetObserver.Start()
@@ -222,6 +224,56 @@ func (s *CollectionObserverRGSuite) putDelegator(collectionID, nodeID int64, cha
 			Segments:     segments,
 		},
 	})
+}
+
+// putServiceableDelegator is putDelegator for a delegator that reports itself
+// serviceable, which is what shard leader readiness asks of it.
+func (s *CollectionObserverRGSuite) putServiceableDelegator(collectionID, nodeID int64, channel string, segmentIDs ...int64) {
+	segments := make(map[int64]*querypb.SegmentDist, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segments[segmentID] = &querypb.SegmentDist{NodeID: nodeID, Version: 1}
+	}
+	s.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channel},
+		Node:         nodeID,
+		View: &meta.LeaderView{
+			ID:           nodeID,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Segments:     segments,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+}
+
+// ageTaskWatermark moves a task's watermark age into the past without touching
+// the percentage it recorded, so the next tick arrives a full load timeout
+// after the previous one as far as the task can tell.
+func (s *CollectionObserverRGSuite) ageTaskWatermark(key string, age time.Duration) {
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	task.LastProgressAt = time.Now().Add(-age)
+	s.ob.loadTasks.Insert(key, task)
+}
+
+// scriptResourceGroupPercentage makes the per-resource-group percentage of
+// rgName answer the given figures in order, holding the last one, and every
+// other group answer 100. The figure is measured against the NEXT target, so
+// under continuous flush it legitimately sits below 100 for a group whose
+// shard leaders are serving; scripting it is how the test holds that state for
+// as long as it likes.
+func (s *CollectionObserverRGSuite) scriptResourceGroupPercentage(rgName string, figures ...int32) func() {
+	i := 0
+	percentage := mockey.Mock(utils.LoadPercentageByResourceGroup).
+		To(func(_ context.Context, _ *meta.Meta, _ meta.TargetManagerInterface, _ *meta.DistributionManager, _ int64, rg string) (int32, error) {
+			if rg != rgName {
+				return 100, nil
+			}
+			figure := figures[min(i, len(figures)-1)]
+			i++
+			return figure, nil
+		}).Build()
+	return func() { percentage.UnPatch() }
 }
 
 // backdateCollectionUpdatedAt simulates a collection whose load was registered
@@ -907,7 +959,7 @@ func (s *CollectionObserverRGSuite) TestRecoveryRebuildsScopedTasksForEveryResou
 	s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1000)
 	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1000))
 
-	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
 
 	keyB, ok := findTask(ob, 1000, rgB)
 	s.Require().True(ok, "the resource group that is still loading must be observed again after a restart")
@@ -944,7 +996,7 @@ func (s *CollectionObserverRGSuite) TestRecoveredScopedTaskTimesOutLikeAFreshOne
 	s.putDelegator(1010, 14, "1010-dmc0")
 	s.markCollectionLoaded(1010, 1011)
 
-	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
 	key, ok := findTask(ob, 1010, rgB)
 	s.Require().True(ok)
 
@@ -982,7 +1034,7 @@ func (s *CollectionObserverRGSuite) TestRebuiltTasksWaitForTheFirstInformativeOb
 	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1040))
 
 	// The restart: the observer is built while the distribution is still empty.
-	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
 	keyA, ok := findTask(ob, 1040, rgA)
 	s.Require().True(ok, "with nothing reported, the rebuild cannot tell the serving group from the lagging one")
 	keyB, ok := findTask(ob, 1040, rgB)
@@ -1036,10 +1088,94 @@ func (s *CollectionObserverRGSuite) TestRecoveryRegistersNoScopedTaskWhileTheCol
 	s.registerLoadingCollection(1020, 1021, "1020-dmc0", 1, 10201, 10202)
 	s.putReplica(1020, 102001, 15, rgA)
 
-	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager)
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
 
 	_, hasScoped := findTask(ob, 1020, rgA)
 	s.False(hasScoped, "a loading collection is watched by its collection-wide task alone")
 	_, hasUnscoped := findTask(ob, 1020, "")
 	s.True(hasUnscoped)
+}
+
+// TestAReadyResourceGroupIsNotTimedOutOnAPercentageStuckBelowHundred is the
+// reviewer's scenario. A collection is loaded into two resource groups; rg-a is
+// serving - its delegator is serviceable on the current target, so shard
+// leader readiness says Ready - while its per-resource-group percentage, which
+// is measured against the NEXT target and integer-truncated, climbs 97, 98, 99
+// and then sits at 99 tick after tick, as a large collection under continuous
+// flush does. Every tick here arrives a full load timeout after the last, so
+// the moment the figure stops moving the timeout has run out.
+//
+// A Ready group must never be released for that: the rule that keeps a Loaded
+// collection's last replicas does not protect rg-a, because rg-b holds one
+// too, and before this check the tick after the figure stopped moving took
+// rg-a's replica away while it was serving queries.
+func (s *CollectionObserverRGSuite) TestAReadyResourceGroupIsNotTimedOutOnAPercentageStuckBelowHundred() {
+	s.registerLoadingCollection(1200, 1201, "1200-dmc0", 2, 12001, 12002)
+	s.putReplica(1200, 120001, 31, rgA)
+	s.putServiceableDelegator(1200, 31, "1200-dmc0", 12001, 12002)
+	s.putReplica(1200, 120002, 32, rgB)
+	s.putServiceableDelegator(1200, 32, "1200-dmc0", 12001, 12002)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1200))
+	s.markCollectionLoaded(1200, 1201)
+
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(s.ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, 1200, rgA)
+	s.Require().NoError(err)
+	s.Require().True(readiness.Ready, "the group under test must be serving, or the case is a plain stall")
+
+	s.ob.LoadCollection(s.ctx, 1200, rgA)
+	key := s.taskKey(1200, rgA)
+
+	defer s.scriptResourceGroupPercentage(rgA, 97, 98, 99, 99, 99, 99)()
+
+	for tick := 0; tick < 6; tick++ {
+		s.ageTaskWatermark(key, time.Hour)
+		s.ob.Observe(s.ctx)
+
+		s.Len(s.replicaIDsInRG(1200, rgA), 1, "tick %d: a resource group whose shard leaders are ready must never be released by the load timeout", tick)
+		s.Len(s.replicaIDsInRG(1200, rgB), 1, "tick %d: the sibling is untouched", tick)
+		s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1200).GetStatus(), "tick %d", tick)
+		s.Require().True(s.ob.loadTasks.Contain(key), "tick %d: the task lives on, it finishes on 100 and nowhere else", tick)
+		task, _ := s.ob.loadTasks.Get(key)
+		s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+			"tick %d: a ready group refreshes its watermark instead of being torn down", tick)
+	}
+	s.EqualValues(99, func() int32 { task, _ := s.ob.loadTasks.Get(key); return task.LastProgress }(),
+		"the figure really did stop at 99: the task was kept on readiness, not on movement")
+}
+
+// TestAnUnreadyResourceGroupStuckBelowHundredIsStillReleased pins that the
+// readiness check narrows the timeout to what it was for, and no further. rg-b
+// here reports a real, constant 50 - its delegator is up but not serviceable,
+// so readiness says the shard has no leader in this group - and once the
+// timeout runs out it is released, as before; rg-a, serving beside it, is
+// untouched.
+func (s *CollectionObserverRGSuite) TestAnUnreadyResourceGroupStuckBelowHundredIsStillReleased() {
+	s.registerLoadingCollection(1300, 1301, "1300-dmc0", 2, 13001, 13002)
+	s.putReplica(1300, 130001, 41, rgA)
+	s.putServiceableDelegator(1300, 41, "1300-dmc0", 13001, 13002)
+	s.putReplica(1300, 130002, 42, rgB)
+	s.putDelegator(1300, 42, "1300-dmc0", 13001)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1300))
+	s.markCollectionLoaded(1300, 1301)
+
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(s.ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, 1300, rgB)
+	s.Require().NoError(err)
+	s.Require().False(readiness.Ready, "the group under test must not be serving, or the timeout is rightly refused")
+
+	s.ob.LoadCollection(s.ctx, 1300, rgB)
+	key := s.taskKey(1300, rgB)
+
+	defer s.scriptResourceGroupPercentage(rgB, 50)()
+
+	// The first tick records the figure; the second arrives a load timeout
+	// later and finds it unmoved.
+	s.ob.Observe(s.ctx)
+	s.Len(s.replicaIDsInRG(1300, rgB), 1, "a figure that has only just been read is not a stall")
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.Empty(s.replicaIDsInRG(1300, rgB), "a stalled group whose shard leaders are not ready is released, as before")
+	s.Len(s.replicaIDsInRG(1300, rgA), 1, "the serving sibling survives")
+	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1300).GetStatus())
+	s.False(s.ob.loadTasks.Contain(key))
 }
