@@ -2496,26 +2496,35 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 		if indexInfo == nil {
 			continue
 		}
-		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-		// some build params also exist in indexParams, which are useless during loading process
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-				return err
-			}
-		}
-
-		// set whether enable offset cache for bitmap index
-		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-		}
-
-		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		if err := enrichIndexLoadParams(indexInfo); err != nil {
 			return err
 		}
-
-		indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
 	}
+	return nil
+}
+
+// enrichIndexLoadParams enriches raw build-time index params with load-time
+// parameters (num_load_thread, search_cache_budget_gb, beamwidth, etc.) that
+// are required by the C++ index loading code but not stored in the index metadata.
+func enrichIndexLoadParams(indexInfo *querypb.FieldIndexInfo) error {
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) ||
+		vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexParams["index_type"]) {
+		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+			return err
+		}
+	}
+
+	if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+	}
+
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		return err
+	}
+
+	indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
 	return nil
 }
 
@@ -2546,7 +2555,11 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 		if collection != nil {
 			configureUseTakeForOutput(info, collection.Schema())
 		}
-
+		for _, indexInfo := range info.IndexInfos {
+			if err := enrichIndexLoadParams(indexInfo); err != nil {
+				return err
+			}
+		}
 		err := segment.Reopen(ctx, info)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))

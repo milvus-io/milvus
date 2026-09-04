@@ -47,9 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -59,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1160,25 +1157,12 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 	defer deleteLoadIndexInfo(loadIndexInfo)
 
+	if err := enrichIndexLoadParams(indexInfo); err != nil {
+		return err
+	}
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	// as Knowhere reports error if encounter an unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
-
-	// some build params also exist in indexParams, which are useless during loading process
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-			return err
-		}
-	}
-
-	// set whether enable offset cache for bitmap index
-	if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-	}
-
-	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-		return err
-	}
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
 	// Add warmup policy to index_params if not already present

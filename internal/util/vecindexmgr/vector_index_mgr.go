@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/vecindex"
 )
 
 const (
@@ -108,11 +109,11 @@ func (mgr *vecIndexMgrImpl) IsNoTrainIndex(indexType IndexType) bool {
 }
 
 func (mgr *vecIndexMgrImpl) IsDiskANN(indexType IndexType) bool {
-	return indexType == "DISKANN"
+	return vecindex.IsDiskANN(indexType)
 }
 
 func (mgr *vecIndexMgrImpl) IsAISAQ(indexType IndexType) bool {
-	return indexType == "AISAQ"
+	return vecindex.IsAISAQ(indexType)
 }
 
 func (mgr *vecIndexMgrImpl) init() {

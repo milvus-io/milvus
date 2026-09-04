@@ -246,7 +246,8 @@ ReadDiskRawDataRows(const LocalChunkManagerPtr& local_chunk_manager,
 void
 ApplyDiskAnnBuildThreadConfig(const IndexType& index_type,
                               knowhere::Json& build_config) {
-    if (index_type != knowhere::IndexEnum::INDEX_DISKANN) {
+    if (index_type != knowhere::IndexEnum::INDEX_DISKANN &&
+        index_type != knowhere::IndexEnum::INDEX_AISAQ) {
         return;
     }
 
@@ -758,14 +759,40 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
         return;
     }
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN ||
+        GetIndexType() == knowhere::IndexEnum::INDEX_AISAQ) {
         // set search list size
         if (CheckKeyInConfig(search_info.search_params_, DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
                 search_info.search_params_[DISK_ANN_QUERY_LIST];
         }
         // set beamwidth
-        search_config[DISK_ANN_QUERY_BEAMWIDTH] = int(search_beamwidth_);
+        const auto default_beamwidth =
+            (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN)
+                ? int(search_beamwidth_)
+                : int(aisaq_search_beamwidth_);
+
+        if (search_config.contains(DISK_ANN_QUERY_BEAMWIDTH)) {
+            auto beamwidth = GetValueFromConfig<int>(search_config,
+                                                     DISK_ANN_QUERY_BEAMWIDTH);
+            if (beamwidth.has_value()) {
+                AssertInfo(beamwidth.value() <= 16,
+                           "beamwidth {} out of range 16",
+                           beamwidth.value());
+                search_config[DISK_ANN_QUERY_BEAMWIDTH] = beamwidth.value();
+            } else {
+                search_config[DISK_ANN_QUERY_BEAMWIDTH] = default_beamwidth;
+            }
+        }
+        if (search_config.contains(DISK_ANN_QUERY_PQ_BEAMWIDTH)) {
+            auto vectors_beamwidth = GetValueFromConfig<int>(
+                search_config, DISK_ANN_QUERY_PQ_BEAMWIDTH);
+            search_config[DISK_ANN_QUERY_PQ_BEAMWIDTH] =
+                vectors_beamwidth.value();
+        } else {
+            search_config[DISK_ANN_QUERY_PQ_BEAMWIDTH] =
+                int(search_vectors_beamwidth_);
+        }
         // set json reset field, will be removed later
         search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
     }
@@ -954,7 +981,8 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     load_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN ||
+        GetIndexType() == knowhere::IndexEnum::INDEX_AISAQ) {
         // set base info
         load_config[DISK_ANN_PREPARE_WARM_UP] = false;
         load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
@@ -972,7 +1000,12 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         auto beamwidth = GetValueFromConfig<std::string>(
             load_config, DISK_ANN_QUERY_BEAMWIDTH);
         if (beamwidth.has_value()) {
-            search_beamwidth_ = std::atoi(beamwidth.value().c_str());
+            auto search_beamwidth = std::atoi(beamwidth.value().c_str());
+            if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+                search_beamwidth_ = search_beamwidth;
+            } else {  // AISAQ
+                aisaq_search_beamwidth_ = search_beamwidth;
+            }
         }
     }
 

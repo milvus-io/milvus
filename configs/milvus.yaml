@@ -1255,6 +1255,17 @@ common:
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
+  AiSAQIndex:
+    maxDegree: 56
+    searchListSize: 100
+    pqCodeBudgetGBRatio: 0.125
+    searchCacheBudgetGBRatio: 0
+    diskPQCodeBudgetGBRatio: 0.25
+    inlinePQ: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.
+    pqCacheSize: 0 # compressed vectors cache DRAM size in bytes.
+    rearrange: true # Enable vectors rearrangement during build.
+    pqReadPageCacheSize: 0 # compressed vectors read cache DRAM size in bytes per thread.
+    numEntryPoints: 100 # Number of entry points that should be generated to be used as a search start points
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
