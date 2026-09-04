@@ -56,7 +56,7 @@ type ChannelWorkload struct {
 	//
 	// A construction site does NOT have to set it. Every entry point of this
 	// package stamps the request's scope on from the context (see
-	// extension_seam.go), because a site that forgot would not fail - it would
+	// resource_group_scope.go), because a site that forgot would not fail - it would
 	// route that subset of requests to another group's leader, silently, the
 	// same wrong-routing-with-no-signal failure as filtering the channel map.
 	// Three paths build a ChannelWorkload directly rather than going through
@@ -347,7 +347,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
-	// Extension seam, see extension_seam.go: the request's routing scope is
+	// Extension seam, see resource_group_scope.go: the request's routing scope is
 	// stamped on here, at the load balancer's own entry, so that no call site
 	// can silently omit it. Empty with no provider installed.
 	workload = scopedChannelWorkload(ctx, workload)
@@ -501,7 +501,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
-	// Extension seam, see extension_seam.go.
+	// Extension seam, see resource_group_scope.go.
 	workload = scopedCollectionWorkload(ctx, workload)
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
@@ -533,7 +533,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 
 // ExecuteOneChannel will execute at any one channel in collection
 func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
-	// Extension seam, see extension_seam.go.
+	// Extension seam, see resource_group_scope.go.
 	workload = scopedCollectionWorkload(ctx, workload)
 	// Unscoped: any one channel will do, so the first is taken. Scoped: the
 	// channel list is a map's key order, so the first channel may be one the
