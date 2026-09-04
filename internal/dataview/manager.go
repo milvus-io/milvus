@@ -625,10 +625,13 @@ func (m *dataViewManager) persistMemoryLocked(state *collectionState, view *view
 // PrepareFlush builds the post-flush DataView snapshot while holding the
 // Collection lock. It is the manager side of the flush atomic txn: the caller
 // composes the returned snapshot into the same catalog.Update as the
-// SegmentMeta actions (see meta.UpdateSegmentsInfoAndDataView), then must call
-// commit on success (loads the snapshot into memory and releases the lock) or
-// abort on failure (releases the lock without touching memory). Both callbacks
-// are idempotent.
+// SegmentMeta actions (see meta.UpdateSegmentsInfoAndDataView), then calls
+// commit when the composite txn was persisted (loads the snapshot into memory
+// and releases the lock), or abort when the txn failed and the error is
+// surfaced to the caller (releases the lock without touching memory). When
+// nothing was persisted (the txn short-circuited because the Collection's
+// DataViews were dropped, PrepareFlush returns nil with no-op callbacks), the
+// caller may skip both callbacks. All callbacks are idempotent.
 func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataViewOfCollection, func(), func(), error) {
 	state, unlock := m.lockStateForMutation(event.CollectionID)
 	if state == nil {

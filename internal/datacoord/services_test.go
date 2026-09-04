@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -309,9 +308,14 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	// The composite flush publish writes the DataView key through
 	// catalog.Update (its DataViewEntry branch), not Catalog.SaveDataView, so
 	// inject the failure at the catalog txn layer the flush actually uses.
+	// The failure is retried inside UpdateSegmentsInfoAndDataView: the
+	// composite write is an idempotent KV overwrite, so a transient catalog
+	// error converges within the same SaveBinlogPaths call instead of
+	// surfacing to the caller (caller-side retry of SaveBinlogPaths would not
+	// be idempotent).
 	publishErr := merr.WrapErrServiceUnavailable("injected DataView publication failure")
 	updateMock := mockey.Mock((*datacoordkv.Catalog).Update).
-		Return(publishErr).Build()
+		Return(mockey.Sequence(publishErr).Then(nil)).Build()
 	defer updateMock.UnPatch()
 
 	req := &datapb.SaveBinlogPathsRequest{
@@ -329,44 +333,28 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		}},
 		CheckPoints: []*datapb.CheckPoint{{SegmentID: 10, NumOfRows: 100}},
 	}
+	// The first catalog.Update attempt fails (injected) and the in-function
+	// retry converges on the second attempt, all within this single call:
+	// the caller sees success, the segment is Flushed (and, under the
+	// default sort-compaction config, marked invisible) and the DataView
+	// snapshot is published atomically - flush advances streaming_version
+	// regardless of the invisible marker.
 	resp, err := s.testServer.SaveBinlogPaths(ctx, req)
-	require.NoError(s.T(), err)
-	require.ErrorIs(s.T(), merr.Error(resp), publishErr)
-	// The atomic txn failed: neither SegmentMeta nor the DataView version
-	// reached etcd, so the segment stays Growing and the prepared flush
-	// snapshot is aborted (the collection baseline snapshot has no segment).
-	require.Equal(s.T(), commonpb.SegmentState_Growing, s.testServer.meta.GetSegment(ctx, 10).GetState())
-	ref, err := manager.Latest(ctx, 100)
-	require.NoError(s.T(), err)
-	require.NotNil(s.T(), ref)
-	segmentIDs := lo.FlatMap(ref.DataView().GetShards(), func(shard *viewpb.DataViewOfShard, _ int) []int64 {
-		return lo.FlatMap(shard.GetPartitions(), func(part *viewpb.DataViewOfPartition, _ int) []int64 {
-			return part.GetSegmentIds()
-		})
-	})
-	require.NotContains(s.T(), segmentIDs, int64(10))
-	ref.Deref()
-	updateMock.UnPatch()
-
-	// On retry the composite write succeeds: SegmentMeta is committed (and,
-	// under the default sort-compaction config, marked invisible) while the
-	// DataView snapshot is still published atomically - flush advances
-	// streaming_version regardless of the invisible marker.
-	resp, err = s.testServer.SaveBinlogPaths(ctx, req)
 	require.NoError(s.T(), err)
 	require.True(s.T(), merr.Ok(resp))
 	flushed := s.testServer.meta.GetSegment(ctx, 10)
 	require.Equal(s.T(), commonpb.SegmentState_Flushed, flushed.GetState())
 	require.True(s.T(), flushed.GetIsInvisible())
-	ref, err = manager.Latest(ctx, 100)
+	ref, err := manager.Latest(ctx, 100)
 	require.NoError(s.T(), err)
 	require.NotNil(s.T(), ref)
 	defer ref.Deref()
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
+	updateMock.UnPatch()
 
-	// A third identical flush (idempotent replay of an already-flushed
+	// A second identical flush (idempotent replay of an already-flushed
 	// segment): SegmentMeta short-circuits (updatePack == nil), but the
 	// DataView snapshot must still be persisted so the flush path never
 	// depends on an unrelated recompute for convergence.
