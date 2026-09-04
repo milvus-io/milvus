@@ -195,25 +195,25 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Per-file PK ranges are the default path for every autoID import. The
-	// coordinator allocates each file a range once and ships it on the ImportMsg, so
-	// the datanode derives primary keys from literal values instead of allocating
-	// them locally. On a replicating cluster that is what makes both clusters produce
-	// identical primary keys; elsewhere it costs a little ID space and keeps one
-	// well-exercised code path instead of a rarely-taken special case.
+	// Per-file ranges are the default path for every ordinary import (both autoID
+	// and explicit-PK): the coordinator allocates each file a range once and ships
+	// it on the ImportMsg. On autoID collections the range supplies the primary key;
+	// on explicit-PK collections it supplies the RowID (the PK itself comes from the
+	// file). This keeps the datanode's PK/RowID deterministic and, crucially, means
+	// the task-level IDRange is only consumed by binlog logIDs, so its size no longer
+	// has to scale with totalRows (which overflowed uint32 on large jobs).
 	//
 	// The local-allocator path in the datanode remains only for compatibility:
-	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
-	// autoID PKs, non-autoID collections never allocate, and jobs created before
-	// this version carry no range. A schema without a resolvable primary key is
-	// left to normal validation.
-	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+	// backup imports keep their embedded PK/RowID/ts (UnsetAutoID), L0 imports carry
+	// no PK/RowID, and jobs created before this version carry no range. A schema
+	// without a resolvable primary key is left to normal validation.
+	if _, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+		!importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
 		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
 		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
+			return merr.Wrap(err, "failed to assign per-file PK/RowID ranges")
 		}
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.

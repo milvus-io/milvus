@@ -52,10 +52,12 @@ type fileSizing struct {
 // assignPKRangesToFiles computes a per-file row upper bound, allocates one
 // contiguous primary-namespace id block sized Σ reservedIDs via allocN, then writes each
 // file its own contiguous pre_allocated_auto_ids slice in the given files order.
-// It is called on the PRIMARY at import broadcast for non-backup autoID imports;
-// the ranges then travel on the replicated ImportMsg so both clusters derive
-// identical primary keys. The layout is bound to each file object, so it survives
-// later file regrouping/reordering.
+// It is called on the PRIMARY at import broadcast for every non-backup/non-L0
+// import (autoID or explicit-PK): on autoID collections the range supplies the
+// primary key, on explicit-PK collections it supplies the RowID (the PK itself
+// comes from the file). The ranges then travel on the replicated ImportMsg so both
+// clusters derive identical PK/RowID. The layout is bound to each file object, so
+// it survives later file regrouping/reordering.
 func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile,
 	allocN func(int64) (int64, int64, error), clusterID uint64,
