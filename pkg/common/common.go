@@ -361,6 +361,11 @@ const (
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 	MaxFieldIDKey           = "max_field_id"
+	// MilvusTableTargetOnlyFieldIDsKey stores the field IDs permanently
+	// reserved for milvus-table target-only columns, such as virtual primary
+	// keys and generated function outputs. Source snapshot fields must never
+	// reuse these IDs, even after the target-only fields are dropped.
+	MilvusTableTargetOnlyFieldIDsKey = "milvus_table_target_only_field_ids"
 
 	// query mode
 	QueryModeKey       = "query_mode"

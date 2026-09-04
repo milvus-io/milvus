@@ -312,6 +312,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 	}
+	if err := s.validateExternalIndexSchemaVersion(ctx, schema, req); err != nil {
+		mlog.Warn(ctx, "external collection is not refreshed for index creation",
+			mlog.FieldFieldID(req.GetFieldID()), mlog.Err(err))
+		return merr.Status(err), nil
+	}
 	if indexID == 0 {
 		if indexID, err = s.allocator.AllocID(ctx); err != nil {
 			mlog.Warn(ctx, "failed to alloc indexID", mlog.Err(err))
@@ -363,6 +368,42 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+// validateExternalIndexSchemaVersion rejects external index creation until all
+// flushed or flushing segments have caught up with the current collection schema.
+func (s *Server) validateExternalIndexSchemaVersion(ctx context.Context, schema *schemapb.CollectionSchema, req *indexpb.CreateIndexRequest) error {
+	if !typeutil.IsExternalCollection(schema) {
+		return nil
+	}
+
+	segments := s.meta.SelectSegments(ctx,
+		WithCollection(req.GetCollectionID()),
+		SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return info.GetLevel() != datapb.SegmentLevel_L0 && isFlush(info)
+		}),
+	)
+	consistentSegments := 0
+	var inconsistentSegment *SegmentInfo
+	for _, segment := range segments {
+		if segment.GetSchemaVersion() == schema.GetVersion() {
+			consistentSegments++
+			continue
+		}
+		if inconsistentSegment == nil {
+			inconsistentSegment = segment
+		}
+	}
+	if inconsistentSegment != nil {
+		err := merr.WrapErrCollectionSchemaVersionNotReady(
+			schema.GetName(), consistentSegments, len(segments),
+		)
+		return merr.Wrapf(err,
+			"external collection segment %d schema version %d does not match collection schema version %d; run RefreshExternalCollection before creating index",
+			inconsistentSegment.GetID(), inconsistentSegment.GetSchemaVersion(), schema.GetVersion(),
+		)
+	}
+	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {

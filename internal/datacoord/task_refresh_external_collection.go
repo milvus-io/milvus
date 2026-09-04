@@ -216,6 +216,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	mt *meta,
 	collectionID int64,
 	baselineSegmentIDs []int64,
+	expectedSchemaVersion int32,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
 	logFields ...mlog.Field,
@@ -241,7 +242,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		if seg == nil {
 			continue
 		}
-		if err := validateExternalRefreshUpdatedSegment(seg, collectionID); err != nil {
+		if err := validateExternalRefreshUpdatedSegment(seg, collectionID, expectedSchemaVersion); err != nil {
 			return err
 		}
 		if keptSegmentMap[seg.GetID()] {
@@ -345,7 +346,6 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
 
-	// Build update operators
 	var operators []UpdateOperator
 	// Segments whose incoming result the collection already carries - a new
 	// segment written by an earlier apply, or a baseline patch already
@@ -353,6 +353,14 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	alreadyAppliedSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *updateSegmentPack) bool {
+		collection := modPack.meta.GetCollection(collectionID)
+		if collection == nil || collection.Schema == nil {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("collection %d not found in meta", collectionID))
+		}
+		if collection.Schema.GetVersion() != expectedSchemaVersion {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh"))
+		}
+
 		for segmentID := range baselineSegmentMap {
 			existing := modPack.meta.segments.GetSegment(segmentID)
 			incoming := upsertSegmentMap[segmentID]
@@ -376,6 +384,14 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			if kept {
 				if existing.GetState() == commonpb.SegmentState_Dropped {
 					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
+				}
+				if existing.GetSchemaVersion() > expectedSchemaVersion {
+					return modPack.fail(merr.WrapErrServiceInternalMsg(
+						"kept segment %d schema version %d is newer than refresh schema version %d",
+						segmentID,
+						existing.GetSchemaVersion(),
+						expectedSchemaVersion,
+					))
 				}
 				continue
 			}
@@ -420,6 +436,13 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				"new external refresh segment %d collides with existing metadata",
 				segmentID,
 			))
+		}
+
+		for segmentID := range keptSegmentMap {
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			if existing.GetSchemaVersion() < expectedSchemaVersion {
+				modPack.Get(segmentID).SchemaVersion = expectedSchemaVersion
+			}
 		}
 		return true
 	}
@@ -503,10 +526,19 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	return nil
 }
 
-func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collectionID int64) error {
+func validateExternalRefreshUpdatedSegment(
+	incoming *datapb.SegmentInfo,
+	collectionID int64,
+	expectedSchemaVersion int32,
+) error {
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
 		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
+	}
+	if incoming.GetSchemaVersion() != expectedSchemaVersion {
+		return merr.WrapErrServiceInternalMsg(
+			"refresh result segment %d schema version %d does not match expected schema version %d",
+			incoming.GetID(), incoming.GetSchemaVersion(), expectedSchemaVersion)
 	}
 	if incoming.GetManifestPath() == "" {
 		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
@@ -643,6 +675,7 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.Binlogs = incoming.GetBinlogs()
 	cloned.TextStatsLogs = nil
 	cloned.JsonKeyStats = nil
+	cloned.Bm25Statslogs = incoming.GetBm25Statslogs()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -771,16 +804,16 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		mlog.Int64("idEnd", idEnd),
 		mlog.Int64("count", idEnd-idBegin))
 
-	// Use the current collection schema as this task's snapshot. There is no
-	// job/task-level schema-version gate for the current additive-only refresh
-	// scope: if AddField races after this request is built, the task may finish
-	// with the older schema and skip the new field, and a later refresh will
-	// self-heal it through missing-column detection. Drop, rename, or type
-	// changes must reintroduce stronger schema coordination, such as a gate or
-	// lock, before they are supported.
+	// Use the task schema as the worker snapshot. If the collection schema has
+	// moved on before dispatch, fail this refresh task and let the caller retry
+	// with a fresh task built from the new schema.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+	if collInfo.Schema.GetVersion() != t.GetSchemaVersion() {
+		err = merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh")
 		return
 	}
 	if len(collInfo.Partitions) != 1 {

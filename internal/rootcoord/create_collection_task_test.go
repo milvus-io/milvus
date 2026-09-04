@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCreateCollectionTaskReleaseFileResources(t *testing.T) {
@@ -1766,10 +1767,13 @@ func TestNextMilvusTableTargetOnlyFieldID(t *testing.T) {
 			{FieldID: 0, Name: common.VirtualPKFieldName},
 			{FieldID: common.StartOfUserFieldID, Name: "target_pk"},
 		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.MaxFieldIDKey, Value: "110"},
+		},
 	}
 
 	next := nextMilvusTableTargetOnlyFieldID(source, target)
-	assert.Equal(t, int64(common.StartOfUserFieldID+4), next)
+	assert.Equal(t, int64(111), next)
 }
 
 func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
@@ -1821,6 +1825,113 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
 	assert.Equal(t, int64(106), schema.GetFields()[1].GetFieldID())
 	assert.Equal(t, int64(101), schema.GetFields()[2].GetFieldID())
 	assert.Equal(t, int64(105), schema.GetFields()[3].GetFieldID())
+}
+
+func TestPrepareSchemaPersistsMilvusTableTargetOnlyFieldIDs(t *testing.T) {
+	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+		Return(&datapb.SnapshotMetadata{
+			Collection: &datapb.CollectionDescription{
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+						{
+							FieldID:  101,
+							Name:     "vec",
+							DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "4"},
+							},
+						},
+					},
+				},
+			},
+		}, nil).Build()
+	defer mockReadMetadata.UnPatch()
+
+	schema := &schemapb.CollectionSchema{
+		Name:           "target",
+		ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+		Fields: []*schemapb.FieldSchema{
+			{Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "source_pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+			{
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	}
+	task := &createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{CollectionName: "target"},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+	}
+
+	require.NoError(t, task.prepareSchema(context.Background()))
+	properties := common.CloneKeyValuePairs(task.body.CollectionSchema.GetProperties()).ToMap()
+	require.Equal(t, "[102]", properties[common.MilvusTableTargetOnlyFieldIDsKey])
+}
+
+func TestPrepareSchemaPreservesMilvusTableTargetOnlyFieldIDTombstones(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "target",
+		ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 106, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 100, Name: "source_pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+			{
+				FieldID:       101,
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	}
+	invalidSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	task := &createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			CollectionName: "target",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: util.PreserveFieldIdsKey, Value: "true"},
+				{Key: common.MaxFieldIDKey, Value: "107"},
+				{Key: common.MilvusTableTargetOnlyFieldIDsKey, Value: "[106,107]"},
+			},
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+		preserveFieldID: true,
+	}
+
+	require.NoError(t, task.prepareSchema(context.Background()))
+	reserved, err := typeutil.GetMilvusTableTargetOnlyFieldIDs(task.body.CollectionSchema)
+	require.NoError(t, err)
+	require.True(t, reserved.Contain(106, 107))
+
+	invalidTask := &createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			CollectionName: "target",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: util.PreserveFieldIdsKey, Value: "true"},
+				{Key: common.MaxFieldIDKey, Value: "107"},
+				{Key: common.MilvusTableTargetOnlyFieldIDsKey, Value: "not-json"},
+			},
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: invalidSchema,
+		},
+		preserveFieldID: true,
+	}
+	require.ErrorIs(t, invalidTask.prepareSchema(context.Background()), merr.ErrDataIntegrity)
 }
 
 func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.T) {

@@ -601,15 +601,16 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 	}
 }
 
-// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
-// snapshot IDs so target-only fields cannot collide with source columns.
+// nextMilvusTableTargetOnlyFieldID returns the first field ID above the
+// historical high-water mark of every provided schema.
 func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
 	next := int64(StartOfUserFieldID)
 	for _, schema := range schemas {
-		for _, field := range schema.GetFields() {
-			if field.GetFieldID() >= next {
-				next = field.GetFieldID() + 1
-			}
+		if schema == nil {
+			continue
+		}
+		if candidate := maxAssignedFieldIDFromSchema(schema) + 1; candidate > next {
+			next = candidate
 		}
 	}
 	return next
@@ -628,6 +629,19 @@ func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string
 	return fields
 }
 
+func currentMilvusTableTargetOnlyFieldIDs(schema *schemapb.CollectionSchema) []int64 {
+	fieldIDs := typeutil.NewSet[int64]()
+	for _, field := range schema.GetFields() {
+		if field.GetName() == common.VirtualPKFieldName || typeutil.IsFunctionOutputField(schema, field) {
+			fieldIDs.Insert(field.GetFieldID())
+		}
+	}
+	for _, function := range schema.GetFunctions() {
+		fieldIDs.Insert(function.GetOutputFieldIds()...)
+	}
+	return fieldIDs.Collect()
+}
+
 // upsertCreateCollectionProperty inserts or updates one create-collection
 // property without disturbing the remaining request properties.
 func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, value string) []*commonpb.KeyValuePair {
@@ -641,6 +655,10 @@ func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, va
 }
 
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
+	// Snapshot alignment also enables preserveFieldID for a brand-new
+	// milvus-table collection. Capture the caller-provided mode first so only
+	// replay/restore paths retain already persisted target-only tombstones.
+	preserveMilvusTableTargetOnlyFieldIDs := t.preserveFieldID
 	if err := t.prepareMilvusTableSnapshotSchema(ctx); err != nil {
 		return err
 	}
@@ -731,6 +749,18 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 
 	// Set properties for persistent
 	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
+	if typeutil.NewStorageColumnResolver(t.body.CollectionSchema).IsMilvusTable() {
+		targetOnlyFieldIDs := currentMilvusTableTargetOnlyFieldIDs(t.body.CollectionSchema)
+		var err error
+		if preserveMilvusTableTargetOnlyFieldIDs {
+			err = typeutil.AddMilvusTableTargetOnlyFieldIDs(t.body.CollectionSchema, targetOnlyFieldIDs...)
+		} else {
+			err = typeutil.SetMilvusTableTargetOnlyFieldIDs(t.body.CollectionSchema, targetOnlyFieldIDs...)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil

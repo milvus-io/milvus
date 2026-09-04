@@ -2903,14 +2903,129 @@ func isExternalSystemOrVirtualField(name string) bool {
 	return IsExternalSystemOrVirtualField(name)
 }
 
+// GetMilvusTableTargetOnlyFieldIDs returns the durable field-ID reservation
+// set for milvus-table target-only columns. The property is internal metadata;
+// malformed values indicate corrupted persisted state rather than bad request
+// input.
+func GetMilvusTableTargetOnlyFieldIDs(schema *schemapb.CollectionSchema) (Set[int64], error) {
+	ids := NewSet[int64]()
+	if schema == nil {
+		return ids, nil
+	}
+
+	found := false
+	for _, property := range schema.GetProperties() {
+		if property.GetKey() != common.MilvusTableTargetOnlyFieldIDsKey {
+			continue
+		}
+		if found {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"schema contains duplicate property %q",
+				common.MilvusTableTargetOnlyFieldIDsKey,
+			)
+		}
+		found = true
+
+		var persistedIDs []int64
+		if err := json.Unmarshal([]byte(property.GetValue()), &persistedIDs); err != nil {
+			return nil, merr.WrapErrDataIntegrity(
+				err,
+				"failed to parse schema property %q",
+				common.MilvusTableTargetOnlyFieldIDsKey,
+			)
+		}
+		for _, fieldID := range persistedIDs {
+			if fieldID < common.StartOfUserFieldID {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"schema property %q contains invalid field ID %d",
+					common.MilvusTableTargetOnlyFieldIDsKey,
+					fieldID,
+				)
+			}
+			if ids.Contain(fieldID) {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"schema property %q contains duplicate field ID %d",
+					common.MilvusTableTargetOnlyFieldIDsKey,
+					fieldID,
+				)
+			}
+			ids.Insert(fieldID)
+		}
+	}
+	return ids, nil
+}
+
+// SetMilvusTableTargetOnlyFieldIDs replaces the durable target-only field-ID
+// reservation with a canonical sorted JSON array.
+func SetMilvusTableTargetOnlyFieldIDs(schema *schemapb.CollectionSchema, fieldIDs ...int64) error {
+	if schema == nil {
+		return merr.WrapErrServiceInternalMsg("cannot set milvus-table target-only field IDs on nil schema")
+	}
+
+	set := NewSet[int64]()
+	for _, fieldID := range fieldIDs {
+		if fieldID < common.StartOfUserFieldID {
+			return merr.WrapErrServiceInternalMsg("invalid milvus-table target-only field ID %d", fieldID)
+		}
+		set.Insert(fieldID)
+	}
+	canonicalIDs := set.Collect()
+	sort.Slice(canonicalIDs, func(i, j int) bool { return canonicalIDs[i] < canonicalIDs[j] })
+	var value strings.Builder
+	value.WriteByte('[')
+	for idx, fieldID := range canonicalIDs {
+		if idx > 0 {
+			value.WriteByte(',')
+		}
+		value.WriteString(strconv.FormatInt(fieldID, 10))
+	}
+	value.WriteByte(']')
+
+	properties := make([]*commonpb.KeyValuePair, 0, len(schema.GetProperties())+1)
+	written := false
+	for _, property := range schema.GetProperties() {
+		if property.GetKey() == common.MilvusTableTargetOnlyFieldIDsKey {
+			if !written {
+				properties = append(properties, &commonpb.KeyValuePair{
+					Key:   common.MilvusTableTargetOnlyFieldIDsKey,
+					Value: value.String(),
+				})
+				written = true
+			}
+			continue
+		}
+		properties = append(properties, property)
+	}
+	if !written {
+		properties = append(properties, &commonpb.KeyValuePair{
+			Key:   common.MilvusTableTargetOnlyFieldIDsKey,
+			Value: value.String(),
+		})
+	}
+	schema.Properties = properties
+	return nil
+}
+
+// AddMilvusTableTargetOnlyFieldIDs extends the durable reservation without
+// allowing an existing persisted ID to disappear.
+func AddMilvusTableTargetOnlyFieldIDs(schema *schemapb.CollectionSchema, fieldIDs ...int64) error {
+	reserved, err := GetMilvusTableTargetOnlyFieldIDs(schema)
+	if err != nil {
+		return err
+	}
+	reserved.Insert(fieldIDs...)
+	return SetMilvusTableTargetOnlyFieldIDs(schema, reserved.Collect()...)
+}
+
 // ValidateMilvusTableSchemaIdentity checks that every target milvus-table data
 // field maps to exactly one source snapshot data field through ExternalField.
+// Source fields not mapped by the target are allowed and remain unread.
 // Source function outputs are optional source columns: a target ordinary field
 // may map to them, but a target function output remains target-local and is
 // regenerated during refresh. Create-time validation may ignore field IDs so
 // RootCoord can copy them from the snapshot; refresh-time validation must
 // require field IDs to prevent reading source manifests through a mismatched
-// target schema.
+// target schema or reusing a target-only field ID for an unmapped source field.
 func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
 	if target == nil {
 		return merr.WrapErrParameterInvalidMsg("target schema is nil")
@@ -2924,12 +3039,21 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 	}
 
 	targetFields := milvusTableMappableUserFieldMap(target)
-	requiredSourceFields := milvusTableMappableUserFieldMap(source)
 	allSourceFields := milvusTableUserFieldMap(source)
-	targetFieldCount := milvusTableMappableUserFieldCount(target)
-	requiredSourceFieldCount := milvusTableMappableUserFieldCount(source)
-	if targetFieldCount < requiredSourceFieldCount || targetFieldCount > len(allSourceFields) {
-		return merr.WrapErrParameterInvalidMsg("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
+	if requireFieldID {
+		reservedTargetOnlyFieldIDs, err := GetMilvusTableTargetOnlyFieldIDs(target)
+		if err != nil {
+			return err
+		}
+		for sourceName, sourceField := range allSourceFields {
+			if reservedTargetOnlyFieldIDs.Contain(sourceField.GetFieldID()) {
+				return merr.WrapErrParameterInvalidMsg(
+					"source snapshot field %q uses field ID %d permanently reserved for a target-only field",
+					sourceName,
+					sourceField.GetFieldID(),
+				)
+			}
+		}
 	}
 	targetUsesVirtualPK := milvusTableUsesVirtualPrimaryKey(target)
 	mappedSourceFields := make(map[string]string, len(targetFields))
@@ -2952,9 +3076,22 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
-	for sourceName := range requiredSourceFields {
-		if _, ok := mappedSourceFields[sourceName]; !ok {
-			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is not mapped by target schema", sourceName)
+	if requireFieldID {
+		targetOnlyFields := make(map[int64]*schemapb.FieldSchema)
+		for _, field := range target.GetFields() {
+			if isExternalSystemOrVirtualField(field.GetName()) || IsFunctionOutputField(target, field) {
+				targetOnlyFields[field.GetFieldID()] = field
+			}
+		}
+		for sourceName, sourceField := range allSourceFields {
+			if _, mapped := mappedSourceFields[sourceName]; mapped {
+				continue
+			}
+			if targetField, conflict := targetOnlyFields[sourceField.GetFieldID()]; conflict {
+				return merr.WrapErrParameterInvalidMsg(
+					"unmapped source snapshot field %q uses field ID %d already assigned to target-only field %q",
+					sourceName, sourceField.GetFieldID(), targetField.GetName())
+			}
 		}
 	}
 	return nil
@@ -3153,17 +3290,6 @@ func milvusTableMappableUserFieldMap(schema *schemapb.CollectionSchema) map[stri
 	return fields
 }
 
-func milvusTableMappableUserFieldCount(schema *schemapb.CollectionSchema) int {
-	count := 0
-	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) || IsFunctionOutputField(schema, field) {
-			continue
-		}
-		count++
-	}
-	return count
-}
-
 func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -3177,9 +3303,17 @@ func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, requ
 	if requireFieldID && target.GetFieldID() != source.GetFieldID() {
 		return merr.WrapErrParameterInvalidMsg("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
 	}
+	if source.GetNullable() && !target.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("nullable mismatch: target field cannot be non-nullable when the source field is nullable")
+	}
 	sourcePKAsDataField := targetUsesVirtualPK && source.GetIsPrimaryKey() && !target.GetIsPrimaryKey()
 	targetComparable := comparableMilvusTableField(target, requireFieldID, sourcePKAsDataField, false)
 	sourceComparable := comparableMilvusTableField(source, requireFieldID, sourcePKAsDataField, sourceFunctionOutputAsDataField)
+	// External target fields are allowed to widen a non-nullable source field to
+	// nullable. Nullable-to-non-nullable narrowing is rejected above; all other
+	// field attributes remain strict identity checks.
+	targetComparable.Nullable = false
+	sourceComparable.Nullable = false
 	if !proto.Equal(targetComparable, sourceComparable) {
 		return merr.WrapErrParameterInvalidMsg("definition mismatch between target and source snapshot schema")
 	}

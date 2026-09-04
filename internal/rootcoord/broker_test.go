@@ -23,17 +23,29 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type captureAlteredCollectionMixCoord struct {
+	types.MixCoord
+	request *datapb.AlterCollectionRequest
+}
+
+func (m *captureAlteredCollectionMixCoord) BroadcastAlteredCollection(_ context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
+	m.request = req
+	return merr.Success(), nil
+}
 
 func TestServerBroker_ReleaseCollection(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
@@ -241,6 +253,23 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, 1)
 		assert.NoError(t, err)
+	})
+
+	t.Run("partition ids contain no zero-value prefix", func(t *testing.T) {
+		meta := newMockMetaTable()
+		meta.GetCollectionByIDFunc = func(context.Context, UniqueID, Timestamp, bool) (*model.Collection, error) {
+			return collMeta, nil
+		}
+		meta.DescribeDatabaseFunc = func(context.Context, string) (*model.Database, error) {
+			return &model.Database{ID: 10}, nil
+		}
+		mixCoord := &captureAlteredCollectionMixCoord{}
+		c := newTestCore(withMeta(meta), withMixCoord(mixCoord))
+
+		err := newServerBroker(c).BroadcastAlteredCollection(context.Background(), collMeta.CollectionID)
+		require.NoError(t, err)
+		require.NotNil(t, mixCoord.request)
+		assert.Equal(t, []int64{2}, mixCoord.request.GetPartitionIDs())
 	})
 }
 
