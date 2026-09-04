@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -32,6 +33,73 @@ import (
 )
 
 type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
+
+// VersionGateSwitcher describes the "version-gated auto-switch" semantics of a
+// configuration item:
+//   - when the user configures the item with EnableAutoSwitchValue (the
+//     sentinel), AutoSwitch is triggered;
+//   - once the cluster-wide confirmed version reaches GateVersion and the
+//     SwitchDelay stability window has elapsed since the confirmation, the
+//     one-shot confirmator flips the config-center value to TargetValue;
+//   - before that the item resolves to PreSwitchValue (the value used before
+//     the switch, i.e. the pre-change behavior) on every read path.
+//
+// DefaultValue is allowed to equal EnableAutoSwitchValue, which means the item
+// is in AutoSwitch mode by default (no explicit user configuration needed);
+// the "not yet switched" state is expressed by resolving reads to
+// PreSwitchValue instead of leaking the sentinel value to callers.
+//
+// The gate is applied at the value-resolution layer (getWithRaw), so GetValue
+// and all GetAs* accessors uniformly return the effective value. The raw
+// configured value is left untouched for callers that need to detect the
+// sentinel (e.g. the version gate confirmator).
+//
+// nil means no version gating (default, backward compatible).
+type VersionGateSwitcher struct {
+	EnableAutoSwitchValue string        // sentinel value: configuring this value triggers AutoSwitch
+	PreSwitchValue        string        // effective value while the gate is not yet activated (pre-change behavior)
+	GateVersion           string        // minimum cluster version (semver) required to switch
+	TargetValue           string        // effective value after AutoSwitch takes effect
+	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+
+	// localSatisfied is set by StartVersionGateSwitcher for embedded-etcd
+	// (single-process) deployments: the local process is the entire cluster, so
+	// when the local version is already >= GateVersion there is nothing to
+	// coordinate and the gate resolves directly to TargetValue. It is a pure
+	// paramtable-internal hint, never part of the configurable contract.
+	localSatisfied bool
+}
+
+// Validate checks the switcher's field contract, panicking on a missing or
+// malformed field. A version-gated item must declare its full semantics:
+//   - EnableAutoSwitchValue: the sentinel that triggers AutoSwitch;
+//   - PreSwitchValue:        the pre-change behavior — without it the sentinel
+//     would leak to callers, so an empty value is a coding error;
+//   - GateVersion:           a valid semver (the confirmator parses it);
+//   - TargetValue:           the post-switch value.
+//
+// Validate is called from ParamItem.Init, so a misconfigured gated item fails
+// fast at startup instead of silently degrading at runtime.
+func (sw *VersionGateSwitcher) Validate() {
+	if sw.EnableAutoSwitchValue == "" {
+		panic("version gate: EnableAutoSwitchValue must not be empty")
+	}
+	if sw.PreSwitchValue == "" {
+		panic("version gate: PreSwitchValue must not be empty (the pre-change behavior is required)")
+	}
+	if sw.GateVersion == "" {
+		panic("version gate: GateVersion must not be empty")
+	}
+	if _, err := semver.Parse(sw.GateVersion); err != nil {
+		panic(fmt.Sprintf("version gate: invalid GateVersion %q: %v", sw.GateVersion, err))
+	}
+	if sw.TargetValue == "" {
+		panic("version gate: TargetValue must not be empty")
+	}
+	if sw.SwitchDelay < 0 {
+		panic("version gate: SwitchDelay must not be negative")
+	}
+}
 
 type ParamItem struct {
 	Key          string // which should be named as "A.B.C"
@@ -46,6 +114,10 @@ type ParamItem struct {
 	Forbidden bool
 	Immutable bool
 
+	// VersionGateSwitcher attaches version-gated auto-switch semantics to this
+	// item; nil means no version gating (backward compatible).
+	VersionGateSwitcher *VersionGateSwitcher
+
 	manager *config.Manager
 
 	// for unittest.
@@ -57,6 +129,11 @@ type ParamItem struct {
 
 func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
+	if pi.VersionGateSwitcher != nil {
+		// A version-gated item must declare its full semantics; a
+		// misconfigured switcher is a coding error and must fail fast.
+		pi.VersionGateSwitcher.Validate()
+	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
@@ -126,7 +203,7 @@ func (pi *ParamItem) get() (string, error) {
 func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	// For unittest.
 	if s := pi.tempValue.Load(); s != nil {
-		return *s, *s, nil
+		return pi.gateValue(*s), *s, nil
 	}
 
 	if pi.manager == nil {
@@ -154,7 +231,7 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		effectiveRaw = pi.DefaultValue
 		raw = pi.DefaultValue
 	}
-	result = effectiveRaw
+	result = pi.gateValue(effectiveRaw)
 	if pi.Formatter != nil {
 		result = pi.Formatter(result)
 	}
@@ -162,6 +239,26 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		panic(fmt.Sprintf("%s is empty", pi.Key))
 	}
 	return result, raw, err
+}
+
+// gateValue applies the version-gated auto-switch semantics to a configured
+// value: when the item carries a VersionGateSwitcher and the value is the
+// sentinel (EnableAutoSwitchValue), the effective value is TargetValue when
+// the gate is locally satisfied (embedded-etcd single-process deployments
+// where the local version is already >= GateVersion, see localSatisfied), and
+// PreSwitchValue otherwise, until the one-shot confirmator flips the config
+// center value to TargetValue. Every read path (GetValue and all GetAs*)
+// resolves through this, so the gate is uniformly visible regardless of the
+// caller's accessor type. The raw value is unaffected: callers that need to
+// detect the sentinel (e.g. the version gate confirmator) still see it.
+func (pi *ParamItem) gateValue(v string) string {
+	if pi.VersionGateSwitcher == nil || v != pi.VersionGateSwitcher.EnableAutoSwitchValue {
+		return v
+	}
+	if pi.VersionGateSwitcher.localSatisfied {
+		return pi.VersionGateSwitcher.TargetValue
+	}
+	return pi.VersionGateSwitcher.PreSwitchValue
 }
 
 // SetTempValue set the value for this ParamItem,

@@ -27,9 +27,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
@@ -80,6 +82,11 @@ type ComponentParam struct {
 	ServiceParam
 	once      sync.Once
 	baseTable *BaseTable
+
+	// versionGates drives the version-gated config items (e.g. write-before
+	// function materialization). It is created and started by the MixCoord
+	// role after the role has been set; see StartVersionGateSwitcher.
+	versionGates *confirmator
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -186,6 +193,83 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
+}
+
+// versionGateItems returns every version-gated config item of the param table.
+// Gate registration follows paramtable initialization: a single confirmator
+// (a paramtable-level capability) drives all of them together.
+func (p *ComponentParam) versionGateItems() []*ParamItem {
+	return []*ParamItem{
+		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+	}
+}
+
+// startVersionGateSwitcherOnce guards the one-shot global version-gate
+// switcher: only the MixCoord role calls StartVersionGateSwitcher, but the
+// once keeps the driving logic idempotent however it is reached.
+var startVersionGateSwitcherOnce sync.Once
+
+// StartVersionGateSwitcher drives every version-gated config item of the
+// process, exactly once. It is only called by the MixCoord role (the single
+// coordinator per cluster) after the role has been set; other roles observe
+// the flipped config value through the regular config refresh. Embedded-etcd
+// deployments are single-process (service_param.go enforces "embedded etcd
+// can not be used under distributed mode"): the local process is the whole
+// cluster, so when the local version already satisfies a gate there is
+// nothing to coordinate across nodes — resolve the gate directly and skip the
+// confirmator (there is no usable etcd client anyway). Otherwise the cluster
+// confirmator is created and started; it runs in the background and stops
+// itself once every gate is resolved. It is a no-op when remote config is
+// skipped (e.g. tests) or there is no usable etcd.
+func StartVersionGateSwitcher() {
+	startVersionGateSwitcherOnce.Do(func() {
+		Get().startVersionGates()
+	})
+}
+
+// startVersionGates implements StartVersionGateSwitcher on a param table.
+func (p *ComponentParam) startVersionGates() {
+	if p == nil || p.baseTable == nil || p.baseTable.config.skipRemote {
+		return
+	}
+	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() {
+		for _, item := range p.versionGateItems() {
+			if item == nil || item.VersionGateSwitcher == nil {
+				continue
+			}
+			gv, err := semver.Parse(item.VersionGateSwitcher.GateVersion)
+			if err != nil {
+				// Validate() at Init already rejected malformed versions; on any
+				// residual parse issue keep the gate unresolved (PreSwitchValue).
+				continue
+			}
+			if common.Version.GE(gv) {
+				item.VersionGateSwitcher.localSatisfied = true
+				// GetAs* accessors short-circuit on the value cache, which is
+				// keyed by config key only and is blind to the runtime
+				// localSatisfied hint, so evict the cached entry to make the
+				// resolved value observable immediately.
+				p.baseTable.mgr.EvictCachedValue(item.Key)
+				mlog.Info(context.TODO(), "version gate: embedded-etcd deployment, local version satisfies the gate",
+					mlog.String("key", item.Key), mlog.String("localVersion", common.Version.String()),
+					mlog.String("gateVersion", item.VersionGateSwitcher.GateVersion))
+			}
+		}
+		return
+	}
+	// The confirmator shares the etcd client created for the config etcd
+	// source: when remote config is disabled or there is no usable etcd, no
+	// client exists and there is nothing to confirm against.
+	if p.baseTable.etcdClient == nil {
+		return
+	}
+	vg, err := recoverConfirmator(p.baseTable.etcdClient,
+		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
+	if err != nil {
+		mlog.Warn(context.TODO(), "recover version gate confirmator failed", mlog.Err(err))
+		return
+	}
+	p.versionGates = vg
 }
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
