@@ -5315,6 +5315,65 @@ TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
     EXPECT_EQ(current->runtime->pk_index_slot, old_pk_index_slot);
 }
 
+TEST(SealedSegmentCowState, ReplaceProxyColumnClearsStaleSkipMetrics) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto payload = schema->AddDebugField("payload", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto old_dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    ASSERT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
+              SkipIndex::MetricsSource::LoadedPayload);
+
+    auto replacement_dataset = DataGen(schema, 4, /*seed=*/271828);
+    auto replacement_segment =
+        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(replacement_segment.get());
+    ASSERT_NE(replacement_sealed, nullptr);
+    auto replacement_state =
+        replacement_sealed->TestGetPublishedStateSnapshot();
+    auto replacement_column = replacement_state->runtime->fields.at(payload);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = current->schema;
+    initial_delta.load_info = current->load_info;
+    initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = current->schema;
+    final_delta.load_info = current->load_info;
+    final_delta.commit_ts = current->commit_ts;
+
+    sealed->TestStageLoadFieldDataThenPublish(
+        payload,
+        replacement_column,
+        replacement_dataset.raw_->num_rows(),
+        DataType::INT64,
+        schema,
+        runtime,
+        staged.get(),
+        current,
+        final_delta,
+        /*is_proxy_column=*/true,
+        [&] {
+            EXPECT_EQ(runtime->skip_index->GetMetricsSource(payload),
+                      SkipIndex::MetricsSource::None);
+            EXPECT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
+                      SkipIndex::MetricsSource::LoadedPayload);
+        });
+
+    EXPECT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
+              SkipIndex::MetricsSource::None);
+}
+
 TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

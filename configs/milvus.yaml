@@ -616,6 +616,7 @@ queryNode:
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
+    scanCursorOwnsPin: false # Use cursor-owned rather than result-owned Cell pins for scalar Scan
     tieredStorage:
       warmup:
         # options: sync, async, disable.

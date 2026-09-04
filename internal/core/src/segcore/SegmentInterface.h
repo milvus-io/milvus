@@ -426,6 +426,17 @@ class SegmentInternalInterface : public SegmentInterface {
                                  int64_t count,
                                  TargetBitmapView valid_result) const = 0;
 
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const {
+        return nullptr;
+    }
+
+    virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
+                      std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const {
+        return {GetChunkedColumn(field_id), GetSkipIndex()};
+    }
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,

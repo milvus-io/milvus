@@ -154,8 +154,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res) {
-        // data == nullptr means the chunk was skipped upstream; only the
-        // bitmap_input cursor needs to advance.
+        // A null data pointer means evaluation was suppressed because the
+        // payload was skipped, the candidate was inactive, or an index
+        // reverse-lookup miss already applied its invalid result. Ordinary
+        // nullable Scan/Take rows carry a placeholder plus real validity.
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -189,8 +191,12 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         input,
+                                                         res,
+                                                         valid_res,
+                                                         bitmap_input);
     } else {
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
@@ -247,8 +253,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
         TargetBitmapView valid_res) {
         // data == nullptr means the helper either pruned an inactive candidate
         // before reverse lookup (leaving false/valid untouched), or found an
-        // active NULL row (after writing false/invalid). In both cases the
-        // reader already owns the result.
+        // active missing value (after writing false/invalid). In both cases
+        // the reader already owns the result.
         if (data == nullptr) {
             return;
         }
@@ -345,8 +351,9 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-        // data == nullptr means the chunk was skipped upstream; only the
-        // bitmap_input cursor needs to advance.
+        // A null data pointer means evaluation was suppressed because the
+        // payload was skipped or the candidate was inactive. Ordinary
+        // nullable Scan/Take rows carry a placeholder plus real validity.
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -402,12 +409,14 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer);
+        processed_size =
+            ProcessDataByOffsetsWithMask<milvus::Json>(execute_sub_batch,
+                                                       std::nullptr_t{},
+                                                       input,
+                                                       res,
+                                                       valid_res,
+                                                       bitmap_input,
+                                                       pointer);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
