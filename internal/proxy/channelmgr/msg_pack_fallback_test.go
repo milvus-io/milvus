@@ -126,6 +126,66 @@ func TestGenInsertMsgsByPartitionFallbackSingleIndexPass(t *testing.T) {
 	}
 }
 
+func TestGenInsertMsgsByPartitionMixedSelectionKeepsContiguousBatchViews(t *testing.T) {
+	src := newNullableVectorInsertMsgForPackTest(10, 2, 1)
+	offsets := []int{1, 2, 4, 5}
+	idxComputer := typeutil.NewFieldDataIdxComputer(src.FieldsData)
+	rowSizes := make([]int, len(offsets))
+	for i, offset := range offsets {
+		var err error
+		rowSizes[i], err = typeutil.EstimateEntitySize(
+			src.FieldsData, offset, idxComputer.Compute(int64(offset))...,
+		)
+		require.NoError(t, err)
+	}
+	firstPairSize := rowSizes[0] + rowSizes[1]
+	secondPairSize := rowSizes[2] + rowSizes[3]
+	threshold := max(firstPairSize, secondPairSize) + 1
+	require.GreaterOrEqual(t, firstPairSize+rowSizes[2], threshold)
+
+	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
+	require.NoError(t, paramtable.Get().Save(key, strconv.Itoa(threshold)))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+
+	msgs, err := GenInsertMsgsByPartition(
+		context.Background(), 2, 1, "test_partition", offsets,
+		"test_channel", src, message.WALNamePulsar,
+	)
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+
+	sourceLongs := src.FieldsData[0].GetScalars().GetLongData().GetData()
+	for i, rowStart := range []int{1, 4} {
+		got := msgs[i].(*msgstream.InsertMsg)
+		gotLongs := got.FieldsData[0].GetScalars().GetLongData().GetData()
+		require.Equal(t, uint64(2), got.NumRows)
+		assert.Equal(t, sourceLongs[rowStart:rowStart+2], gotLongs)
+		assert.True(t, &sourceLongs[rowStart] == &gotLongs[0])
+		assert.True(t, &src.HashValues[rowStart] == &got.HashValues[0])
+	}
+}
+
+func TestGenInsertMsgsByPartitionGapWithinBatchCopiesContiguousPrefix(t *testing.T) {
+	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
+	require.NoError(t, paramtable.Get().Save(key, "1024"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+
+	src := newNullableVectorInsertMsgForPackTest(10, 2, 1)
+	offsets := []int{1, 2, 4, 5}
+	msgs, err := GenInsertMsgsByPartition(
+		context.Background(), 2, 1, "test_partition", offsets,
+		"test_channel", src, message.WALNamePulsar,
+	)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	got := msgs[0].(*msgstream.InsertMsg)
+	sourceLongs := src.FieldsData[0].GetScalars().GetLongData().GetData()
+	gotLongs := got.FieldsData[0].GetScalars().GetLongData().GetData()
+	assert.Equal(t, []int64{1, 2, 4, 5}, gotLongs)
+	assert.False(t, &sourceLongs[1] == &gotLongs[0])
+}
+
 func TestGenInsertMsgsByPartitionFallbackNullableSparseVectorSizes(t *testing.T) {
 	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
 	require.NoError(t, paramtable.Get().Save(key, "73"))
