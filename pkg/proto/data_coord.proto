@@ -479,6 +479,13 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+
+  // manifest_has_index records that this segment's manifest has carried at
+  // least one index entry. It is sticky and written atomically with the first
+  // such manifest pointer, so recovery and GC can find manifest-resident
+  // indexes independently of the current write-mode switch. A stale true only
+  // costs one manifest read; clearing it could hide live index metadata.
+  bool manifest_has_index = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1232,6 +1239,11 @@ message CopySegmentSource {
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
 
+  // Sticky source-segment marker. Presence matters: false proves that the
+  // copied manifest has no index entries, while absence means an older
+  // snapshot whose manifest must still be inspected conservatively.
+  optional bool manifest_has_index = 15;
+
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
 }
@@ -1242,6 +1254,12 @@ message CopySegmentTarget {
   int64 segment_id = 3;     // target segment ID
   map<int64, int64> new_build_ids = 4;  // srcBuildID -> newBuildID mapping for target segment indexes
   string target_root_path = 5; // target root path for external snapshot restore
+  // Target-collection index identity, keyed by index name. RestoreIndexes()
+  // allocates fresh index IDs for the restored collection, so the worker cannot
+  // derive them from the source snapshot; index name is the only key preserved
+  // across the snapshot boundary (field ID cannot be used because one JSON field
+  // may carry several indexes on different paths).
+  repeated CopySegmentTargetIndex target_indexes = 6;
 }
 
 message CopySegmentRequest {
@@ -1317,6 +1335,12 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
+
+  // Present on workers that rewrote (or proved empty) the copied manifest's
+  // index section. The build IDs are the entries actually published there.
+  // Absence identifies an older worker and requires DataCoord read-back.
+  optional bool manifest_index_rewritten = 11;
+  repeated int64 manifest_index_build_ids = 12;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1336,6 +1360,10 @@ message CopySegmentTask {
   repeated CopySegmentIDMapping id_mappings = 9;
   uint64 created_ts = 10;   // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+
+  // Placement selected before dispatch. Presence distinguishes an explicit
+  // false value from an older persisted task that predates this field.
+  optional bool index_write_to_manifest = 12;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1810,6 +1838,9 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // Sticky source marker copied from SegmentInfo. Presence lets restore skip
+  // manifest index reads when false; old snapshots leave it absent.
+  optional bool manifest_has_index = 19;
 }
 
 message CollectionDescription {
@@ -2097,4 +2128,18 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// CopySegmentTargetIndex carries the target-collection metadata a copied index
+// artifact must be recorded under. The worker owns the physical facts (paths,
+// build ID, sizes); DataCoord owns the identity and index definition below.
+// Keep this message at the end so adding it does not renumber descriptors for
+// the many existing messages below CopySegmentTarget.
+message CopySegmentTargetIndex {
+  string index_name = 1;               // stable key across the snapshot boundary
+  int64 index_id = 2;                  // target collection's index ID
+  int64 field_id = 3;                  // target collection's field ID
+  string column_name = 4;              // target collection's schema field name
+  string index_type = 5;
+  map<string, string> properties = 6;  // type params merged with index params
 }

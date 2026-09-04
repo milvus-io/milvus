@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,11 +28,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -62,6 +65,14 @@ func newCopySegmentCopierMock(
 func mockNoManifestLobFiles(t *testing.T) {
 	t.Helper()
 	mock := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
+	t.Cleanup(func() { mock.UnPatch() })
+}
+
+// mockCopiedManifestIndexEntries stubs the conservative enumeration performed
+// when the source snapshot does not prove its manifest index section empty.
+func mockCopiedManifestIndexEntries(t *testing.T, entries []packed.ManifestIndexInfo) {
+	t.Helper()
+	mock := mockey.Mock(packed.GetManifestIndexInfos).Return(entries, nil).Build()
 	t.Cleanup(func() { mock.UnPatch() })
 }
 
@@ -1103,6 +1114,7 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 			context.Background(),
 			cm,
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			newCopySegmentCopierMock(t, nil),
 			"test-bucket",
 			"test-bucket",
@@ -1125,6 +1137,7 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 		result, copiedFiles, err := CopySegmentAndIndexFiles(
 			context.Background(),
 			cm,
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
 				return errors.New("copy failed")
@@ -1399,6 +1412,7 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			context.Background(),
 			cm,
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			newCopySegmentCopierMock(t, nil),
 			"test-bucket",
 			"test-bucket",
@@ -1449,6 +1463,7 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			context.Background(),
 			cm,
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			copier,
 			"test-bucket",
 			"test-bucket",
@@ -1497,6 +1512,7 @@ func TestCopySegmentAndIndexFiles_NormalizesProviderSourceURI(t *testing.T) {
 		context.Background(),
 		&struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{BucketName: "source-bucket"},
+		&indexpb.StorageConfig{BucketName: "target-bucket"},
 		copier,
 		"source-bucket",
 		"target-bucket",
@@ -1911,13 +1927,13 @@ func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
 		context.Background(),
 		mockCM,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		newCopySegmentCopierMock(t, nil),
 		"test-bucket",
 		"test-bucket",
 		source,
 		target,
-		nil,
-	)
+		nil)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Nil(t, copiedFiles)
@@ -2277,13 +2293,13 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 		context.Background(),
 		&struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		copier,
 		"test-bucket",
 		"test-bucket",
 		source,
 		target,
-		nil,
-	)
+		nil)
 
 	require.NoError(t, err)
 	expectedManifest := "files/insert_log/444/555/666/_metadata/manifest.json"
@@ -2296,6 +2312,7 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 
 func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 	mockNoManifestLobFiles(t)
+	mockCopiedManifestIndexEntries(t, nil)
 
 	source := &datapb.CopySegmentSource{
 		CollectionId:         111,
@@ -2336,6 +2353,7 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 	result, copiedFiles, err := CopySegmentAndIndexFiles(
 		context.Background(),
 		cm,
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		copier,
 		"test-bucket",
@@ -2742,6 +2760,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 
 	t.Run("successful copy with manifest", func(t *testing.T) {
 		mockNoManifestLobFiles(t)
+		mockCopiedManifestIndexEntries(t, nil)
 
 		mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
 			return []string{
@@ -2762,6 +2781,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		result, copiedFiles, err := CopySegmentAndIndexFiles(
 			context.Background(),
 			cm,
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			copier,
 			"test-bucket",
@@ -2810,6 +2830,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			context.Background(),
 			cm,
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
 				return errors.New("storage unavailable")
 			}),
@@ -2853,6 +2874,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			context.Background(),
 			cm,
 			&indexpb.StorageConfig{BucketName: "test-bucket"},
+			&indexpb.StorageConfig{BucketName: "test-bucket"},
 			newCopySegmentCopierMock(t, nil),
 			"test-bucket",
 			"test-bucket",
@@ -2871,16 +2893,24 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 // When InsertBinlogs in pb is empty but manifest has files, Step 3.5 has nothing to add (no logical paths).
 func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 	mockNoManifestLobFiles(t)
+	manifestIndexReads := 0
+	manifestIndexMock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestIndexReads++
+			return nil, nil
+		}).Build()
+	defer manifestIndexMock.UnPatch()
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
 
 	source := &datapb.CopySegmentSource{
-		CollectionId:   111,
-		PartitionId:    222,
-		SegmentId:      333,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   manifestPath,
-		InsertBinlogs:  []*datapb.FieldBinlog{},
+		CollectionId:     111,
+		PartitionId:      222,
+		SegmentId:        333,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     manifestPath,
+		ManifestHasIndex: proto.Bool(false),
+		InsertBinlogs:    []*datapb.FieldBinlog{},
 	}
 
 	target := &datapb.CopySegmentTarget{
@@ -2897,6 +2927,7 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 		context.Background(),
 		cm,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		newCopySegmentCopierMock(t, nil),
 		"test-bucket",
 		"test-bucket",
@@ -2910,6 +2941,10 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 	assert.Equal(t, int64(0), result.ImportedRows)
 	assert.Len(t, copiedFiles, 1)
 	assert.NotEmpty(t, result.ManifestPath)
+	assert.NotNil(t, result.ManifestIndexRewritten)
+	assert.True(t, result.GetManifestIndexRewritten())
+	assert.Empty(t, result.GetManifestIndexBuildIds())
+	assert.Zero(t, manifestIndexReads)
 }
 
 // TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged verifies that StorageV1 segments
@@ -2940,6 +2975,7 @@ func TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged(t *testing.T) {
 	result, copiedFiles, err := CopySegmentAndIndexFiles(
 		context.Background(),
 		cm,
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		newCopySegmentCopierMock(t, nil),
 		"test-bucket",
@@ -3006,6 +3042,7 @@ func TestListAllFiles(t *testing.T) {
 // basePath/_stats/) and passes metadata as placeholders.
 func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 	mockNoManifestLobFiles(t)
+	mockCopiedManifestIndexEntries(t, nil)
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
 
@@ -3069,6 +3106,7 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 		context.Background(),
 		cm,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		newCopySegmentCopierMock(t, nil),
 		"test-bucket",
 		"test-bucket",
@@ -3102,4 +3140,439 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 
 	// Verify _stats files are included in the copy (from listAllFiles, part of InsertBinlogs)
 	assert.True(t, len(copiedFiles) >= 6, "should copy all files including _stats/")
+}
+
+func TestBuildTargetManifestIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 100,
+		PartitionId:  200,
+		SegmentId:    300,
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{
+				IndexName:  "vec_idx",
+				IndexId:    777,
+				FieldId:    101,
+				ColumnName: "vector",
+				IndexType:  "HNSW",
+				Properties: map[string]string{"M": "16"},
+			},
+		},
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "vec_idx",
+			BuildId:        888,
+			Version:        2,
+			IndexSize:      1024,
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a", "files/index/100/200/300/888/2/b"},
+		},
+	}
+
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
+	assert.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	entry := entries[0]
+	// Identity comes from the target definition DataCoord shipped, never from
+	// the source snapshot: RestoreIndexes() reallocates index IDs.
+	assert.Equal(t, int64(777), entry.IndexID)
+	assert.Equal(t, int64(101), entry.FieldID)
+	assert.Equal(t, "vector", entry.ColumnName)
+	assert.Equal(t, "HNSW", entry.IndexType)
+	// Physical facts come from the artifacts this copy wrote.
+	assert.Equal(t, int64(888), entry.BuildID)
+	assert.Equal(t, int64(2), entry.IndexVersion)
+	assert.Equal(t, int64(4096), entry.NumRows)
+	assert.Equal(t, []string{"a", "b"}, entry.IndexFileKeys)
+	assert.Equal(t, "16", entry.Properties["M"])
+	assert.Equal(t, "HNSW", entry.Properties[common.IndexTypeKey])
+
+	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/index/100/200/300/888/2")
+	assert.NoError(t, err)
+	assert.Equal(t, expectedPath, entry.Path)
+	// The stored path walks out of the segment base, which is exactly why an
+	// inherited entry cannot be re-based and must be re-derived here.
+	assert.True(t, strings.HasPrefix(entry.Path, ".."), "index path should escape the segment base, got %q", entry.Path)
+}
+
+func TestBuildTargetManifestIndexes_NoTargetDefinition(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{SegmentId: 300}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "dropped_idx",
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+		},
+	}
+
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
+	assert.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+// A finished SegmentIndex whose record names no file keys - a build too small
+// to produce an artifact, or an index a snapshot captured without its files -
+// still reaches the worker as an IndexFilePathInfo, because uncompressIndexFiles
+// emits one per finished record regardless. It carries nothing a manifest can
+// point at, and the rest of the copy path has always tolerated it, so it must be
+// skipped here rather than fail the whole restore.
+func TestBuildTargetManifestIndexes_NoArtifactPathIsSkippedNotFatal(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		SegmentId: 300,
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "empty_idx", IndexId: 10, FieldId: 101, ColumnName: "vec", IndexType: "HNSW"},
+			{IndexName: "real_idx", IndexId: 11, FieldId: 102, ColumnName: "vec2", IndexType: "HNSW"},
+		},
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {IndexName: "empty_idx", BuildId: 888},
+		889: {
+			IndexName:      "real_idx",
+			BuildId:        889,
+			IndexFilePaths: []string{"files/index/100/200/300/889/2/a"},
+		},
+	}
+
+	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
+	assert.NoError(t, err)
+	// The empty one is dropped; the one with a real artifact still lands, so the
+	// skip cannot silently swallow a sibling index in the same segment.
+	assert.Len(t, entries, 1)
+	assert.Equal(t, "real_idx", entries[0].IndexName)
+}
+
+func TestSplitIndexArtifactPaths(t *testing.T) {
+	dir, keys, err := splitIndexArtifactPaths([]string{"a/b/c/1", "a/b/c/2"})
+	assert.NoError(t, err)
+	assert.Equal(t, "a/b/c", dir)
+	assert.Equal(t, []string{"1", "2"}, keys)
+
+	_, _, err = splitIndexArtifactPaths(nil)
+	assert.Error(t, err)
+
+	_, _, err = splitIndexArtifactPaths([]string{"bare"})
+	assert.Error(t, err)
+
+	// A manifest entry stores one directory plus file names, so artifacts split
+	// across directories cannot be represented and must be rejected.
+	_, _, err = splitIndexArtifactPaths([]string{"a/b/1", "a/c/2"})
+	assert.Error(t, err)
+
+	// The DataCoord-facing result shortens index paths to their base names,
+	// which no longer identify a directory. The manifest entry must therefore be
+	// derived before that shortening; this guards the ordering.
+	_, _, err = splitIndexArtifactPaths(shortenIndexFilePaths([]string{"a/b/c/1", "a/b/c/2"}))
+	assert.Error(t, err)
+}
+
+func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	// The copied manifest genuinely holds no index entries and nothing was
+	// copied: the pointer is published untouched, without opening a manifest
+	// transaction or reading the manifest. The sticky snapshot marker proves
+	// the index section empty.
+	manifestReads := 0
+	mock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestReads++
+			return nil, nil
+		}).Build()
+	defer mock.UnPatch()
+	republished, publishedBuildIDs, err := republishCopiedManifestIndexes(context.TODO(), manifestPath,
+		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil, true)
+	assert.NoError(t, err)
+	assert.Equal(t, manifestPath, republished)
+	assert.Empty(t, publishedBuildIDs)
+	assert.Zero(t, manifestReads)
+}
+
+func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInheritedIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		SegmentId: 300,
+		// DataCoord leaves TargetIndexes empty when
+		// writeSegmentIndexToManifest is disabled.
+		TargetIndexes: nil,
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "vec_idx",
+			BuildId:        888,
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+		},
+	}
+	mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 5001, BuildID: 6001}})
+	commitCalls := 0
+	var gotDrops []packed.DropIndexEntry
+	var gotIndexes []packed.ManifestIndexInfo
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			commitCalls++
+			gotDrops = updates.DropIndexes
+			gotIndexes = updates.Indexes
+			return republished, nil
+		}).Build()
+	defer commit.UnPatch()
+
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
+	assert.NoError(t, err)
+	assert.Equal(t, republished, got)
+	assert.Equal(t, 1, commitCalls)
+	assert.Equal(t, []packed.DropIndexEntry{{IndexID: 5001}}, gotDrops)
+	assert.Empty(t, gotIndexes, "no target definitions must mean no copied index publication")
+	assert.Empty(t, publishedBuildIDs)
+}
+
+// CopySegmentTask is the DataNode worker used by snapshot restore. Exercise its
+// final manifest state against the real local FFI rather than only inspecting
+// the ManifestUpdates passed to a mock: off must remove inherited source
+// entries and leave the target index-free; on must replace them with the
+// target collection's identity and copied build.
+func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "manifest writes disabled", enabled: false},
+		{name: "manifest writes enabled", enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			basePath := "files/copy_manifest_write_matrix/" + strings.ReplaceAll(tc.name, " ", "_")
+			sourceIndexPath := "files/index_v1/1/2/3/6001/1"
+			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
+			require.NoError(t, err)
+			copiedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg,
+				&packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{
+					ColumnName:            "vector",
+					IndexName:             "source_idx",
+					IndexType:             "HNSW",
+					Path:                  relativePath,
+					FieldID:               101,
+					IndexID:               5001,
+					BuildID:               6001,
+					IndexVersion:          1,
+					NumRows:               4096,
+					IndexFileKeys:         []string{"source.bin"},
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				}}})
+			require.NoError(t, err)
+
+			target := &datapb.CopySegmentTarget{
+				CollectionId: 100,
+				PartitionId:  200,
+				SegmentId:    300,
+			}
+			if tc.enabled {
+				target.TargetIndexes = []*datapb.CopySegmentTargetIndex{
+					{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+				}
+			}
+			indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+				888: {
+					IndexName:      "vec_idx",
+					BuildId:        888,
+					Version:        2,
+					IndexFilePaths: []string{"files/index_v1/100/200/300/888/2/target.bin"},
+				},
+			}
+
+			republished, publishedBuildIDs, err := republishCopiedManifestIndexes(
+				context.TODO(), copiedManifest, target, 4096, cfg, indexInfos, false)
+			require.NoError(t, err)
+			entries, err := packed.GetManifestIndexInfos(republished, cfg)
+			require.NoError(t, err)
+			if tc.enabled {
+				assert.Equal(t, []int64{888}, publishedBuildIDs)
+				require.Len(t, entries, 1)
+				assert.Equal(t, int64(777), entries[0].IndexID)
+				assert.Equal(t, int64(888), entries[0].BuildID)
+				assert.Equal(t, "vec_idx", entries[0].IndexName)
+			} else {
+				assert.Empty(t, publishedBuildIDs)
+				assert.Empty(t, entries)
+			}
+		})
+	}
+}
+
+func TestExcludeUnpinnedManifestRevisions(t *testing.T) {
+	base := "files/insert_log/1/2/3"
+	pinned := base + "/_metadata/manifest-4.avro"
+	files := []string{
+		base + "/_data/col-0.parquet",
+		base + "/_stats/bm25",
+		base + "/_metadata/manifest-1.avro",
+		base + "/_metadata/manifest-4.avro",
+		// Written by the source after the snapshot pinned revision 4. Copying
+		// it would make the target's version discovery land on revision 6, and
+		// the next commit there would merge onto the source's later state.
+		base + "/_metadata/manifest-5.avro",
+		base + "/_metadata/manifest-6.avro",
+	}
+
+	kept := excludeUnpinnedManifestRevisions(files, pinned)
+	assert.Equal(t, []string{
+		base + "/_data/col-0.parquet",
+		base + "/_stats/bm25",
+		base + "/_metadata/manifest-4.avro",
+	}, kept)
+}
+
+func TestExcludeUnpinnedManifestRevisions_KeepsNonRevisionObjects(t *testing.T) {
+	base := "files/insert_log/1/2/3"
+	pinned := base + "/_metadata/manifest-2.avro"
+	// Only revision files are filtered; anything else the metadata directory
+	// may hold is carried over untouched.
+	files := []string{
+		base + "/_metadata/other.json",
+		base + "/_metadata/manifest-2.avro",
+	}
+
+	kept := excludeUnpinnedManifestRevisions(files, pinned)
+	assert.Equal(t, []string{
+		base + "/_metadata/other.json",
+		base + "/_metadata/manifest-2.avro",
+	}, kept)
+}
+
+// A source manifest written before index publication existed carries no index
+// section, so nothing is inherited and nothing is retracted. The segment's
+// indexes are still recorded in etcd and reach the worker as indexInfos, and
+// this copy is where they get written into the new manifest - the absence of
+// inherited entries must not gate the additions.
+func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 100,
+		PartitionId:  200,
+		SegmentId:    300,
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+		},
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "vec_idx",
+			BuildId:        888,
+			Version:        2,
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+		},
+	}
+
+	// The sticky marker proves this legacy source manifest has no index section,
+	// so the copied manifest does not need to be read before adding the target.
+	manifestReads := 0
+	mock := mockey.Mock(packed.GetManifestIndexInfos).To(
+		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestReads++
+			return nil, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	// Read the fields out HERE rather than stashing the *ManifestUpdates for
+	// later. The caller passes a composite literal whose address does not
+	// escape through the real CommitManifestUpdates, so the compiler is free to
+	// stack-allocate it; monkey-patching the callee does not change that
+	// decision, and the pointer dangles the moment
+	// republishCopiedManifestIndexes returns. The slices themselves are
+	// heap-allocated, so copying the headers out is enough.
+	var gotDrops []packed.DropIndexEntry
+	var gotIndexes []packed.ManifestIndexInfo
+	var captured bool
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	defer mockey.Mock(packed.CommitManifestUpdates).To(
+		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
+			updates *packed.ManifestUpdates,
+		) (string, error) {
+			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
+			return republished, nil
+		}).Build().UnPatch()
+
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, true)
+	assert.NoError(t, err)
+	assert.Equal(t, republished, got, "a new revision must be published")
+
+	require.True(t, captured, "the commit must have been reached")
+	assert.Empty(t, gotDrops, "nothing was inherited, so nothing is retracted")
+	require.Len(t, gotIndexes, 1, "the etcd-recorded index must still be written to the new manifest")
+	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
+	assert.Equal(t, "vec_idx", gotIndexes[0].IndexName)
+	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
+	assert.Equal(t, []int64{888}, publishedBuildIDs)
+	assert.Zero(t, manifestReads)
+}
+
+// External restore: the source manifest sits in a foreign bucket DataCoord
+// cannot address, so it deliberately ships NO inherited index IDs - yet the
+// worker byte-copied that manifest into the target bucket, entries and all.
+// The retraction must therefore be driven by what the copied manifest actually
+// holds, not by the shipped list: every enumerated entry is dropped and only
+// the re-derived target entries are installed. The shipped list being out of
+// step is a logged inconsistency, never a failure.
+func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 100,
+		PartitionId:  200,
+		SegmentId:    300,
+		TargetIndexes: []*datapb.CopySegmentTargetIndex{
+			{IndexName: "vec_idx", IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+		},
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "vec_idx",
+			BuildId:        888,
+			Version:        2,
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+		},
+	}
+
+	// The copied manifest still carries the SOURCE collection's entries,
+	// including one for an index the snapshot no longer defines, and a
+	// duplicate ID that must collapse to a single drop.
+	mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{
+		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
+		{IndexID: 5002, BuildID: 6002, IndexName: "dropped_idx"},
+		{IndexID: 5002, BuildID: 6003, IndexName: "dropped_idx"},
+	})
+
+	// See TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes for
+	// why the fields are copied out inside the mock instead of stashing the
+	// *ManifestUpdates pointer.
+	var gotDrops []packed.DropIndexEntry
+	var gotIndexes []packed.ManifestIndexInfo
+	var captured bool
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	defer mockey.Mock(packed.CommitManifestUpdates).To(
+		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
+			updates *packed.ManifestUpdates,
+		) (string, error) {
+			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
+			return republished, nil
+		}).Build().UnPatch()
+
+	got, publishedBuildIDs, err := republishCopiedManifestIndexes(
+		context.TODO(), manifestPath, target, 4096, &indexpb.StorageConfig{}, indexInfos, false)
+	assert.NoError(t, err)
+	assert.Equal(t, republished, got, "a new revision must be published")
+
+	require.True(t, captured, "the commit must have been reached")
+	droppedIDs := make([]int64, 0, len(gotDrops))
+	for _, drop := range gotDrops {
+		droppedIDs = append(droppedIDs, drop.IndexID)
+		assert.Zero(t, drop.ExpectedBuildID, "the freshly created target segment is exclusively owned; drops are unconditional")
+	}
+	assert.ElementsMatch(t, []int64{5001, 5002}, droppedIDs,
+		"every entry the copied manifest holds is retracted, shipped list or not")
+	require.Len(t, gotIndexes, 1, "only the re-derived target entries are installed")
+	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
+	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
+	assert.Equal(t, []int64{888}, publishedBuildIDs)
 }

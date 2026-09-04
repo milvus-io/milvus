@@ -5726,6 +5726,8 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
+	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6494,6 +6496,40 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
+
+	p.WriteSegmentIndexToManifest = ParamItem{
+		Key:          "dataCoord.index.writeSegmentIndexToManifest",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
+The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
+		Export: true,
+	}
+	p.WriteSegmentIndexToManifest.Init(base.mgr)
+
+	p.SegmentIndexManifestLoadConcurrency = ParamItem{
+		Key:          "dataCoord.index.segmentIndexManifestLoadConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				return "1"
+			}
+			// The pool backend stores capacity as int32; a larger value wraps
+			// negative and the first Submit blocks forever.
+			if concurrency > math.MaxInt32 {
+				return strconv.Itoa(math.MaxInt32)
+			}
+			return strconv.Itoa(concurrency)
+		},
+		Doc: `Concurrency of DataCoord reads that load index metadata from StorageV3 manifests. It bounds both the startup scan that rebuilds completed SegmentIndex records from healthy manifests marked manifest_has_index and the compatibility fallback that supplements an older snapshot during restore. Both paths follow existing data independently of the current write-mode switch; unmarked segments require no manifest read.
+This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
+Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot or restore latency; lower it if the object store throttles. Restore applies the limit independently to each copy-task assembly.`,
+		Export: true,
+	}
+	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

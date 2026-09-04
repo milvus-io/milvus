@@ -364,6 +364,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
 
+	// Recovery follows the durable storage location, not the current write
+	// mode. A segment marked manifest_has_index may contain records published
+	// while the switch was previously on, so it must still be loaded after the
+	// switch is turned off. Unmarked clusters perform no manifest reads.
+	if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
+		return nil, err
+	}
+
 	return mt, nil
 }
 
@@ -1805,9 +1813,34 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		// owner) and the finalization of a fresh copy/import target. These segments
 		// have no concurrent manifest writer, so no CommitSegmentManifest
 		// serialization is needed even for StorageV3. Concurrent post-flush writers
-		// (stats, index, GC, compaction, batch DDL) never reach this operator; they
-		// build revisions and advance the pointer through CommitSegmentManifest.
+		// (stats, index, GC, compaction) never reach this operator; they build
+		// revisions and advance the pointer through CommitSegmentManifest. Batch
+		// DDL and backfill adoption do not: they adopt an externally built
+		// revision through UpdateManifestVersion below, guarded only by version
+		// monotonicity - a known bypass of the manifest lock (see the design
+		// doc's known limitations).
 		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
+// UpdateManifestHasIndex sets the segment's sticky manifest_has_index marker
+// when a copy target adopts a worker-produced manifest containing target index
+// entries. It must be committed together with UpdateManifest so recovery can
+// never observe the pointer without the marker. There is intentionally no
+// clearing counterpart.
+func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(modPack.meta.ctx, "meta update: set manifest has index failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.ManifestHasIndex {
+			return false
+		}
+		segment.ManifestHasIndex = true
 		return true
 	}
 }

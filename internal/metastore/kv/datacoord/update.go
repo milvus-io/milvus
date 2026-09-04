@@ -49,6 +49,26 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
 				return err
 			}
+		case metastore.SegmentIndexEntry:
+			if e.SegmentIndex == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment index in UpdateAction")
+			}
+			key := BuildSegmentIndexKey(
+				e.SegmentIndex.CollectionID,
+				e.SegmentIndex.PartitionID,
+				e.SegmentIndex.SegmentID,
+				e.SegmentIndex.BuildID,
+			)
+			switch action.Type {
+			case metastore.ActionDelete:
+				// Remove, not CommitRemove: an action set containing a segment
+				// index entry never takes the ordered fallback path (see
+				// containsSegmentIndexUpdate below), so there is no visibility
+				// point to mark.
+				b.Remove(key)
+			default:
+				return unsupportedAction(action)
+			}
 		case metastore.ChannelEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
@@ -142,7 +162,22 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
+	if containsSegmentIndexUpdate(actions) {
+		// A segment index removal and the segment manifest pointer that
+		// publishes or retracts its artifact must land together. Refuse a
+		// chunked fallback that could expose only half of the transition.
+		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
+	}
 	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
+	for _, action := range actions {
+		if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // applySegmentEntry stages the kv writes for a segment action.

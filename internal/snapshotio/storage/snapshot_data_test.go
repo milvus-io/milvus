@@ -3283,8 +3283,13 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_current",
+			name:    "version_4_legacy",
 			version: 4,
+			wantErr: false,
+		},
+		{
+			name:    "version_5_current",
+			version: 5,
 			wantErr: false,
 		},
 		{
@@ -3336,8 +3341,13 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_current",
+			name:    "version_4_legacy",
 			version: 4,
+			wantErr: false,
+		},
+		{
+			name:    "version_5_current",
+			version: 5,
 			wantErr: false,
 		},
 		{
