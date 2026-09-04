@@ -14,13 +14,19 @@
 #include <assert.h>
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <future>
+#include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include "IndexConfigGenerator.h"
 #include "cachinglayer/CacheSlot.h"
@@ -31,10 +37,12 @@
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "glog/logging.h"
 #include "index/VectorIndex.h"
 #include "knowhere/config.h"
+#include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "oneapi/tbb/concurrent_vector.h"
 #include "segcore/AckResponder.h"
@@ -271,11 +279,45 @@ class VectorFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
 
+    // Write-side lifecycle of the growing interim index (spec §4.1). Only
+    // kNotBuilt -> kBuilding -> (kSynced | kDisabled) transitions exist; there
+    // are no back edges, so a (segment, field) builds at most once. This state
+    // is invisible to the read path, which keeps consuming built_ /
+    // sync_with_index_ with their pre-change meaning.
+    enum class GrowingIndexState : uint8_t {
+        kNotBuilt,  // no index yet, raw data lives entirely in ConcurrentVector
+        kBuilding,  // background first build / catch-up in progress
+        kSynced,    // index covers every row whose AppendingIndex has returned
+        kDisabled,  // build failed, permanently degraded to brute-force scan
+    };
+
+    // Phase boundaries of the background task, exposed for tests only.
+    enum class GrowingBuildPhase {
+        kBeforeBuild,
+        kAfterBuild,
+        kAfterCatchupRound,
+        kBeforeFinalize
+    };
+
+    // Test-only observation / fault-injection hook, called on the background
+    // build thread at phase boundaries. Set it before the first insert and
+    // clear it after every segment that could have queued a task is destroyed;
+    // it is a process-wide static, so a stale hook leaks across tests.
+    static std::function<void(GrowingBuildPhase)> growing_build_test_hook_;
+
     explicit VectorFieldIndexing(const FieldMeta& field_meta,
                                  const FieldIndexMeta& field_index_meta,
                                  int64_t segment_max_row_count,
                                  const SegcoreConfig& segcore_config,
                                  const VectorBase* field_raw_data);
+
+    ~VectorFieldIndexing() override;
+
+    // For tests/diagnostics only; the read path must not branch on this.
+    GrowingIndexState
+    get_growing_index_state() const {
+        return state_.load();
+    }
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,
@@ -358,6 +400,191 @@ class VectorFieldIndexing : public FieldIndexing {
     int64_t
     resolve_build_thread_num() const;
 
+    // Copy dense physical rows [from, to) into contiguous memory; when the
+    // range falls entirely within a single chunk, returns the chunk pointer
+    // directly and leaves staging unallocated (zero-copy fast path).
+    // NOTE: the fast-path pointer aliases live chunk memory, so it is only
+    // valid while the chunks are unreclaimed — guaranteed before the index
+    // synchronizes, because HasRawData() stays false (and therefore
+    // try_remove_chunks is a no-op) until sync_with_index_ flips.
+    const void*
+    CopyDenseRows(const VectorBase* vec,
+                  int64_t from,
+                  int64_t to,
+                  size_t vec_length,
+                  std::unique_ptr<char[]>& staging) const;
+
+    // Sparse counterpart of CopyDenseRows. Single-chunk ranges directly
+    // borrow the chunk's SparseRow array; cross-chunk ranges build a
+    // contiguous array of non-owning SparseRow views, avoiding one heap
+    // allocation + memcpy per row. The views are consumed synchronously by
+    // knowhere before staging is destroyed.
+    const void*
+    CopySparseRows(const VectorBase* vec,
+                   int64_t from,
+                   int64_t to,
+                   std::vector<knowhere::sparse::SparseRow<SparseValueType>>&
+                       staging) const;
+
+    // First build: BuildWithDataset over physical rows [0, get_build_threshold()),
+    // UpdateValidData for mapping storage, then mark built_ = true and advance
+    // index_cur_. Failures are thrown, not caught here — the caller decides the
+    // failure/recovery strategy.
+    void
+    BuildFirstIndexDense(const VectorBase* field_raw_data);
+    // Same as BuildFirstIndexDense, for sparse float vectors. new_data_dim is
+    // the dimension of the data that triggered this build (see
+    // AppendSegmentIndexSparse), used for the GenDataSet call exactly as the
+    // pre-refactor code did.
+    void
+    BuildFirstIndexSparse(const VectorBase* field_raw_data,
+                          int64_t new_data_dim);
+
+    // Registers the null-only logical tail
+    // [GetIdMap().OutCount(), logical_target) through an empty
+    // AddWithDataset. IdMap couples logical registration with the physical
+    // rows of the same Add, so this is only legal once every valid row below
+    // logical_target has been drained into the index.
+    void
+    RegisterNullLogicalTail(const VectorBase* field_raw_data,
+                            int64_t logical_target);
+
+    // For mapping storage, attaches IdMapData covering the logical range the
+    // physical slice ending at `to_physical` completes; returns the validity
+    // buffer, which must outlive the AddWithDataset consuming the dataset.
+    std::unique_ptr<bool[]>
+    AttachSliceIdMapData(const VectorBase* field_raw_data,
+                         knowhere::DataSet* dataset,
+                         int64_t to_physical);
+
+    // Append data to an already-built index. Moved verbatim from the former
+    // "add" branch of AppendSegmentIndexDense/Sparse, including the
+    // non-nullable/nullable split, sync_with_index_.store(true), and the
+    // internal try/catch + recreate_index recovery.
+    void
+    AddBatchDense(int64_t reserved_offset,
+                  int64_t size,
+                  const VectorBase* field_raw_data,
+                  const void* data_source);
+    void
+    AddBatchSparse(int64_t reserved_offset,
+                   int64_t size,
+                   int64_t new_data_dim,
+                   const VectorBase* field_raw_data,
+                   const void* data_source);
+
+    // ---- async first build (spec §4.4-§4.7) ----------------------------------
+
+    // Publishes kBuilding + the initial watermark and submits the background
+    // task. Must be called with append_mutex_ held and only from kNotBuilt.
+    // new_data_dim is meaningful for sparse only (see BuildFirstIndexSparse).
+    void
+    StartBuildLocked(const VectorBase* field_raw_data,
+                     int64_t upto,
+                     int64_t new_data_dim);
+
+    // Advances the raw-data watermark consumed by the catch-up task. Caller
+    // holds append_mutex_. Deliberately a max-store, not a plain store:
+    // catch-up completeness ("the index covers every row whose
+    // AppendingIndex returned") would otherwise rest entirely on the
+    // unenforced invariant that Insert calls into one segment are strictly
+    // ordered (single writer). The legacy AddBatch* offset arithmetic shares
+    // that assumption and is NOT protected here; the max only makes the
+    // async watermark self-healing against reordered inserts instead of
+    // silently dropping rows from the published index.
+    void
+    AdvanceWatermarkLocked(int64_t upto) {
+        pending_upto_.store(std::max(pending_upto_.load(), upto));
+    }
+
+    // Background task body: first build, then catch up, then publish. Any
+    // failure lands in kDisabled — never retried.
+    void
+    BuildAsync(const VectorBase* field_raw_data, int64_t new_data_dim);
+
+    // Phase 2: drain the raw-data watermark into the index, then flip
+    // sync_with_index_ atomically with the last Add under append_mutex_.
+    void
+    CatchUp(const VectorBase* field_raw_data);
+
+    // Adds physical rows [index_cur_, target) to the index in staging-budget
+    // sized slices, checking IsCancelled() between slices when `interruptible`.
+    // CatchUp bounds each unlocked call to one slice so it can re-check the
+    // absolute deadline between calls. The finalize call may cover multiple
+    // slices under append_mutex_, but only after the measured ETA fits the
+    // finalize budget.
+    // knowhere failures propagate to BuildAsync's handler.
+    void
+    AddRange(const VectorBase* field_raw_data,
+             int64_t target,
+             bool interruptible);
+
+    // Logical watermark -> physical row count. Identity for non-mapping
+    // storage; for mapping storage a binary search over the monotone
+    // physical -> logical map.
+    int64_t
+    PhysicalTarget(const VectorBase* vec, int64_t logical_upto) const;
+
+    int64_t
+    CatchupSliceRows() const;
+
+    static constexpr int64_t kCatchupStagingBytes = 8 << 20;
+    static constexpr int64_t kCatchupSparseRows = 4096;
+
+    // Destructor/task handshake (spec §4.6). The task CASes kQueued->kRunning
+    // on the control block BEFORE touching `this`; the destructor CASes
+    // kQueued->kAbandoned. Exactly one wins: abandoned tasks return touching
+    // only the shared_ptr-kept control block (no UAF, no destructor wait);
+    // running tasks are joined (<= one build).
+    struct BuildTaskCtrl {
+        enum class Phase : uint8_t { kQueued, kRunning, kAbandoned };
+        std::atomic<Phase> phase{Phase::kQueued};
+        std::atomic<bool> cancelled{false};
+        // Completion signal owned by the control block, NOT by the future that
+        // Submit returns: ThreadPool::Submit enqueues the task first and only
+        // then does throwable work (mutex lock, std::thread construction, map
+        // insert), so a task can be running while `build_task_` was never
+        // assigned. The destructor therefore joins on `finished`, which exists
+        // and is reachable from the moment the control block is constructed --
+        // before Submit is ever called.
+        std::promise<void> finished_promise;
+        std::shared_future<void> finished;
+
+        BuildTaskCtrl() : finished(finished_promise.get_future()) {
+        }
+
+        // RAII: fulfils `finished` on every exit path of the task lambda --
+        // normal return, the abandoned early return, and exceptions.
+        struct FinishGuard {
+            BuildTaskCtrl* ctrl;
+            ~FinishGuard() {
+                try {
+                    ctrl->finished_promise.set_value();
+                } catch (...) {
+                    // Only reachable if the promise were already satisfied,
+                    // which cannot happen (one guard per task); never let a
+                    // destructor throw.
+                }
+            }
+        };
+
+        bool
+        TryStart() {
+            auto e = Phase::kQueued;
+            return phase.compare_exchange_strong(e, Phase::kRunning);
+        }
+        bool
+        TryAbandon() {
+            auto e = Phase::kQueued;
+            return phase.compare_exchange_strong(e, Phase::kAbandoned);
+        }
+    };
+
+    bool
+    IsCancelled() const {
+        return build_ctrl_ != nullptr && build_ctrl_->cancelled.load();
+    }
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -368,6 +595,33 @@ class VectorFieldIndexing : public FieldIndexing {
     // whether growing index build has failed and future appends should keep
     // using brute force over raw chunks.
     std::atomic<bool> index_unavailable_;
+
+    // Write-side state machine; see GrowingIndexState.
+    // Per-field snapshot of SegcoreConfig's atomic asyncGrowingBuild switch,
+    // taken once at construction. Immutable afterwards, so the per-dispatch
+    // read is race-free and a hot toggle only affects growing segments
+    // created later.
+    const bool async_build_enabled_;
+    // Per-field snapshots of the async catch-up policy. As with the enable
+    // switch, hot updates affect only growing segments created afterwards.
+    const int64_t async_finalize_budget_ms_;
+    const int64_t async_catchup_deadline_ms_;
+
+    std::atomic<GrowingIndexState> state_{GrowingIndexState::kNotBuilt};
+    // Monotonic logical raw-data watermark: the largest reserved_offset + size
+    // whose set_data_raw has completed. Written under append_mutex_ by insert,
+    // read lock-free by the background task.
+    std::atomic<int64_t> pending_upto_{0};
+    // Serializes every mutation of index_ plus the state_ read-and-act on the
+    // insert side (spec §4.2).
+    std::mutex append_mutex_;
+    // Assigned exactly once, under append_mutex_, on kNotBuilt -> kBuilding.
+    // Cleared back to nullptr only when Submit failed *and* we won the abandon
+    // race, i.e. when no task body will ever run and nothing needs joining.
+    std::shared_ptr<BuildTaskCtrl> build_ctrl_;
+    // Only holds the pool's future so it is not discarded mid-flight; the
+    // destructor joins on build_ctrl_->finished instead (see BuildTaskCtrl).
+    std::future<void> build_task_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
