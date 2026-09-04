@@ -69,7 +69,11 @@ from `Before` always reaches the client as the interceptor's own
 
 One addition to hookutil: a compiled-in hook (`SetHook`) is used in preference
 to `proxy.soPath`, and a deployment that configures both is refused at
-start-up.
+start-up. A compiled-in hook is otherwise treated exactly as a plug-in is: it
+gets the same `Init` call with the `hook.*` configuration before it is
+installed, a failure to initialize keeps the proxy from starting, and it is
+registered with the same watcher, so editing a `hook.*` key re-initializes it
+with the new configuration without a restart.
 
 ### The coordinator engine
 
@@ -106,12 +110,75 @@ now, not part of this mechanism:
   the querycoord load job recognizes a request that only adds groups as a
   pure expansion and keeps the collection serving instead of resetting it to
   Loading.
+
+  The scope comes from the request as the caller wrote it. A request naming
+  no group at all states the whole placement, which is what a plain
+  `load_collection` or `load_partitions` has always meant, so nothing is
+  carried over for it; a request that names `__default_resource_group`
+  explicitly is a scoped request like any other. A cluster-level load
+  override states the whole placement too, whatever the request named.
+
+  A resource group added this way is watched by its own load task, which
+  judges the group on its own load percentage rather than on the collection's:
+
+  - The task's clock restarts whenever that percentage *changes*, in either
+    direction. A load can go backwards - a delegator restarts, or a freshly
+    flushed segment enters the next target - and only a percentage that does
+    not move at all for the load timeout counts as stalled and has its
+    replicas released. The consequence is deliberate: a load that keeps
+    moving is never declared stalled, so a percentage oscillating below 100
+    (50, 49, 50) refreshes forever. Keeping a loaded-count watermark of our
+    own would catch that, but it would also bring back the false regression
+    this rule removes, on a figure that legitimately moves down while the
+    collection is ingesting; a group that is still moving is left alone.
+  - A percentage is only acted on when it is *evidence*. A serving group reads
+    0 in several ordinary situations, so all of these count as "unknown"
+    rather than as a number: the read failed; the collection's target is not
+    known (the current target is persisted only on a graceful stop and the
+    next one has to be pulled from datacoord, so an ungraceful restart has no
+    target for a while); or some replica of the group owns no node that has
+    reported a channel of the collection (the group's figure is a minimum
+    across its replicas, so one pod still pending drags a loaded group to 0).
+    Unknown *pauses* the clock: the last known figure is kept and the timeout
+    is only ever measured over ticks that learned something. A task whose
+    group never becomes readable simply stays paused until the collection is
+    released or dropped, which removes it.
+  - The teardown itself has a hard limit: it may shrink an expansion that
+    never came up, and it may abandon a load that never completed, but it may
+    never take the last replicas of a *Loaded* collection or delete its load
+    meta. If that is what releasing the group would do, the task is dropped
+    and the collection keeps serving. The collection-wide path has always had
+    this property, because its timeout only runs while a collection is
+    Loading; a scoped task sits on a Loaded collection, so the rule is
+    written out. Between the two - only evidence starts the clock, and the
+    teardown can never unload a serving collection - a reading that is wrong
+    in the pessimistic direction costs nothing.
+  - The task finishes only once the group carries every target *and* the
+    collection's current target has been promoted, because until then the
+    group cannot serve: shard leader readiness is measured against the current
+    target.
+  - The tasks live only in memory, so a querycoord restart rebuilds them: for
+    every loaded collection, every resource group holding a replica gets its
+    task back. Nothing extra is persisted for this, and no attempt is made to
+    guess which groups need one: the constructor runs before any QueryNode has
+    reported, so a group that has been serving for weeks and a group that
+    never came up look identical there. The task is what tells them apart
+    afterwards, on the first tick that carries evidence - a group that turns
+    out to be loaded finishes then and there.
+
 - With no QueryNode session registered, datacoord answers its own compiled-in
   index engine version (knowhere's for vectors, the constant for scalars)
   rather than zero, which knowhere would otherwise read as "only DISKANN
   loads off disk" and misroute other disk indexes onto the in-memory path.
   This assumes a QueryNode started later runs the same image as the
-  coordinator.
+  coordinator, and the same assumption sets the upper bound with no session:
+  an operator's `dataCoord.targetVecIndexVersion` (or the scalar one) above
+  what this image can load is clamped down to it rather than written into
+  index builds unchecked. This changes what a *forced* override does in that
+  window: with no QueryNode registered, a target version above the
+  coordinator's own is silently clamped, with only a rate-limited warning in
+  the log, where before it was written through. A QueryNode that does register
+  replaces both figures with the cluster-wide ones.
 
 ## Compatibility
 
@@ -128,13 +195,19 @@ now, not part of this mechanism:
 
 - `pkg/extension`: the setters and getters, and the context mark.
 - hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
-  default.
+  default, initialized with the `hook.*` configuration, and re-initialized
+  when that configuration changes.
 - proxy: a hook-pinned resource group reaches the search task; per-resource-
   group latency series exist only for pinned requests.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.
 - querycoord / datacoord: the remaining configuration items off (stock) and
-  on; the two now-default behaviors above.
+  on; the two now-default behaviors above - including a request naming no
+  resource group, a load percentage that regresses, the three ways a serving
+  group reads as an unreliable 0 (failed read, no target, a replica that has
+  not reported), a load timeout that may not unload a serving collection, the
+  rebuild of scoped load tasks after a restart, and an index engine version
+  override clamped with no QueryNode registered.
 
 ## Rejected alternatives
 

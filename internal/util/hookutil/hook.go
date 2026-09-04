@@ -16,6 +16,17 @@
  * limitations under the License.
  */
 
+// Package hookutil installs and serves the proxy's request hook: the extension
+// seam a deployment form uses to answer, inspect or refuse an RPC without
+// forking milvus. A form supplies its hook either compiled into the binary
+// (pkg/extension.SetHook) or as a plug-in loaded from proxy.soPath; both are
+// initialized with the hook.* configuration, reconfigured when it changes, and
+// consulted by the same proxy interceptor (internal/proxy/hook_interceptor.go).
+// With no hook installed the default one does nothing and every RPC behaves as
+// it always did.
+//
+// The mechanism, and what a form may and may not do with it, is described in
+// docs/design-docs/design_docs/20260831-in_tree_extension_mechanism.md.
 package hookutil
 
 import (

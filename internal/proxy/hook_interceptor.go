@@ -15,6 +15,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+// UnaryServerHookInterceptor installs the request hook on every unary RPC.
+//
+// This is the extension seam the "Extension seam, see internal/util/hookutil"
+// comments elsewhere in this package point at: a deployment form supplies a
+// hook - compiled into the binary or loaded from proxy.soPath - and the hook
+// may answer an RPC itself (Mock), inspect or rewrite it before it runs
+// (Before), or see its result (After). With no hook installed the default one
+// does nothing and every RPC behaves exactly as it did. How a hook is installed
+// and configured is internal/util/hookutil, whose package comment names the
+// design doc.
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		return HookInterceptor(ctx, req, GetCurUserFromContextOrDefault(ctx), info.FullMethod, handler)
