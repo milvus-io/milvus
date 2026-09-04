@@ -197,8 +197,13 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 }
 
 // checkReplica returns the tasks this replica needs, and whether it wanted a
-// delegator placed but could not place one - the replica's read-write set was
-// empty at this tick, so the assignment produced nothing.
+// delegator placed but no load task came out. The case this exists for is the
+// replica's read-write set being empty at this tick, so the assignment had
+// nothing to place on; but the test is on the outcome, not the cause, so it
+// also fires when the balancer produced no plan for some other reason, and
+// that collection bypasses the version cache for as long as it lasts. That is
+// accepted: the cost is one re-check per tick, and missing a replica that is
+// waiting for a node would be the worse mistake.
 //
 // The second result exists for the version cache in Check: "no task" normally
 // means converged, and caching it is what keeps the checker cheap. A replica
