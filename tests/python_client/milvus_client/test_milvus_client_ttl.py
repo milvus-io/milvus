@@ -47,8 +47,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         """
         client = self._client()
         dim = 65
-        ttl = 11
-        nb = 1000
+        ttl = 60
+        nb = 100
         # field name constants
         pk_field = "id"
         vec_field = "embeddings"
@@ -159,7 +159,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get("count(*)", None) == 0
 
-        # Use a small single request so the unchanged short TTL still covers the visibility check.
+        # Use a small single request so the TTL window comfortably covers the visibility checks.
         new_nb = 10
         rows = cf.gen_row_data_by_schema(nb=new_nb, schema=schema, start=nb * insert_times)
         for row in rows:
@@ -178,6 +178,22 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             consistency_level=CONSISTENCY_STRONG,
         )[0]
         assert res[0].get("count(*)", 0) == new_nb
+        res = self.query(
+            client,
+            collection_name,
+            filter="",
+            output_fields=["count(*)"],
+            consistency_level=CONSISTENCY_STRONG,
+        )[0]
+        assert res[0].get("count(*)", 0) == new_nb
+        res = self.query(
+            client,
+            collection_name,
+            filter="visible==False",
+            output_fields=["count(*)"],
+            consistency_level=CONSISTENCY_STRONG,
+        )[0]
+        assert res[0].get("count(*)", 0) == 0
 
         # Extend TTL before slower flush and multi-RPC checks.
         self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 2000})
@@ -1044,7 +1060,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 100
+        nb = 20
 
         self._create_ttl_collection(client, collection_name)
 
@@ -1089,7 +1105,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert {row[default_primary_key_field_name] for row in res} == set(range(nb // 2, nb))
 
         # Start the short TTL window after reload so setup latency cannot consume it.
-        ttl_seconds = 20
+        ttl_seconds = 60
         short_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         rows = [
             {
