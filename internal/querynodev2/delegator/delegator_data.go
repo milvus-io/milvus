@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -150,6 +151,13 @@ type DeleteBatch struct {
 	Data []*DeleteData
 }
 
+type segmentInsertResult struct {
+	growingSegmentAdded bool
+	err                 error
+	panicValue          any
+	panicked            bool
+}
+
 // Append appends another delete data into this one.
 func (d *DeleteData) Append(ad DeleteData) {
 	d.PrimaryKeys = append(d.PrimaryKeys, ad.PrimaryKeys...)
@@ -161,57 +169,128 @@ func (d *DeleteData) Append(ad DeleteData) {
 func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
-	log := sd.getLogger(context.Background())
+	observeProcessCost := func() {
+		metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
+			Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}
+
+	segmentIDs := make([]int64, 0, len(insertRecords))
+	for segmentID := range insertRecords {
+		segmentIDs = append(segmentIDs, segmentID)
+	}
+	slices.Sort(segmentIDs)
+	if len(segmentIDs) == 0 {
+		observeProcessCost()
+		return
+	}
+
+	results := make([]segmentInsertResult, len(segmentIDs))
+	if len(segmentIDs) == 1 {
+		results[0] = sd.runProcessInsertTask(segmentIDs[0], insertRecords[segmentIDs[0]])
+	} else {
+		futures := make([]*conc.Future[struct{}], len(segmentIDs))
+		pool := segments.GetInsertPool()
+		for index, segmentID := range segmentIDs {
+			index := index
+			segmentID := segmentID
+			futures[index] = pool.Submit(func() (struct{}, error) {
+				results[index] = sd.runProcessInsertTask(segmentID, insertRecords[segmentID])
+				return struct{}{}, nil
+			})
+		}
+		for index, future := range futures {
+			if _, err := future.Await(); err != nil && !results[index].panicked && results[index].err == nil {
+				results[index].err = err
+			}
+		}
+	}
+
 	growingSegmentAdded := false
-	for segmentID, insertData := range insertRecords {
-		growing := sd.segmentManager.GetGrowing(segmentID)
-		newGrowingSegment := false
-		if growing == nil {
-			var err error
-			// TODO: It's a wired implementation that growing segment have load info.
-			// we should separate the growing segment and sealed segment by type system.
-			growing, err = segments.NewSegment(
-				context.Background(),
-				sd.collection,
-				sd.segmentManager,
-				segments.SegmentTypeGrowing,
-				0,
-				&querypb.SegmentLoadInfo{
-					SegmentID:     segmentID,
-					PartitionID:   insertData.PartitionID,
-					CollectionID:  sd.collectionID,
-					InsertChannel: sd.vchannelName,
-					StartPosition: insertData.StartPosition,
-					DeltaPosition: insertData.StartPosition,
-					Level:         datapb.SegmentLevel_L1,
-				},
-			)
-			if err != nil {
-				log.Error(context.TODO(), "failed to create new segment",
-					mlog.FieldSegmentID(segmentID),
-					mlog.Err(err))
-				panic(err)
-			}
-			newGrowingSegment = true
-		}
+	for _, result := range results {
+		growingSegmentAdded = growingSegmentAdded || result.growingSegmentAdded
+	}
+	if growingSegmentAdded {
+		sd.notifyLeaderViewUpdated()
+	}
 
-		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
-		if err != nil {
-			log.Error(context.TODO(), "failed to insert data into growing segment",
-				mlog.FieldSegmentID(segmentID),
-				mlog.Err(err),
-			)
-			if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
-				log.Warn(context.TODO(), "try to insert data into released segment, skip it", mlog.Err(err))
-				continue
-			}
+	for _, result := range results {
+		if result.panicked {
+			panic(result.panicValue)
+		}
+		if result.err != nil {
 			// panic here, insert failure
-			panic(err)
+			panic(result.err)
 		}
-		growing.UpdatePkCandidate(insertData.PrimaryKeys)
+	}
+	observeProcessCost()
+}
 
-		if newGrowingSegment {
+func (sd *shardDelegator) runProcessInsertTask(segmentID int64, insertData *InsertData) (result segmentInsertResult) {
+	completed := false
+	defer func() {
+		if !completed {
+			result.panicked = true
+			result.panicValue = recover()
+		}
+	}()
+	result.err = sd.processInsert(segmentID, insertData, &result.growingSegmentAdded)
+	completed = true
+	return result
+}
+
+func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData, growingSegmentAdded *bool) error {
+	log := sd.getLogger(context.Background())
+	growing := sd.segmentManager.GetGrowing(segmentID)
+	newGrowingSegment := false
+	if growing == nil {
+		var err error
+		// TODO: It's a wired implementation that growing segment have load info.
+		// we should separate the growing segment and sealed segment by type system.
+		growing, err = segments.NewSegment(
+			context.Background(),
+			sd.collection,
+			sd.segmentManager,
+			segments.SegmentTypeGrowing,
+			0,
+			&querypb.SegmentLoadInfo{
+				SegmentID:     segmentID,
+				PartitionID:   insertData.PartitionID,
+				CollectionID:  sd.collectionID,
+				InsertChannel: sd.vchannelName,
+				StartPosition: insertData.StartPosition,
+				DeltaPosition: insertData.StartPosition,
+				Level:         datapb.SegmentLevel_L1,
+			},
+		)
+		if err != nil {
+			log.Error(context.TODO(), "failed to create new segment",
+				mlog.FieldSegmentID(segmentID),
+				mlog.Err(err))
+			return err
+		}
+		newGrowingSegment = true
+	}
+
+	err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+	if err != nil {
+		log.Error(context.TODO(), "failed to insert data into growing segment",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Err(err),
+		)
+		if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
+			log.Warn(context.TODO(), "try to insert data into released segment, skip it", mlog.Err(err))
+			return nil
+		}
+		return err
+	}
+	growing.UpdatePkCandidate(insertData.PrimaryKeys)
+
+	excluded := false
+	if newGrowingSegment {
+		func() {
 			sd.growingSegmentLock.Lock()
+			defer sd.growingSegmentLock.Unlock()
+
 			// Forbid create growing segment in excluded segment
 			// 	(Now excluded ts may not worked for growing segment with multiple partition.
 			//	Because use checkpoint ts as excluded ts when add excluded, but it may less than last message ts.
@@ -221,9 +300,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			//	Use right ts when add excluded segment. And Verify with insert ts here.
 			if ok := sd.VerifyExcludedSegments(segmentID, 0); !ok {
 				log.Warn(context.TODO(), "try to insert data into released segment, skip it", mlog.FieldSegmentID(segmentID))
-				sd.growingSegmentLock.Unlock()
-				growing.Release(context.Background())
-				continue
+				excluded = true
+				return
 			}
 
 			if !sd.distribution.GrowingSegmentExists(segmentID) {
@@ -240,25 +318,23 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
-				growingSegmentAdded = true
+				*growingSegmentAdded = true
 			}
-
-			sd.growingSegmentLock.Unlock()
-		} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
-			idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		}()
+		if excluded {
+			growing.Release(context.Background())
+			return nil
 		}
-		log.Info(context.TODO(), "insert into growing segment",
-			mlog.FieldCollectionID(growing.Collection()),
-			mlog.FieldSegmentID(segmentID),
-			mlog.Int("rowCount", len(insertData.RowIDs)),
-			mlog.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
-		)
+	} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 	}
-	if growingSegmentAdded {
-		sd.notifyLeaderViewUpdated()
-	}
-	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info(context.TODO(), "insert into growing segment",
+		mlog.FieldCollectionID(growing.Collection()),
+		mlog.FieldSegmentID(segmentID),
+		mlog.Int("rowCount", len(insertData.RowIDs)),
+		mlog.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
+	)
+	return nil
 }
 
 // ProcessDelete handles delete data in delegator.
