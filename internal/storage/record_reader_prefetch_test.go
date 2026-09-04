@@ -19,6 +19,7 @@ package storage
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -110,7 +111,7 @@ func TestIterativeRecordReader_PrefetchPreservesOrder(t *testing.T) {
 	chunks := []*ownedChunkReader{chunkOf(alloc, 0, 2), chunkOf(alloc, 1, 3), chunkOf(alloc, 2, 1)}
 	call, invocations := 0, 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			invocations++
 			if call >= len(chunks) {
@@ -150,7 +151,7 @@ func TestIterativeRecordReader_PrefetchSkipsEmptyChunks(t *testing.T) {
 	}
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= len(chunks) {
 				return nil, io.EOF
@@ -180,7 +181,7 @@ func TestIterativeRecordReader_PrefetchSurfacesOpenError(t *testing.T) {
 	first := chunkOf(alloc, 0, 1)
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			call++
 			if call == 1 {
@@ -205,7 +206,7 @@ func TestIterativeRecordReader_PrefetchSurfacesFirstNextError(t *testing.T) {
 	chunks := []RecordReader{chunkOf(alloc, 0, 1), broken}
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= len(chunks) {
 				return nil, io.EOF
@@ -241,7 +242,7 @@ func TestIterativeRecordReader_PrefetchOverlapsNextOpen(t *testing.T) {
 	var once sync.Once
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call == 1 {
 				once.Do(func() { close(secondOpened) })
@@ -283,7 +284,7 @@ func TestIterativeRecordReader_PrefetchCloseDrainsInFlight(t *testing.T) {
 	gate := make(chan struct{})
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call == 1 {
 				<-gate // hold the open of chunk 1 until the test says so
@@ -332,7 +333,7 @@ func TestIterativeRecordReader_PrefetchCloseReportsPrefetchedCloseError(t *testi
 	chunks[1].closeErr = closeErr
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= len(chunks) {
 				return nil, io.EOF
@@ -354,7 +355,7 @@ func TestIterativeRecordReader_PrefetchRecoversIteratePanic(t *testing.T) {
 	first := chunkOf(alloc, 0, 1)
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			call++
 			if call == 1 {
@@ -377,8 +378,8 @@ func TestIterativeRecordReader_PrefetchRecoversIteratePanic(t *testing.T) {
 func TestIterativeRecordReader_PrefetchCloseBeforeNext(t *testing.T) {
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
-		iterate:  func() (RecordReader, error) { call++; return nil, io.EOF },
+		window:  2,
+		iterate: func() (RecordReader, error) { call++; return nil, io.EOF },
 	}
 	assert.NoError(t, ir.Close())
 	assert.Equal(t, 0, call)
@@ -414,11 +415,11 @@ func TestIterativeRecordReader_SerialPathUnchanged(t *testing.T) {
 	alloc.AssertSize(t, 0)
 }
 
-func TestNewIterativePackedRecordReader_PrefetchFlag(t *testing.T) {
-	on := newIterativePackedRecordReader(nil, nil, 0, nil, nil, packed.ExternalReaderContext{}, true)
-	off := newIterativePackedRecordReader(nil, nil, 0, nil, nil, packed.ExternalReaderContext{}, false)
-	assert.True(t, on.prefetch)
-	assert.False(t, off.prefetch)
+func TestNewIterativePackedRecordReader_ReadConcurrency(t *testing.T) {
+	on := newIterativePackedRecordReader(nil, nil, 0, nil, nil, packed.ExternalReaderContext{}, 4)
+	off := newIterativePackedRecordReader(nil, nil, 0, nil, nil, packed.ExternalReaderContext{}, 1)
+	assert.Equal(t, 4, on.window)
+	assert.Equal(t, 1, off.window)
 	// With no paths at all both must report EOF on the first read and close cleanly.
 	for _, ir := range []*IterativeRecordReader{on, off} {
 		_, err := ir.Next()
@@ -434,7 +435,7 @@ func TestIterativeRecordReader_PrefetchCloseReportsCurrentCloseError(t *testing.
 	only.closeErr = closeErr
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= 1 {
 				return nil, io.EOF
@@ -460,7 +461,7 @@ func TestIterativeRecordReader_PrefetchSurfacesCloseErrorOnChunkBoundary(t *test
 	chunks[0].closeErr = closeErr
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= len(chunks) {
 				return nil, io.EOF
@@ -482,13 +483,13 @@ func TestIterativeRecordReader_PrefetchSurfacesCloseErrorOnChunkBoundary(t *test
 	alloc.AssertSize(t, 0)
 }
 
-func TestWithReadPrefetch(t *testing.T) {
+func TestWithReadConcurrency(t *testing.T) {
 	opts := DefaultReaderOptions()
-	assert.False(t, opts.readPrefetch, "prefetch is off unless a reader opts in")
-	WithReadPrefetch(true)(opts)
-	assert.True(t, opts.readPrefetch)
-	WithReadPrefetch(false)(opts)
-	assert.False(t, opts.readPrefetch)
+	assert.Equal(t, 0, opts.readConcurrency, "readers stay serial unless they opt in")
+	WithReadConcurrency(4)(opts)
+	assert.Equal(t, 4, opts.readConcurrency)
+	WithReadConcurrency(1)(opts)
+	assert.Equal(t, 1, opts.readConcurrency)
 }
 
 // panicOnNextReader panics on its first Next; used to check that a panic in the
@@ -505,7 +506,7 @@ func TestIterativeRecordReader_PrefetchRecoversLiveNextPanic(t *testing.T) {
 	live := &panicOnNextReader{}
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= 1 {
 				return nil, io.EOF
@@ -534,7 +535,7 @@ func TestIterativeRecordReader_PrefetchRecoversPanicFromCurrent(t *testing.T) {
 	live := &panicAfterFirstReader{inner: first}
 	call := 0
 	ir := &IterativeRecordReader{
-		prefetch: true,
+		window: 2,
 		iterate: func() (RecordReader, error) {
 			if call >= 1 {
 				return nil, io.EOF
@@ -569,3 +570,211 @@ func (r *panicAfterFirstReader) Next() (Record, error) {
 	return r.inner.Next()
 }
 func (r *panicAfterFirstReader) Close() error { return r.inner.Close() }
+
+// gatedChunkReader blocks its first Next until released, so a test can observe
+// how many chunks the reader has opened and is fetching at the same time.
+type gatedChunkReader struct {
+	inner   *ownedChunkReader
+	release chan struct{}
+	first   bool
+}
+
+func (r *gatedChunkReader) Next() (Record, error) {
+	if !r.first {
+		r.first = true
+		<-r.release
+	}
+	return r.inner.Next()
+}
+func (r *gatedChunkReader) Close() error { return r.inner.Close() }
+
+// TestIterativeRecordReader_WindowKeepsChunksInFlight pins the whole point of
+// the window: with window=4 the reader has four chunks open and fetching while
+// the consumer is still waiting for the first one, never more, and the chunks
+// still come out in order.
+func TestIterativeRecordReader_WindowKeepsChunksInFlight(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	const window, n = 4, 7
+	chunks := make([]*gatedChunkReader, n)
+	for i := range chunks {
+		chunks[i] = &gatedChunkReader{inner: chunkOf(alloc, i, 2), release: make(chan struct{})}
+	}
+	var opened atomic.Int32
+	call := 0
+	ir := &IterativeRecordReader{
+		window: window,
+		iterate: func() (RecordReader, error) {
+			if call >= n {
+				return nil, io.EOF
+			}
+			c := chunks[call]
+			call++
+			opened.Add(1)
+			return c, nil
+		},
+	}
+
+	type result struct {
+		rec Record
+		err error
+	}
+	got := make(chan result, 1)
+	go func() {
+		rec, err := ir.Next()
+		got <- result{rec, err}
+	}()
+	// The consumer is blocked on chunk 0; the window must fill up behind it.
+	assert.Eventually(t, func() bool { return opened.Load() == window }, 2*time.Second, 5*time.Millisecond,
+		"expected %d chunks open while waiting for the first, got %d", window, opened.Load())
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, int32(window), opened.Load(), "the reader must not run further ahead than its window")
+
+	close(chunks[0].release)
+	r := <-got
+	require.NoError(t, r.err)
+	assert.Equal(t, int64(0), int64Of(r.rec))
+	r.rec.Release()
+
+	// Release the rest; consuming chunk 0 frees a slot, so chunk 4 opens, etc.
+	for i := 1; i < n; i++ {
+		close(chunks[i].release)
+	}
+	rest, err := drain(ir)
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Equal(t, []int64{1, 100, 101, 200, 201, 300, 301, 400, 401, 500, 501, 600, 601}, rest)
+	assert.Equal(t, int32(n), opened.Load())
+	for i, c := range chunks {
+		assert.True(t, c.inner.closed, "chunk %d must be closed", i)
+	}
+	require.NoError(t, ir.Close())
+	alloc.AssertSize(t, 0)
+}
+
+// TestIterativeRecordReader_WindowIterateNeverConcurrent guards the contract
+// that iterate() is only ever called from one goroutine, which is what makes
+// the plain chunk cursor in newIterativePackedRecordReader race-free.
+func TestIterativeRecordReader_WindowIterateNeverConcurrent(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	const n = 24
+	var inIterate atomic.Int32
+	var overlaps atomic.Int32
+	call := 0
+	ir := &IterativeRecordReader{
+		window: 8,
+		iterate: func() (RecordReader, error) {
+			if inIterate.Add(1) != 1 {
+				overlaps.Add(1)
+			}
+			defer inIterate.Add(-1)
+			time.Sleep(time.Millisecond)
+			if call >= n {
+				return nil, io.EOF
+			}
+			c := chunkOf(alloc, call, 1)
+			call++
+			return c, nil
+		},
+	}
+	got, err := drain(ir)
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Len(t, got, n)
+	assert.Zero(t, overlaps.Load(), "iterate() must never run concurrently")
+	require.NoError(t, ir.Close())
+	alloc.AssertSize(t, 0)
+}
+
+// TestIterativeRecordReader_WindowOpenErrorIsSticky checks that once opening a
+// chunk failed, every later Next repeats that error instead of drifting to EOF.
+func TestIterativeRecordReader_WindowOpenErrorIsSticky(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	openErr := errors.New("open failed")
+	first := chunkOf(alloc, 0, 1)
+	call := 0
+	ir := &IterativeRecordReader{
+		window: 4,
+		iterate: func() (RecordReader, error) {
+			call++
+			if call == 1 {
+				return first, nil
+			}
+			return nil, openErr
+		},
+	}
+	got, err := drain(ir)
+	assert.ErrorIs(t, err, openErr)
+	assert.Equal(t, []int64{0}, got)
+	_, err = ir.Next()
+	assert.ErrorIs(t, err, openErr, "the failure must be sticky")
+	assert.Equal(t, 2, call, "the producer stops after the first open error")
+	require.NoError(t, ir.Close())
+	alloc.AssertSize(t, 0)
+}
+
+// TestIterativeRecordReader_WindowCloseDrainsWholeWindow opens a wide window,
+// consumes one record and closes: every reader the window opened must be
+// closed, the ones it never reached are the test's to release.
+func TestIterativeRecordReader_WindowCloseDrainsWholeWindow(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	const window, n = 4, 9
+	chunks := make([]*ownedChunkReader, n)
+	for i := range chunks {
+		chunks[i] = chunkOf(alloc, i, 2)
+	}
+	call := 0
+	ir := &IterativeRecordReader{
+		window: window,
+		iterate: func() (RecordReader, error) {
+			if call >= n {
+				return nil, io.EOF
+			}
+			c := chunks[call]
+			call++
+			return c, nil
+		},
+	}
+	rec, err := ir.Next()
+	require.NoError(t, err)
+	rec.Release()
+	require.NoError(t, ir.Close())
+	assert.LessOrEqual(t, call, window+1, "close must not let the producer run on")
+	for i := 0; i < call; i++ {
+		assert.True(t, chunks[i].closed, "opened chunk %d must be closed", i)
+	}
+	for _, c := range chunks[call:] {
+		require.NoError(t, c.Close())
+	}
+	// Close is idempotent, and a closed reader reports EOF instead of
+	// restarting the producer behind the caller's back.
+	require.NoError(t, ir.Close())
+	openedBefore := call
+	_, err = ir.Next()
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Equal(t, openedBefore, call, "nothing more is opened after Close")
+	alloc.AssertSize(t, 0)
+}
+
+// TestIterativeRecordReader_WindowOneIsSerial makes sure window=1 takes the
+// untouched serial path: nothing is opened until the consumer asks.
+func TestIterativeRecordReader_WindowOneIsSerial(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	chunks := []*ownedChunkReader{chunkOf(alloc, 0, 1), chunkOf(alloc, 1, 1)}
+	call := 0
+	ir := &IterativeRecordReader{
+		window: 1,
+		iterate: func() (RecordReader, error) {
+			if call >= len(chunks) {
+				return nil, io.EOF
+			}
+			c := chunks[call]
+			call++
+			return c, nil
+		},
+	}
+	assert.Equal(t, 0, call, "serial mode opens nothing up front")
+	got, err := drain(ir)
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Equal(t, []int64{0, 100}, got)
+	assert.False(t, ir.started, "serial mode never starts a producer")
+	require.NoError(t, ir.Close())
+	alloc.AssertSize(t, 0)
+}

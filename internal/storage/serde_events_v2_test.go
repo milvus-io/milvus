@@ -72,7 +72,7 @@ func TestPackedSerde(t *testing.T) {
 			prepareChunkData(chunkPaths, size)
 		}
 
-		reader := newIterativePackedRecordReader(paths, schema, bufferSize, nil, nil, packed.ExternalReaderContext{}, false)
+		reader := newIterativePackedRecordReader(paths, schema, bufferSize, nil, nil, packed.ExternalReaderContext{}, 1)
 		defer reader.Close()
 
 		nRows := 0

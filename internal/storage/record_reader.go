@@ -147,7 +147,7 @@ func NewRecordReaderFromManifest(manifest string,
 
 var _ RecordReader = (*IterativeRecordReader)(nil)
 
-// prefetchedChunk is the outcome of opening the next chunk ahead of time. It
+// prefetchedChunk is the outcome of opening one chunk ahead of time. It
 // carries the chunk's first record as well as its reader: for storage v2 a chunk
 // is one binlog file whose column groups are fetched by that first Next(), so
 // opening alone would overlap only the footer read, not the payload download.
@@ -165,90 +165,141 @@ type IterativeRecordReader struct {
 	cur     RecordReader
 	iterate func() (RecordReader, error)
 
-	// prefetch overlaps the object-storage round trip for chunk N+1 with the
-	// caller's processing of chunk N. Chunks are still consumed strictly in
-	// order; only the opening runs ahead. When enabled, iterate() is called
-	// ONLY from the prefetch goroutine and at most one is ever in flight, which
-	// is what keeps the closure's chunk cursor free of races.
-	prefetch bool
-	pending  chan *prefetchedChunk
-	drained  bool
+	// window is the number of chunks that may be open at once, the one being
+	// consumed included. With window <= 1 chunks are opened strictly one after
+	// another (nextSerial). With a larger window the object-storage fetch of
+	// up to window-1 further chunks overlaps the caller's processing of the
+	// current one. Chunks are still delivered in order: for storage v2 the
+	// first Next() on a chunk pulls its whole payload, so keeping the fetches
+	// concurrent is what matters, not the delivery order.
+	window int
+
+	// queue hands the per-chunk result channels from the producer to the
+	// consumer in iteration order. Its capacity (window-1) is the back
+	// pressure: the producer reserves a slot by enqueueing the channel before
+	// it opens the chunk, so it can never run more than window-1 chunks ahead.
+	queue chan chan *prefetchedChunk
+	// stop tells the producer to quit; done is closed once it has.
+	stop chan struct{}
+	done chan struct{}
+	// started records that the producer has been launched; failed remembers a
+	// terminal error so later Next calls repeat it instead of reporting EOF.
+	started bool
+	failed  error
+	drained bool
 }
 
 // Close implements RecordReader.
 func (ir *IterativeRecordReader) Close() error {
 	var firstErr error
-	// Wait for any in-flight prefetch before returning: the goroutine holds a
-	// reader that would otherwise leak, and iterate() must not run on after the
-	// caller believes the reader is closed.
-	if ir.pending != nil {
-		p := <-ir.pending
-		ir.pending = nil
-		if p.reader != nil {
-			if err := p.reader.Close(); err != nil {
-				firstErr = err
+	if ir.started {
+		// Stop the producer, wait for it, then close every reader it managed
+		// to open: each channel it enqueued is guaranteed to be filled.
+		close(ir.stop)
+		<-ir.done
+		for {
+			var ch chan *prefetchedChunk
+			select {
+			case ch = <-ir.queue:
+			default:
+			}
+			if ch == nil {
+				break
+			}
+			p := <-ch
+			if p.reader != nil {
+				if err := p.reader.Close(); err != nil && firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
+		ir.started = false
 	}
+	// A closed reader stays closed: later Next calls report EOF instead of
+	// restarting the producer and opening chunks nobody will consume.
+	ir.drained = true
 	if ir.cur != nil {
 		if err := ir.cur.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		ir.cur = nil
 	}
 	return firstErr
 }
 
-// launch starts opening the next chunk in the background. It is a no-op once
-// the chunks are exhausted or while one is already in flight.
-func (ir *IterativeRecordReader) launch() {
-	if ir.drained || ir.pending != nil {
+// start launches the producer that walks iterate() and opens chunks ahead of
+// the consumer. iterate() is only ever called from this one goroutine, which
+// keeps the closure's chunk cursor free of races; the first Next() of each
+// chunk, i.e. its payload download, runs in a goroutine of its own so that up
+// to window-1 downloads are in flight at the same time.
+func (ir *IterativeRecordReader) start() {
+	if ir.started {
 		return
 	}
-	ch := make(chan *prefetchedChunk, 1)
-	ir.pending = ch
-	iterate := ir.iterate
+	ir.started = true
+	ir.queue = make(chan chan *prefetchedChunk, ir.window-1)
+	ir.stop = make(chan struct{})
+	ir.done = make(chan struct{})
+	iterate, queue, stop, done := ir.iterate, ir.queue, ir.stop, ir.done
 	go func() {
-		p := &prefetchedChunk{}
-		defer func() {
-			if x := recover(); x != nil {
-				// Keep p.reader: if the panic came from its first Next(), the
-				// consumer still has to close it.
-				p.rec = nil
-				p.err = merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+		defer close(done)
+		for {
+			ch := make(chan *prefetchedChunk, 1)
+			// Reserve the slot first: once ch is queued the consumer relies
+			// on it being filled, so everything after this point must send.
+			select {
+			case queue <- ch:
+			case <-stop:
+				return
 			}
-			ch <- p
-		}()
-		r, err := iterate()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				p.exhausted = true
-			} else {
-				// iterate() may hand back a typed-nil reader alongside the
-				// error (see the comment in nextSerial); keep it so Close()
-				// never dereferences it.
-				p.err = err
+			p := &prefetchedChunk{}
+			r, err := func() (r RecordReader, err error) {
+				defer func() {
+					if x := recover(); x != nil {
+						err = merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+					}
+				}()
+				return iterate()
+			}()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					p.exhausted = true
+				} else {
+					// iterate() may hand back a typed-nil reader alongside
+					// the error (see the comment in nextSerial); do not keep
+					// it, Close() must never dereference it.
+					p.err = err
+				}
+				ch <- p
+				return
 			}
-			return
+			p.reader = r
+			go func() {
+				defer func() {
+					if x := recover(); x != nil {
+						// Keep p.reader: the consumer still has to close it.
+						p.rec = nil
+						p.err = merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+					}
+					ch <- p
+				}()
+				p.rec, p.err = r.Next()
+			}()
 		}
-		p.reader = r
-		rec, nextErr := r.Next()
-		if nextErr != nil {
-			p.err = nextErr
-			return
-		}
-		p.rec = rec
 	}()
 }
 
 // nextChunk installs the next non-empty chunk and returns its first record.
 func (ir *IterativeRecordReader) nextChunk() (Record, error) {
+	if ir.failed != nil {
+		return nil, ir.failed
+	}
+	if ir.drained {
+		return nil, io.EOF
+	}
+	ir.start()
 	for {
-		ir.launch()
-		if ir.pending == nil {
-			return nil, io.EOF
-		}
-		p := <-ir.pending
-		ir.pending = nil
+		p := <-<-ir.queue
 		if p.exhausted {
 			ir.drained = true
 			return nil, io.EOF
@@ -261,12 +312,10 @@ func (ir *IterativeRecordReader) nextChunk() (Record, error) {
 				// The chunk opened but held no rows; move on to the next one.
 				continue
 			}
+			ir.failed = p.err
 			return nil, p.err
 		}
 		ir.cur = p.reader
-		// Keep one chunk in flight while the caller works through this one:
-		// that overlap is the whole point of the prefetch.
-		ir.launch()
 		return p.rec, nil
 	}
 }
@@ -277,7 +326,7 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 			rec, err = nil, merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
 		}
 	}()
-	if ir.prefetch {
+	if ir.window > 1 {
 		if ir.cur == nil {
 			return ir.nextChunk()
 		}
@@ -338,11 +387,11 @@ func newIterativePackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
-	prefetch bool,
+	readConcurrency int,
 ) *IterativeRecordReader {
 	chunk := 0
 	return &IterativeRecordReader{
-		prefetch: prefetch,
+		window: readConcurrency,
 		iterate: func() (RecordReader, error) {
 			if chunk >= len(paths) {
 				return nil, io.EOF

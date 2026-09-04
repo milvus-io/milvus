@@ -65,7 +65,7 @@ type rwOptions struct {
 	version             int64
 	op                  rwOp
 	bufferSize          int64
-	readPrefetch        bool
+	readConcurrency     int
 	downloader          downloaderFn
 	uploader            uploaderFn
 	multiPartUploadSize int64
@@ -131,13 +131,14 @@ func WithVersion(version int64) RwOption {
 	}
 }
 
-// WithReadPrefetch lets a reader open the next chunk while the caller is still
-// consuming the current one. Chunks are still consumed in order; only the
-// object-storage round trip moves off the critical path. Off by default so the
-// readers that stream many chunks concurrently keep their current memory shape.
-func WithReadPrefetch(prefetch bool) RwOption {
+// WithReadConcurrency sets how many input chunks a binlog reader keeps open at
+// once, the one being consumed included. Values <= 1 keep the original
+// strictly serial behaviour; larger values let the reader fetch up to n-1
+// further chunks from object storage while the caller consumes the current
+// one. Chunks are still delivered in order.
+func WithReadConcurrency(n int) RwOption {
 	return func(options *rwOptions) {
-		options.readPrefetch = prefetch
+		options.readConcurrency = n
 	}
 }
 
@@ -384,10 +385,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			if ferr != nil {
 				return nil, ferr
 			}
-			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readPrefetch)
+			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readConcurrency)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
-			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readPrefetch)
+			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readConcurrency)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

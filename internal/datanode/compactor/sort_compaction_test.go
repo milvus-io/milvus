@@ -18,6 +18,7 @@ package compactor
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"math"
 	"testing"
 	"time"
@@ -505,15 +506,15 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
 }
 
-// prefetchFlagsSeen runs one sort compaction and returns every value the sort
-// handed to storage.WithReadPrefetch, so the test can pin that the reader is
-// opened with exactly what dataNode.compaction.sortReadPrefetch says.
-func (s *SortCompactionTaskSuite) prefetchFlagsSeen() []bool {
-	var seen []bool
-	var origin func(bool) storage.RwOption
-	mocker := mockey.Mock(storage.WithReadPrefetch).To(func(prefetch bool) storage.RwOption {
-		seen = append(seen, prefetch)
-		return origin(prefetch)
+// readConcurrencySeen runs one sort compaction and returns every value the sort
+// handed to storage.WithReadConcurrency, so the test can pin that the reader is
+// opened with exactly what dataNode.compaction.sortReadConcurrency resolves to.
+func (s *SortCompactionTaskSuite) readConcurrencySeen() []int {
+	var seen []int
+	var origin func(int) storage.RwOption
+	mocker := mockey.Mock(storage.WithReadConcurrency).To(func(n int) storage.RwOption {
+		seen = append(seen, n)
+		return origin(n)
 	}).Origin(&origin).Build()
 	defer mocker.UnPatch()
 
@@ -524,16 +525,16 @@ func (s *SortCompactionTaskSuite) prefetchFlagsSeen() []bool {
 	return seen
 }
 
-func (s *SortCompactionTaskSuite) TestSortCompactionReadPrefetchOnByDefault() {
-	s.Equal([]bool{true}, s.prefetchFlagsSeen(),
-		"the input reader must be opened with prefetch on, once, under the default config")
+func (s *SortCompactionTaskSuite) TestSortCompactionReadConcurrencyDefaultsToCPUs() {
+	s.Equal([]int{hardware.GetCPUNum()}, s.readConcurrencySeen(),
+		"under the default config the input reader must be opened with one chunk per CPU core, once")
 }
 
-func (s *SortCompactionTaskSuite) TestSortCompactionReadPrefetchFollowsConfig() {
-	key := paramtable.Get().DataNodeCfg.CompactionSortReadPrefetch.Key
-	paramtable.Get().Save(key, "false")
+func (s *SortCompactionTaskSuite) TestSortCompactionReadConcurrencyFollowsConfig() {
+	key := paramtable.Get().DataNodeCfg.CompactionSortReadConcurrency.Key
+	paramtable.Get().Save(key, "3")
 	defer paramtable.Get().Reset(key)
 
-	s.Equal([]bool{false}, s.prefetchFlagsSeen(),
-		"turning dataNode.compaction.sortReadPrefetch off must reach the reader")
+	s.Equal([]int{3}, s.readConcurrencySeen(),
+		"dataNode.compaction.sortReadConcurrency must reach the reader")
 }

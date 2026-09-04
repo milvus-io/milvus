@@ -7461,14 +7461,14 @@ type dataNodeConfig struct {
 	ImportWriteRetryMaxInterval     ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio           ParamItem `refreshable:"true"`
-	L0CompactionMaxBatchSize     ParamItem `refreshable:"true"`
-	UseMergeSort                 ParamItem `refreshable:"true"`
-	MaxSegmentMergeSort          ParamItem `refreshable:"true"`
-	MaxCompactionConcurrency     ParamItem `refreshable:"true"`
-	CompactionSortReadBufferSize ParamItem `refreshable:"true"`
-	CompactionSortReadPrefetch   ParamItem `refreshable:"true"`
-	LOBHoleRatioThreshold        ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio            ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize      ParamItem `refreshable:"true"`
+	UseMergeSort                  ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort           ParamItem `refreshable:"true"`
+	MaxCompactionConcurrency      ParamItem `refreshable:"true"`
+	CompactionSortReadBufferSize  ParamItem `refreshable:"true"`
+	CompactionSortReadConcurrency ParamItem `refreshable:"true"`
+	LOBHoleRatioThreshold         ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
 	TextInlineThreshold     ParamItem `refreshable:"true"`
@@ -7978,17 +7978,25 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	}
 	p.CompactionSortReadBufferSize.Init(base.mgr)
 
-	p.CompactionSortReadPrefetch = ParamItem{
-		Key:     "dataNode.compaction.sortReadPrefetch",
+	p.CompactionSortReadConcurrency = ParamItem{
+		Key:     "dataNode.compaction.sortReadConcurrency",
 		Version: "3.0.1",
-		Doc: "Whether a sort compaction opens the next input chunk while it is still consuming the current one. " +
-			"A sort reads its input segment as a chain of per-binlog chunks opened strictly one after another, so " +
-			"without this the object-storage round trip for every chunk sits on the critical path. Chunk order is " +
-			"unchanged; one extra chunk is in flight, which the sort would buffer anyway.",
-		DefaultValue: "true",
-		Export:       true,
+		Doc: "How many input chunks a sort compaction keeps open at once, the one being consumed included. " +
+			"A sort reads its input segment as a chain of per-binlog chunks; with 1 they are opened strictly one " +
+			"after another and the object-storage round trip for every chunk sits on the critical path, with n the " +
+			"next n-1 chunks are fetched while the current one is consumed. Chunks are still delivered in order. " +
+			"Values <= 0 mean the number of CPU cores.",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return strconv.Itoa(hardware.GetCPUNum())
+			}
+			return v
+		},
+		Export: true,
 	}
-	p.CompactionSortReadPrefetch.Init(base.mgr)
+	p.CompactionSortReadConcurrency.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

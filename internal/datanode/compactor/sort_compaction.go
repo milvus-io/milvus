@@ -260,10 +260,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithBufferSize(paramtable.Get().DataNodeCfg.CompactionSortReadBufferSize.GetAsSize()),
 		// A sort reads its input segment as a chain of per-binlog chunks, one
 		// opened only after the previous one is drained and closed. Prefetching
-		// takes the object-storage round trip for the next chunk off the
-		// critical path; the sort buffers its whole input anyway, so the extra
-		// chunk in flight does not change the peak.
-		storage.WithReadPrefetch(paramtable.Get().DataNodeCfg.CompactionSortReadPrefetch.GetAsBool()),
+		// keeps several input chunks downloading at once; the sort buffers
+		// its whole input anyway, so the chunks in flight do not change the
+		// peak, only how early it is reached.
+		storage.WithReadConcurrency(paramtable.Get().DataNodeCfg.CompactionSortReadConcurrency.GetAsInt()),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
