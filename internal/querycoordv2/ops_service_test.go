@@ -473,6 +473,49 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	suite.Contains(nodes, int64(1))
 }
 
+func (suite *OpsServiceSuite) TestSuspendNodeNotInAnyResourceGroup() {
+	// A node that is registered in node manager but not in any resource group
+	// (e.g. the embedded query node of a streaming node whose session reports
+	// another resource group) must be marked as stopping and the call must
+	// succeed, instead of silently no-oping.
+	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	// node 1 is not in any resource group
+	nodes, err := suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.NotContains(nodes, int64(1))
+
+	resp, err := suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{
+		NodeID: 1,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+
+	// node must be marked as stopping in node manager
+	info := suite.nodeMgr.Get(1)
+	suite.NotNil(info)
+	suite.True(info.IsStoppingState())
+
+	// resuming must clear the stopping state and re-assign to default RG
+	resp, err = suite.server.ResumeNode(ctx, &querypb.ResumeNodeRequest{
+		NodeID: 1,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	info = suite.nodeMgr.Get(1)
+	suite.NotNil(info)
+	suite.False(info.IsStoppingState())
+	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Contains(nodes, int64(1))
+}
+
 func (suite *OpsServiceSuite) TestTransferSegment() {
 	ctx := context.Background()
 
