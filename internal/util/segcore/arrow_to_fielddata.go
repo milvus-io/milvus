@@ -19,6 +19,7 @@ package segcore
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -30,23 +31,38 @@ import (
 )
 
 // ArrowFieldsToProto converts the columns of an Arrow RecordBatch into proto
-// FieldData. The column at index i in rec must correspond to the FieldSchema
-// at index i in fieldSchemas.
-func ArrowFieldsToProto(rec arrow.Record, fieldSchemas []*schemapb.FieldSchema) ([]*schemapb.FieldData, error) {
+// FieldData. Each Arrow column carries milvus.field_id metadata; the column
+// is matched to its FieldSchema via fieldSchemaMap. Columns whose field_id
+// is not in the map are skipped (the field may have been dropped).
+func ArrowFieldsToProto(rec arrow.Record, fieldSchemaMap map[int64]*schemapb.FieldSchema) ([]*schemapb.FieldData, error) {
 	numCols := int(rec.NumCols())
 	numRows := int(rec.NumRows())
-	result := make([]*schemapb.FieldData, numCols)
+	result := make([]*schemapb.FieldData, 0, numCols)
 
 	for i := 0; i < numCols; i++ {
-		fd, err := arrowColumnToFieldData(rec.Column(i), fieldSchemas[i], numRows)
+		field := rec.Schema().Field(i)
+		md := field.Metadata
+		fidStr, ok := md.GetValue("milvus.field_id")
+		if !ok {
+			continue
+		}
+		fid, err := strconv.ParseInt(fidStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		schema, ok := fieldSchemaMap[fid]
+		if !ok {
+			continue
+		}
+		fd, err := arrowColumnToFieldData(rec.Column(i), schema, numRows)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternal(
 				fmt.Sprintf("failed to convert Arrow column %q (field %d)",
-					fieldSchemas[i].GetName(), fieldSchemas[i].GetFieldID()),
+					schema.GetName(), schema.GetFieldID()),
 				err.Error(),
 			)
 		}
-		result[i] = fd
+		result = append(result, fd)
 	}
 	return result, nil
 }
@@ -243,21 +259,26 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 			schema.GetDataType().String(), schema.GetName(), schema.GetFieldID())
 	}
 
-	setArrowValidData(fd, col, numRows)
+	setArrowValidData(fd, col, numRows, schema.GetNullable())
 	return fd, nil
 }
 
-// setArrowValidData extracts the Arrow validity bitmap and writes it to the
-// field-specific ValidData location when nulls are present.
-func setArrowValidData(fd *schemapb.FieldData, col arrow.Array, numRows int) {
-	if col.NullN() == 0 {
+func setArrowValidData(fd *schemapb.FieldData, col arrow.Array, numRows int, nullable bool) {
+	if col.NullN() > 0 {
+		validData := make([]bool, numRows)
+		for j := 0; j < numRows; j++ {
+			validData[j] = col.IsValid(j)
+		}
+		typeutil.SetFieldDataValidData(fd, validData)
 		return
 	}
-	validData := make([]bool, numRows)
-	for j := 0; j < numRows; j++ {
-		validData[j] = col.IsValid(j)
+	if nullable {
+		validData := make([]bool, numRows)
+		for j := range validData {
+			validData[j] = true
+		}
+		typeutil.SetFieldDataValidData(fd, validData)
 	}
-	typeutil.SetFieldDataValidData(fd, validData)
 }
 
 // resolveVectorDim returns the vector dimension for a FixedSizeBinary vector

@@ -109,18 +109,10 @@ func buildIgnoreNonPkPipeline(
 		validSegments = append(validSegments, segments[i])
 	}
 
-	// Build the output field schemas, aligned with OutputFieldsId, needed by
-	// the Arrow path to convert Arrow record columns back to proto FieldData.
-	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, f := range schema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(allFields))
+	for _, f := range allFields {
 		fieldSchemaMap[f.GetFieldID()] = f
-	}
-	outputFieldsId := req.GetReq().GetOutputFieldsId()
-	fieldSchemas := make([]*schemapb.FieldSchema, 0, len(outputFieldsId))
-	for _, fid := range outputFieldsId {
-		if fs, ok := fieldSchemaMap[fid]; ok {
-			fieldSchemas = append(fieldSchemas, fs)
-		}
 	}
 
 	builder := queryutil.NewPipelineBuilder(queryutil.PipelineNameQNIgnoreNonPk)
@@ -134,7 +126,7 @@ func buildIgnoreNonPkPipeline(
 		queryutil.OpFetchFields,
 		[]string{queryutil.ChannelMerged},
 		[]string{queryutil.PipelineOutput},
-		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan, fieldSchemas),
+		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan, fieldSchemaMap),
 	)
 
 	msg := queryutil.OpMsg{queryutil.PipelineInput: validResults}

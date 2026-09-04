@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -198,7 +199,7 @@ func NewFetchFieldsDataOperator(
 	validSegments []Segment,
 	manager *Manager,
 	retrievePlan *segcore.RetrievePlan,
-	fieldSchemas []*schemapb.FieldSchema,
+	fieldSchemaMap map[int64]*schemapb.FieldSchema,
 ) queryutil.Operator {
 	return queryutil.NewLambdaOperator(queryutil.OpFetchFields, func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 		merged := inputs[0].(*MergedResultWithOffsets)
@@ -213,7 +214,7 @@ func NewFetchFieldsDataOperator(
 		}
 
 		if paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.GetAsBool() {
-			return fetchFieldsArrow(ctx, validSegments, retrievePlan, fieldSchemas, merged, ret)
+			return fetchFieldsArrow(ctx, validSegments, retrievePlan, fieldSchemaMap, merged, ret)
 		}
 		return fetchFieldsProto(ctx, validSegments, manager, retrievePlan, merged, ret)
 	})
@@ -225,7 +226,7 @@ func fetchFieldsArrow(
 	ctx context.Context,
 	validSegments []Segment,
 	retrievePlan *segcore.RetrievePlan,
-	fieldSchemas []*schemapb.FieldSchema,
+	fieldSchemaMap map[int64]*schemapb.FieldSchema,
 	merged *MergedResultWithOffsets,
 	ret *segcorepb.RetrieveResults,
 ) ([]any, error) {
@@ -235,7 +236,7 @@ func fetchFieldsArrow(
 	}
 	defer rec.Release()
 
-	fieldsData, err := segcore.ArrowFieldsToProto(rec, fieldSchemas)
+	fieldsData, err := segcore.ArrowFieldsToProto(rec, fieldSchemaMap)
 	if err != nil {
 		return nil, err
 	}
@@ -355,9 +356,30 @@ func fetchFieldsAsRecord(
 	retrievePlan *segcore.RetrievePlan,
 	merged *MergedResultWithOffsets,
 ) (arrow.Record, error) {
-	cSegments := make([]segcore.CSegment, len(validSegments))
+	type pinned struct {
+		ls *LocalSegment
+		cs segcore.CSegment
+	}
+	segs := make([]pinned, len(validSegments))
 	for i, seg := range validSegments {
-		cSegments[i] = seg.(*LocalSegment).csegment
+		ls := seg.(*LocalSegment)
+		if !ls.ptrLock.PinIf(state.IsNotReleased) {
+			for j := 0; j < i; j++ {
+				segs[j].ls.ptrLock.Unpin()
+			}
+			return nil, merr.WrapErrSegmentNotLoaded(ls.ID(), "segment released")
+		}
+		segs[i] = pinned{ls, ls.csegment}
+	}
+	defer func() {
+		for _, s := range segs {
+			s.ls.ptrLock.Unpin()
+		}
+	}()
+
+	cSegments := make([]segcore.CSegment, len(segs))
+	for i, s := range segs {
+		cSegments[i] = s.cs
 	}
 
 	segIndices := make([]int32, len(merged.Selections))
@@ -367,5 +389,8 @@ func fetchFieldsAsRecord(
 		segOffsets[i] = sel.Offset
 	}
 
-	return segcore.FillRetrieveFieldsOrdered(ctx, cSegments, retrievePlan, segIndices, segOffsets)
+	return retrySegmentReadGate(ctx, SegmentTypeSealed,
+		func() (arrow.Record, error) {
+			return segcore.FillRetrieveFieldsOrdered(ctx, cSegments, retrievePlan, segIndices, segOffsets)
+		}, waitSegmentReadGateRetry)
 }
