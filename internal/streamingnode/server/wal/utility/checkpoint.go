@@ -8,6 +8,7 @@ import (
 
 const (
 	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
+	RecoveryMagicRecoveryStorageV2    int64 = 2 // recovery metadata uses one published global checkpoint.
 	// the checkpoint is set into the catalog.
 )
 
