@@ -944,6 +944,47 @@ class TestMilvusClientTextLOBShared(TestMilvusClientV2Base):
         assert {row[ID_FIELD] for row in upper_rows} == text_match_ids
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_text_match_fuzzy_text_varchar_and_bm25_filter(self):
+        """
+        target: verify text_match_fuzzy supports TEXT/VARCHAR fields and can filter BM25 search
+        method: compare a one-edit typo with exact text_match on both string types, then filter TEXT BM25 hits
+        expected: fuzzy typo IDs equal exact-term IDs and BM25 returns only the fuzzy-matched ranking row
+        """
+        client = self._client()
+        for field in [CONTENT_FIELD, VARCHAR_TEXT_FIELD]:
+            exact_rows, _ = self.query(
+                client,
+                SHARED_COLLECTION_NAME,
+                filter=f'text_match({field}, "database")',
+                output_fields=[ID_FIELD],
+                consistency_level="Strong",
+            )
+            fuzzy_rows, _ = self.query(
+                client,
+                SHARED_COLLECTION_NAME,
+                filter=f'TEXT_MATCH_FUZZY({field}, "databse", max_edit_distance=1)',
+                output_fields=[ID_FIELD, field],
+                consistency_level="Strong",
+            )
+            exact_ids = {row[ID_FIELD] for row in exact_rows}
+            fuzzy_ids = {row[ID_FIELD] for row in fuzzy_rows}
+            assert exact_ids
+            assert fuzzy_ids == exact_ids
+
+        filtered, _ = self.search(
+            client,
+            SHARED_COLLECTION_NAME,
+            data=["vector database"],
+            anns_field=CONTENT_SPARSE_FIELD,
+            search_params={"metric_type": "BM25", "params": {}},
+            filter=f'text_match_fuzzy({CONTENT_FIELD}, "rankng", max_edit_distance=1)',
+            limit=len(self.shared_rows),
+            output_fields=[ID_FIELD, CONTENT_FIELD],
+            consistency_level="Strong",
+        )
+        assert {result_id(hit) for hit in filtered[0]} == {10}
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_text_match_minimum_should_match(self):
         """
         target: verify minimum_should_match on TEXT fields
