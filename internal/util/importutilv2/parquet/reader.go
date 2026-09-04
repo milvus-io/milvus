@@ -71,7 +71,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}))
 	if err != nil {
 		retryableReader.Close()
-		return nil, merr.WrapErrImportSysFailedMsg("new parquet reader failed, err=%v", err)
+		return nil, common.WrapDecodeErr(err, "new parquet reader failed")
 	}
 	mlog.Info(ctx, "parquet file info", mlog.Int("row group num", r.NumRowGroups()),
 		mlog.Int64("num rows", r.NumRows()))

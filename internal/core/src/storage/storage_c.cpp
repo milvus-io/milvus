@@ -29,9 +29,11 @@
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -111,6 +113,11 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     }
 }
 
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable) {
+    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
+}
+
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config) {
     try {
@@ -130,6 +137,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =
@@ -200,6 +208,16 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     }
 }
 
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads) {
     try {
@@ -250,6 +268,22 @@ InitIndexBuildReadWindow(int64_t window_bytes) {
         }
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .SetIndexBuildReadWindow(window_bytes);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+    try {
+        if (initial_rate == 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "external IOPS initial rate must be greater than zero");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

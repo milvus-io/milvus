@@ -709,6 +709,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
 	if !sd.Serviceable() {
 		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
 	}
@@ -1645,6 +1649,11 @@ func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, ru
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return nil, err
+	}
+	defer sd.lifetime.Done()
+
 	var result [][]*milvuspb.AnalyzerToken
 	var analyzeErr error
 	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {

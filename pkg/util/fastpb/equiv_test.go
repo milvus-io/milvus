@@ -79,6 +79,33 @@ func TestEquiv_FieldData_ValidData(t *testing.T) {
 	})
 }
 
+func TestEquiv_FieldData_FieldSpecificValidData(t *testing.T) {
+	t.Run("scalar", func(t *testing.T) {
+		roundTripFieldData(t, &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{1, 0, 3}},
+				},
+			}},
+		})
+	})
+
+	t.Run("vector", func(t *testing.T) {
+		roundTripFieldData(t, &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:       2,
+				ValidData: []bool{true, false, true},
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+				},
+			}},
+		})
+	})
+}
+
 func TestEquiv_IDs(t *testing.T) {
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}}}}})
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"k1", "k2"}}}}})
@@ -226,7 +253,11 @@ func randFieldData(r *rand.Rand, rows int) *schemapb.FieldData {
 		for i := range vd {
 			vd[i] = r.Intn(2) == 0
 		}
-		fd.ValidData = vd
+		if scalars := fd.GetScalars(); scalars != nil {
+			scalars.ValidData = vd
+		} else {
+			fd.GetVectors().ValidData = vd
+		}
 	}
 	return fd
 }

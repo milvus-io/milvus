@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestProperties_AppendType_AllValidTypes(t *testing.T) {
@@ -55,7 +57,7 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 		TaskIDKey: "1",
 	})
 	taskType, err := props.GetTaskType()
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	assert.Equal(t, "UnknownType", taskType)
 }
 

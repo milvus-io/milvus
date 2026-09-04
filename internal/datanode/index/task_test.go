@@ -154,6 +154,78 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 }
 
+func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(suite.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	accessKey := statsLogSentinel("INDEX", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("INDEX", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("INDEX", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("INDEX", "GCP", "CREDENTIAL", "SENTINEL")
+	externalSpecSecret := statsLogSentinel("INDEX", "EXTERNAL", "SPEC", "SENTINEL")
+	externalSpec := `{"format":"parquet","extfs":{"future_secret":"` + externalSpecSecret + `"}}`
+
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+		suite.Equal(accessKey, params.GetStorageConfig().GetAccessKeyID())
+		suite.Equal(secretKey, params.GetStorageConfig().GetSecretAccessKey())
+		suite.Equal(caCert, params.GetStorageConfig().GetSslCACert())
+		suite.Contains(params.GetStorageConfig().GetGcpCredentialJSON(), gcpCredential)
+		suite.Equal(externalSpec, params.GetExternalSpec())
+		return nil, nil
+	}).Build()
+	defer createIndexPatch.UnPatch()
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID:    "test-cluster",
+		BuildID:      1,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		SegmentID:    suite.segmentID,
+		NumRows:      int64(suite.numRows),
+		Dim:          int64(suite.dim),
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
+			StorageType:       "s3",
+			BucketName:        "index-bucket",
+			RootPath:          "index/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
+		},
+		StorageVersion: storage.StorageV2,
+		ExternalSource: "s3://index-bucket/data",
+		ExternalSpec:   externalSpec,
+	}
+
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil)
+	task.newIndexParams = map[string]string{
+		common.IndexTypeKey:  "FLAT",
+		common.MetricTypeKey: metric.L2,
+	}
+	task.newTypeParams = map[string]string{"dim": "128"}
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	output := logs.String()
+	suite.NotContains(output, accessKey)
+	suite.NotContains(output, secretKey)
+	suite.NotContains(output, caCert)
+	suite.NotContains(output, gcpCredential)
+	suite.NotContains(output, externalSpecSecret)
+	suite.Contains(output, "storage.example.test")
+	suite.Contains(output, "index-bucket")
+	suite.Contains(output, "index/root")
+	suite.Contains(output, "s3")
+	suite.Contains(output, "<redacted>")
+}
+
 func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

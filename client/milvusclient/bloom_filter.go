@@ -19,12 +19,12 @@ package milvusclient
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 )
 
 // BloomFilterBlob is a client pre-built Split-Block Bloom Filter (MBF1
-// envelope) blob for a bloom_match(field, {blob}) filter. Building the filter on
-// the client and shipping the compact blob (≈32 MB for ~24M members at the
+// envelope) blob for a membership_match(field, {blob}, type=bloom) filter.
+// Building the filter on the client and shipping the compact blob (≈32 MB for ~24M members at the
 // default fpr) lets large membership sets pass the proxy gRPC receive limit,
 // which a raw value list (≈90 MB for 10M int64) would exceed. When passed as an
 // expression template parameter it travels as a native protobuf bytes value
@@ -36,7 +36,7 @@ import (
 // inserted, so a wrong-domain blob is rejected by the proxy with a parameter
 // error rather than silently matching nothing — and a probe never aliases across
 // domains, even when the two encodings are byte-identical. JSON paths
-// (bloom_match(meta["user_id"], {blob})) are strictly typed per row: JSON
+// (membership_match(meta["user_id"], {blob}, type=bloom)) are strictly typed per row: JSON
 // strings behave like VARCHAR and JSON integers like int64, but a JSON double
 // NEVER matches — a stored 5.0 does not match an int64 member 5, unlike exact
 // `in` (which unifies 5.0 == 5). If your writers may float-encode integers,
@@ -51,9 +51,10 @@ type BloomFilterBlob []byte
 // resulting blob is reproducible in other languages from the same spec
 // (docs/design-docs/design_docs/20260707-bloom-filter-expression.md).
 //
-// The blob passes two proxy limits: its body must fit
-// proxy.maxBloomFilterSize (64 MiB by default) and the whole request must fit
-// proxy.grpc.serverMaxRecvSize (128 MiB by default). Use
+// The blob body must fit proxy.maxMembershipFilterSize (64 MiB by default),
+// all membership-filter-bearing plans in the request must fit
+// proxy.maxMembershipFilterPlanSize (128 MiB by default), and the complete
+// request must fit proxy.grpc.serverMaxRecvSize. Use
 // sbbf.EstimateMarshalSize(n, fpr) to check the exact blob size for a planned
 // member count before building the filter. Bodies are powers of two, so a
 // count just past a tier boundary doubles the blob and a slightly higher fpr

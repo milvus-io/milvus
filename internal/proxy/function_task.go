@@ -102,7 +102,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionName != t.FunctionSchema.Name {
 		return merr.WrapErrParameterInvalidMsg("invalid function config, name not match")
 	}
-	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
+	coll, err := getCollectionInfo(ctx, t.GetMetaCache(), t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
 			mlog.String("dbName", t.GetDbName()),
@@ -110,12 +110,12 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			mlog.Err(err))
 		return err
 	}
-	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+	if err := rejectExternalCollectionFunctionMutation(coll.Schema.CollectionSchema); err != nil {
 		return err
 	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
-	for _, fSchema := range coll.schema.Functions {
+	for _, fSchema := range coll.Schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
 				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
@@ -133,7 +133,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("function %s not found", t.FunctionName)
 	}
 
-	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
+	newColl := proto.Clone(coll.Schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
 	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
@@ -154,15 +154,15 @@ func (t *alterCollectionFunctionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func getCollectionInfo(ctx context.Context, dbName string, collectionName string) (*collectionInfo, error) {
-	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+func getCollectionInfo(ctx context.Context, metaCache Cache, dbName string, collectionName string) (*collectionInfo, error) {
+	collID, err := metaCache.GetCollectionID(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
-	coll, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collID)
+	coll, err := metaCache.GetCollectionInfo(ctx, dbName, collectionName, collID)
 	if err != nil {
 		return nil, err
 	}
-	coll.schema.DbName = dbName
+	coll.Schema.DbName = dbName
 	return coll, nil
 }

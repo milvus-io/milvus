@@ -49,13 +49,14 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &createSnapshotTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "CreateSnapshot failed to Enqueue",
@@ -90,13 +91,14 @@ func (node *Proxy) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotR
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &dropSnapshotTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DropSnapshot failed to Enqueue",
@@ -131,13 +133,14 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &describeSnapshotTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "DescribeSnapshot failed to Enqueue",
@@ -175,13 +178,14 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &listSnapshotsTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListSnapshots failed to Enqueue",
@@ -296,7 +300,7 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		failStatus, failCause := failMetricLabel(err)
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failStatus, failCause, req.GetDbName(), req.GetCollectionName()).Inc()
@@ -322,9 +326,118 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              resp.GetStatus(),
-		SnapshotMetadataUri: resp.GetSnapshotMetadataUri(),
+		Status: resp.GetStatus(),
+		JobId:  resp.GetJobId(),
 	}, nil
+}
+
+func (node *Proxy) GetExportSnapshotState(
+	ctx context.Context,
+	req *milvuspb.GetExportSnapshotStateRequest,
+) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetExportSnapshotState")
+	defer sp.End()
+
+	method := "GetExportSnapshotState"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.TotalLabel,
+		metrics.CauseNA,
+		"",
+		"",
+	).Inc()
+	if req == nil || req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("valid snapshot export job_id is required")
+		failStatus, failCause := failMetricLabel(err)
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			failStatus,
+			failCause,
+			"",
+			"",
+		).Inc()
+		return &milvuspb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+
+	resp, err := node.mixCoord.GetExportSnapshotState(ctx, &datapb.GetExportSnapshotStateRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetExportSnapshotState),
+		),
+		JobId: req.GetJobId(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		failStatus, failCause := failMetricLabel(err)
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			failStatus,
+			failCause,
+			"",
+			"",
+		).Inc()
+		return &milvuspb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.SuccessLabel,
+		metrics.CauseNA,
+		"",
+		"",
+	).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: resp.GetStatus(),
+		Info:   exportSnapshotJobInfoToPublic(resp.GetInfo()),
+	}, nil
+}
+
+func exportSnapshotJobInfoToPublic(info *datapb.ExportSnapshotJobInfo) *milvuspb.ExportSnapshotInfo {
+	if info == nil {
+		return nil
+	}
+	metadataURI := ""
+	if info.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted {
+		metadataURI = info.GetSnapshotMetadataUri()
+	}
+	return &milvuspb.ExportSnapshotInfo{
+		JobId:               info.GetJobId(),
+		SnapshotName:        info.GetSnapshotName(),
+		DbName:              info.GetDbName(),
+		CollectionName:      info.GetCollectionName(),
+		State:               exportSnapshotJobStateToPublic(info.GetState()),
+		Progress:            info.GetProgress(),
+		Reason:              info.GetReason(),
+		StartTime:           info.GetStartTime(),
+		TimeCost:            info.GetTimeCost(),
+		TotalFiles:          info.GetTotalFiles(),
+		CopiedFiles:         info.GetCopiedFiles(),
+		SnapshotMetadataUri: metadataURI,
+		TotalBytes:          info.GetTotalBytes(),
+	}
+}
+
+func exportSnapshotJobStateToPublic(state datapb.ExportSnapshotJobState) milvuspb.ExportSnapshotState {
+	switch state {
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobPending:
+		return milvuspb.ExportSnapshotState_ExportSnapshotPending
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting,
+		datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing:
+		return milvuspb.ExportSnapshotState_ExportSnapshotExecuting
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted:
+		return milvuspb.ExportSnapshotState_ExportSnapshotCompleted
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobFailed:
+		return milvuspb.ExportSnapshotState_ExportSnapshotFailed
+	default:
+		return milvuspb.ExportSnapshotState_ExportSnapshotNone
+	}
 }
 
 func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
@@ -341,13 +454,14 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &restoreSnapshotTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "RestoreSnapshot failed to Enqueue",
@@ -382,13 +496,14 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
 	t := &getRestoreSnapshotStateTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, "", "").Inc()
 		log.Warn(ctx, "GetRestoreSnapshotState failed to Enqueue",
@@ -427,13 +542,14 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &listRestoreSnapshotJobsTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(t)
+	err := node.sched.DdQueue.Enqueue(t)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "ListRestoreSnapshotJobs failed to Enqueue",
@@ -474,13 +590,14 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &pinSnapshotDataTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		mixCoord:  node.mixCoord,
 	}
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn(ctx, "PinSnapshotData failed to Enqueue",
 			mlog.Err(err))
@@ -524,7 +641,7 @@ func (node *Proxy) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSna
 		mixCoord:  node.mixCoord,
 	}
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, metrics.CauseNA, "", "").Inc()
 		log.Warn(ctx, "UnpinSnapshotData failed to Enqueue",
 			mlog.Err(err))

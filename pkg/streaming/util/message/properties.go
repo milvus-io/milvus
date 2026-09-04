@@ -19,6 +19,9 @@ const (
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
 	messageTraceContext                     = "_tc"  // Trace context subset header.
+	messagePartialUpdateCAS                 = "_puc" // partial update CAS transaction marker.
+	messageChunkIndex                       = "_ci"  // payload chunk index (0-based) of a chunked WAL record.
+	messageChunkTotal                       = "_ct"  // total chunk count of a chunked WAL record.
 )
 
 var (

@@ -146,6 +146,10 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"Scalar/mol-smiles-data-malformed", wfield(14, truncTag), newScalarField, decScalarField},
 		{"Scalar/date-data-malformed", wfield(15, truncTag), newScalarField, decScalarField},
 		{"Scalar/time-data-malformed", wfield(16, truncTag), newScalarField, decScalarField},
+		{"Scalar/validdata-truncated-len-prefix", cat(wtag(17, protowire.BytesType), truncTag), newScalarField, decScalarField},
+		{"Scalar/validdata-truncated-packed-varint", wfield(17, truncTag), newScalarField, decScalarField},
+		{"Scalar/validdata-single-varint-ok", protowire.AppendVarint(wtag(17, protowire.VarintType), 1), newScalarField, decScalarField},
+		{"Scalar/validdata-single-varint-truncated", cat(wtag(17, protowire.VarintType), truncTag), newScalarField, decScalarField},
 
 		// --- VectorField: one malformed case per field ---
 		{"Vector/truncated-tag", truncTag, newVectorField, decVectorField},
@@ -162,6 +166,10 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"Vector/int8-truncated-len-prefix", cat(wtag(7, protowire.BytesType), truncTag), newVectorField, decVectorField},
 		{"Vector/vectorarray-len-overruns-buffer", cat(wtag(8, protowire.BytesType), []byte{0x05}), newVectorField, decVectorField},
 		{"Vector/vectorarray-malformed-submsg", wfield(8, truncTag), newVectorField, decVectorField},
+		{"Vector/validdata-truncated-len-prefix", cat(wtag(9, protowire.BytesType), truncTag), newVectorField, decVectorField},
+		{"Vector/validdata-truncated-packed-varint", wfield(9, truncTag), newVectorField, decVectorField},
+		{"Vector/validdata-single-varint-ok", protowire.AppendVarint(wtag(9, protowire.VarintType), 1), newVectorField, decVectorField},
+		{"Vector/validdata-single-varint-truncated", cat(wtag(9, protowire.VarintType), truncTag), newVectorField, decVectorField},
 		{"Vector/unknown-truncated-varint", cat(wtag(20, protowire.VarintType), truncTag), newVectorField, decVectorField},
 
 		// --- IDs ---
@@ -170,6 +178,7 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"IDs/member-len-overruns-buffer", cat(wtag(1, protowire.BytesType), []byte{0x05}), newIDs, decIDs},
 		{"IDs/intid-malformed", wfield(1, truncTag), newIDs, decIDs},
 		{"IDs/strid-malformed", wfield(2, truncTag), newIDs, decIDs},
+		{"IDs/uuidid-malformed", wfield(3, truncTag), newIDs, decIDs},
 
 		// --- SearchResultData: error propagation per field ---
 		{"SRD/numqueries-truncated-varint", cat(wtag(1, protowire.VarintType), truncTag), newSearchResult, decSearchResult},

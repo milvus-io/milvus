@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SearchReduceUtilTestSuite struct {
@@ -1058,9 +1059,9 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldNull
 				FieldId:   101,
 				FieldName: "brand",
 				Type:      schemapb.DataType_VarChar,
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A", "C"}}},
+					ValidData: []bool{true, false, true},
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A", "C"}}},
 				}},
 			},
 			multiGroupByTestStringField(102, []string{"X", "Y", "Z"}),
@@ -1074,7 +1075,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldNull
 	struts.Require().Len(res.GetGroupByFieldValues(), 2)
 	nullableField := res.GetGroupByFieldValues()[0]
 	struts.Equal("brand", nullableField.GetFieldName())
-	struts.Equal([]bool{true, false, true}, nullableField.GetValidData())
+	struts.Equal([]bool{true, false, true}, typeutil.GetFieldDataValidData(nullableField))
 	struts.Equal([]string{"A", "", "C"}, nullableField.GetScalars().GetStringData().GetData())
 	struts.Equal([]string{"X", "Y", "Z"}, res.GetGroupByFieldValues()[1].GetScalars().GetStringData().GetData())
 }
@@ -1116,9 +1117,9 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardNull
 				FieldId:   101,
 				FieldName: "brand",
 				Type:      schemapb.DataType_VarChar,
-				ValidData: []bool{true, false},
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A"}}},
+					ValidData: []bool{true, false},
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A"}}},
 				}},
 			},
 			multiGroupByTestStringField(102, []string{"X", "Y"}),
@@ -1135,9 +1136,9 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardNull
 				FieldId:   101,
 				FieldName: "brand",
 				Type:      schemapb.DataType_VarChar,
-				ValidData: []bool{false, true},
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"D"}}},
+					ValidData: []bool{false, true},
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"D"}}},
 				}},
 			},
 			multiGroupByTestStringField(102, []string{"U", "V"}),
@@ -1152,7 +1153,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardNull
 	struts.Require().Len(res.GetGroupByFieldValues(), 2)
 	nullableField := res.GetGroupByFieldValues()[0]
 	struts.Equal("brand", nullableField.GetFieldName())
-	struts.Equal([]bool{true, false, false, true}, nullableField.GetValidData())
+	struts.Equal([]bool{true, false, false, true}, typeutil.GetFieldDataValidData(nullableField))
 	struts.Equal([]string{"A", "", "", "D"}, nullableField.GetScalars().GetStringData().GetData())
 	struts.Equal([]string{"X", "Y", "U", "V"}, res.GetGroupByFieldValues()[1].GetScalars().GetStringData().GetData())
 }

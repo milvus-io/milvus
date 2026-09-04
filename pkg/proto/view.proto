@@ -1,0 +1,134 @@
+syntax = "proto3";
+package milvus.proto.view;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
+
+// ViewSyncService transports QueryView state transitions between the
+// coordinator and StreamingNode/QueryNode followers. State-machine execution
+// remains outside this transport contract.
+service ViewSyncService {
+    rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
+    }
+}
+
+// DataVersion is the composite version embedded in a QueryView version.
+// Values are ordered lexicographically by (streaming_version, compact_version).
+message DataVersion {
+    int64 streaming_version = 1;
+    int64 compact_version = 2;
+}
+
+// DataViewOfCollection is the immutable storage snapshot used to build QueryViews.
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    DataVersion data_version = 3;
+}
+
+// DataViewOfShard is the immutable storage snapshot for one vchannel.
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+    uint64 transform_start_after_timetick = 3;
+}
+
+// DataViewOfPartition lists the sealed segments in one partition.
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    repeated int64 segment_ids = 2;
+}
+
+// QueryViewState represents the distributed lifecycle of a QueryView.
+enum QueryViewState {
+    QueryViewStateUnknown = 0;
+    QueryViewStatePreparing = 1;
+    QueryViewStateReady = 2;
+    QueryViewStateUp = 3;
+    QueryViewStateDown = 4;
+    QueryViewStateUnrecoverable = 5;
+    QueryViewStateDropping = 6;
+    QueryViewStateDropped = 7;
+    // StreamingNode-only state while WAL recovery is catching up.
+    QueryViewStateUpRecovering = 8;
+}
+
+// QueryViewOfShard is the state-machine snapshot for one shard and replica.
+message QueryViewOfShard {
+    QueryViewMeta meta = 1;
+    repeated QueryViewOfQueryNode query_node = 2;
+    QueryViewOfStreamingNode streaming_node = 3;
+}
+
+// QueryViewMeta identifies a QueryView and carries its current lifecycle state.
+message QueryViewMeta {
+    int64 collection_id = 1;
+    int64 replica_id = 2;
+    string vchannel = 3;
+    QueryViewVersion version = 4;
+    QueryViewState state = 5;
+    uint64 load_info_version = 6;
+    uint64 transform_start_after_timetick = 7;
+}
+
+// QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
+// The node is identified implicitly by the shard's vchannel binding.
+message QueryViewOfStreamingNode {
+}
+
+// QueryViewOfQueryNode contains the segment assignments for one QueryNode.
+message QueryViewOfQueryNode {
+    int64 node_id = 1;
+    repeated QueryViewOfPartition partitions = 2;
+}
+
+// QueryViewVersion is ordered lexicographically by
+// (data_version, query_version).
+message QueryViewVersion {
+    DataVersion data_version = 1;
+    int64 query_version = 2;
+}
+
+// QueryViewOfPartition tracks assigned and ready segments for one partition.
+message QueryViewOfPartition {
+    int64 partition_id = 1;
+    repeated int64 segment_ids = 2;
+    repeated int64 ready_segment_ids = 3;
+}
+
+// SyncRequest carries an atomic state-machine input or closes the stream.
+message SyncRequest {
+    oneof request {
+        SyncQueryViewsRequest views = 1;
+        SyncCloseRequest close = 2;
+    }
+}
+
+// SyncQueryViewsRequest atomically applies QueryView states on one work node.
+message SyncQueryViewsRequest {
+    repeated QueryViewOfShard query_views = 1;
+}
+
+message SyncCloseRequest {
+}
+
+// SyncResponse carries follower state reports or acknowledges stream close.
+message SyncResponse {
+    oneof response {
+        SyncQueryViewsResponse views = 1;
+        SyncCloseResponse close = 2;
+    }
+}
+
+// SyncQueryViewsResponse reports the follower's latest local states.
+message SyncQueryViewsResponse {
+    repeated QueryViewOfShard query_views = 1;
+}
+
+message SyncCloseResponse {
+}
+
+// ShardID identifies one shard within a replica.
+message ShardID {
+    int64 replica_id = 1;
+    string vchannel = 2;
+}

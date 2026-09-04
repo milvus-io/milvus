@@ -149,6 +149,11 @@ AlignUp(uint64_t size, uint64_t alignment) {
 }
 
 uint64_t
+ValidityBitmapBytes(int64_t num_rows) {
+    return AlignUp(BitsetBytes(num_rows), sizeof(uint64_t));
+}
+
+uint64_t
 BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
     constexpr uint64_t kBitmapFrozenAlignment = 32;
     auto dense_bitmap_bytes =
@@ -186,7 +191,7 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
-OffsetMappingMmapDiskCost(const Config& config, int64_t num_rows) {
+IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
     }
@@ -222,7 +227,7 @@ MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
 }
 
 std::string
-GetFileName(const std::string& path) {
+GetIndexFileBaseName(const std::string& path) {
     auto pos = path.find_last_of('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
@@ -260,7 +265,7 @@ ResolveHybridInternalIndexType(
 
     auto index_type_file =
         std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
-            return GetFileName(f) == INDEX_TYPE;
+            return GetIndexFileBaseName(f) == INDEX_TYPE;
         });
     if (index_type_file != index_files.end()) {
         auto index_datas = file_manager.LoadIndexToMemory(
@@ -554,9 +559,10 @@ IndexFactory::VecIndexLoadResource(
                                      num_rows,
                                      dim,
                                      config);
-            has_raw_data =
-                knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
-                    index_type, index_version, config);
+            has_raw_data = knowhere::IndexStaticFaced<
+                knowhere::sparse_u32_f32>::HasRawData(index_type,
+                                                      index_version,
+                                                      config);
             break;
         case milvus::DataType::VECTOR_INT8:
             resource = knowhere::IndexStaticFaced<
@@ -672,12 +678,11 @@ IndexFactory::VecIndexLoadResource(
         request.max_memory_cost = 2 * res.memoryCost;
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
-        const auto offset_mapping_disk_cost =
-            OffsetMappingMmapDiskCost(config, num_rows);
+        const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
         request.final_disk_cost =
-            SaturatingAdd(request.final_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
         request.max_disk_cost =
-            SaturatingAdd(request.max_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
     }
     return request;
 }
@@ -785,13 +790,31 @@ IndexFactory::ScalarIndexLoadResourceImpl(
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
-               index_type == milvus::index::NGRAM_INDEX_TYPE ||
-               index_type == milvus::index::RTREE_INDEX_TYPE) {
+               index_type == milvus::index::NGRAM_INDEX_TYPE) {
+        // Sealed nullable Tantivy indexes materialize an immutable validity
+        // bitmap on the heap. The estimator cannot know whether a sidecar
+        // contains nulls, so reserve the conservative full bitmap.
+        auto validity_bitmap_bytes = ValidityBitmapBytes(num_rows);
+        if (mmap_enable) {
+            request.final_memory_cost = validity_bitmap_bytes;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                SaturatingAdd(stream_memory_overhead, validity_bitmap_bytes);
+        } else {
+            auto resident_bytes =
+                SaturatingAdd(index_size_in_bytes, validity_bitmap_bytes);
+            request.final_memory_cost = resident_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost =
+                std::max(resident_bytes, stream_memory_overhead);
+        }
+        request.max_disk_cost = index_size_in_bytes;
+        request.has_raw_data = false;
+    } else if (index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
         request.max_memory_cost = stream_memory_overhead;
         request.max_disk_cost = index_size_in_bytes;
-
         request.has_raw_data = false;
     } else if (index_type == milvus::index::FMINDEX_INDEX_TYPE) {
         // FM-index is a single flat blob. A LoadView (mmap) load views every
@@ -1031,13 +1054,6 @@ IndexFactory::CreateCompositeScalarIndex(
     }
 }
 
-IndexBasePtr
-IndexFactory::CreateComplexScalarIndex(
-    IndexType index_type,
-    const storage::FileManagerContext& file_manager_context) {
-    ThrowInfo(Unsupported, "Complex index not supported now");
-}
-
 namespace {
 
 template <typename T, typename BaseIndex, typename... Args>
@@ -1187,6 +1203,10 @@ IndexFactory::CreateNestedIndex(
     if (index_type == BITMAP_INDEX_TYPE) {
         return CreateNestedIndexBitmap(file_manager_context);
     }
+    if (index_type == HYBRID_INDEX_TYPE) {
+        return CreateNestedIndexHybrid(tantivy_index_version,
+                                       file_manager_context);
+    }
 
     return CreateNestedIndexScalarIndexSort(file_manager_context);
 }
@@ -1293,6 +1313,43 @@ IndexFactory::CreateNestedIndexScalarIndexSort(
         case DataType::VARCHAR:
             return std::make_unique<StringIndexSort>(file_manager_context,
                                                      true);
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexHybrid(
+    int32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context) {
+    DataType element_type = static_cast<DataType>(
+        file_manager_context.fieldDataMeta.field_schema.element_type());
+    switch (element_type) {
+        case DataType::BOOL:
+            return std::make_unique<HybridScalarIndex<bool>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT8:
+            return std::make_unique<HybridScalarIndex<int8_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT16:
+            return std::make_unique<HybridScalarIndex<int16_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT32:
+            return std::make_unique<HybridScalarIndex<int32_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::INT64:
+            return std::make_unique<HybridScalarIndex<int64_t>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::FLOAT:
+            return std::make_unique<HybridScalarIndex<float>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::DOUBLE:
+            return std::make_unique<HybridScalarIndex<double>>(
+                tantivy_index_version, file_manager_context, true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<HybridScalarIndex<std::string>>(
+                tantivy_index_version, file_manager_context, true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

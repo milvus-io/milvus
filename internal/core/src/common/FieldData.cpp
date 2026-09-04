@@ -33,6 +33,7 @@
 #include "bitset/detail/element_wise.h"
 #include "bitset/detail/popcount.h"
 #include "common/Array.h"
+#include "common/ArrayValue.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
@@ -41,6 +42,89 @@
 #include "simdjson/padded_string.h"
 
 namespace milvus {
+
+FieldData<ArrayValue>::FieldData(
+    proto::schema::TypeSchema array_type,
+    bool nullable,
+    int64_t num_rows,
+    const std::optional<DefaultValueType>& default_value)
+    : Base(1, DataType::ARRAY, nullable, num_rows),
+      array_type_(std::make_shared<const proto::schema::TypeSchema>(
+          std::move(array_type))) {
+    ColumnarArrayChunk::ValidateArrayType(*array_type_);
+    AssertInfo(nullable, "default value field data must be nullable");
+    AssertInfo(!default_value.has_value(),
+               "nested ARRAY default values are not supported");
+
+    ScalarFieldProto null_row;
+    const auto null_value = ArrayValue::FromProto(null_row, array_type_);
+    std::fill(data_.begin(), data_.end(), null_value);
+    std::fill(valid_data_.begin(), valid_data_.end(), 0x00);
+    null_count_ = num_rows;
+    length_ = num_rows;
+}
+
+void
+FieldData<ArrayValue>::FillFieldData(
+    const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array != nullptr, "null Arrow array for nested ARRAY field");
+    AssertInfo(array->type_id() == arrow::Type::BINARY,
+               "nested ARRAY field expects Arrow BinaryArray, got {}",
+               array->type()->ToString());
+    auto binary_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+
+    const auto element_count = binary_array->length();
+    if (element_count == 0) {
+        return;
+    }
+
+    std::vector<ArrayValue> values;
+    values.reserve(element_count);
+    for (int64_t index = 0; index < element_count; ++index) {
+        ScalarFieldProto row;
+        if (binary_array->IsValid(index)) {
+            const auto value = binary_array->GetView(index);
+            AssertInfo(row.ParseFromArray(value.data(), value.size()),
+                       "failed to parse nested ARRAY row {}",
+                       index);
+            AssertInfo(row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                       "valid nested ARRAY row {} has no ScalarField payload",
+                       index);
+        }
+        values.emplace_back(ArrayValue::FromProto(row, array_type_));
+    }
+
+    if (this->nullable_) {
+        this->null_count_ += binary_array->null_count();
+        return Base::FillFieldData(values.data(),
+                                   binary_array->null_bitmap_data(),
+                                   element_count,
+                                   binary_array->offset());
+    }
+
+    AssertInfo(binary_array->null_count() == 0,
+               "non-nullable nested ARRAY field contains {} null rows",
+               binary_array->null_count());
+    return Base::FillFieldData(values.data(), element_count);
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize() const {
+    int64_t data_size = 0;
+    for (size_t offset = 0; offset < this->length(); ++offset) {
+        data_size += static_cast<int64_t>(this->data_[offset].byte_size());
+    }
+    return data_size;
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize(ssize_t offset) const {
+    AssertInfo(offset >= 0 && offset < this->get_num_rows(),
+               "field data subscript out of range");
+    AssertInfo(static_cast<size_t>(offset) < this->length(),
+               "subscript position doesn't have a value");
+    return static_cast<int64_t>(this->data_[offset].byte_size());
+}
 
 template <typename Type, bool is_type_entire_row>
 void
@@ -498,149 +582,6 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     }
 }
 
-// used for generate added field which has no related binlogs
-template <typename Type, bool is_type_entire_row>
-void
-FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
-    std::optional<DefaultValueType> default_value, ssize_t element_count) {
-    AssertInfo(nullable_, "added field must be nullable");
-    if (element_count == 0) {
-        return;
-    }
-    null_count_ = default_value.has_value() ? 0 : element_count;
-
-    auto valid_data_ptr = [&] {
-        ssize_t byte_count = (element_count + 7) / 8;
-        std::shared_ptr<uint8_t[]> valid_data(new uint8_t[byte_count]);
-        std::fill(valid_data.get(), valid_data.get() + byte_count, 0x00);
-        return valid_data;
-    }();
-    switch (data_type_) {
-        case DataType::BOOL: {
-            FixedVector<bool> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->bool_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::INT8: {
-            FixedVector<int8_t> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->int_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::INT16: {
-            FixedVector<int16_t> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->int_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::INT32: {
-            FixedVector<int32_t> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->int_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::INT64: {
-            FixedVector<int64_t> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->long_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::FLOAT: {
-            FixedVector<float> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->float_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::DOUBLE: {
-            FixedVector<double> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->double_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::TIMESTAMPTZ: {
-            FixedVector<int64_t> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(values.begin(),
-                          values.end(),
-                          default_value->timestamptz_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::STRING:
-        case DataType::VARCHAR: {
-            FixedVector<std::string> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->string_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::JSON: {
-            // The code here is not referenced.
-            // A subclass named FieldDataJsonImpl is implemented, which overloads this function.
-            FixedVector<Json> values(element_count);
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-
-        case DataType::GEOMETRY: {
-            FixedVector<std::string> values(element_count);
-            if (default_value.has_value()) {
-                std::fill(
-                    values.begin(), values.end(), default_value->string_data());
-                return FillFieldData(values.data(), nullptr, element_count, 0);
-            }
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        case DataType::ARRAY: {
-            // todo: add array default_value
-            FixedVector<Array> values(element_count);
-            return FillFieldData(
-                values.data(), valid_data_ptr.get(), element_count, 0);
-        }
-        default: {
-            ThrowInfo(DataTypeInvalid,
-                      "{}::FillFieldData not support data type {}",
-                      GetName(),
-                      GetDataTypeName(data_type_));
-        }
-    }
-}
-
 // scalar data
 template class FieldDataImpl<bool, true>;
 template class FieldDataImpl<unsigned char, false>;
@@ -654,6 +595,7 @@ template class FieldDataImpl<std::string, true>;
 template class FieldDataImpl<Json, true>;
 template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
+template class FieldDataImpl<ArrayValue, true>;
 
 // vector data
 template class FieldDataImpl<int8_t, false>;

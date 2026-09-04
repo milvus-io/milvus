@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -135,6 +136,26 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if errors.Is(err, ErrPKRangeTooSmall) {
+			// The one assemble failure a retry cannot fix: the reservation was
+			// sized from an upper bound and preimport produced a larger exact
+			// count. Neither number changes by rescheduling, so fail the job now
+			// and keep the precise reason -- otherwise the job stays Importing
+			// (checkImportingJob only advances once every task is Completed) until
+			// tryTimeoutJob overwrites the reason with a generic timeout message.
+			//
+			// Only the job is updated, as in the DataNode-reported failure path
+			// below and in preimport: the checker's tryFailingTasks marks this
+			// task Failed on the next tick.
+			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			return
+		}
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())

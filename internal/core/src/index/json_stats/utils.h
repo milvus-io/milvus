@@ -36,7 +36,6 @@
 
 namespace milvus::index {
 
-constexpr int64_t DEFAULT_BATCH_SIZE = 8192 * 10;
 constexpr int64_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024;
 constexpr int64_t DEFAULT_PART_UPLOAD_SIZE = 10 * 1024 * 1024;
 
@@ -188,37 +187,6 @@ IsPrimitiveJsonType(JSONType type) {
            type == JSONType::INT32 || type == JSONType::INT64 ||
            type == JSONType::FLOAT || type == JSONType::DOUBLE ||
            type == JSONType::STRING || type == JSONType::STRING_ESCAPE;
-}
-
-inline bool
-IsIntegerJsonType(JSONType type) {
-    return type == JSONType::INT8 || type == JSONType::INT16 ||
-           type == JSONType::INT32 || type == JSONType::INT64;
-}
-
-inline bool
-IsFloatJsonType(JSONType type) {
-    return type == JSONType::FLOAT || type == JSONType::DOUBLE;
-}
-
-inline bool
-IsStringJsonType(JSONType type) {
-    return type == JSONType::STRING || type == JSONType::STRING_ESCAPE;
-}
-
-inline bool
-IsComplexJsonType(JSONType type) {
-    return type == JSONType::ARRAY || type == JSONType::OBJECT;
-}
-
-inline bool
-IsNullJsonType(JSONType type) {
-    return type == JSONType::NONE;
-}
-
-inline bool
-IsShreddingJsonType(JSONType type) {
-    return IsPrimitiveJsonType(type) || type == JSONType::ARRAY;
 }
 
 enum class JsonKeyLayoutType {
@@ -406,10 +374,6 @@ struct KeyStatsInfo {
         return "row_num: " + std::to_string(hit_row_num_);
     }
 };
-struct PathWriter {
-    JsonKeyLayoutType type_;
-    JsonKey key_;
-};
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateSharedArrowBuilder();
@@ -555,22 +519,6 @@ class JsonStatsMeta {
     const std::map<JsonKey, JsonKeyLayoutType>&
     GetLayoutTypeMap() const {
         return layout_type_map_;
-    }
-
-    // build key_field_map from layout_type_map (for loading)
-    std::unordered_map<std::string, std::set<std::string>>
-    BuildKeyFieldMap() const {
-        std::unordered_map<std::string, std::set<std::string>> key_field_map;
-        for (const auto& [json_key, layout_type] : layout_type_map_) {
-            // only store metadata for shredding columns (TYPED/DYNAMIC),
-            // skip SHARED keys to save memory
-            if (layout_type == JsonKeyLayoutType::SHARED) {
-                continue;
-            }
-            auto column_name = json_key.ToColumnName();
-            key_field_map[json_key.key_].insert(column_name);
-        }
-        return key_field_map;
     }
 
     std::string

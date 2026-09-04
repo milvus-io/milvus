@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -50,32 +51,6 @@ func (s *statsTaskMetaSuite) SetupTest() {
 
 func (s *statsTaskMetaSuite) Test_Method() {
 	s.Run("newStatsTaskMeta", func() {
-		s.Run("normal case", func() {
-			catalog := mocks.NewDataCoordCatalog(s.T())
-			catalog.EXPECT().ListStatsTasks(mock.Anything).Return([]*indexpb.StatsTask{
-				{
-					CollectionID:    s.collectionID,
-					PartitionID:     s.partitionID,
-					SegmentID:       10000,
-					InsertChannel:   "ch1",
-					TaskID:          10001,
-					Version:         1,
-					NodeID:          0,
-					State:           indexpb.JobState_JobStateFinished,
-					FailReason:      "",
-					TargetSegmentID: 10002,
-					SubJobType:      indexpb.StatsSubJob_Sort,
-					CanRecycle:      true,
-				},
-			}, nil)
-
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
-
-			m, err := newStatsTaskMeta(context.Background(), catalog)
-			s.NoError(err)
-			s.NotNil(m)
-		})
-
 		s.Run("failed case", func() {
 			catalog := mocks.NewDataCoordCatalog(s.T())
 			catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, errors.New("mock error"))
@@ -83,6 +58,47 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			m, err := newStatsTaskMeta(context.Background(), catalog)
 			s.Error(err)
 			s.Nil(m)
+		})
+
+		s.Run("skips sort tasks and loads others", func() {
+			catalog := mocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().ListStatsTasks(mock.Anything).Return([]*indexpb.StatsTask{
+				{
+					TaskID:     1,
+					SegmentID:  100,
+					SubJobType: indexpb.StatsSubJob_Sort,
+				},
+				{
+					TaskID:     2,
+					SegmentID:  200,
+					SubJobType: indexpb.StatsSubJob_TextIndexJob,
+				},
+				{
+					TaskID:     3,
+					SegmentID:  300,
+					SubJobType: indexpb.StatsSubJob_Sort,
+				},
+			}, nil)
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+			m, err := newStatsTaskMeta(context.Background(), catalog)
+			s.NoError(err)
+			s.NotNil(m)
+
+			_, ok := m.tasks.Get(int64(2))
+			s.True(ok)
+			_, ok = m.tasks.Get(int64(1))
+			s.False(ok)
+			_, ok = m.tasks.Get(int64(3))
+			s.False(ok)
+
+			s.Equal([]int64{1, 3}, m.deprecatedSortTaskIDs)
+
+			var wg sync.WaitGroup
+			m.StartCleanupDeprecatedSortTasks(context.Background(), &wg)
+			wg.Wait()
+
+			s.Nil(m.deprecatedSortTaskIDs)
 		})
 	})
 
@@ -265,6 +281,15 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 	})
 
+	s.Run("HasStatsTask", func() {
+		s.False(m.HasStatsTask(100, indexpb.StatsSubJob_Sort))
+		s.False(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_BM25Job))
+		// The task is already Finished here: it keeps blocking resubmission
+		// until GC recycles it, matching AddStatsTask's duplicate guard.
+		s.Equal(indexpb.JobState_JobStateFinished, m.GetStatsTaskStateBySegmentID(s.segmentID, indexpb.StatsSubJob_Sort))
+		s.True(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_Sort))
+	})
+
 	s.Run("DropStatsTask", func() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
@@ -280,6 +305,8 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.NoError(m.DropStatsTask(context.TODO(), 1))
 			_, ok := m.tasks.Get(1)
 			s.False(ok)
+			// Once recycled the segment becomes submittable again.
+			s.False(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_Sort))
 
 			s.NoError(m.DropStatsTask(context.TODO(), 1000))
 		})

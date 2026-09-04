@@ -116,6 +116,7 @@ func values2FieldData[T any](values []T, fieldType entity.FieldType, dim int) *s
 		entity.FieldTypeInt32,
 		entity.FieldTypeInt64,
 		entity.FieldTypeVarChar,
+		entity.FieldTypeText,
 		entity.FieldTypeString,
 		entity.FieldTypeJSON,
 		entity.FieldTypeGeometry,
@@ -175,7 +176,7 @@ func values2Scalars[T any](values []T, fieldType entity.FieldType) *schemapb.Sca
 		scalars.Data = &schemapb.ScalarField_LongData{
 			LongData: &schemapb.LongArray{Data: int64s},
 		}
-	case entity.FieldTypeVarChar, entity.FieldTypeString, entity.FieldTypeTimestamptz:
+	case entity.FieldTypeVarChar, entity.FieldTypeText, entity.FieldTypeString, entity.FieldTypeTimestamptz:
 		var strVals []string
 		strVals, ok = any(values).([]string)
 		scalars.Data = &schemapb.ScalarField_StringData{

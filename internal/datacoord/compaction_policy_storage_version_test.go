@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -36,14 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type syncBuffer struct {
-	bytes.Buffer
-}
-
-func (b *syncBuffer) Sync() error {
-	return nil
-}
 
 func TestStorageVersionUpgradePolicySuite(t *testing.T) {
 	suite.Run(t, new(StorageVersionUpgradePolicySuite))
@@ -428,19 +419,13 @@ func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilte
 
 func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual() {
 	collID := int64(100)
-	var logs syncBuffer
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	logs := mlog.CaptureGlobalLogs(s.T(), &mlog.Config{
 		Level:             "warn",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, &logs)
-	s.NoError(err)
-	mlog.ReplaceGlobals(logger, props)
-	defer mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
 
 	assertLogContains := func(substr string) {
 		s.True(strings.Contains(logs.String(), substr), logs.String())

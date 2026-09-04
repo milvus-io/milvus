@@ -44,12 +44,12 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "flushTaskByStreamingService.Execute", mlog.Int("collectionNum", len(t.CollectionNames)), mlog.Uint64("flushTs", flushTs))
 	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	for _, collName := range t.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
+		collID, err := t.GetMetaCache().GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
 			return err
 		}
 
-		vchannels, err := t.chMgr.getVChannels(collID)
+		vchannels, err := t.chMgr.GetVChannels(collID)
 		if err != nil {
 			return err
 		}

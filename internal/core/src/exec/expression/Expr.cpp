@@ -28,7 +28,6 @@
 #include "exec/expression/AlwaysTrueExpr.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/BinaryRangeExpr.h"
-#include "exec/expression/BloomFilterExpr.h"
 #include "exec/expression/CallExpr.h"
 #include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
@@ -40,6 +39,7 @@
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/MatchExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
@@ -467,6 +467,17 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+    } else if (auto roaring_filter_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::RoaringFilterExpr>(expr)) {
+        result = std::make_shared<PhyRoaringFilterExpr>(
+            compiled_inputs,
+            roaring_filter_expr,
+            "PhyRoaringFilterExpr",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
@@ -504,7 +515,7 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
 // Coarse(R-Tree) node (bucketed early, prunes others) and an expensive Refine
 // node (bucketed last, consumes bitmap_input + fuses per-row construction).
 // Gated by queryNode.segcore.enableGISSplitFusion. See
-// docs/design_docs/gis_filter_coarse_refine_split_fusion.md.
+// docs/design-docs/design_docs/20260727-gis-filter-coarse-refine-split-fusion.md.
 static void
 SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                      ExecContext* context) {
@@ -712,7 +723,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     std::vector<size_t> array_like_expr;
     std::vector<size_t> compare_expr;
     std::vector<size_t> other_expr;
-    std::vector<size_t> bloom_expr;
+    // Index-less membership probes (bloom_match, roaring_match).
+    std::vector<size_t> membership_expr;
     std::vector<size_t> heavy_conjunct_expr;
     std::vector<size_t> light_conjunct_expr;
     // Record all LIKE expression indices for potential batch ngram optimization
@@ -756,8 +768,15 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         // index-accelerated indexed_expr (indexed VARCHAR) and run FIRST. Place it
         // in the string-compare tier so it runs after numeric + indexed
         // predicates, whose result already prunes the rows it has to probe.
-        if (input->name() == "PhyBloomFilterExpr") {
-            bloom_expr.push_back(i);
+        //
+        // roaring_match sits in the same tier for the same reasons: its per-row
+        // cost is a binary search over the bitmap's containers rather than a
+        // hash, but it is likewise index-less (its index-only fallback also
+        // reverse-looks-up per row), so it must run after the numeric and
+        // indexed predicates that can prune what it has to probe.
+        if (input->name() == "PhyBloomFilterExpr" ||
+            input->name() == "PhyRoaringFilterExpr") {
+            membership_expr.push_back(i);
             continue;
         }
 
@@ -850,8 +869,9 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // 2. Numeric column expressions (fastest to evaluate)
     // 3. Indexed column expressions (can use index for efficient filtering)
     // 4. String column expressions
-    // 5. Bloom filter probe expressions (index-less; ~string-compare cost, run
-    //    after numeric + indexed so their result already prunes the probe)
+    // 5. Membership probe expressions, bloom_match and roaring_match
+    //    (index-less; ~string-compare cost, run after numeric + indexed so
+    //    their result already prunes the probe)
     // 6. Light conjunct expressions (conjunctions without heavy operations)
     // 7. Other expressions
     // 8. Array column expression
@@ -864,7 +884,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
     reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
     reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());
-    reorder.insert(reorder.end(), bloom_expr.begin(), bloom_expr.end());
+    reorder.insert(
+        reorder.end(), membership_expr.begin(), membership_expr.end());
     reorder.insert(
         reorder.end(), light_conjunct_expr.begin(), light_conjunct_expr.end());
     reorder.insert(reorder.end(), other_expr.begin(), other_expr.end());

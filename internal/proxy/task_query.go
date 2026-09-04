@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -35,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -47,7 +48,6 @@ const (
 
 const (
 	RetrieveTaskName = "RetrieveTask"
-	QueryTaskName    = "QueryTask"
 )
 
 type queryTask struct {
@@ -76,8 +76,11 @@ type queryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
-	preferredNodes   map[string]int64
-	fastSkip         bool
+	// fixedSnapshotTimestamp pins internal queries whose read timestamp is
+	// also used as a later write-side correctness proof.
+	fixedSnapshotTimestamp uint64
+	preferredNodes         map[string]int64
+	fastSkip               bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -86,7 +89,7 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
-	chMgr                channelsMgr
+	chMgr                channelmgr.ChannelsMgr
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -94,6 +97,16 @@ func (t *queryTask) getQueryLabel() string {
 		return label
 	}
 	return metrics.QueryLabel
+}
+
+// applyFixedSnapshotTimestamp restores the exact read fence after generic
+// query preprocessing adjusts consistency and collection metadata fences.
+func (t *queryTask) applyFixedSnapshotTimestamp(guaranteeTimestamp uint64) uint64 {
+	if t.fixedSnapshotTimestamp == 0 {
+		return guaranteeTimestamp
+	}
+	t.MvccTimestamp = t.fixedSnapshotTimestamp
+	return t.fixedSnapshotTimestamp
 }
 
 type queryParams struct {
@@ -104,7 +117,6 @@ type queryParams struct {
 	collectionID        int64
 	groupByFields       []string
 	orderByFields       []string // NEW: ORDER BY field specifications (e.g., "price:desc")
-	timezone            string
 	extractTimeFields   []string
 	queryIteratorCursor *planpb.QueryIteratorCursor
 }
@@ -334,7 +346,6 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		isIterator        bool
 		err               error
 		collectionID      int64
-		timezone          string
 		extractTimeFields []string
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
@@ -401,11 +412,6 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		}
 	}
 
-	timezone, _ = funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, queryParamsPair)
-	if (timezone != "") && !timestamptz.IsTimezoneValid(timezone) {
-		return nil, merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-	}
-
 	extractTimeFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TimefieldsKey, queryParamsPair)
 	if err == nil {
 		extractTimeFields = strings.FieldsFunc(extractTimeFieldsStr, func(r rune) bool {
@@ -453,7 +459,6 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		groupByFields:       groupByFields,
 		orderByFields:       orderByFields,
 		queryIteratorCursor: queryIteratorCursor,
-		timezone:            timezone,
 		extractTimeFields:   extractTimeFields,
 	}, nil
 }
@@ -528,7 +533,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, exprTemplateValues)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+		return nil, wrapPlanCreationError(err, "failed to create query plan")
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -545,10 +550,10 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	var err error
 	if t.plan == nil {
 		start := time.Now()
-		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
+		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.SchemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+			return wrapPlanCreationError(err, "failed to create query plan")
 		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
@@ -637,20 +642,20 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
-		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		collID, err := t.GetMetaCache().GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			mlog.Warn(t.ctx, "query task get collectionID failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
-		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		collectionInfo, err2 := t.GetMetaCache().GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "query task get collection info failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 	}
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
@@ -672,14 +677,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	t.CollectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	colInfo, err := t.GetMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection info.", mlog.String("collectionName", collectionName),
 			mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
@@ -691,7 +696,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
+	schema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
@@ -708,7 +713,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.PartitionNames = partitionNames
 	}
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.GetMetaCache(), t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 		return err
@@ -733,7 +738,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.queryMode == common.QueryModeLargeTopK, getPrimaryKeyDataType(schema.CollectionSchema))
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.QueryMode == common.QueryModeLargeTopK, getPrimaryKeyDataType(schema.CollectionSchema))
 	if err != nil {
 		return err
 	}
@@ -775,14 +780,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
-	if t.queryParams.timezone != "" {
-		// validated in queryParams, no need to validate again
-		t.resolvedTimezoneStr = t.queryParams.timezone
-		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", t.resolvedTimezoneStr))
-	} else {
-		t.resolvedTimezoneStr = getColTimezone(colInfo)
-		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", t.resolvedTimezoneStr))
+	timezone, err := resolveTimezone(ctx, t.request.GetQueryParams(), colInfo)
+	if err != nil {
+		return err
 	}
+	t.resolvedTimezoneStr = timezone
 
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
@@ -806,7 +808,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
 		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -818,14 +820,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionKeys)
 			if err != nil {
 				return err
 			}
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionNames)
 		if err != nil {
 			return err
 		}
@@ -838,7 +840,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(t.plan, 0)
+	t.SerializedExprPlan, _, err = marshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
 		return err
 	}
@@ -848,7 +850,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	collectionInfo, err2 := t.GetMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn(ctx, "Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID),
@@ -861,7 +863,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -880,9 +882,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
+	if collectionInfo.UpdateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.UpdateTimestamp
 	}
+	guaranteeTs = t.applyFixedSnapshotTimestamp(guaranteeTs)
 
 	t.GuaranteeTimestamp = guaranteeTs
 	// Extract physical time for entity-level TTL (issue #47413)
@@ -895,13 +898,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if collectionInfo.collectionTTL != 0 {
+	if collectionInfo.CollectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -926,8 +929,20 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	// Built once, ahead of the namespace fast path below, so that the fast
+	// path derives its single-channel workload from the same value Execute
+	// would fan out -- every collection-level field, the resource-group scope
+	// included, reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             1,
+		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
+	}
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
@@ -937,15 +952,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if ok {
-			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-				Db:              t.request.GetDbName(),
-				CollectionName:  t.collectionName,
-				CollectionID:    t.CollectionID,
-				Channel:         channelName,
-				Nq:              1,
-				Exec:            t.queryShard,
-				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
-			}); err != nil {
+			if err := t.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, preferredNodeForChannel(t.preferredNodes, channelName))); err != nil {
 				log.Warn(ctx, "fail to execute query", mlog.Err(err))
 				return errors.Wrap(err, "failed to query")
 			}
@@ -954,14 +961,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			return nil
 		}
 	}
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             1,
-		Exec:           t.queryShard,
-		PreferredNodes: t.preferredNodes,
-	})
+	err := t.lb.Execute(ctx, workload)
 	if err != nil {
 		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")
@@ -1049,7 +1049,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	// Only geometry WKB→WKT conversion still needs to happen here.
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
-			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
 				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
@@ -1077,7 +1077,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 				return err
 			}
 		} else {
-			log.Debug(ctx, "translate timestamp to ISO string", mlog.String("user define timezone", t.queryParams.timezone))
+			log.Debug(ctx, "translate timestamp to ISO string", mlog.String("timezone", t.resolvedTimezoneStr))
 			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
 			if err != nil {
 				log.Warn(ctx, "fail to translate timestamp", mlog.Err(err))

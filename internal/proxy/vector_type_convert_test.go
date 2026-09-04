@@ -226,6 +226,42 @@ func TestConvertPlaceholderGroupToBFloat16(t *testing.T) {
 	assert.Equal(t, 4*2, len(resultPhg.Placeholders[0].Values[0]))
 }
 
+func TestConvertPlaceholderGroupArrayOfVectorElementType(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		elementType     schemapb.DataType
+		placeholderType commonpb.PlaceholderType
+	}{
+		{
+			name:            "float16 element",
+			elementType:     schemapb.DataType_Float16Vector,
+			placeholderType: commonpb.PlaceholderType_Float16Vector,
+		},
+		{
+			name:            "bfloat16 element",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			placeholderType: commonpb.PlaceholderType_BFloat16Vector,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			vectors := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+			phgBytes := createFloat32PlaceholderGroup(vectors)
+			fieldSchema := &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: tt.elementType,
+			}
+
+			convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+			assert.NoError(t, err)
+
+			var resultPhg commonpb.PlaceholderGroup
+			err = proto.Unmarshal(convertedBytes, &resultPhg)
+			assert.NoError(t, err)
+			assertPlaceholderVectorsMatchFloat32(t, tt.placeholderType, tt.elementType, resultPhg.Placeholders, vectors)
+		})
+	}
+}
+
 func TestConvertPlaceholderGroupTypeMismatch(t *testing.T) {
 	// Test: Float16Vector searching BFloat16Vector field -> should error
 	// (Only fp32 -> fp16/bf16 conversion is supported)

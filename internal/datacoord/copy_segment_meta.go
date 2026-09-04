@@ -239,7 +239,8 @@ func (t *copySegmentTasks) getByCollectionID(collectionID int64) []CopySegmentTa
 
 // copySegmentMeta implements CopySegmentMeta with in-memory caching and persistent storage.
 type copySegmentMeta struct {
-	mu           lock.RWMutex               // Protects jobs and tasks maps
+	mu           lock.RWMutex // Protects jobs and tasks maps
+	ctx          context.Context
 	jobs         map[int64]CopySegmentJob   // Job ID -> Job mapping (in-memory cache)
 	tasks        *copySegmentTasks          // Task collection (in-memory cache)
 	catalog      metastore.DataCoordCatalog // Persistent storage backend (etcd)
@@ -288,6 +289,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 
 	tasks := newCopySegmentTasks()
 	copySegmentMeta := &copySegmentMeta{
+		ctx:          ctx,
 		catalog:      catalog,
 		meta:         meta,
 		snapshotMeta: snapshotMeta,
@@ -297,6 +299,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// Reconstruct task objects with metadata references
 	for _, task := range restoredTasks {
 		t := &copySegmentTask{
+			ctx:          ctx,
 			copyMeta:     copySegmentMeta,
 			meta:         meta,
 			snapshotMeta: snapshotMeta,
@@ -314,6 +317,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 		jobs[job.GetJobId()] = &copySegmentJob{
 			CopySegmentJob: job,
 			tr:             timerecord.NewTimeRecorder("copy segment job"),
+			snapshotCache:  &copySegmentSnapshotCache{},
 		}
 	}
 
@@ -511,6 +515,9 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
 		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
 
+	if isTerminal && !wasTerminal {
+		updatedJob.(*copySegmentJob).snapshotCache = nil
+	}
 	shouldUnpin := isTerminal && !wasTerminal && updatedJob.GetPinId() > 0
 	pinID := updatedJob.GetPinId()
 	sourceCollectionID := updatedJob.GetSourceCollectionId()
@@ -593,15 +600,13 @@ func (m *copySegmentMeta) RemoveJob(ctx context.Context, jobID int64) error {
 //
 // Process flow:
 //  1. Acquire write lock
-//  2. Inject metadata references into task (for accessing segment/snapshot data)
+//  2. Inject runtime dependencies into task
 //  3. Persist task to catalog (etcd)
 //  4. Add task to in-memory cache
 //  5. Release lock
 //
-// Why inject metadata:
-// - Tasks need access to segment metadata for binlog updates
-// - Tasks need access to snapshot metadata for reading source data
-// - Injecting at add time ensures all tasks have required dependencies
+// Injecting at add time ensures scheduler-owned tasks use DataCoord's context,
+// metadata, snapshot reader, and allocator.
 //
 // Thread safety: Protected by write lock
 func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) error {
@@ -610,6 +615,7 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 
 	// Ensure the task has meta references
 	t := task.(*copySegmentTask)
+	t.ctx = m.ctx
 	t.copyMeta = m
 	t.meta = m.meta
 	t.snapshotMeta = m.snapshotMeta

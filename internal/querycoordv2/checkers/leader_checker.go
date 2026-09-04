@@ -23,6 +23,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -137,6 +138,7 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 
 		t := task.NewLeaderPartStatsTask(
 			ctx,
+			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			leaderView.CollectionID,
 			replica,
@@ -185,6 +187,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
 			t := task.NewLeaderSegmentTask(
 				ctx,
+				Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 				c.ID(),
 				s.GetCollectionID(),
 				replica,
@@ -230,6 +233,7 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 		action := task.NewLeaderAction(leaderView.ID, leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
 		t := task.NewLeaderSegmentTask(
 			ctx,
+			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			leaderView.CollectionID,
 			replica,

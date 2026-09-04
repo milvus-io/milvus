@@ -42,6 +42,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestGetConnectedDataNodeMetrics(t *testing.T) {
+	const nodeID int64 = 100
+	nodeInfos := metricsinfo.DataNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+			ID:   nodeID,
+		},
+	}
+	response, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+	assert.NoError(t, err)
+
+	dn := mocks.NewMockDataNodeClient(t)
+	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		Response:      response,
+		ComponentName: nodeInfos.Name,
+	}, nil).Once()
+
+	nodeManager := session.NewMockNodeManager(t)
+	nodeManager.EXPECT().GetClientIDs().Return([]int64{nodeID}).Once()
+	nodeManager.EXPECT().GetClient(nodeID).Return(dn, nil).Once()
+
+	svr := &Server{nodeManager: nodeManager}
+	metrics := svr.getConnectedDataNodeMetrics(context.Background(), &milvuspb.GetMetricsRequest{})
+	assert.Len(t, metrics, 1)
+	assert.Equal(t, nodeInfos.Name, metrics[0].Name)
+	assert.Equal(t, nodeID, metrics[0].ID)
+}
+
 func TestGetDataNodeMetrics(t *testing.T) {
 	ctx := context.Background()
 

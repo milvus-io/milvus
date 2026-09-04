@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSliceOperator_Name(t *testing.T) {
@@ -80,12 +81,12 @@ func TestSliceOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *testing
 				FieldName: "nullable_vec",
 				FieldId:   100,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
 					},
 				}},
-				ValidData: []bool{true, false, true},
 			},
 			{
 				Type:      schemapb.DataType_Int64,
@@ -105,7 +106,7 @@ func TestSliceOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *testing
 
 	sliced := outputs[0].(*internalpb.RetrieveResults)
 	require.Len(t, sliced.GetFieldsData(), 2)
-	assert.Equal(t, []bool{true}, sliced.GetFieldsData()[0].GetValidData())
+	assert.Equal(t, []bool{true}, typeutil.GetFieldDataValidData(sliced.GetFieldsData()[0]))
 	assert.Equal(t, []float32{3, 4}, sliced.GetFieldsData()[0].GetVectors().GetFloatVector().GetData())
 	assert.Equal(t, []int64{30}, sliced.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 }

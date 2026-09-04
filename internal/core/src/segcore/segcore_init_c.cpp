@@ -51,6 +51,30 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
+extern "C" CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version) {
+    try {
+        const int64_t current_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        if (target_version != -1 &&
+            !knowhere::Version::VersionSupport(
+                knowhere::Version(static_cast<int32_t>(target_version)))) {
+            ThrowInfo(ConfigInvalid,
+                      "interim index target version {} is not supported by "
+                      "Knowhere (current {}, maximum {})",
+                      target_version,
+                      current_version,
+                      knowhere::Version::GetMaximumVersion().VersionNumber());
+        }
+
+        SegcoreConfig::default_config().set_interim_index_target_version(
+            static_cast<int32_t>(target_version));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 extern "C" void
 SegcoreSetStorageV3Enabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
@@ -93,6 +117,20 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_prefer_field_data_when_index_has_raw_data(value);
+}
+
+extern "C" void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_take_for_output_result_count_limit(value);
+}
+
+extern "C" int64_t
+SegcoreGetTakeForOutputResultCountLimit() {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    return config.get_take_for_output_result_count_limit();
 }
 
 extern "C" void
@@ -186,6 +224,13 @@ SegcoreSetIndexBuildRatio(const float value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_build_ratio(value);
+}
+
+extern "C" void
+SegcoreSetGrowingIndexBuildThreadRate(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_growing_index_build_thread_rate(value);
 }
 
 extern "C" void

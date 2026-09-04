@@ -474,7 +474,7 @@ class TestPartialUpdate(TestBase):
 
     def test_partial_update_with_auto_id(self):
         """
-        Test partial update with autoID primary key - should fail as autoID is not supported for upsert
+        Test partial update with autoID primary key preserves the existing IDs.
         """
         # Create collection with autoID primary key
         name = gen_collection_name()
@@ -524,14 +524,13 @@ class TestPartialUpdate(TestBase):
         assert rsp["code"] == 0
         assert len(rsp["data"]) == nb
 
-        original_ids = [data["book_id"] for data in rsp["data"]]
+        original_ids_by_user = {data["user_id"]: data["book_id"] for data in rsp["data"]}
 
         # Partial update existing records using their auto-generated IDs
-        # When autoID=true, partial update should generate NEW IDs for existing records
         partial_update_data = []
-        for i, book_id in enumerate(original_ids):
+        for i in range(nb):
             tmp = {
-                "book_id": book_id,
+                "book_id": original_ids_by_user[i],
                 "book_describe": f"updated_book_{i}",  # Only update description
             }
             partial_update_data.append(tmp)
@@ -543,13 +542,13 @@ class TestPartialUpdate(TestBase):
         c.flush()
         time.sleep(3)
 
-        # Critical verification: old IDs should no longer exist
-        for old_id in original_ids:
-            rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"book_id == {old_id}"})
+        # Existing IDs remain addressable after the update.
+        for original_id in original_ids_by_user.values():
+            rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"book_id == {original_id}"})
             assert rsp["code"] == 0
-            assert len(rsp["data"]) == 0, f"Old ID {old_id} should not exist after partial update with autoID=true"
+            assert len(rsp["data"]) == 1
 
-        # Verify updated records have NEW auto-generated IDs
+        # Verify updated records retain their original auto-generated IDs.
         for i in range(nb):
             rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"user_id == {i}"})
             assert rsp["code"] == 0
@@ -560,20 +559,26 @@ class TestPartialUpdate(TestBase):
             assert data["book_describe"] == f"updated_book_{i}"
             # Should have same user_id (identifies the record)
             assert data["user_id"] == i
-            # Should have NEW book_id (different from original)
-            assert data["book_id"] not in original_ids, (
-                f"New ID {data['book_id']} should be different from original IDs {original_ids}"
-            )
+            assert data["book_id"] == original_ids_by_user[i]
 
         # Verify total count is still correct (3 updated)
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id >= 0"})
         assert rsp["code"] == 0
         assert len(rsp["data"]) == 3
 
-        logger.info("Partial update with autoID test passed - verified new IDs generated for updated records")
+        missing_id = max(original_ids_by_user.values()) + 1
+        payload = {
+            "collectionName": name,
+            "data": [{"book_id": missing_id, "book_describe": "missing"}],
+            "partialUpdate": True,
+        }
+        rsp = self.vector_client.vector_upsert(payload)
+        assert rsp["code"] != 0
+
+        logger.info("Partial update with autoID test passed - verified IDs are preserved")
 
         """
-        Test detailed behavior of partial update with autoID: old record deletion and new record insertion
+        Test detailed behavior of partial update with autoID using the original ID.
         """
         # Create collection with autoID primary key
         name = gen_collection_name()
@@ -639,12 +644,10 @@ class TestPartialUpdate(TestBase):
         c.flush()
         time.sleep(3)
 
-        # Verify the original ID no longer exists
+        # Verify the original ID still identifies the updated record.
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"id == {original_id}"})
         assert rsp["code"] == 0
-        assert len(rsp["data"]) == 0, (
-            f"Original ID {original_id} should be deleted after partial update with autoID=true"
-        )
+        assert len(rsp["data"]) == 1
 
         # Verify there's still exactly one record with updated data
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "age > 0"})
@@ -652,12 +655,12 @@ class TestPartialUpdate(TestBase):
         assert len(rsp["data"]) == 1
 
         updated_record = rsp["data"][0]
-        new_id = updated_record["id"]
+        updated_id = updated_record["id"]
 
-        logger.info(f"Updated record: ID={new_id}, name={updated_record['name']}, age={updated_record['age']}")
+        logger.info(f"Updated record: ID={updated_id}, name={updated_record['name']}, age={updated_record['age']}")
 
-        # Verify the record has a new ID and updated fields
-        assert new_id != original_id, f"New ID {new_id} should be different from original ID {original_id}"
+        # Verify the record keeps its ID and updates only the requested field.
+        assert updated_id == original_id
         assert updated_record["name"] == "Alice Updated", "Name should be updated"
         assert updated_record["age"] == 25, "Age should remain unchanged (inherited from original record)"
 
@@ -731,8 +734,8 @@ class TestPartialUpdate(TestBase):
 
         updated_record = rsp["data"][0]
 
-        # Verify new ID generated
-        assert updated_record["id"] != original_id, "Should have new autoID"
+        # Verify the original ID is preserved.
+        assert updated_record["id"] == original_id
         # Verify field1 was updated
         assert updated_record["field1"] == "updated_value1", "field1 should be updated"
         # Verify other fields remained unchanged

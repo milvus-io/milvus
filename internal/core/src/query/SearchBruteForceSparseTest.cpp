@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <limits>
 #include <map>
@@ -30,6 +31,7 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "knowhere/array_store.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/index/index_node.h"
@@ -203,6 +205,79 @@ TEST_F(TestSparseFloatSearchBruteForce, NotSupported) {
 TEST_F(TestSparseFloatSearchBruteForce, IP) {
     Run(100, 10, 5, "IP");
     Run(100, 10, 5, "ip");
+}
+
+TEST(SparseFloatBruteForce, UsesOutIdsForBitsetAndResultIds) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+
+    std::vector<SparseRow> base;
+    base.emplace_back(
+        std::vector<std::pair<knowhere::sparse::table_t, float>>{{1, 1.0F}});
+    base.emplace_back(
+        std::vector<std::pair<knowhere::sparse::table_t, float>>{{1, 1.0F}});
+    std::vector<SparseRow> query;
+    query.emplace_back(
+        std::vector<std::pair<knowhere::sparse::table_t, float>>{{1, 1.0F}});
+
+    constexpr int64_t nq = 1;
+    constexpr int64_t topk = 1;
+    constexpr int64_t dim = 8;
+    dataset::SearchDataset query_dataset{
+        knowhere::metric::IP, nq, topk, -1, dim, query.data()};
+    query::dataset::RawDataset raw_dataset{
+        1, dim, static_cast<int64_t>(base.size()), base.data()};
+
+    SearchInfo search_info;
+    search_info.topk_ = topk;
+    search_info.metric_type_ = knowhere::metric::IP;
+
+    BitsetType logical_filter;
+    logical_filter.resize(6);
+    logical_filter.set(1);
+    BitsetView bitset_view(logical_filter);
+    std::array<int32_t, 3> out_id_values{0, 1, 5};
+    knowhere::IdArray out_ids(out_id_values.data(), out_id_values.size());
+    bitset_view.set_id_offset(1);
+    bitset_view.set_out_ids(out_ids, out_ids.size());
+
+    std::map<std::string, std::string> index_info;
+    auto result = BruteForceSearch(query_dataset,
+                                   raw_dataset,
+                                   search_info,
+                                   index_info,
+                                   bitset_view,
+                                   DataType::VECTOR_SPARSE_U32_F32,
+                                   DataType::NONE,
+                                   nullptr);
+    ASSERT_EQ(result.mutable_offsets().size(), topk);
+    EXPECT_EQ(result.mutable_offsets()[0], 5);
+
+    search_info.search_params_[RADIUS] = 0.5F;
+    search_info.search_params_[RANGE_FILTER] = 1.5F;
+    auto range_result = BruteForceSearch(query_dataset,
+                                         raw_dataset,
+                                         search_info,
+                                         index_info,
+                                         bitset_view,
+                                         DataType::VECTOR_SPARSE_U32_F32,
+                                         DataType::NONE,
+                                         nullptr);
+    ASSERT_EQ(range_result.mutable_offsets().size(), topk);
+    EXPECT_EQ(range_result.mutable_offsets()[0], 5);
+
+    auto iterator_result = PackBruteForceSearchIteratorsIntoSubResult(
+        query_dataset,
+        raw_dataset,
+        search_info,
+        index_info,
+        bitset_view,
+        DataType::VECTOR_SPARSE_U32_F32);
+    auto iterators = iterator_result.chunk_iterators();
+    ASSERT_EQ(iterators.size(), nq);
+    ASSERT_TRUE(iterators[0]->HasNext().value());
+    auto first = iterators[0]->Next().value();
+    EXPECT_EQ(first.first, 5);
+    EXPECT_FLOAT_EQ(first.second, 1.0F);
 }
 
 // Behavioral regression for #51366: a segment that predates a BM25 field added

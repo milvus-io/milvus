@@ -15,6 +15,7 @@
 #include <set>
 #include <unordered_map>
 #include <vector>
+#include "common/Utils.h"
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentSealed.h"
 #include "plan/PlanNode.h"
@@ -927,7 +928,8 @@ TEST_P(QueryAggTest, RetrieveAggregationWithValidityBitmap) {
     auto& field_data = retrieve_results->fields_data(0);
 
     // Check that valid_data is properly populated for nullable fields
-    auto valid_data_size = field_data.valid_data_size();
+    const auto& valid_data = GetFieldDataRowValidData(field_data);
+    auto valid_data_size = valid_data.size();
     auto data_size = field_data.scalars().long_data().data_size();
 
     if (nullable) {
@@ -937,7 +939,7 @@ TEST_P(QueryAggTest, RetrieveAggregationWithValidityBitmap) {
         // Count valid and invalid entries
         int valid_count = 0;
         for (int i = 0; i < valid_data_size; i++) {
-            if (field_data.valid_data(i)) {
+            if (valid_data[i]) {
                 valid_count++;
             }
         }
@@ -949,7 +951,7 @@ TEST_P(QueryAggTest, RetrieveAggregationWithValidityBitmap) {
         // or all entries should be true if populated
         if (valid_data_size > 0) {
             for (int i = 0; i < valid_data_size; i++) {
-                EXPECT_TRUE(field_data.valid_data(i))
+                EXPECT_TRUE(valid_data[i])
                     << "All values should be valid for non-nullable field";
             }
         }

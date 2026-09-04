@@ -14,18 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for the `bloom_match` C++ probe path (plan proto BloomFilterExpr →
-// expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
+// Tests for the Bloom-kind `membership_match` C++ probe path (plan proto
+// BloomFilterExpr → expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
 // docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
 //
 // Golden-vector conformance consumes the same
-// client/sbbf/testdata/golden_vectors.json used by the Go builder tests;
+// client/membership/sbbf/testdata/golden_vectors.json used by the Go builder tests;
 // the C++ prober must reproduce every membership answer bit-identically.
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <arrow/io/memory.h>
 #include <parquet/bloom_filter.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +34,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -47,7 +49,7 @@
 #include "knowhere/comp/index_param.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
-#include "exec/expression/BloomFilterExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
@@ -71,14 +73,14 @@ using namespace milvus::segcore;
 
 namespace {
 
-// Locate client/sbbf/testdata/golden_vectors.json relative to this source
+// Locate client/membership/sbbf/testdata/golden_vectors.json relative to this source
 // file (repo root is four levels up from internal/core/unittest/<file>).
 std::filesystem::path
 GoldenVectorsPath() {
     // Co-located with this test (internal/core/unittest/testdata/bloom) so the
     // C++ unittest environment — which does not check out the standalone
     // client/ module — can always find it. The authoritative copy the client
-    // SDK ships is client/sbbf/testdata/golden_vectors.json; both are generated
+    // SDK ships is client/membership/sbbf/testdata/golden_vectors.json; both are generated
     // from the same spec and pinned identical by CppGeneratedFixtureIsReproducible.
     auto path =
         std::filesystem::path(__FILE__).parent_path()  // internal/core/unittest
@@ -175,7 +177,7 @@ SerializeMbf1(std::string bitset,
     return out;
 }
 
-// Minimal SBBF builder mirroring client/sbbf (Go) and Arrow's
+// Minimal SBBF builder mirroring client/membership/sbbf (Go) and Arrow's
 // parquet::BlockSplitBloomFilter. Used only to construct filters for
 // expression-level tests; cross-language bit-compatibility of the layout is
 // pinned separately by the golden vectors.
@@ -542,7 +544,6 @@ TEST(BloomFilterExprTest, ProbeSkipsAbsentValueDomain) {
     TestSbbfBuilder empty(4);
     const std::string empty_blob = empty.Serialize(0, 0.001);
     const auto empty_view = SplitBlockBloomFilterView::Parse(empty_blob);
-    EXPECT_EQ(empty_view.domains(), 0);
     EXPECT_FALSE(empty_view.TestInt64(kCollidingInt64));
     EXPECT_FALSE(
         empty_view.TestBytes(kCollidingString, std::strlen(kCollidingString)));
@@ -643,6 +644,17 @@ TEST(BloomFilterExprTest, ProtoParserDispatchAndTypeCheck) {
 // ---------------------------------------------------------------------------
 // Expression-level evaluation over growing and sealed segments.
 // ---------------------------------------------------------------------------
+std::atomic<int64_t> g_bloom_reverse_lookup_calls{0};
+
+class CountingBloomInt64Index : public index::ScalarIndexSort<int64_t> {
+ public:
+    std::optional<int64_t>
+    Reverse_Lookup(size_t offset) const override {
+        ++g_bloom_reverse_lookup_calls;
+        return index::ScalarIndexSort<int64_t>::Reverse_Lookup(offset);
+    }
+};
+
 class BloomFilterExprEvalTest : public ::testing::Test {
  protected:
     void
@@ -684,9 +696,10 @@ class BloomFilterExprEvalTest : public ::testing::Test {
             for (const auto& s : rows) {
                 jd->Add(std::string(s));
             }
-            fd.mutable_valid_data()->Clear();
+            auto* valid_data = fd.mutable_scalars()->mutable_valid_data();
+            valid_data->Clear();
             for (bool v : valid) {
-                fd.mutable_valid_data()->Add(v);
+                valid_data->Add(v);
             }
         }
         ASSERT_TRUE(found) << "json field not present in generated dataset";
@@ -709,6 +722,46 @@ class BloomFilterExprEvalTest : public ::testing::Test {
     std::unique_ptr<SegmentSealed>
     BuildSealed() {
         return CreateSealedWithFieldDataLoaded(schema_, *dataset_);
+    }
+
+    std::unique_ptr<SegmentSealed>
+    BuildIndexOnlyCountingInt64() {
+        auto segment = CreateSealedWithFieldDataLoaded(
+            schema_, *dataset_, false, {i64_fid_.get()});
+        EXPECT_FALSE(segment->HasFieldData(i64_fid_));
+
+        LoadIndexInfo index_info;
+        index_info.field_id = i64_fid_.get();
+        index_info.field_type = DataType::INT64;
+        auto scalar_index = std::make_unique<CountingBloomInt64Index>();
+        scalar_index->Build(N, i64_col_.data(), i64_valid_.data());
+        index_info.index_params = GenIndexParams(scalar_index.get());
+        index_info.cache_index = CreateTestCacheIndex("bloom-counting-index",
+                                                      std::move(scalar_index));
+        segment->LoadIndex(index_info);
+        EXPECT_TRUE(segment->HasIndex(i64_fid_));
+        return segment;
+    }
+
+    ColumnVectorPtr
+    EvalPhysical(const SegmentInternalInterface* segment,
+                 const expr::TypedExprPtr& logical,
+                 TargetBitmap bitmap_input,
+                 OffsetVector* offsets = nullptr) {
+        auto query_context = std::make_shared<QueryContext>(
+            DEAFULT_QUERY_ID, segment, N, MAX_TIMESTAMP);
+        ExecContext exec_context(query_context.get());
+        auto compiled = CompileExpressions({logical}, &exec_context, {}, false);
+        EXPECT_EQ(compiled.size(), 1u);
+        if (compiled.empty()) {
+            return nullptr;
+        }
+
+        EvalCtx eval_ctx(&exec_context, offsets);
+        eval_ctx.set_bitmap_input(std::move(bitmap_input));
+        VectorPtr result;
+        compiled[0]->Eval(eval_ctx, result);
+        return std::static_pointer_cast<ColumnVector>(result);
     }
 
     // Evaluate a bloom filter expr (optionally negated) on a segment and
@@ -1355,6 +1408,157 @@ TEST_F(BloomFilterExprEvalTest, Int64OffsetInputIterativeFilter) {
     auto sealed = BuildSealed();
     run(growing.get());
     run(sealed.get());
+}
+
+TEST_F(BloomFilterExprEvalTest,
+       ScalarBitmapInputLeavesExcludedNullCandidatesUntouched) {
+    std::vector<size_t> null_rows;
+    std::vector<size_t> valid_rows;
+    for (size_t i = 0; i < N; ++i) {
+        (i64_valid_[i] ? valid_rows : null_rows).push_back(i);
+    }
+    ASSERT_GE(null_rows.size(), 2u);
+    ASSERT_GE(valid_rows.size(), 2u);
+
+    OffsetVector offsets{
+        static_cast<int32_t>(null_rows[0]),
+        static_cast<int32_t>(valid_rows[0]),
+        static_cast<int32_t>(null_rows[1]),
+        static_cast<int32_t>(valid_rows[1]),
+    };
+    TargetBitmap candidate_mask(offsets.size(), false);
+    candidate_mask.set(1);
+    candidate_mask.set(2);
+
+    TestSbbfBuilder builder(4);
+    builder.AddInt64(i64_col_[valid_rows[0]]);
+    const auto blob = builder.Serialize(1, 0.001);
+    const auto filter = SplitBlockBloomFilterView::Parse(blob);
+    expr::TypedExprPtr logical = std::make_shared<expr::BloomFilterExpr>(
+        expr::ColumnInfo(i64_fid_, DataType::INT64, {}, true), blob);
+
+    auto growing = BuildGrowing();
+    auto sealed = BuildSealed();
+    for (const SegmentInternalInterface* segment :
+         {static_cast<const SegmentInternalInterface*>(growing.get()),
+          static_cast<const SegmentInternalInterface*>(sealed.get())}) {
+        auto result =
+            EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
+        ASSERT_NE(result, nullptr);
+        BitsetTypeView bits(result->GetRawData(), result->size());
+        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        ASSERT_EQ(result->size(), offsets.size());
+
+        EXPECT_FALSE(bits[0]);
+        EXPECT_TRUE(valid[0])
+            << "an excluded NULL candidate must remain untouched";
+        EXPECT_EQ(bits[1], filter.TestInt64(i64_col_[valid_rows[0]]));
+        EXPECT_TRUE(valid[1]);
+        EXPECT_FALSE(bits[2]);
+        EXPECT_FALSE(valid[2]) << "an active NULL candidate is invalid";
+        EXPECT_FALSE(bits[3]);
+        EXPECT_TRUE(valid[3])
+            << "an excluded valid candidate must remain untouched";
+    }
+}
+
+TEST_F(BloomFilterExprEvalTest,
+       JsonBitmapInputLeavesExcludedNullCandidatesUntouched) {
+    std::vector<std::string> rows(N, R"({"uid": 5})");
+    FixedVector<bool> validity(N, true);
+    validity[0] = false;
+    validity[1] = false;
+    OverwriteJsonColumn(rows, validity);
+
+    OffsetVector offsets{0, 1, 2, 3};
+    TargetBitmap candidate_mask(offsets.size(), false);
+    candidate_mask.set(1);
+    candidate_mask.set(2);
+
+    TestSbbfBuilder builder(4);
+    builder.AddInt64(5);
+    const auto blob = builder.Serialize(1, 0.001);
+    expr::TypedExprPtr logical = std::make_shared<expr::BloomFilterExpr>(
+        expr::ColumnInfo(
+            json_fid_, DataType::JSON, std::vector<std::string>{"uid"}, true),
+        blob);
+
+    auto growing = BuildGrowing();
+    auto sealed = BuildSealed();
+    for (const SegmentInternalInterface* segment :
+         {static_cast<const SegmentInternalInterface*>(growing.get()),
+          static_cast<const SegmentInternalInterface*>(sealed.get())}) {
+        auto result =
+            EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
+        ASSERT_NE(result, nullptr);
+        BitsetTypeView bits(result->GetRawData(), result->size());
+        BitsetTypeView valid(result->GetValidRawData(), result->size());
+
+        EXPECT_FALSE(bits[0]);
+        EXPECT_TRUE(valid[0])
+            << "an excluded whole-row NULL must remain untouched";
+        EXPECT_FALSE(bits[1]);
+        EXPECT_FALSE(valid[1]) << "an active whole-row NULL is invalid";
+        EXPECT_TRUE(bits[2]);
+        EXPECT_TRUE(valid[2]);
+        EXPECT_FALSE(bits[3]);
+        EXPECT_TRUE(valid[3]);
+    }
+}
+
+TEST_F(BloomFilterExprEvalTest,
+       IndexOnlyBitmapInputPrunesReverseLookupsByCandidatePosition) {
+    std::vector<size_t> null_rows;
+    std::vector<size_t> valid_rows;
+    for (size_t i = 0; i < N; ++i) {
+        (i64_valid_[i] ? valid_rows : null_rows).push_back(i);
+    }
+    ASSERT_GE(null_rows.size(), 2u);
+    ASSERT_GE(valid_rows.size(), 6u);
+
+    OffsetVector offsets{
+        static_cast<int32_t>(valid_rows[0]),
+        static_cast<int32_t>(null_rows[0]),
+        static_cast<int32_t>(valid_rows[1]),
+        static_cast<int32_t>(valid_rows[2]),
+        static_cast<int32_t>(valid_rows[3]),
+        static_cast<int32_t>(null_rows[1]),
+        static_cast<int32_t>(valid_rows[4]),
+        static_cast<int32_t>(valid_rows[5]),
+    };
+    TargetBitmap candidate_mask(offsets.size(), false);
+    candidate_mask.set(1);
+    candidate_mask.set(4);
+    candidate_mask.set(6);
+
+    TestSbbfBuilder builder(4);
+    builder.AddInt64(i64_col_[valid_rows[3]]);
+    builder.AddInt64(i64_col_[valid_rows[4]]);
+    const auto blob = builder.Serialize(2, 0.001);
+    const auto filter = SplitBlockBloomFilterView::Parse(blob);
+    expr::TypedExprPtr logical = std::make_shared<expr::BloomFilterExpr>(
+        expr::ColumnInfo(i64_fid_, DataType::INT64, {}, true), blob);
+
+    auto index_only = BuildIndexOnlyCountingInt64();
+    g_bloom_reverse_lookup_calls.store(0);
+    auto result = EvalPhysical(
+        index_only.get(), logical, std::move(candidate_mask), &offsets);
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(g_bloom_reverse_lookup_calls.load(), 3);
+
+    BitsetTypeView bits(result->GetRawData(), result->size());
+    BitsetTypeView valid(result->GetValidRawData(), result->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const bool active = i == 1 || i == 4 || i == 6;
+        const auto row = static_cast<size_t>(offsets[i]);
+        const bool expected_valid = active ? i64_valid_[row] : true;
+        const bool expected_match =
+            active && i64_valid_[row] && filter.TestInt64(i64_col_[row]);
+        EXPECT_EQ(bits[i], expected_match) << "candidate " << i;
+        EXPECT_EQ(valid[i], expected_valid) << "candidate " << i;
+    }
+    EXPECT_TRUE(valid[5])
+        << "the excluded NULL candidate must not be reverse-looked-up";
 }
 
 // ---------------------------------------------------------------------------

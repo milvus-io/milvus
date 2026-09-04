@@ -1036,6 +1036,10 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	return s.mixCoord.ExportSnapshot(ctx, req)
 }
 
+func (s *Server) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	return s.mixCoord.GetExportSnapshotState(ctx, req)
+}
+
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	return s.mixCoord.GetRestoreSnapshotState(ctx, req)
 }
@@ -1078,4 +1082,9 @@ func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 // DeleteClientCommand deletes a client command
 func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.mixCoord.DeleteClientCommand(ctx, req)
+}
+
+// ListClientCommands lists the commands currently held for clients
+func (s *Server) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return s.mixCoord.ListClientCommands(ctx, req)
 }

@@ -38,9 +38,11 @@ set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
         test_bloom_filter_expr.cpp
+        test_roaring_filter_expr.cpp
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
+        test_timestamptz_compare.cpp
         test_offsets_eval_correctness.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
@@ -60,7 +62,6 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
-        test_async_warmup.cpp
         test_boost_score_c.cpp
         test_sort_buffer.cpp
         test_row_container.cpp
@@ -109,6 +110,12 @@ endif()
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
+
+# ArrowFileSystemChunkManagerRemoteTest needs a live object store (MinIO); the
+# cpp-ut environment has none (MINIO_ADDRESS points at the docker-compose
+# `minio` service, unresolvable there), so keep it out of all_tests like the
+# real-object-storage tests above.
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrowFileSystemChunkManagerRemoteTest\\.cpp$")
 
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)

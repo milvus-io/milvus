@@ -42,16 +42,7 @@ func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	// Wildcard "*" should not trigger resolution
 	for _, sentinel := range []string{"*", ""} {
@@ -72,7 +63,7 @@ func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.
 		Aliases:      []string{"some_alias"},
 	}, nil)
 
-	result, err := resolveCollectionAlias(ctx, "default", "some_alias")
+	result, err := resolveCollectionAlias(ctx, cache, "default", "some_alias")
 	assert.NoError(t, err)
 	assert.Equal(t, "real_col", result)
 	mockCoord.AssertCalled(t, "DescribeCollection", mock.Anything, mock.Anything)
@@ -82,12 +73,7 @@ func TestResolveCollectionAlias_CachedCollection(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// plant the collection into the primary store + name hint the way update() would
 	seedCollection(cache, "default", "test_collection", 1)
 
@@ -113,12 +99,7 @@ func TestResolveCollectionAlias_ValidAlias(t *testing.T) {
 		Aliases:      []string{"my_alias"},
 	}, nil).Once()
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	// the first resolution fills the cache (one DescribeCollection RPC) ...
 	result, err := cache.ResolveCollectionAlias(ctx, "default", "my_alias")
@@ -144,12 +125,7 @@ func TestResolveCollectionAlias_RPCError(t *testing.T) {
 	mockCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		Return(nil, assert.AnError)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	result, err := cache.ResolveCollectionAlias(ctx, "default", "some_name")
 	assert.Error(t, err)
@@ -169,12 +145,7 @@ func TestResolveCollectionAlias_InternalServerError(t *testing.T) {
 		},
 	}, nil)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	result, err := cache.ResolveCollectionAlias(ctx, "default", "some_name")
 	assert.Error(t, err)
@@ -183,11 +154,8 @@ func TestResolveCollectionAlias_InternalServerError(t *testing.T) {
 
 func TestResolveCollectionAlias_NilGlobalMetaCache(t *testing.T) {
 	ctx := context.Background()
-	oldCache := globalMetaCache
-	globalMetaCache = nil
-	defer func() { globalMetaCache = oldCache }()
 
-	result, err := resolveCollectionAlias(ctx, "default", "test")
+	result, err := resolveCollectionAlias(ctx, nil, "default", "test")
 	assert.Error(t, err)
 	assert.Equal(t, "test", result)
 }
@@ -196,17 +164,12 @@ func TestResolveCollectionAlias_AliasCacheHit(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// hint-declared seeding, the way a real fill writes it: the primary entry
 	// declares the alias, and the alias hint chains alias -> real name -> entry
 	real := seedCollection(cache, "default", "real_collection", 7)
-	real.aliases = []string{"my_alias"}
-	cache.setAliasLocked("default", "my_alias", "real_collection")
+	real.Aliases = []string{"my_alias"}
+	cache.SetAliasLockedForTest("default", "my_alias", "real_collection")
 
 	// Should resolve through the cached hint chain without any RPC call
 	result, err := cache.ResolveCollectionAlias(ctx, "default", "my_alias")
@@ -229,12 +192,7 @@ func TestResolveCollectionAlias_NotAnAliasIsNotCached(t *testing.T) {
 		Status: merr.Status(merr.WrapErrCollectionNotFound("not_alias")),
 	}, nil).Twice()
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	// both calls resolve to the name as-is (no error), and BOTH issue the RPC
 	for i := 0; i < 2; i++ {
@@ -245,11 +203,9 @@ func TestResolveCollectionAlias_NotAnAliasIsNotCached(t *testing.T) {
 	mockCoord.AssertNumberOfCalls(t, "DescribeCollection", 2)
 
 	// nothing was cached: no alias hint, no name hint, no primary entry
-	cache.mu.RLock()
-	_, hasAliasHint := cache.aliasInfo["default"]["not_alias"]
-	_, hasNameHint := cache.nameIdx["default"]["not_alias"]
-	numCached := len(cache.collections)
-	cache.mu.RUnlock()
+	_, hasAliasHint := cache.AliasTargetForTest("default", "not_alias")
+	hasNameHint := cache.HasNameHintForTest("default", "not_alias")
+	numCached := cache.CollectionCountForTest()
 	assert.False(t, hasAliasHint, "a non-resolving name must not write an alias hint")
 	assert.False(t, hasNameHint, "a non-resolving name must not write a name hint")
 	assert.Zero(t, numCached, "a not-found fill must cache nothing")
@@ -259,16 +215,8 @@ func TestRemoveAlias_InvalidatesCache(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo: map[string]map[string]string{
-			"default": {
-				"my_alias": "real_collection",
-			},
-		},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
+	cache.SetAliasLockedForTest("default", "my_alias", "real_collection")
 
 	// Remove the alias
 	cache.RemoveAlias(ctx, "default", "my_alias")
@@ -290,31 +238,23 @@ func TestRemoveCollectionByID_DeclaredAliasHintsCleanedStrayMisses(t *testing.T)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:       mockCoord,
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		aliasInfo:      map[string]map[string]string{},
-		partitionCache: map[string]*partitionInfos{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// plant the collection into the primary store + name hint like update() would;
 	// alias1 is recorded on the entry itself (as a real fill would), alias2 is a
 	// stray hint (e.g. an upgrade-window DescribeAlias write-back)
 	doomed := seedCollection(cache, "default", "my_collection", 100)
-	doomed.aliases = []string{"alias1"}
-	cache.setAliasLocked("default", "alias1", "my_collection")
-	cache.setAliasLocked("default", "alias2", "my_collection")
-	cache.setAliasLocked("default", "alias3", "other_collection")
+	doomed.Aliases = []string{"alias1"}
+	cache.SetAliasLockedForTest("default", "alias1", "my_collection")
+	cache.SetAliasLockedForTest("default", "alias2", "my_collection")
+	cache.SetAliasLockedForTest("default", "alias3", "other_collection")
 
 	// Remove collection by ID: the primary entry AND everything it owns
 	// (its listed alias hints, its name hint) go away synchronously.
 	cache.RemoveCollectionsByID(ctx, 100)
 
-	cache.mu.RLock()
 	assert.Nil(t, collByIDLive(cache, 100), "the primary entry must be deleted")
 	assert.Nil(t, cachedEntryLocked(cache, "default", "my_collection"), "a by-name lookup must miss after the drop")
-	_, hasListed := cache.aliasInfo["default"]["alias1"]
-	cache.mu.RUnlock()
+	_, hasListed := cache.AliasTargetForTest("default", "alias1")
 	assert.False(t, hasListed, "an alias listed on the entry is cleaned at eviction")
 
 	// DEFENSIVE: a stray hint (impossible in production -- not declared by the
@@ -324,7 +264,7 @@ func TestRemoveCollectionByID_DeclaredAliasHintsCleanedStrayMisses(t *testing.T)
 	if assert.True(t, ok, "the (impossible-in-production) stray hint is not reached by declared-alias cleanup") {
 		assert.Equal(t, "my_collection", entry)
 	}
-	_, ok = cache.getCollection("default", "alias2", 0)
+	_, ok = cache.GetCollectionForTest("default", "alias2", 0)
 	assert.False(t, ok, "a lookup through the stray alias must not reach the dead collection")
 
 	// Alias pointing to other_collection is untouched.
@@ -345,15 +285,10 @@ func TestRemoveCollection_DefensiveDanglingAliasBranch(t *testing.T) {
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
 	// Target collection is NOT in the primary store, but alias hints exist.
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
-	cache.setAliasLocked("default", "alias1", "uncached_collection")
-	cache.setAliasLocked("default", "alias2", "uncached_collection")
-	cache.setAliasLocked("default", "alias3", "other_collection")
+	cache := mustNewMetaCacheForTest(mockCoord)
+	cache.SetAliasLockedForTest("default", "alias1", "uncached_collection")
+	cache.SetAliasLockedForTest("default", "alias2", "uncached_collection")
+	cache.SetAliasLockedForTest("default", "alias3", "other_collection")
 
 	// RemoveCollection with the (uncached) TARGET name does not touch the
 	// hand-seeded hints pointing at it (no reverse alias sweep exists).
@@ -384,20 +319,9 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:       mockCoord,
-		collections:    map[UniqueID]*collectionInfo{},
-		nameIdx:        map[string]map[string]UniqueID{},
-		partitionCache: map[string]*partitionInfos{},
-		aliasInfo: map[string]map[string]string{
-			"mydb": {
-				"alias1": "coll1",
-			},
-		},
-		dbInfo: map[string]*databaseInfo{
-			"mydb": {},
-		},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
+	cache.SetAliasLockedForTest("mydb", "alias1", "coll1")
+	cache.SeedDBInfoForTest("mydb", &databaseInfo{})
 
 	cache.RemoveDatabase(ctx, "mydb")
 
@@ -411,24 +335,18 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
 	// Set up cache: "existing_alias" -> "real_collection"
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// hint-declared seeding: the entry declares the alias, so "existing_alias"
 	// resolves to "real_collection" from the cache with zero RPC
-	seedCollection(cache, "default", "real_collection", 1).aliases = []string{"existing_alias"}
-	cache.setAliasLocked("default", "existing_alias", "real_collection")
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
+	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
 	paramtable.Init()
 
 	task := &CreateAliasTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -451,24 +369,18 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
 	// Set up cache: "existing_alias" -> "real_collection"
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// hint-declared seeding: the entry declares the alias, so "existing_alias"
 	// resolves to "real_collection" from the cache with zero RPC
-	seedCollection(cache, "default", "real_collection", 1).aliases = []string{"existing_alias"}
-	cache.setAliasLocked("default", "existing_alias", "real_collection")
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
+	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
 	paramtable.Init()
 
 	task := &AlterAliasTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		AlterAliasRequest: &milvuspb.AlterAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -492,26 +404,20 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// hint-declared seeding: the entry declares the alias, so "existing_alias"
 	// resolves to "real_collection" from the cache with zero RPC
-	seedCollection(cache, "default", "real_collection", 1).aliases = []string{"existing_alias"}
-	cache.setAliasLocked("default", "existing_alias", "real_collection")
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
+	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
 	paramtable.Init()
 	paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
 	defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
 
 	task := &CreateAliasTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -534,24 +440,18 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
 	// Set up cache: "existing_alias" -> "real_collection"
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
+	cache := mustNewMetaCacheForTest(mockCoord)
 	// hint-declared seeding: the entry declares the alias, so "existing_alias"
 	// resolves to "real_collection" from the cache with zero RPC
-	seedCollection(cache, "default", "real_collection", 1).aliases = []string{"existing_alias"}
-	cache.setAliasLocked("default", "existing_alias", "real_collection")
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
+	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
 	paramtable.Init()
 
 	task := &ListAliasesTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{
 			Base:           &commonpb.MsgBase{},
@@ -572,20 +472,14 @@ func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
-	cache := &MetaCache{
-		mixCoord:    mockCoord,
-		collections: map[UniqueID]*collectionInfo{},
-		nameIdx:     map[string]map[string]UniqueID{},
-		aliasInfo:   map[string]map[string]string{},
-	}
-
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
+	cache := mustNewMetaCacheForTest(mockCoord)
 
 	paramtable.Init()
 
 	task := &ListAliasesTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{
 			Base:   &commonpb.MsgBase{},

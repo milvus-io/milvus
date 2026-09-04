@@ -19,7 +19,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: v0.1.37
+    tag: v0.1.40
     pullPolicy: Always
 streaming:
   enabled: true
@@ -98,6 +98,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         storageVersion:
           enabled: true

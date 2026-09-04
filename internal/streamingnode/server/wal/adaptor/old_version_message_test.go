@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -215,4 +216,80 @@ func TestNewOldVersionImmutableMessage(t *testing.T) {
 	ImportMsgV1, err := message.AsImmutableImportMessageV1(msg)
 	assert.NoError(t, err)
 	assert.NotNil(t, ImportMsgV1)
+}
+
+func TestCatchupScannerAssemblesOldVersionBeforeConversion(t *testing.T) {
+	resource.InitForTest(t)
+
+	tt := uint64(10086)
+	insert := &msgpb.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Insert,
+			Timestamp: tt,
+		},
+		Timestamps:   []uint64{tt},
+		CollectionID: 1,
+		PartitionID:  2,
+		NumRows:      1,
+		SegmentID:    100,
+		ShardName:    "test-v0",
+	}
+	payload, err := proto.Marshal(insert)
+	require.NoError(t, err)
+
+	logical := message.NewMutableMessageBeforeAppend(payload, map[string]string{
+		"_v": message.VersionOld.String(),
+	}).WithTimeTick(tt)
+	chunks := message.SplitIntoChunks(logical, len(payload)/2)
+	require.Greater(t, len(chunks), 1)
+
+	physical := make([]message.ImmutableMessage, 0, len(chunks))
+	for i, chunk := range chunks {
+		physical = append(physical, chunk.IntoImmutableMessage(walimplstest.NewTestMessageID(int64(i+1))))
+	}
+
+	captured := runTraceTestCatchupScanner(t, physical...)
+	require.Len(t, captured, 1)
+	assert.False(t, message.IsChunkedPayload(captured[0]))
+	converted, err := message.AsImmutableInsertMessageV1(captured[0])
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), converted.Header().CollectionId)
+	assert.Equal(t, uint64(1), converted.Header().Partitions[0].Rows)
+}
+
+func TestCatchupScannerUsesConvertedOldTimeTickAsChunkBarrier(t *testing.T) {
+	resource.InitForTest(t)
+
+	insert := &msgpb.InsertRequest{
+		Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, Timestamp: 100},
+		Timestamps:   []uint64{100},
+		CollectionID: 1,
+		PartitionID:  2,
+		NumRows:      1,
+		SegmentID:    100,
+		ShardName:    "test-v0",
+	}
+	payload, err := proto.Marshal(insert)
+	require.NoError(t, err)
+	chunks := message.SplitIntoChunks(
+		message.NewMutableMessageBeforeAppend(payload, map[string]string{"_v": message.VersionOld.String()}).WithTimeTick(100),
+		(len(payload)+1)/2,
+	)
+	require.Len(t, chunks, 2)
+
+	timeTickPayload, err := proto.Marshal(&msgpb.DeleteRequest{
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_TimeTick, Timestamp: 150},
+	})
+	require.NoError(t, err)
+	timeTick := message.NewMutableMessageBeforeAppend(timeTickPayload, map[string]string{
+		"_v": message.VersionOld.String(),
+	}).WithTimeTick(150)
+
+	captured := runTraceTestCatchupScanner(t,
+		chunks[0].IntoImmutableMessage(walimplstest.NewTestMessageID(1)),
+		timeTick.IntoImmutableMessage(walimplstest.NewTestMessageID(2)),
+		chunks[1].IntoImmutableMessage(walimplstest.NewTestMessageID(3)),
+	)
+	require.Len(t, captured, 1, "the stale tail must not complete after the TimeTick barrier")
+	assert.Equal(t, message.MessageTypeTimeTick, captured[0].MessageType())
 }

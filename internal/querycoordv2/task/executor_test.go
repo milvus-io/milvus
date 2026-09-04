@@ -398,7 +398,7 @@ func TestExecutorDeadlockReproduction(t *testing.T) {
 	// In the old single-pool design, this would fail because all 5 slots would need to be full
 	// But with split pools, non-channel has its own capacity of 3
 	leaderAction := NewLeaderAction(1, 1, ActionTypeGrow, "shard-0", 700, 1)
-	leaderTask := NewLeaderSegmentTask(ctx, testSource("test"), 1000, replica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(ctx, 10*time.Second, testSource("test"), 1000, replica, 1, leaderAction)
 	leaderTask.SetID(700)
 
 	// Directly check: can we increment the non-channel counter?

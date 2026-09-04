@@ -40,9 +40,10 @@ This feature addresses these gaps by implementing a comprehensive client telemet
 // TelemetryConfig holds configurable settings for client telemetry
 type TelemetryConfig struct {
     Enabled           bool          // Enable/disable telemetry collection (default: true)
-    HeartbeatInterval time.Duration // Heartbeat frequency (default: 30s)
+    HeartbeatInterval time.Duration // Heartbeat frequency (default: 10s)
     SamplingRate      float64       // Sampling rate 0.0-1.0 (default: 1.0)
     ErrorMaxCount     int           // Max errors to track (default: 100)
+    ClientID          string        // Optional stable identity across process restarts
 }
 
 // ClientConfig gains a new field
@@ -54,7 +55,7 @@ type ClientConfig struct {
 
 **Telemetry is on by default and must be turned off explicitly.** `New()` always constructs
 and starts the manager; a nil `TelemetryConfig` is replaced by `DefaultTelemetryConfig()`,
-which returns `Enabled: true` with a 30s heartbeat and 100% sampling. A caller who never
+which returns `Enabled: true` with a 10s heartbeat and 100% sampling. A caller who never
 mentions `TelemetryConfig` therefore still reports heartbeats and metrics to the server. To
 disable it:
 
@@ -64,6 +65,11 @@ client.New(ctx, &client.ClientConfig{
     TelemetryConfig: &milvusclient.TelemetryConfig{Enabled: false},
 })
 ```
+
+An initial `Enabled: false` is an explicit opt-out and starts no heartbeat worker. If an
+already-running client is disabled later by a server `push_config`, operation collection and
+metric payloads stop, but the lightweight command heartbeat remains active so the disable
+reply is acknowledged and a later re-enable can be received.
 
 ### HTTP REST APIs (Proxy)
 
@@ -133,7 +139,7 @@ privilege check on this surface.
 │  │           └────────────────────┼────────────────────┘                 │  │
 │  │                                ▼                                       │  │
 │  │                    ┌───────────────────────┐                          │  │
-│  │                    │   Heartbeat Loop      │───────── 30s interval    │  │
+│  │                    │   Heartbeat Loop      │───────── 10s default     │  │
 │  │                    │   (Background)        │                          │  │
 │  │                    └───────────┬───────────┘                          │  │
 │  └────────────────────────────────┼──────────────────────────────────────┘  │
@@ -187,9 +193,9 @@ type ClientTelemetryManager struct {
 ```
 
 **Key behaviors:**
-- Generates a client UUID on creation. It is stable for the lifetime of the `Client`, and
-  therefore across gRPC reconnects, but **not across process restarts** -- each `New()`
-  produces a fresh UUID. Servers see a restarted process as a new client.
+- Generates a client UUID on creation unless `TelemetryConfig.ClientID` pins a stable value.
+  The resolved ID is stable for the lifetime of the `Client` and across gRPC reconnects. It
+  survives a process restart only when the caller supplies `ClientID`.
 - Starts background heartbeat loop on `Start()`
 - Sends first heartbeat immediately, then every `HeartbeatInterval`
 - Uses `time.After` per iteration rather than a `time.Ticker`, so a server-pushed interval
@@ -272,6 +278,8 @@ the client and is answered with `"unknown command type: <type>"`.
 | `get_config` | Return the client's current effective config | No |
 
 `command_store.go` rejects `persistent=true` for anything other than `push_config`.
+Custom handlers execute on the heartbeat goroutine. A handler panic is recovered and turned
+into a failed command reply so it cannot terminate the process or stop later heartbeats.
 
 **Payload schemas.** `ClientCommand.payload` is raw JSON (not protobuf).
 
@@ -308,6 +316,16 @@ type LatencyHistoryPayload struct {
 
 Reply payloads are capped at 1 MB client-side; `show_errors` halves the returned count
 until it fits. `get_config` deliberately omits `Password` and `APIKey`.
+
+Latency snapshots are retained by timestamp for one hour, independent of the dynamically
+configured heartbeat interval. A 4096-snapshot hard cap is the final memory bound for
+sub-second intervals. The previous fixed 120-snapshot cap represented one hour only at the
+obsolete 30-second default and retained just 20 minutes at the current 10-second default.
+Each operation/window also retains an internal 128-point, evenly spaced quantile sketch
+from the collector's recent sample ring. Aggregated history merges those weighted samples
+and computes P99 from the combined distribution; averaging the P99 values of individual
+windows is mathematically invalid. The sketch is internal and is not added to heartbeat or
+detail-mode response payloads.
 
 ### Server-Side Components
 
@@ -538,7 +556,7 @@ Client                                      Server
    │                                           │
 ```
 
-**Heartbeat interval:** 30 seconds (client default; the server can change it via
+**Heartbeat interval:** 10 seconds (client default; the server can change it via
 `push_config`).
 
 **`report_timestamp`** is accepted but ignored — the server uses its own clock for
@@ -560,6 +578,28 @@ else:                     sort configs by ID ascending
 The server computes it over the configs **already filtered to this client's scope**, and
 sends persistent configs only when `request.ConfigHash != serverHash`. The response has no
 "new hash" field — the client recomputes it locally after processing commands.
+
+An empty command list is otherwise ambiguous: it can mean either that a non-empty client
+hash already matches or that the last matching config was deleted. Clearing the hash for
+every empty response would make a matching non-empty config alternate between suppression
+and re-delivery. To let existing SDKs converge without a protobuf change, the server uses a
+reserved empty-config sentinel only when the effective config set is empty and the client
+reports some other non-empty hash:
+
+```
+ID:          00000000-0000-0000-0000-000000000000
+Type:        push_config
+Payload:     {}
+Persistent:  true
+CreateTime:  0
+Hash:        d34aea1518ff0217
+```
+
+Every telemetry SDK treats this as a successful no-op and adopts its hash. The server
+accepts both `""` and `d34aea1518ff0217` as an empty effective-config hash, so fresh clients
+receive no sentinel and transitioned clients do not receive it again. The command is
+synthesized in the heartbeat response, never stored in etcd or exposed through List/Delete,
+and its acknowledgement is omitted from ordinary command reply history.
 
 #### Command delivery and deduplication
 
@@ -625,6 +665,7 @@ Persistent configs are never deleted by a reply; they are removed only via
 3. **Command Processing:**
    - Server returns commands in the heartbeat response
    - Client dispatches to the registered handler for that type
+   - A custom-handler panic becomes a failed reply; later commands and heartbeats continue
    - Reply is queued and sent with the next heartbeat
    - Persistent configs are re-sent only when the client's `config_hash` disagrees
 

@@ -44,12 +44,12 @@ class ShreddingArrayBsonContainsArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -92,12 +92,12 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -144,12 +144,12 @@ class ShreddingArrayBsonContainsAnyExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -198,12 +198,12 @@ class ShreddingArrayBsonContainsAllExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -252,12 +252,12 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -357,12 +357,12 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -491,6 +491,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
     void
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {
@@ -509,7 +514,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         if (expr_->column_.data_type_ == DataType::ARRAY &&
-            expr_->vals_.empty()) {
+            (expr_->column_.element_level_ || expr_->vals_.empty())) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -546,6 +551,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContains(EvalCtx& context);
 
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsImpl(EvalCtx& context);
+
     template <typename ExprValueType>
     VectorPtr
     ExecJsonContainsAll(EvalCtx& context);
@@ -557,6 +566,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecArrayContainsAll(EvalCtx& context);
+
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsAllImpl(EvalCtx& context);
 
     VectorPtr
     ExecJsonContainsArray(EvalCtx& context);

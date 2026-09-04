@@ -19,6 +19,7 @@
 package chain
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -276,17 +278,29 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 	if scores := resultData.GetScores(); len(scores) > 0 && int64(len(scores)) < totalRows {
 		return nil, merr.WrapErrServiceInternalMsg("scores length (%d) is less than totalRows (%d)", len(scores), totalRows)
 	}
+	if elementIndices := resultData.GetElementIndices(); elementIndices != nil && int64(len(elementIndices.GetData())) < totalRows {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"element_indices length (%d) is less than totalRows (%d)", len(elementIndices.GetData()), totalRows)
+	}
 
 	// Import ID column ($id)
-	if ids := resultData.GetIds(); ids != nil {
+	// Zero-hit results may carry Ids as a non-nil shell whose IdField oneof is
+	// unset (e.g. querynode emptySearchResultData forwarded verbatim by the
+	// single-channel reduce fast path); it holds no IDs, so treat it exactly
+	// like Ids == nil.
+	if ids := resultData.GetIds(); ids.GetIdField() != nil {
 		if err := importIDs(builder, ids, offsets, alloc); err != nil {
 			return nil, err
 		}
 	} else if totalRows == 0 {
-		// Empty result: create empty $id column so Merge can process it
+		// Empty result: create an empty $id column so Merge can process nil IDs
+		// and the unset ID oneof emitted by emptySearchResultData.
 		if err := importEmptyIDs(builder, offsets, alloc); err != nil {
 			return nil, err
 		}
+	} else if ids != nil {
+		// IdField unset but rows present: malformed input.
+		return nil, importIDs(builder, ids, offsets, alloc)
 	}
 
 	// Import Score column ($score)
@@ -297,6 +311,15 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 	} else if totalRows == 0 {
 		// Empty result: create empty $score column so Merge can process it
 		if err := importScores(builder, []float32{}, offsets, alloc); err != nil {
+			return nil, err
+		}
+	}
+
+	// Import element indices as the fixed Int32 system column used by Merge.
+	// SearchResultData uses int64 on the wire, while QueryNode element indices
+	// originate as int32, so reject malformed out-of-range values explicitly.
+	if elementIndices := resultData.GetElementIndices(); elementIndices != nil {
+		if err := importElementIndices(builder, elementIndices.GetData(), offsets, alloc); err != nil {
 			return nil, err
 		}
 	}
@@ -399,6 +422,22 @@ func importScores(builder *DataFrameBuilder, scores []float32, offsets []int64, 
 	return builder.AddColumnFromChunks(types.ScoreFieldName, chunks)
 }
 
+func importElementIndices(builder *DataFrameBuilder, values []int64, offsets []int64, alloc memory.Allocator) error {
+	indices := make([]int32, len(values))
+	for i, value := range values {
+		if value < math.MinInt32 || value > math.MaxInt32 {
+			return merr.WrapErrServiceInternalMsg("element_indices[%d] value %d is out of Int32 range", i, value)
+		}
+		indices[i] = int32(value)
+	}
+
+	noValidSlice := func(int) []bool { return nil }
+	chunks := importChunkedBatch(indices, offsets, noValidSlice, array.NewInt32Builder, alloc)
+	builder.SetFieldType(types.ElementIndicesFieldName, schemapb.DataType_Int32)
+	builder.SetFieldNullable(types.ElementIndicesFieldName, false)
+	return builder.AddColumnFromChunks(types.ElementIndicesFieldName, chunks)
+}
+
 func shouldImportGroupByField(fieldData *schemapb.FieldData, seenFieldIDs map[int64]bool, seenFieldNames map[string]bool) bool {
 	fieldID := fieldData.GetFieldId()
 	fieldName := groupByFieldColumnName(fieldData)
@@ -449,7 +488,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 
 	totalRows := offsets[len(offsets)-1]
 
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	nullable := len(validData) > 0
 	if nullable && int64(len(validData)) < totalRows {
 		return merr.WrapErrServiceInternalMsg("field %s: validData length (%d) is less than totalRows (%d)", fieldName, len(validData), totalRows)
@@ -675,10 +714,7 @@ type ExportOptions struct {
 	// GroupByFields specifies columns to export as GroupByFieldValues instead
 	// of FieldsData. It supersedes GroupByField when non-empty.
 	GroupByFields []string
-	// SkipColumns lists column names to omit from FieldsData. Columns with
-	// segment-specific semantics (e.g., $element_indices) are exported by the
-	// caller after this generic conversion; listing them here prevents them
-	// from leaking into FieldsData as if they were schema fields.
+	// SkipColumns lists additional column names to omit from FieldsData.
 	SkipColumns []string
 }
 
@@ -716,6 +752,16 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 		result.Scores = scores
 	}
 
+	// Export the fixed element-index system column through its dedicated wire
+	// field instead of leaking it into schema FieldsData.
+	if df.HasColumn(types.ElementIndicesFieldName) {
+		elementIndices, err := exportElementIndices(df)
+		if err != nil {
+			return nil, err
+		}
+		result.ElementIndices = elementIndices
+	}
+
 	// Determine which columns to skip or export specially
 	groupBySet := map[string]struct{}{}
 	var skipSet map[string]struct{}
@@ -737,7 +783,8 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 
 	// Export other fields
 	for _, name := range df.ColumnNames() {
-		if name == types.IDFieldName || name == types.ScoreFieldName || name == GroupScoreFieldName {
+		if name == types.IDFieldName || name == types.ScoreFieldName ||
+			name == types.ElementIndicesFieldName || name == GroupScoreFieldName {
 			continue
 		}
 		if _, ok := skipSet[name]; ok {
@@ -813,6 +860,23 @@ func exportScores(df *DataFrame) ([]float32, error) {
 		return nil, merr.WrapErrServiceInternalMsg("exportScores: %v", err)
 	}
 	return data, nil
+}
+
+func exportElementIndices(df *DataFrame) (*schemapb.LongArray, error) {
+	col := df.Column(types.ElementIndicesFieldName)
+	if col == nil {
+		return nil, merr.WrapErrServiceInternalMsg("exportElementIndices: column %s not found", types.ElementIndicesFieldName)
+	}
+
+	data, err := exportChunkedValues[int32, *array.Int32](col, types.ElementIndicesFieldName)
+	if err != nil {
+		return nil, merr.Wrap(err, "exportElementIndices")
+	}
+	values := make([]int64, len(data))
+	for i, value := range data {
+		values[i] = int64(value)
+	}
+	return &schemapb.LongArray{Data: values}, nil
 }
 
 // exportFieldData exports a field from the DataFrame.
@@ -933,7 +997,7 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	// Export validity data for nullable fields
 	if df.fieldNullables[name] {
 		if validData := exportValidData(col); validData != nil {
-			fieldData.ValidData = validData
+			typeutil.SetFieldDataValidData(fieldData, validData)
 		}
 	}
 

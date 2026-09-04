@@ -832,7 +832,7 @@ var file_proxy_proto_rawDesc = []byte{
 	0x0b, 0x32, 0x1f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
 	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x6e,
 	0x66, 0x6f, 0x52, 0x0b, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x73, 0x32,
-	0xb5, 0x0e, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74,
+	0x98, 0x0f, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74,
 	0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x12,
 	0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
 	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65,
@@ -947,11 +947,17 @@ var file_proxy_proto_rawDesc = []byte{
 	0x73, 0x74, 0x1a, 0x31, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x43, 0x6c, 0x65, 0x61, 0x72,
 	0x52, 0x65, 0x61, 0x64, 0x54, 0x61, 0x73, 0x6b, 0x51, 0x75, 0x65, 0x75, 0x65, 0x52, 0x65, 0x73,
-	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68, 0x75,
-	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x72, 0x6f, 0x78, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x33,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x61, 0x0a, 0x10, 0x53, 0x79, 0x6e, 0x63, 0x46,
+	0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x2e, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72,
+	0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f,
+	0x75, 0x72, 0x63, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69,
+	0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d,
+	0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33,
+	0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x72, 0x6f, 0x78, 0x79, 0x70, 0x62, 0x62, 0x06,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -996,15 +1002,16 @@ var file_proxy_proto_goTypes = []interface{}{
 	(*internalpb.GetSegmentsInfoRequest)(nil),      // 25: milvus.proto.internal.GetSegmentsInfoRequest
 	(*internalpb.GetQuotaMetricsRequest)(nil),      // 26: milvus.proto.internal.GetQuotaMetricsRequest
 	(*internalpb.ClearReadTaskQueueRequest)(nil),   // 27: milvus.proto.internal.ClearReadTaskQueueRequest
-	(*milvuspb.ComponentStates)(nil),               // 28: milvus.proto.milvus.ComponentStates
-	(*milvuspb.StringResponse)(nil),                // 29: milvus.proto.milvus.StringResponse
-	(*milvuspb.GetMetricsResponse)(nil),            // 30: milvus.proto.milvus.GetMetricsResponse
-	(*internalpb.ImportResponse)(nil),              // 31: milvus.proto.internal.ImportResponse
-	(*internalpb.GetImportProgressResponse)(nil),   // 32: milvus.proto.internal.GetImportProgressResponse
-	(*internalpb.ListImportsResponse)(nil),         // 33: milvus.proto.internal.ListImportsResponse
-	(*internalpb.GetSegmentsInfoResponse)(nil),     // 34: milvus.proto.internal.GetSegmentsInfoResponse
-	(*internalpb.GetQuotaMetricsResponse)(nil),     // 35: milvus.proto.internal.GetQuotaMetricsResponse
-	(*internalpb.ClearReadTaskQueueResponse)(nil),  // 36: milvus.proto.internal.ClearReadTaskQueueResponse
+	(*internalpb.SyncFileResourceRequest)(nil),     // 28: milvus.proto.internal.SyncFileResourceRequest
+	(*milvuspb.ComponentStates)(nil),               // 29: milvus.proto.milvus.ComponentStates
+	(*milvuspb.StringResponse)(nil),                // 30: milvus.proto.milvus.StringResponse
+	(*milvuspb.GetMetricsResponse)(nil),            // 31: milvus.proto.milvus.GetMetricsResponse
+	(*internalpb.ImportResponse)(nil),              // 32: milvus.proto.internal.ImportResponse
+	(*internalpb.GetImportProgressResponse)(nil),   // 33: milvus.proto.internal.GetImportProgressResponse
+	(*internalpb.ListImportsResponse)(nil),         // 34: milvus.proto.internal.ListImportsResponse
+	(*internalpb.GetSegmentsInfoResponse)(nil),     // 35: milvus.proto.internal.GetSegmentsInfoResponse
+	(*internalpb.GetQuotaMetricsResponse)(nil),     // 36: milvus.proto.internal.GetQuotaMetricsResponse
+	(*internalpb.ClearReadTaskQueueResponse)(nil),  // 37: milvus.proto.internal.ClearReadTaskQueueResponse
 }
 var file_proxy_proto_depIdxs = []int32{
 	12, // 0: milvus.proto.proxy.InvalidateCollMetaCacheRequest.base:type_name -> milvus.proto.common.MsgBase
@@ -1044,25 +1051,27 @@ var file_proxy_proto_depIdxs = []int32{
 	25, // 34: milvus.proto.proxy.Proxy.GetSegmentsInfo:input_type -> milvus.proto.internal.GetSegmentsInfoRequest
 	26, // 35: milvus.proto.proxy.Proxy.GetQuotaMetrics:input_type -> milvus.proto.internal.GetQuotaMetricsRequest
 	27, // 36: milvus.proto.proxy.Proxy.ClearReadTaskQueue:input_type -> milvus.proto.internal.ClearReadTaskQueueRequest
-	28, // 37: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	29, // 38: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 39: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
-	29, // 40: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 41: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 42: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 43: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
-	30, // 44: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	16, // 45: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
-	10, // 46: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
-	31, // 47: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
-	32, // 48: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
-	33, // 49: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
-	16, // 50: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
-	34, // 51: milvus.proto.proxy.Proxy.GetSegmentsInfo:output_type -> milvus.proto.internal.GetSegmentsInfoResponse
-	35, // 52: milvus.proto.proxy.Proxy.GetQuotaMetrics:output_type -> milvus.proto.internal.GetQuotaMetricsResponse
-	36, // 53: milvus.proto.proxy.Proxy.ClearReadTaskQueue:output_type -> milvus.proto.internal.ClearReadTaskQueueResponse
-	37, // [37:54] is the sub-list for method output_type
-	20, // [20:37] is the sub-list for method input_type
+	28, // 37: milvus.proto.proxy.Proxy.SyncFileResource:input_type -> milvus.proto.internal.SyncFileResourceRequest
+	29, // 38: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	30, // 39: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	16, // 40: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
+	30, // 41: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
+	16, // 42: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
+	16, // 43: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
+	16, // 44: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
+	31, // 45: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	16, // 46: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
+	10, // 47: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
+	32, // 48: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
+	33, // 49: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
+	34, // 50: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
+	16, // 51: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
+	35, // 52: milvus.proto.proxy.Proxy.GetSegmentsInfo:output_type -> milvus.proto.internal.GetSegmentsInfoResponse
+	36, // 53: milvus.proto.proxy.Proxy.GetQuotaMetrics:output_type -> milvus.proto.internal.GetQuotaMetricsResponse
+	37, // 54: milvus.proto.proxy.Proxy.ClearReadTaskQueue:output_type -> milvus.proto.internal.ClearReadTaskQueueResponse
+	16, // 55: milvus.proto.proxy.Proxy.SyncFileResource:output_type -> milvus.proto.common.Status
+	38, // [38:56] is the sub-list for method output_type
+	20, // [20:38] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name
 	20, // [20:20] is the sub-list for extension extendee
 	0,  // [0:20] is the sub-list for field type_name

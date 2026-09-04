@@ -1443,7 +1443,15 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 	// to correct the actual size, we need to multiply the memory expansion ratio accordingly.
 	determineMemoryExpansionRatio := func(field *schemapb.FieldSchema) int {
 		if field.DataType == schemapb.DataType_Array {
-			switch field.GetElementType() {
+			elementType := field.GetElementType()
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				typeSchema := field.GetTypeSchema()
+				for typeSchema.GetArrayElement() != nil {
+					typeSchema = typeSchema.GetArrayElement()
+				}
+				elementType = typeSchema.GetLeafType()
+			}
+			switch elementType {
 			case schemapb.DataType_Int16:
 				return 2
 			case schemapb.DataType_Int32:

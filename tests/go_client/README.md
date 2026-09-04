@@ -185,6 +185,9 @@ Recommend you to use gotestsum https://github.com/gotestyourself/gotestsum
 # Run all default cases
 gotestsum --format testname --hide-summary=output -v ./testcases/... --addr=127.0.0.1:19530 -timeout=30m
 
+# Run against an endpoint that uses token authentication
+gotestsum --format testname --hide-summary=output -v ./testcases/... --uri=https://example.api.milvus.io --token="${MILVUS_TOKEN}" -timeout=30m
+
 # Run a specified file
 gotestsum --format testname --hide-summary=output ./testcases/collection_test.go ./testcases/main_test.go --addr=127.0.0.1:19530
 

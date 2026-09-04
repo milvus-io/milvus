@@ -193,6 +193,21 @@ var (
 		Buckets: messageBytesBuckets,
 	}, WALChannelLabelName)
 
+	StreamingNodePartialUpdateVersionIndexBytes = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "partial_update_version_index_bytes",
+		Help: "Estimated bytes used by the partial update primary-key version index",
+	})
+
+	StreamingNodePartialUpdateVersionIndexMaxBytes = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "partial_update_version_index_max_bytes",
+		Help: "Configured node-wide byte limit for the partial update primary-key version index",
+	})
+
+	StreamingNodePartialUpdateVersionIndexMissedWrites = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "partial_update_version_index_missed_writes_total",
+		Help: "Committed writes with primary keys omitted because the partial update version index budget was exhausted",
+	})
+
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "info",
@@ -621,6 +636,9 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumerTotal)
 	registry.MustRegister(StreamingNodeConsumeInflightTotal)
 	registry.MustRegister(StreamingNodeConsumeBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMaxBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMissedWrites)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
@@ -748,6 +766,13 @@ func newStreamingNodeGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prome
 	opts.Subsystem = typeutil.StreamingNodeRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewGaugeVec(opts, labels)
+}
+
+func newStreamingNodeCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingNodeRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingNodeHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {

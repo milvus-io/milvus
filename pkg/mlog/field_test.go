@@ -3,6 +3,7 @@
 package mlog
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // Test all String type field constructors
@@ -434,6 +437,30 @@ func TestStringerField(t *testing.T) {
 	field := Stringer("obj", s)
 	expected := zap.Stringer("obj", s)
 	assert.Equal(t, expected, field)
+}
+
+func TestFieldSchemaRedactsExternalCredentials(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: "s3://ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path",
+		ExternalSpec:   `{"format":"parquet","extfs":{"access_key_value":"SPEC_SENTINEL"}}`,
+	}
+
+	var output bytes.Buffer
+	encoderConfig := zap.NewProductionEncoderConfig()
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderConfig),
+		zapcore.AddSync(&output),
+		zap.DebugLevel,
+	))
+	logger.Info("schema", FieldSchema(schema))
+
+	assert.Contains(t, output.String(), "external_collection")
+	assert.Contains(t, output.String(), "<redacted>")
+	assert.NotContains(t, output.String(), "ACCESS_SENTINEL")
+	assert.NotContains(t, output.String(), "SECRET_SENTINEL")
+	assert.NotContains(t, output.String(), "SPEC_SENTINEL")
+	assert.Contains(t, schema.GetExternalSource(), "ACCESS_SENTINEL")
 }
 
 // Test all FieldXXX helper functions from field_enum.go

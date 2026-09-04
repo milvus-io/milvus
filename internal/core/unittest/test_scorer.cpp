@@ -504,7 +504,7 @@ TEST(BoostScoreRunnerTest, NativeFilterGivesNullRowsNoBoost) {
     // Every row satisfies the filter on its data bits; odd rows are NULL.
     auto* age_col =
         age_field_data->mutable_scalars()->mutable_long_data()->mutable_data();
-    auto* valid_col = age_field_data->mutable_valid_data();
+    auto* valid_col = age_field_data->mutable_scalars()->mutable_valid_data();
     ASSERT_EQ(valid_col->size(), N);
     for (int64_t i = 0; i < N; i++) {
         age_col->at(i) = i;

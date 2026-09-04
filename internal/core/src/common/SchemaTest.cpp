@@ -654,6 +654,43 @@ TEST_F(SchemaTest,
               columns->end());
 }
 
+TEST_F(SchemaTest, NullableStructArrayMakesSubFieldsEffectivelyNullable) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* struct_array = schema_proto.add_struct_array_fields();
+    struct_array->set_fieldid(200);
+    struct_array->set_name("events");
+    struct_array->set_nullable(true);
+
+    auto* vector = struct_array->add_fields();
+    vector->set_fieldid(201);
+    vector->set_name("events[embedding]");
+    vector->set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    vector->set_element_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("8");
+
+    auto* tag = struct_array->add_fields();
+    tag->set_fieldid(202);
+    tag->set_name("events[tag]");
+    tag->set_data_type(milvus::proto::schema::DataType::Array);
+    tag->set_element_type(milvus::proto::schema::DataType::VarChar);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->operator[](FieldId(201)).is_nullable());
+    EXPECT_TRUE(schema->operator[](FieldId(202)).is_nullable());
+    EXPECT_FALSE(vector->nullable());
+    EXPECT_FALSE(tag->nullable());
+}
+
 TEST_F(SchemaTest, MilvusTableRealPKLoadsSourceTimestampColumn) {
     milvus::proto::schema::CollectionSchema schema_proto;
     schema_proto.set_external_source(

@@ -147,6 +147,10 @@ func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) in
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMembershipMatchWithOption(ctx *MembershipMatchWithOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{} {
 	return v.VisitChildren(ctx)
 }

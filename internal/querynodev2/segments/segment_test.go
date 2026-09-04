@@ -254,17 +254,21 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 		}},
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    11,
-		PartitionID:  22,
-		CollectionID: 33,
-		Level:        datapb.SegmentLevel_L1,
-		BinlogPaths: []*datapb.FieldBinlog{{
-			FieldID: 101,
-			Binlogs: []*datapb.Binlog{{
-				MemorySize: 4096,
-				LogSize:    2048,
-			}},
-		}},
+		SegmentID:      11,
+		PartitionID:    22,
+		CollectionID:   33,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "files/manifest",
+		Stats: &datapb.Statistics{
+			LoadResource: &datapb.LoadResourceStatistics{
+				ColumnGroups: []*datapb.ColumnGroupStatistics{{
+					GroupId:    101,
+					FieldIds:   []int64{101, 999}, // field 999 was dropped from the current schema
+					MemorySize: 4096,
+				}},
+			},
+		},
 	}
 	segment := &baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
@@ -276,6 +280,7 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	segment.compactLoadInfoForRuntime()
 
 	assert.Empty(t, segment.LoadInfo().GetBinlogPaths())
+	assert.Nil(t, segment.LoadInfo().GetStats())
 	cached := segment.resourceUsageCache.Load()
 	if assert.NotNil(t, cached) {
 		assert.EqualValues(t, 4096, cached.MemorySize)

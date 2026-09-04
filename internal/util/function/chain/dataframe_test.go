@@ -245,9 +245,9 @@ func (s *DataFrameSuite) TestCopyFieldMetadata_IncludesNullable() {
 				Type:      schemapb.DataType_Int64,
 				FieldName: "nullable_col",
 				FieldId:   100,
-				ValidData: []bool{true, false},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, false},
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{10, 0}},
 						},

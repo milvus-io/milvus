@@ -41,7 +41,7 @@ func TestShardManager(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -311,7 +311,7 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 	}
 	appendCh := make(chan *message.CreateSegmentMessageHeader, 1)
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -389,7 +389,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -663,13 +663,91 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	m.Close()
 }
 
+func TestShardManagerGetPrimaryKeyDescriptor(t *testing.T) {
+	newSchema := func(version int32, fieldID int64, dataType schemapb.DataType) *streamingpb.CollectionSchemaOfVChannel {
+		return &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Version: version,
+				Fields: []*schemapb.FieldSchema{{
+					FieldID:      fieldID,
+					DataType:     dataType,
+					IsPrimaryKey: true,
+				}},
+			},
+		}
+	}
+
+	t.Run("returns cached descriptor", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.NotNil(t, info.primaryKey)
+	})
+
+	t.Run("refreshes descriptor with schema", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(1, 100, schemapb.DataType_Int64))
+		info.setSchema(newSchema(2, 101, schemapb.DataType_VarChar))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 101, DataType: schemapb.DataType_VarChar}, descriptor)
+	})
+
+	t.Run("reads existing uncached collection info", func(t *testing.T) {
+		info := &CollectionInfo{Schema: newSchema(1, 100, schemapb.DataType_Int64)}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.Nil(t, info.primaryKey)
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionNotFound)
+	})
+
+	t.Run("schema not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: {}}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
+	})
+
+	t.Run("schema version mismatch", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
+	})
+
+	t.Run("schema has no primary key", func(t *testing.T) {
+		info := &CollectionInfo{Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101}}},
+		}}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.Error(t, err)
+	})
+}
+
 // newShardManagerWithGrowingSegment builds a minimal shard manager that has
 // collection collID / partition partID / growing segment segID pre-loaded.
 func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64) *shardManagerImpl {
 	t.Helper()
 	channel := types.PChannelInfo{Name: "test_alter_channel", Term: 1}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{

@@ -32,6 +32,7 @@ func TestHTTPConfig_Init(t *testing.T) {
 	assert.Equal(t, cfg.Port.GetValue(), "")
 	assert.Equal(t, cfg.AcceptTypeAllowInt64.GetValue(), "true")
 	assert.Equal(t, cfg.EnablePprof.GetAsBool(), true)
+	assert.Equal(t, cfg.DQLAdmissionEnabled.GetAsBool(), true)
 	assert.Equal(t, 5*time.Second, cfg.ReadHeaderTimeout.GetAsDurationByParse())
 	assert.Equal(t, time.Duration(0), cfg.ReadTimeout.GetAsDurationByParse())
 	assert.Equal(t, time.Duration(0), cfg.WriteTimeout.GetAsDurationByParse())

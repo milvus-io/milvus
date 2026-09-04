@@ -142,13 +142,6 @@ class IndexFactory {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    // For types like Json, XML, etc
-    IndexBasePtr
-    CreateComplexScalarIndex(
-        IndexType index_type,
-        const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
-
     IndexBasePtr
     CreateJsonIndex(const CreateIndexInfo& create_index_info,
                     const storage::FileManagerContext& file_manager_context =
@@ -179,6 +172,12 @@ class IndexFactory {
 
     IndexBasePtr
     CreateNestedIndexBitmap(
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
+    CreateNestedIndexHybrid(
+        int32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 

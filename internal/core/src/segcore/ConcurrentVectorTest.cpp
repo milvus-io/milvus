@@ -20,14 +20,44 @@
 #include <tuple>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 #include "gtest/gtest.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegcoreConfig.h"
+#include "storage/Util.h"
 
 using namespace milvus::segcore;
 using std::vector;
+
+namespace {
+
+// A nullable INT64 batch. Only the validity bits are under test here; the
+// values are filler.
+milvus::FieldDataPtr
+MakeNullableInt64Batch(const std::vector<bool>& valid) {
+    const auto num_rows = static_cast<int64_t>(valid.size());
+    std::vector<int64_t> values(num_rows, 0);
+    std::vector<uint8_t> bitmap((num_rows + 7) / 8, 0);
+    for (int64_t i = 0; i < num_rows; ++i) {
+        if (valid[i]) {
+            bitmap[i / 8] |= (1 << (i % 8));
+        }
+    }
+    auto field_data = milvus::storage::CreateFieldData(
+        milvus::DataType::INT64, milvus::DataType::NONE, true, 1, num_rows);
+    field_data->FillFieldData(values.data(), bitmap.data(), num_rows, 0);
+    return field_data;
+}
+
+std::vector<bool>
+BitsOf(const ThreadSafeValidData& valid_data) {
+    auto bits = valid_data.get_data();
+    return std::vector<bool>(bits.begin(), bits.end());
+}
+
+}  // namespace
 
 TEST(ConcurrentVector, TestSingle) {
     auto dim = 8;
@@ -116,4 +146,50 @@ TEST(ConcurrentVector, TestAckSingle) {
         EXPECT_GE(seg + 100, b);
     }
     EXPECT_EQ(ack.GetAck(), N);
+}
+
+// The growing load path reserves a logical range per batch and writes column
+// data and the interim index at that offset; validity has to land in the same
+// range. A write that would leave a gap has to fail loudly rather than publish
+// rows nobody wrote -- is_valid() admits every offset below length_, so those
+// bits would read back as garbage, not as null.
+TEST(ThreadSafeValidData, WritesFieldDataAtReservedOffset) {
+    // size_per_chunk 3 makes the batch written at offset 2 straddle a chunk
+    // boundary.
+    ThreadSafeValidData valid_data(/*size_per_chunk=*/3);
+    EXPECT_TRUE(valid_data.empty());
+
+    const std::vector<bool> a = {true, false};
+    const std::vector<bool> b = {false, true};
+
+    valid_data.set_data_raw(0, {MakeNullableInt64Batch(a)});
+    valid_data.set_data_raw(2, {MakeNullableInt64Batch(b)});
+    EXPECT_EQ(BitsOf(valid_data),
+              (std::vector<bool>{true, false, false, true}));
+
+    // A batch carrying several FieldDatas fills the reserved range in order --
+    // the write_offset accumulation this overload does and its DataArray
+    // sibling does not.
+    valid_data.set_data_raw(
+        4, {MakeNullableInt64Batch(a), MakeNullableInt64Batch(b)});
+    EXPECT_EQ(BitsOf(valid_data),
+              (std::vector<bool>{
+                  true, false, false, true, true, false, false, true}));
+
+    // Rewriting an already written range is not rejected and does not extend
+    // the bitmap, matching the DataArray overload -- a Reopen backfill retry
+    // stays idempotent.
+    valid_data.set_data_raw(0, {MakeNullableInt64Batch(b)});
+    EXPECT_EQ(BitsOf(valid_data),
+              (std::vector<bool>{
+                  false, true, false, true, true, false, false, true}));
+
+    // Writing at exactly length_ extends the bitmap; starting one row past it
+    // would leave a hole and must throw instead.
+    ASSERT_EQ(BitsOf(valid_data).size(), 8u);
+    EXPECT_NO_THROW(valid_data.set_data_raw(8, {MakeNullableInt64Batch(a)}));
+    EXPECT_EQ(BitsOf(valid_data).size(), 10u);
+    EXPECT_THROW(valid_data.set_data_raw(11, {MakeNullableInt64Batch(a)}),
+                 milvus::SegcoreError);
+    EXPECT_EQ(BitsOf(valid_data).size(), 10u);
 }

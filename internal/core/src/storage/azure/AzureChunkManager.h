@@ -170,11 +170,6 @@ class AzureChunkManager : public ChunkManager {
         return default_bucket_name_;
     }
 
-    inline void
-    SetBucketName(const std::string& bucket_name) {
-        default_bucket_name_ = bucket_name;
-    }
-
     bool
     BucketExists(const std::string& bucket_name);
 

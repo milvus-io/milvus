@@ -31,6 +31,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/GroupChunk.h"
 #include "common/EasyAssert.h"
@@ -365,7 +366,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<FixedWidthChunk*>(chunk.get())->Span());
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -378,12 +379,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
-            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            std::pair<std::vector<std::string_view>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<StringChunk*>(chunk.get())->StringViews(offset_len));
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -393,14 +394,41 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 ErrorCode::Unsupported,
                 "[StorageV2] ArrayViews only supported for ChunkedArrayColumn");
         }
+        if (field_meta_.is_nested_array()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy ArrayViews API does not support nested ARRAY");
+        }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
-        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+        return PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(milvus::OpContext* op_ctx,
+                    int64_t chunk_id,
+                    std::optional<std::pair<int64_t, int64_t>> offset_len =
+                        std::nullopt) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_) ||
+            !field_meta_.is_nested_array()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ArrayValueViews only supports recursive "
+                      "ARRAY columns");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
+        AssertInfo(array_chunk != nullptr,
+                   "[StorageV2] recursive ARRAY chunk {} must use "
+                   "ColumnarArrayChunk",
+                   chunk_id);
+        auto content = array_chunk->Views(offset_len);
+        return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+            std::move(chunk_wrapper), std::move(content));
+    }
+
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(milvus::OpContext* op_ctx,
                      int64_t chunk_id,
                      std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -413,7 +441,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
-            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
     }
@@ -454,11 +482,40 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
+        if (field_meta_.is_nested_array()) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "legacy ArrayViewsByOffsets API does not support nested ARRAY");
+        }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_) ||
+            !field_meta_.is_nested_array()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ArrayValueViewsByOffsets only supports "
+                      "recursive ARRAY columns");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
+        AssertInfo(array_chunk != nullptr,
+                   "[StorageV2] recursive ARRAY chunk {} must use "
+                   "ColumnarArrayChunk",
+                   chunk_id);
+        auto content = array_chunk->ViewsByOffsets(offsets);
+        return PinWrapper<
+            std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
+            std::move(chunk_wrapper), std::move(content));
     }
 
     std::pair<size_t, size_t>
@@ -735,6 +792,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "[StorageV2] BulkArrayAt only supported for "
                       "ChunkedArrayColumn");
         }
+        if (field_meta_.is_nested_array()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy BulkArrayAt API does not support nested ARRAY");
+        }
         ForEachResolvedRow(
             op_ctx,
             offsets,
@@ -744,6 +805,27 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     static_cast<ArrayChunk*>(chunk)->View(offset_in_chunk);
                 fn(view, i);
             });
+    }
+
+    void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_) ||
+            !field_meta_.is_nested_array()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] BulkArrayValueAt only supports nested "
+                      "ARRAY columns");
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(op_ctx, cids);
+        for (int64_t i = 0; i < count; ++i) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto* array_chunk = static_cast<ColumnarArrayChunk*>(chunk.get());
+            fn(array_chunk->output_data(offsets_in_chunk[i]), i);
+        }
     }
 
     void
@@ -766,6 +848,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                                  .output_data();
                 fn(std::move(array), i);
             });
+    }
+
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            return;
+        }
+        BuildVectorArrayValidOffsets(chunk_pws);
     }
 
  private:

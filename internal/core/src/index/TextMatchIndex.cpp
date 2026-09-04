@@ -41,6 +41,10 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
+    auto memory_budget_in_bytes =
+        commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+            ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+            : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id,
         true,
@@ -51,7 +55,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         analyzer_params,
         /*analyzer_extra_info=*/"",
         milvus::tantivy::DEFAULT_NUM_THREADS,
-        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        memory_budget_in_bytes,
         enable_background_merge);
     set_is_growing(true);
 }
@@ -215,27 +219,12 @@ TextMatchIndex::Load(const Config& config) {
         f = base_path + "/" + f;
     }
 
-    auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            return file.substr(file.find_last_of('/') + 1) ==
-                   "index_null_offset";
-        });
-    if (it != files_value.end()) {
-        std::vector<std::string> file;
-        file.push_back(*it);
-        files_value.erase(it);
-        auto index_datas =
-            this->file_manager_->LoadIndexToMemory(file, load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
-        index_datas.clear();
-        auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    index_valid_data->data.get(),
-                                    (size_t)index_valid_data->size);
-    }
+    // Reuse the base metadata loader so both the legacy single null-offset
+    // sidecar and Disassemble()-generated slices are reconstructed. Remove all
+    // metadata sidecars before passing the remaining Tantivy files to the disk
+    // file manager.
+    LoadIndexMetas(files_value, config);
+    RetainTantivyIndexFiles(files_value);
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
@@ -250,6 +239,10 @@ TextMatchIndex::Load(const Config& config) {
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveTextLogFiles();
     }
+
+    // V2 has its own multi-file loader and therefore does not pass through
+    // InvertedIndexTantivy::Load()/LoadEntries().
+    FinalizeSealed(/*release_null_offsets=*/true);
 }
 
 // Add text for sealed segment
@@ -280,12 +273,17 @@ TextMatchIndex::AddTextsGrowing(size_t n,
                                 const bool* valids,
                                 int64_t offset_begin) {
     if (valids != nullptr) {
+        std::vector<size_t> null_offsets;
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;
             if (!valids[i]) {
-                std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.push_back(offset);
+                null_offsets.push_back(offset);
             }
+        }
+        if (!null_offsets.empty()) {
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
+            null_offset_.insert(
+                null_offset_.end(), null_offsets.begin(), null_offsets.end());
         }
     }
     wrapper_->add_data(texts, n, offset_begin);
@@ -297,8 +295,10 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
-    int64_t offset = 0;
+    const std::vector<FieldDataPtr>& field_datas,
+    bool nullable,
+    int64_t offset_begin) {
+    int64_t offset = offset_begin;
     if (nullable) {
         int64_t total = 0;
         for (const auto& data : field_datas) {
@@ -306,14 +306,27 @@ TextMatchIndex::BuildIndexFromFieldData(
         }
         {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(total);
+            null_offset_.reserve(null_offset_.size() +
+                                 static_cast<size_t>(total));
         }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
+            auto null_count = data->get_null_count();
+            std::vector<size_t> null_offsets;
+            null_offsets.reserve(null_count);
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
-                    std::unique_lock<folly::SharedMutex> lock(mutex_);
-                    null_offset_.push_back(offset);
+                    null_offsets.push_back(offset + i);
+                }
+            }
+            if (!null_offsets.empty()) {
+                std::unique_lock<folly::SharedMutex> lock(mutex_);
+                null_offset_.insert(null_offset_.end(),
+                                    null_offsets.begin(),
+                                    null_offsets.end());
+            }
+            for (int i = 0; i < n; i++) {
+                if (!data->is_valid(i)) {
                     // add empty array doc to register offset in tantivy,
                     // same as AddNullSealed
                     static const std::string empty;
