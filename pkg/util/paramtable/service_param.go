@@ -1362,8 +1362,11 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 			}
 			if hostOnly, _, err := net.SplitHostPort(host); err == nil {
 				host = hostOnly
+			} else {
+				// no port in the host; strip IPv6 brackets so that JoinHostPort adds them back
+				host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 			}
-			return "http://" + host + ":" + p.WebPort.GetValue()
+			return "http://" + net.JoinHostPort(host, p.WebPort.GetValue())
 		},
 	}
 	p.WebAddress.Init(base.mgr)
