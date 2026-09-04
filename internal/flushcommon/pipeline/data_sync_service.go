@@ -163,7 +163,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					return nil, err
 				}
 				resolver := packed.NewStatsResolverFromSegmentInfo(segment)
-				bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
+				bfPaths, err := resolver.ChunkManagerBloomFilterPaths(pkField.GetFieldID())
 				if err != nil {
 					return nil, err
 				}
@@ -177,7 +177,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				}
 
 				if segType == "growing" {
-					bm25Paths, err := resolver.BM25StatsPaths()
+					bm25Paths, err := resolver.ChunkManagerBM25StatsPaths()
 					if err != nil {
 						return nil, err
 					}

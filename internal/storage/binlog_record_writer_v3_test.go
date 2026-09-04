@@ -355,3 +355,56 @@ func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) 
 	assert.Equal(t, "parquet", gotColumnGroups[1].Format)
 	assert.Equal(t, gotColumnGroups, w.columnGroups)
 }
+
+// TestSegmentManifestBasePath verifies that the V3 manifest base path stays
+// consistent with the loon filesystem root for both storage types. For local
+// storage the filesystem is rooted at localStorage.path, so the key must stay
+// relative to it and minio.rootPath must NOT leak in (see #53051, #53052). For
+// remote storage the logical minio.rootPath is a key prefix and must be kept.
+func TestSegmentManifestBasePath(t *testing.T) {
+	localCfg := &indexpb.StorageConfig{StorageType: "local", RootPath: "/var/lib/milvus/data"}
+	assert.Equal(t, "insert_log/1/2/3",
+		SegmentManifestBasePath(localCfg, 1, 2, 3))
+
+	remoteCfg := &indexpb.StorageConfig{StorageType: "minio", RootPath: "files"}
+	assert.Equal(t, "files/insert_log/1/2/3",
+		SegmentManifestBasePath(remoteCfg, 1, 2, 3))
+}
+
+// TestPackedManifestRecordWriter_LocalStorageBasePath verifies that initWriters
+// derives a relative basePath for local storage, i.e. it does not prepend the
+// absolute localStorage root (which the loon local filesystem already applies).
+func TestPackedManifestRecordWriter_LocalStorageBasePath(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{common.TimeStampField, common.RowIDField}},
+	}
+
+	var gotBasePath string
+	patch := mockey.Mock(newPackedRecordBatchWriter).To(
+		func(basePath string, _ *schemapb.CollectionSchema, _, _ int64, _ []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext, _ bool, _ bool,
+			_ string, _ []string,
+		) (*packedRecordBatchWriter, error) {
+			gotBasePath = basePath
+			return &packedRecordBatchWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+
+	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
+		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
+		allocator.NewLocalAllocator(1, 1<<20),
+		1024, 0, 0, columnGroups, cfg, nil, false, "")
+	require.NoError(t, err)
+	require.NoError(t, w.initWriters(nil))
+
+	assert.Equal(t, "insert_log/1/2/3", w.basePath)
+	assert.Equal(t, "insert_log/1/2/3", gotBasePath)
+	assert.NotContains(t, w.basePath, root, "local basePath must stay relative to the loon local filesystem root")
+}

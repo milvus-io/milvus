@@ -18,12 +18,16 @@ package datacoord
 
 import (
 	"context"
+	"os"
+	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -43,6 +48,154 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCleanupRejectedStatsResultFiles_LocalUsesCompletePaths(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	logicalPath := "insert_log/1/2/3/_stats/text_index.100/index"
+	completePath := filepath.Join(root, filepath.FromSlash(logicalPath))
+	require.NoError(t, cm.Write(context.Background(), completePath, []byte("stale")))
+
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	task.cleanupRejectedStatsResultFiles(context.Background(), &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath("insert_log/1/2/3", 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{logicalPath}},
+		},
+	})
+
+	_, err := os.Stat(completePath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestCleanupRejectedStatsResultFiles_LocalRejectsUnsafePaths(t *testing.T) {
+	ctx := context.Background()
+	outer := t.TempDir()
+	root := filepath.Join(outer, "storage")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	baseManifest := packed.MarshalManifestPath("insert_log/1/2/3", 1)
+	resultForTextPath := func(filePath string) *workerpb.StatsResult {
+		return &workerpb.StatsResult{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    3,
+			BaseManifest: baseManifest,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				100: {Files: []string{filePath}},
+			},
+		}
+	}
+
+	outsidePath := filepath.Join(outer, "outside")
+	require.NoError(t, os.WriteFile(outsidePath, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath("../outside"))
+	require.FileExists(t, outsidePath)
+
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath(outsidePath))
+	require.FileExists(t, outsidePath)
+
+	directoryPath := filepath.Join(root, "insert_log")
+	directorySentinel := filepath.Join(directoryPath, "sentinel")
+	require.NoError(t, os.MkdirAll(directoryPath, 0o755))
+	require.NoError(t, os.WriteFile(directorySentinel, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath("insert_log"))
+	require.FileExists(t, directorySentinel)
+
+	safePath := filepath.Join(root, "insert_log/1/2/3/_stats/text_index.100/index")
+	require.NoError(t, os.MkdirAll(filepath.Dir(safePath), 0o755))
+	require.NoError(t, os.WriteFile(safePath, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{"insert_log/1/2/3/_stats/text_index.100/index"}},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {Files: []string{"index"}},
+		},
+		BaseManifest: "not-a-manifest",
+	})
+	require.FileExists(t, safePath)
+
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {Files: []string{"index"}},
+		},
+		BaseManifest: packed.MarshalManifestPath("", 1),
+	})
+	require.FileExists(t, directorySentinel)
+
+	arbitraryPath := filepath.Join(root, "insert_log/1/2/3/not-stats")
+	require.NoError(t, os.WriteFile(arbitraryPath, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath("insert_log/1/2/3/not-stats"))
+	require.FileExists(t, arbitraryPath)
+
+	jsonVictim := filepath.Join(root, "insert_log/1/2/3/victim")
+	require.NoError(t, os.WriteFile(jsonVictim, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: baseManifest,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {Files: []string{"../../victim"}},
+		},
+	})
+	require.FileExists(t, jsonVictim)
+}
+
+type rootedStatsChunkManager struct {
+	storage.ChunkManager
+	rootPath string
+	removed  []string
+}
+
+func (m *rootedStatsChunkManager) RootPath() string { return m.rootPath }
+
+func (m *rootedStatsChunkManager) MultiRemove(_ context.Context, filePaths []string) error {
+	m.removed = append(m.removed, filePaths...)
+	return nil
+}
+
+func TestCleanupRejectedStatsResultFiles_RemoteRequiresConfiguredRoot(t *testing.T) {
+	cm := &rootedStatsChunkManager{rootPath: "files"}
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	result := func(basePath string) *workerpb.StatsResult {
+		return &workerpb.StatsResult{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    3,
+			BaseManifest: packed.MarshalManifestPath(basePath, 1),
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				100: {Files: []string{path.Join(basePath, "_stats/text_index.100/index")}},
+			},
+		}
+	}
+
+	task.cleanupRejectedStatsResultFiles(context.Background(), result("other/insert_log/1/2/3"))
+	require.Empty(t, cm.removed)
+
+	task.cleanupRejectedStatsResultFiles(context.Background(), result("files/insert_log/1/2/3"))
+	require.Equal(t, []string{"files/insert_log/1/2/3/_stats/text_index.100/index"}, cm.removed)
+}
 
 type statsTaskSuite struct {
 	suite.Suite
@@ -66,6 +219,8 @@ type mockeyStatsCluster struct {
 type mockeyChunkManager struct {
 	storage.ChunkManager
 }
+
+func (m *mockeyChunkManager) RootPath() string { return "" }
 
 func Test_statsTaskSuite(t *testing.T) {
 	suite.Run(t, new(statsTaskSuite))
@@ -897,7 +1052,7 @@ func (s *statsTaskSuite) TestClassifyStatsManifestCommitError() {
 func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 	baseManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
 	s.Run("collect text and json stats files", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			BaseManifest: baseManifest,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				101: {
@@ -909,9 +1064,10 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, 1, 2, 1179)
 
 		s.NoError(err)
+		s.Equal("files/insert_log/1/2/1179", basePath)
 		s.ElementsMatch([]string{
 			"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
 			"files/insert_log/1/2/1179/_stats/json_stats.102/shared_key_index/.managed.json_0",
@@ -919,7 +1075,8 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 	})
 
 	s.Run("deduplicate text stats files without json stats", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			BaseManifest: baseManifest,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				101: {
 					Files: []string{
@@ -929,36 +1086,39 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					},
 				},
 			},
-		})
+		}, 1, 2, 1179)
 
 		s.NoError(err)
+		s.Equal("files/insert_log/1/2/1179", basePath)
 		s.Equal([]string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"}, files)
 	})
 
 	s.Run("json stats without manifest returns typed error", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, 1, 2, 1179)
 
+		s.Empty(basePath)
 		s.Empty(files)
 		s.ErrorIs(err, merr.ErrServiceInternal)
-		s.Contains(err.Error(), "manifest is empty for rejected json stats result")
+		s.Contains(err.Error(), "manifest is empty for rejected stats result")
 	})
 
 	s.Run("json stats with invalid manifest returns error", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			BaseManifest: "invalid",
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, 1, 2, 1179)
 
+		s.Empty(basePath)
 		s.Empty(files)
 		s.Error(err)
 	})

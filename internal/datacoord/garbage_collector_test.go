@@ -4328,7 +4328,8 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 		channelCPs: newChannelCps(),
 	}
 
-	basePath := "/tmp/test-gc-v3/insert_log/100/10/2001"
+	basePath := "insert_log/100/10/2001"
+	completeBasePath := path.Join(cli.RootPath(), basePath) + "/"
 	manifestPath := packed.MarshalManifestPath(basePath, 1)
 
 	// V3 dropped segment with ManifestPath and StorageVersion=3
@@ -4415,7 +4416,7 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 
 	// V3 segment should use RemoveWithPrefix with basePath
 	assert.True(t, removeWithPrefixCalled, "V3 segment should use RemoveWithPrefix")
-	assert.Equal(t, basePath, removeWithPrefixArg, "RemoveWithPrefix should be called with basePath")
+	assert.Equal(t, completeBasePath, removeWithPrefixArg, "RemoveWithPrefix should be called with a complete local path")
 
 	// V1 segment should use removeObjectFiles
 	assert.True(t, removeObjectFilesCalled, "V1 segment should use removeObjectFiles")
@@ -4425,6 +4426,128 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	assert.Contains(t, droppedSegmentIDs, int64(2002))
 	assert.Nil(t, m.GetSegment(ctx, 2001))
 	assert.Nil(t, m.GetSegment(ctx, 2002))
+}
+
+func TestGarbageCollectorRemoveDroppedSegmentFilesRejectsUnsafeLocalManifestRoot(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	gc := &garbageCollector{option: GcOption{cli: cli}}
+	sentinelPath := path.Join(root, "sentinel")
+	require.NoError(t, cli.Write(ctx, sentinelPath, []byte("keep")))
+
+	unsafeBasePaths := []string{
+		"",
+		".",
+		"/",
+		"../outside",
+		root,
+		"s3://bucket/files/insert_log/100/10/2001",
+		"insert_log",
+		"insert_log/100/10/20010",
+	}
+	for _, basePath := range unsafeBasePaths {
+		t.Run(fmt.Sprintf("base_%q", basePath), func(t *testing.T) {
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:             2001,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+			}}
+			err := gc.removeDroppedSegmentFiles(ctx, segment, nil)
+			require.Error(t, err)
+			content, readErr := cli.Read(ctx, sentinelPath)
+			require.NoError(t, readErr)
+			assert.Equal(t, []byte("keep"), content)
+		})
+	}
+}
+
+func TestGarbageCollectorRemoveDroppedSegmentFilesUsesSegmentBoundary(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	gc := &garbageCollector{option: GcOption{cli: cli}}
+	segmentFile := path.Join(root, "files/insert_log/100/10/2001/data")
+	siblingFile := path.Join(root, "files/insert_log/100/10/20010/data")
+	require.NoError(t, cli.Write(ctx, segmentFile, []byte("remove")))
+	require.NoError(t, cli.Write(ctx, siblingFile, []byte("keep")))
+
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:             2001,
+		CollectionID:   100,
+		PartitionID:    10,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("files/insert_log/100/10/2001", 1),
+	}}
+	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, nil))
+
+	segmentExists, err := cli.Exist(ctx, segmentFile)
+	require.NoError(t, err)
+	assert.False(t, segmentExists)
+	siblingContent, err := cli.Read(ctx, siblingFile)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), siblingContent)
+}
+
+type gcRootedChunkManager struct {
+	storage.ChunkManager
+	root          string
+	removeCalled  bool
+	removedPrefix string
+}
+
+func (cm *gcRootedChunkManager) RootPath() string {
+	return cm.root
+}
+
+func (cm *gcRootedChunkManager) RemoveWithPrefix(_ context.Context, prefix string) error {
+	cm.removeCalled = true
+	cm.removedPrefix = prefix
+	return nil
+}
+
+func TestGarbageCollectorRemoveDroppedSegmentFilesRejectsUnsafeRemoteManifestRoot(t *testing.T) {
+	unsafeBasePaths := []string{
+		"other/insert_log/100/10/2001",
+		"files/insert_log",
+		"files/insert_log/100/10/20010",
+		"/files/insert_log/100/10/2001",
+		"s3://bucket/files/insert_log/100/10/2001",
+		"files/tmp/../insert_log/100/10/2001",
+		"../insert_log/100/10/2001",
+	}
+	for _, basePath := range unsafeBasePaths {
+		t.Run(fmt.Sprintf("base_%q", basePath), func(t *testing.T) {
+			cli := &gcRootedChunkManager{root: "files"}
+			gc := &garbageCollector{option: GcOption{cli: cli}}
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:             2001,
+				CollectionID:   100,
+				PartitionID:    10,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+			}}
+			err := gc.removeDroppedSegmentFiles(context.Background(), segment, nil)
+			require.Error(t, err)
+			assert.False(t, cli.removeCalled)
+		})
+	}
+}
+
+func TestGarbageCollectorRemoveDroppedSegmentFilesUsesCompleteRemoteKey(t *testing.T) {
+	cli := &gcRootedChunkManager{root: "files"}
+	gc := &garbageCollector{option: GcOption{cli: cli}}
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:             2001,
+		CollectionID:   100,
+		PartitionID:    10,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("files/insert_log/100/10/2001", 1),
+	}}
+
+	require.NoError(t, gc.removeDroppedSegmentFiles(context.Background(), segment, nil))
+	assert.True(t, cli.removeCalled)
+	assert.Equal(t, "files/insert_log/100/10/2001/", cli.removedPrefix)
 }
 
 func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {

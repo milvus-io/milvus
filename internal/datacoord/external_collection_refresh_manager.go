@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
@@ -317,7 +318,9 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 	if m.chunkManager == nil {
 		return
 	}
-	exploreBaseDir := exploreTempDirForJob(jobID)
+	// ChunkManager consumes a complete key. The explore job stores paths in a
+	// root-relative format, so cross that boundary explicitly for cleanup.
+	exploreBaseDir := path.Join(m.chunkManager.RootPath(), exploreTempDirForJob(jobID))
 	explorePrefix := exploreBaseDir + "/"
 	// Derive from m.ctx so shutdown cancels in-flight cleanup instead of
 	// blocking Stop() on a slow object-store call.

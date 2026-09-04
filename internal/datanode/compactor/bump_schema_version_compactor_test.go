@@ -1081,7 +1081,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteDropsExpirQuantile
 	s.Empty(segment.GetExpirQuantiles())
 	manifestBasePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 	s.NoError(err)
-	expectedBasePath := path.Join(s.task.compactionParams.StorageConfig.GetRootPath(), common.SegmentInsertLogPath, metautil.JoinIDPath(inputSegment.GetCollectionID(), inputSegment.GetPartitionID(), newSegmentID))
+	expectedBasePath := path.Join(common.SegmentInsertLogPath, metautil.JoinIDPath(inputSegment.GetCollectionID(), inputSegment.GetPartitionID(), newSegmentID))
 	s.Equal(expectedBasePath, manifestBasePath)
 
 	for _, fieldBinlog := range segment.GetInsertLogs() {

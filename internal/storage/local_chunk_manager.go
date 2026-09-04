@@ -251,6 +251,16 @@ func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64,
 }
 
 func (lcm *LocalChunkManager) Remove(ctx context.Context, filePath string) error {
+	// Keep an empty key as a no-op and never allow this API to remove the
+	// configured storage root. Some existing local-only cleanup paths remove a
+	// derived job subdirectory recursively, so retain that behavior below the
+	// root while making the dangerous root cases explicit.
+	if filePath == "" {
+		return nil
+	}
+	if lcm.localPath != "" && filepath.Clean(filePath) == filepath.Clean(lcm.localPath) {
+		return merr.WrapErrParameterInvalidMsg("refuse to remove local storage root")
+	}
 	err := os.RemoveAll(filePath)
 	return merr.WrapErrIoFailed(filePath, err)
 }

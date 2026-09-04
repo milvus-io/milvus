@@ -51,7 +51,17 @@ type ChunkObjectInfo struct {
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
-	// RootPath returns current root path.
+	// Paths passed to ChunkManager are complete keys in the backend namespace.
+	// Implementations must not implicitly prepend RootPath:
+	//   - remote paths are bucket-relative object keys, including the configured
+	//     root prefix (for example, files/insert_log/...); they are not URIs and
+	//     do not start with a slash or contain traversal components
+	//   - local paths are complete filesystem paths (for example,
+	//     /var/lib/milvus/data/insert_log/...)
+	// WalkWithPrefix returns FilePath values in the same namespace.
+	// RootPath returns the configured namespace root so callers that start from
+	// a root-relative format (such as a local StorageV3 manifest) can construct
+	// the complete key explicitly at that format boundary.
 	RootPath() string
 	// Path returns path of @filePath.
 	Path(ctx context.Context, filePath string) (string, error)

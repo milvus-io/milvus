@@ -241,6 +241,46 @@ func TestStatsResolverLegacy(t *testing.T) {
 	})
 }
 
+func TestStatsResolverExternalManifestPathStaysInLoonNamespace(t *testing.T) {
+	externalPath := "s3://source-bucket/source-root/_stats/bloom_filter.100/1"
+	resolver := &StatsResolver{
+		manifestPath:   "manifest",
+		storageConfig:  &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+		manifestLoaded: true,
+		manifestStats: map[string]ManifestStat{
+			"bloom_filter.100": {Paths: []string{externalPath}},
+		},
+	}
+
+	paths, err := resolver.BloomFilterPaths(100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{externalPath}, paths)
+
+	_, err = resolver.ChunkManagerBloomFilterPaths(100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ChunkManager stats path")
+
+	resolver.storageConfig = &indexpb.StorageConfig{StorageType: "remote", RootPath: "files"}
+	_, err = resolver.ChunkManagerBloomFilterPaths(100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ChunkManager stats path")
+
+	resolver.manifestStats["bloom_filter.100"] = ManifestStat{Paths: []string{"/absolute/object"}}
+	_, err = resolver.ChunkManagerBloomFilterPaths(100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bucket-relative object key")
+
+	resolver.manifestStats["bloom_filter.100"] = ManifestStat{Paths: []string{"other/object"}}
+	_, err = resolver.ChunkManagerBloomFilterPaths(100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the configured storage root")
+
+	resolver.manifestStats["bloom_filter.100"] = ManifestStat{Paths: []string{"files/tmp/../object"}}
+	_, err = resolver.ChunkManagerBloomFilterPaths(100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canonical object key")
+}
+
 // TestStatsResolverManifest exercises the V3 manifest-based code path
 // end-to-end: write stats to a manifest via AddStatsToManifest, then
 // read them back through StatsResolver and verify exact paths.
@@ -260,7 +300,7 @@ func TestStatsResolverManifest(t *testing.T) {
 		StorageType: "local",
 	}
 
-	bp := filepath.Join(dir, "insert_log/1/2/3_resolver")
+	bp := "insert_log/1/2/3_resolver"
 	manifestPath := createBaseManifest(t, bp, storageConfig)
 
 	// Add bloom filter + BM25 stats to manifest
@@ -311,6 +351,10 @@ func TestStatsResolverManifest(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(paths))
 		assert.Equal(t, bfPath, paths[0])
+
+		chunkManagerPaths, err := resolver.ChunkManagerBloomFilterPaths(100)
+		require.NoError(t, err)
+		assert.Equal(t, []string{filepath.Join(dir, bfPath)}, chunkManagerPaths)
 	})
 
 	t.Run("BloomFilterMemorySize", func(t *testing.T) {
@@ -330,6 +374,10 @@ func TestStatsResolverManifest(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(paths[200]))
 		assert.Equal(t, bm25Path, paths[200][0])
+
+		chunkManagerPaths, err := resolver.ChunkManagerBM25StatsPaths()
+		require.NoError(t, err)
+		assert.Equal(t, []string{filepath.Join(dir, bm25Path)}, chunkManagerPaths[200])
 	})
 
 	t.Run("TextAndJSONIndexStatsWithBasePaths hides json stats without metadata placeholder", func(t *testing.T) {

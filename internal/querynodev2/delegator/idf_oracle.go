@@ -501,7 +501,7 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 			return nil, nil
 		}
 
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).ChunkManagerBM25StatsPaths()
 		if err != nil {
 			mlog.Warn(ctx, "load remote segment bm25 stats failed",
 				mlog.FieldSegmentID(segmentID),
@@ -553,7 +553,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
 		logger := mlog.With(mlog.FieldSegmentID(segmentID))
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).ChunkManagerBM25StatsPaths()
 		if err != nil {
 			logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
 			return nil, err

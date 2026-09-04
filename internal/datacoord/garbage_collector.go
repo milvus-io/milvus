@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -1056,6 +1057,73 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 				mlog.Err(err))
 			return err
 		}
+		if strings.TrimSpace(basePath) == "" || path.Clean(basePath) == "." || path.Clean(basePath) == "/" {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d has an unsafe manifest base path", cloned.GetID())
+		}
+		// ChunkManager consumes complete backend keys. Local loon manifests
+		// store a path relative to localStorage.path, so cross that boundary
+		// explicitly before deleting. Remote manifests already carry the full
+		// bucket-relative object key.
+		var manifestRelativePath string
+		if _, ok := gc.option.cli.(*storage.LocalChunkManager); ok {
+			if strings.Contains(basePath, "://") {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d local manifest base path must be a filesystem path", cloned.GetID())
+			}
+			rootPath := filepath.Clean(gc.option.cli.RootPath())
+			if !filepath.IsAbs(rootPath) {
+				return merr.WrapErrDataIntegrityMsg("GC local storage root must be an absolute filesystem path")
+			}
+			completePath := filepath.Clean(filepath.FromSlash(basePath))
+			if !filepath.IsAbs(completePath) {
+				completePath = filepath.Join(rootPath, completePath)
+			}
+			relativePath, relErr := filepath.Rel(rootPath, completePath)
+			if relErr != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path is outside the local storage root", cloned.GetID())
+			}
+			basePath = completePath
+			manifestRelativePath = filepath.ToSlash(relativePath)
+		} else {
+			if path.IsAbs(basePath) || strings.Contains(basePath, "://") {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d remote manifest base path must be a bucket-relative object key", cloned.GetID())
+			}
+			rootPath := strings.Trim(strings.TrimSpace(gc.option.cli.RootPath()), "/")
+			rawBasePath := strings.Trim(strings.TrimSpace(basePath), "/")
+			cleanBasePath := path.Clean(rawBasePath)
+			if cleanBasePath != rawBasePath || cleanBasePath == ".." || strings.HasPrefix(cleanBasePath, "../") {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d remote manifest base path is not a canonical object key", cloned.GetID())
+			}
+			manifestRelativePath = cleanBasePath
+			if rootPath != "" {
+				if !strings.HasPrefix(cleanBasePath, rootPath+"/") {
+					return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path is outside the remote storage root", cloned.GetID())
+				}
+				manifestRelativePath = strings.TrimPrefix(cleanBasePath, rootPath+"/")
+			}
+			basePath = cleanBasePath
+		}
+
+		// A deletion prefix must identify exactly this segment, not merely some
+		// path under the configured root. Storage roots may contain an extra
+		// layout prefix (for example, files/insert_log/...), so validate the
+		// canonical segment suffix rather than assuming insert_log is component 0.
+		parts := strings.Split(manifestRelativePath, "/")
+		if len(parts) < 4 {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d has an invalid manifest base path", cloned.GetID())
+		}
+		segmentParts := parts[len(parts)-4:]
+		collectionID, collectionErr := strconv.ParseInt(segmentParts[1], 10, 64)
+		partitionID, partitionErr := strconv.ParseInt(segmentParts[2], 10, 64)
+		segmentID, segmentErr := strconv.ParseInt(segmentParts[3], 10, 64)
+		if segmentParts[0] != common.SegmentInsertLogPath ||
+			collectionErr != nil || partitionErr != nil || segmentErr != nil ||
+			collectionID != cloned.GetCollectionID() || partitionID != cloned.GetPartitionID() || segmentID != cloned.GetID() {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path does not match segment identity", cloned.GetID())
+		}
+		// Prefix deletion must be segment-boundary aware: without the slash,
+		// segment 2001 also matches sibling segment 20010.
+		basePath = strings.TrimRight(basePath, "/") + "/"
+
 		log.Info(ctx, "GC V3 segment start, removing basePath...",
 			mlog.String("basePath", basePath),
 			mlog.Int("indexFiles", len(indexFiles)))

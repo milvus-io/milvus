@@ -516,7 +516,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 
 			resolver := packed.NewStatsResolver(segment.GetManifest(), t.compactionParams.StorageConfig).
 				WithStatslogs(segment.GetField2StatslogPaths())
-			paths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
+			paths, err := resolver.ChunkManagerBloomFilterPaths(pkField.GetFieldID())
 			if err != nil {
 				return err, err
 			}

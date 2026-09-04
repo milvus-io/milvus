@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -105,9 +106,62 @@ func transformManifestPath(
 	if err != nil {
 		return "", merr.Wrap(err, "failed to generate target base path")
 	}
+	targetBasePath, err = storageV3MetadataPath(targetBasePath, target)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to convert target base path to manifest namespace")
+	}
 
 	targetManifestPath := packed.MarshalManifestPath(targetBasePath, version)
 	return targetManifestPath, nil
+}
+
+// completeLocalStorageV3Path crosses from loon's root-relative manifest
+// namespace into LocalChunkManager's complete filesystem-path namespace.
+// Keep this conversion at the format boundary instead of hiding it inside the
+// ChunkManager implementation.
+func completeLocalStorageV3Path(cm storage.ChunkManager, filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" || strings.Contains(filePath, "://") {
+		return "", merr.WrapErrDataIntegrityMsg("local StorageV3 path is not a filesystem path")
+	}
+	rootPath := filepath.Clean(cm.RootPath())
+	if !filepath.IsAbs(rootPath) {
+		return "", merr.WrapErrDataIntegrityMsg("local storage root must be an absolute filesystem path")
+	}
+	completePath := filepath.Clean(filepath.FromSlash(filePath))
+	if !filepath.IsAbs(completePath) {
+		completePath = filepath.Join(rootPath, completePath)
+	}
+	relativePath, err := filepath.Rel(rootPath, completePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", merr.WrapErrDataIntegrityMsg("local StorageV3 path is outside the configured storage root")
+	}
+	return completePath, nil
+}
+
+// isLocalPrimaryStorage identifies the physical key namespace from the
+// ChunkManager first. StorageConfig remains a fallback for proxy/mock chunk
+// managers, but callers must not depend on config alone: the manager is the
+// component that defines whether a complete key is an absolute filesystem path
+// or a bucket-relative object key.
+func isLocalPrimaryStorage(cm storage.ChunkManager, config *indexpb.StorageConfig) bool {
+	_, isLocalChunkManager := cm.(*storage.LocalChunkManager)
+	return isLocalChunkManager || config.GetStorageType() == "local"
+}
+
+// storageV3MetadataPath converts a physical local target path back into the
+// root-relative namespace persisted by a local loon manifest. Remote target
+// roots are object-key prefixes and remain unchanged.
+func storageV3MetadataPath(targetPath string, target *datapb.CopySegmentTarget) (string, error) {
+	targetRootPath := filepath.Clean(filepath.FromSlash(strings.TrimSpace(target.GetTargetRootPath())))
+	completeTargetPath := filepath.Clean(filepath.FromSlash(targetPath))
+	if !filepath.IsAbs(targetRootPath) || !filepath.IsAbs(completeTargetPath) {
+		return targetPath, nil
+	}
+	relativePath, err := filepath.Rel(targetRootPath, completeTargetPath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", merr.WrapErrDataIntegrityMsg("local StorageV3 target path is outside the configured storage root")
+	}
+	return filepath.ToSlash(relativePath), nil
 }
 
 // listAllFiles recursively lists all files under the given path using WalkWithPrefix.
@@ -207,6 +261,7 @@ func collectSegmentFiles(
 	source *datapb.CopySegmentSource,
 ) (*SegmentFiles, error) {
 	files := &SegmentFiles{}
+	isLocalStorage := isLocalPrimaryStorage(sourceCM, sourceStorageConfig)
 
 	if source.GetStorageVersion() >= storage.StorageV3 {
 		// StorageV3+: binlog paths MUST come from manifest
@@ -220,9 +275,30 @@ func collectSegmentFiles(
 		if err != nil {
 			return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
 		}
-		basePath = snapshotstorage.NormalizeSnapshotObjectPath(basePath)
+		if strings.TrimSpace(basePath) == "" {
+			return nil, merr.WrapErrDataIntegrityMsg("storage v3 segment %d has an empty manifest base path", source.GetSegmentId())
+		}
 
-		allFiles, listErr := listAllFiles(ctx, sourceCM, basePath)
+		// ChunkManager operates on complete backend keys. A local loon manifest
+		// stores its base path relative to localStorage.path because loon uses a
+		// subtree filesystem, so cross that boundary explicitly before walking.
+		// Remote manifest paths already contain the configured object root.
+		walkBasePath := ""
+		if isLocalStorage {
+			// Validate the raw manifest value before URI normalization; a URI is
+			// not a local filesystem key and must not silently become root/object.
+			walkBasePath, err = completeLocalStorageV3Path(sourceCM, basePath)
+			if err != nil {
+				return nil, merr.Wrapf(err, "invalid local manifest base path for segment %d", source.GetSegmentId())
+			}
+		} else {
+			walkBasePath = snapshotstorage.NormalizeSnapshotObjectPath(basePath)
+			if walkBasePath == "" {
+				return nil, merr.WrapErrDataIntegrityMsg("storage v3 segment %d has an empty manifest base path", source.GetSegmentId())
+			}
+		}
+
+		allFiles, listErr := listAllFiles(ctx, sourceCM, walkBasePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
 		}
@@ -243,9 +319,19 @@ func collectSegmentFiles(
 		if lobErr != nil {
 			return nil, merr.Wrapf(lobErr, "failed to collect LOB files from manifest for segment %d", source.GetSegmentId())
 		} else if len(lobFileInfos) > 0 {
-			// GetManifestLobFiles returns absolute paths (the manifest
-			// deserializer calls ToAbsolute internally), so use them directly.
 			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
+			// Manifest::ToAbsolutePaths expands paths against the manifest
+			// base, not against the local filesystem root. Local V3 manifests
+			// therefore still return root-relative LOB keys; convert those to
+			// complete LocalChunkManager paths at this format boundary.
+			if isLocalStorage {
+				for i, filePath := range files.LobFiles {
+					files.LobFiles[i], err = completeLocalStorageV3Path(sourceCM, filePath)
+					if err != nil {
+						return nil, merr.Wrapf(err, "invalid local LOB path for segment %d", source.GetSegmentId())
+					}
+				}
+			}
 			mlog.Info(context.TODO(), "collected LOB files from segment manifest",
 				mlog.String("manifestPath", manifestPath),
 				mlog.Int("lobFileCount", len(files.LobFiles)))
@@ -263,6 +349,19 @@ func collectSegmentFiles(
 	files.StatsBinlogs = extractFromPb(source.GetStatsBinlogs())
 	files.Bm25Binlogs = extractFromPb(source.GetBm25Binlogs())
 	files.VectorScalarIndex = extractIndexFiles(source.GetIndexFiles())
+	if source.GetStorageVersion() >= storage.StorageV3 && isLocalStorage {
+		// These protobuf paths are persisted in loon's root-relative namespace,
+		// but copying is Go ChunkManager I/O and therefore needs complete paths.
+		for _, paths := range [][]string{files.DeltaBinlogs, files.StatsBinlogs, files.Bm25Binlogs} {
+			for i, filePath := range paths {
+				completePath, pathErr := completeLocalStorageV3Path(sourceCM, filePath)
+				if pathErr != nil {
+					return nil, merr.Wrapf(pathErr, "invalid local StorageV3 protobuf path for segment %d", source.GetSegmentId())
+				}
+				paths[i] = completePath
+			}
+		}
+	}
 
 	// For V3, text/json stats files live under basePath/_stats/ and are already
 	// included in InsertBinlogs via listAllFiles(). Skip pb extraction to avoid
@@ -405,23 +504,34 @@ func CopySegmentAndIndexFiles(
 	mlog.Info(context.TODO(), "all files copied successfully",
 		mlog.Int("fileCount", len(mappings)))
 
-	// Step 3.5: When manifest is used (StorageV3+), InsertBinlogs were collected from manifest
-	// (actual file paths under base_path including _data/ and _metadata/), but
-	// generateSegmentInfoFromSource needs mappings for the protobuf logical paths too.
-	// Add these "logical-only" mappings AFTER file copying so they don't trigger actual copy operations.
+	// Step 3.5: When manifest is used (StorageV3+), physical paths may have been
+	// collected from the manifest or converted to complete LocalChunkManager
+	// paths. Metadata construction still needs mappings in loon's logical
+	// namespace, so add those only after physical copying is complete.
 	if useManifest {
-		pbInsertPaths := extractFromPb(source.GetInsertBinlogs())
-		for _, srcPath := range pbInsertPaths {
-			if _, exists := mappings[srcPath]; !exists {
+		logicalPathGroups := [][]string{
+			extractFromPb(source.GetInsertBinlogs()),
+			extractFromPb(source.GetDeltaBinlogs()),
+			extractFromPb(source.GetStatsBinlogs()),
+			extractFromPb(source.GetBm25Binlogs()),
+		}
+		logicalPathCount := 0
+		for _, logicalPaths := range logicalPathGroups {
+			logicalPathCount += len(logicalPaths)
+			for _, srcPath := range logicalPaths {
 				dstPath, pathErr := generateTargetPath(srcPath, source, target)
 				if pathErr != nil {
-					return nil, copiedFiles, merr.Wrapf(pathErr, "failed to generate target path for pb insert binlog %s", srcPath)
+					return nil, copiedFiles, merr.Wrapf(pathErr, "failed to generate target path for protobuf binlog %s", srcPath)
+				}
+				dstPath, pathErr = storageV3MetadataPath(dstPath, target)
+				if pathErr != nil {
+					return nil, copiedFiles, merr.Wrapf(pathErr, "failed to convert protobuf binlog to target metadata path %s", srcPath)
 				}
 				mappings[srcPath] = dstPath
 			}
 		}
-		mlog.Info(context.TODO(), "added logical insert binlog mappings for manifest segment",
-			mlog.Int("pbPathCount", len(pbInsertPaths)))
+		mlog.Info(context.TODO(), "added logical protobuf binlog mappings for manifest segment",
+			mlog.Int("pbPathCount", logicalPathCount))
 	}
 
 	// Step 4: Build index metadata from source
@@ -504,6 +614,8 @@ func CopySegmentAndIndexFiles(
 //   - countRows: If true, accumulate total row count from EntriesNum (for insert logs only)
 //   - isExternalTable: If true, skip path mapping because external table insert
 //     binlogs carry row metadata without physical log paths
+//   - preservePathless: If true, preserve metadata-only summaries that have no
+//     physical LogPath (StorageV3 insert and delta summaries)
 //
 // Returns:
 //   - []*datapb.FieldBinlog: Transformed binlog list with target paths
@@ -514,6 +626,7 @@ func transformFieldBinlogs(
 	mappings map[string]string,
 	countRows bool,
 	isExternalTable bool,
+	preservePathless bool,
 ) ([]*datapb.FieldBinlog, int64, error) {
 	result := make([]*datapb.FieldBinlog, 0, len(srcFieldBinlogs))
 	var totalRows int64
@@ -528,13 +641,16 @@ func transformFieldBinlogs(
 			if !isExternalTable {
 				srcPath := srcBinlog.GetLogPath()
 				if srcPath == "" {
-					continue
+					if !preservePathless {
+						continue
+					}
+				} else {
+					dstPath, ok := mappings[srcPath]
+					if !ok {
+						return nil, 0, merr.WrapErrServiceInternalMsg("no mapping found for source path: %s", srcPath)
+					}
+					dstBinlog.LogPath = dstPath
 				}
-				dstPath, ok := mappings[srcPath]
-				if !ok {
-					return nil, 0, merr.WrapErrServiceInternalMsg("no mapping found for source path: %s", srcPath)
-				}
-				dstBinlog.LogPath = dstPath
 			}
 
 			dstFieldBinlog.Binlogs = append(dstFieldBinlog.Binlogs, dstBinlog)
@@ -587,7 +703,10 @@ func generateSegmentInfoFromSource(
 	}
 
 	// Process insert binlogs (count rows)
-	binlogs, totalRows, err := transformFieldBinlogs(source.GetInsertBinlogs(), mappings, true, source.GetIsExternalCollection())
+	isStorageV3 := source.GetStorageVersion() >= storage.StorageV3
+	binlogs, totalRows, err := transformFieldBinlogs(
+		source.GetInsertBinlogs(), mappings, true, source.GetIsExternalCollection(), isStorageV3,
+	)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to transform insert binlogs")
 	}
@@ -598,21 +717,21 @@ func generateSegmentInfoFromSource(
 	}
 
 	// Process stats binlogs (no row counting)
-	statslogs, _, err := transformFieldBinlogs(source.GetStatsBinlogs(), mappings, false, false)
+	statslogs, _, err := transformFieldBinlogs(source.GetStatsBinlogs(), mappings, false, false, false)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to transform stats binlogs")
 	}
 	segmentInfo.Statslogs = statslogs
 
 	// Process delta binlogs (no row counting)
-	deltalogs, _, err := transformFieldBinlogs(source.GetDeltaBinlogs(), mappings, false, false)
+	deltalogs, _, err := transformFieldBinlogs(source.GetDeltaBinlogs(), mappings, false, false, isStorageV3)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to transform delta binlogs")
 	}
 	segmentInfo.Deltalogs = deltalogs
 
 	// Process BM25 binlogs (no row counting)
-	bm25logs, _, err := transformFieldBinlogs(source.GetBm25Binlogs(), mappings, false, false)
+	bm25logs, _, err := transformFieldBinlogs(source.GetBm25Binlogs(), mappings, false, false, false)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to transform BM25 binlogs")
 	}
@@ -675,14 +794,90 @@ func remapSourceRootPath(sourcePath string, source *datapb.CopySegmentSource, ta
 		}
 	}
 
-	targetRootPath := strings.Trim(target.GetTargetRootPath(), "/")
-	if targetRootPath == "" {
-		return relativePath, nil
+	rawTargetRootPath := strings.TrimSpace(target.GetTargetRootPath())
+	targetRootIsAbs := path.IsAbs(rawTargetRootPath)
+	targetRootPath := strings.Trim(rawTargetRootPath, "/")
+	var targetPath string
+	switch {
+	case targetRootPath == "":
+		targetPath = relativePath
+	case relativePath == "":
+		targetPath = targetRootPath
+	default:
+		targetPath = path.Join(targetRootPath, relativePath)
 	}
-	if relativePath == "" {
-		return targetRootPath, nil
+	if targetRootIsAbs {
+		return "/" + targetPath, nil
 	}
-	return path.Join(targetRootPath, relativePath), nil
+	return targetPath, nil
+}
+
+// findPathLayoutAnchor returns the only path component that matches both the
+// layout keyword and the source identity at the supplied offsets. Storage
+// roots are user-configurable and may themselves contain names such as
+// insert_log or json_stats, so matching the first keyword is ambiguous and can
+// rewrite the root instead of the Milvus layout. Multiple identity-matching
+// layouts are rejected as ambiguous instead of guessing.
+func findPathLayoutAnchor(parts []string, keyword string, expectedParts map[int]string, lastRequiredOffset int) int {
+	anchor := -1
+	for i, part := range parts {
+		if part != keyword || i+lastRequiredOffset >= len(parts) {
+			continue
+		}
+		matches := true
+		for offset, expected := range expectedParts {
+			if parts[i+offset] != expected {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			if anchor >= 0 {
+				return -1
+			}
+			anchor = i
+		}
+	}
+	return anchor
+}
+
+// buildTargetPath rejoins a transformed path and verifies that a complete
+// physical key remains below the configured target root. Local logical
+// metadata paths remain root-relative until their explicit format boundary.
+func buildTargetPath(parts []string, sourcePath string, target *datapb.CopySegmentTarget) (string, error) {
+	targetPath := path.Join(parts...)
+	if path.IsAbs(sourcePath) {
+		targetPath = "/" + targetPath
+	}
+
+	rawTargetRoot := strings.TrimSpace(target.GetTargetRootPath())
+	if rawTargetRoot == "" {
+		return targetPath, nil
+	}
+	if strings.Contains(rawTargetRoot, "://") {
+		return "", merr.WrapErrDataIntegrityMsg("target storage root must be a complete key, not a URI")
+	}
+	targetRoot := path.Clean(rawTargetRoot)
+	cleanTargetPath := path.Clean(targetPath)
+	if cleanTargetPath == "." || cleanTargetPath == ".." || strings.HasPrefix(cleanTargetPath, "../") {
+		return "", merr.WrapErrDataIntegrityMsg("generated target path escapes its key namespace")
+	}
+	if targetRoot == "." || targetRoot == ".." || strings.HasPrefix(targetRoot, "../") {
+		return "", merr.WrapErrDataIntegrityMsg("configured target storage root is not a valid complete key")
+	}
+	// Local StorageV3 manifests and protobuf summaries deliberately stay
+	// root-relative even though the physical target root is absolute. Their
+	// callers convert at the format/I/O boundary, so containment is meaningful
+	// here only for an already-complete absolute local path. Remote complete
+	// keys and absolute local paths must remain under TargetRootPath.
+	if path.IsAbs(targetRoot) && !path.IsAbs(cleanTargetPath) {
+		return cleanTargetPath, nil
+	}
+	if path.IsAbs(targetRoot) != path.IsAbs(cleanTargetPath) ||
+		(cleanTargetPath != targetRoot && !strings.HasPrefix(cleanTargetPath, strings.TrimRight(targetRoot, "/")+"/")) {
+		return "", merr.WrapErrDataIntegrityMsg("generated target path is outside the configured target storage root")
+	}
+	return cleanTargetPath, nil
 }
 
 // generateTargetPath converts source file path to target path by replacing collection/partition/segment IDs
@@ -695,7 +890,10 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 		return "", err
 	}
 
-	// Convert IDs to strings for replacement
+	// Convert IDs to strings for identity matching and replacement.
+	sourceCollectionIDStr := strconv.FormatInt(source.GetCollectionId(), 10)
+	sourcePartitionIDStr := strconv.FormatInt(source.GetPartitionId(), 10)
+	sourceSegmentIDStr := strconv.FormatInt(source.GetSegmentId(), 10)
 	targetCollectionIDStr := strconv.FormatInt(target.GetCollectionId(), 10)
 	targetPartitionIDStr := strconv.FormatInt(target.GetPartitionId(), 10)
 	targetSegmentIDStr := strconv.FormatInt(target.GetSegmentId(), 10)
@@ -703,13 +901,22 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
 
-	// Find the log type index (insert_log, delta_log, stats_log, bm25_stats)
-	// Path structure: .../log_type/collectionID/partitionID/segmentID/...
+	// Find a log layout whose IDs match the source segment. A configured root
+	// may contain any of these directory names and must remain byte-for-byte
+	// unchanged.
 	logTypeIndex := -1
 	for i, part := range parts {
-		if part == BinlogTypeInsert || part == BinlogTypeDelta || part == BinlogTypeStats || part == BinlogTypeBM25 {
+		if part != BinlogTypeInsert && part != BinlogTypeDelta && part != BinlogTypeStats && part != BinlogTypeBM25 {
+			continue
+		}
+		if i+3 < len(parts) &&
+			parts[i+1] == sourceCollectionIDStr &&
+			parts[i+2] == sourcePartitionIDStr &&
+			parts[i+3] == sourceSegmentIDStr {
+			if logTypeIndex >= 0 {
+				return "", merr.WrapErrParameterInvalidMsg("ambiguous binlog path structure: %s", sourcePath)
+			}
 			logTypeIndex = i
-			break
 		}
 	}
 
@@ -726,7 +933,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	parts[logTypeIndex+2] = targetPartitionIDStr
 	parts[logTypeIndex+3] = targetSegmentIDStr
 
-	return path.Join(parts...), nil
+	return buildTargetPath(parts, sourcePath, target)
 }
 
 // generateTargetLOBPath replaces collection and partition IDs in a LOB file path.
@@ -741,13 +948,11 @@ func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, 
 
 	parts := strings.Split(sourcePath, "/")
 
-	logTypeIndex := -1
-	for i, part := range parts {
-		if part == BinlogTypeInsert {
-			logTypeIndex = i
-			break
-		}
-	}
+	logTypeIndex := findPathLayoutAnchor(parts, BinlogTypeInsert, map[int]string{
+		1: strconv.FormatInt(source.GetCollectionId(), 10),
+		2: strconv.FormatInt(source.GetPartitionId(), 10),
+		3: "lobs",
+	}, 3)
 
 	// Path: .../{insert_log}/{coll}/{part}/lobs/...
 	// Need at least logTypeIndex + 2 (coll and part) after insert_log
@@ -758,7 +963,7 @@ func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, 
 	parts[logTypeIndex+1] = strconv.FormatInt(target.GetCollectionId(), 10)
 	parts[logTypeIndex+2] = strconv.FormatInt(target.GetPartitionId(), 10)
 
-	return path.Join(parts...), nil
+	return buildTargetPath(parts, sourcePath, target)
 }
 
 // buildIndexInfoFromSource builds complete index metadata from source information.
@@ -891,10 +1096,10 @@ func buildIndexInfoFromSource(
 // File Type Constants
 // ============================================================================
 
-// lobFileInfosToPaths extracts absolute file paths from LobFileInfo structs.
-// GetManifestLobFiles returns paths that have already been resolved to absolute
-// form by the C++ manifest deserializer (Manifest::ToAbsolutePaths), so we use
-// them directly without any path concatenation.
+// lobFileInfosToPaths extracts manifest-expanded paths from LobFileInfo structs.
+// The paths are complete remote object keys. For local manifests they are
+// relative to the loon filesystem root and the caller must explicitly convert
+// them to complete LocalChunkManager paths.
 func lobFileInfosToPaths(infos []packed.LobFileInfo) []string {
 	paths := make([]string, 0, len(infos))
 	for _, info := range infos {
@@ -963,11 +1168,7 @@ func generateTargetIndexPath(
 		return "", err
 	}
 
-	// Split path into parts
-	parts := strings.Split(sourcePath, "/")
-
-	// Determine keyword and offsets based on index type
-	var keywordIdx int
+	// Determine keyword and offsets based on index type.
 	var collectionOffset, partitionOffset, segmentOffset int
 
 	keyword := indexType
@@ -975,19 +1176,6 @@ func generateTargetIndexPath(
 		// The caller still passes the vector/scalar logical type, but v1 files
 		// live under a different object-storage prefix.
 		keyword = IndexTypeVectorScalarV1
-	}
-
-	// Find the keyword position in the path
-	keywordIdx = -1
-	for i, part := range parts {
-		if part == keyword {
-			keywordIdx = i
-			break
-		}
-	}
-
-	if keywordIdx == -1 {
-		return "", merr.WrapErrServiceInternalMsg("keyword '%s' not found in path: %s", keyword, sourcePath)
 	}
 
 	// Set offsets based on index type
@@ -1023,10 +1211,18 @@ func generateTargetIndexPath(
 			indexType, IndexTypeVectorScalarV0, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
 	}
 
-	// Validate path structure has enough components
-	if keywordIdx+segmentOffset >= len(parts) {
-		return "", merr.WrapErrParameterInvalidMsg("invalid %s path structure: %s (expected '%s' with at least %d components after it)",
-			indexType, sourcePath, indexType, segmentOffset+1)
+	parts := strings.Split(sourcePath, "/")
+	expectedParts := map[int]string{
+		partitionOffset: strconv.FormatInt(source.GetPartitionId(), 10),
+		segmentOffset:   strconv.FormatInt(source.GetSegmentId(), 10),
+	}
+	if collectionOffset >= 0 {
+		expectedParts[collectionOffset] = strconv.FormatInt(source.GetCollectionId(), 10)
+	}
+	keywordIdx := findPathLayoutAnchor(parts, keyword, expectedParts, segmentOffset)
+	if keywordIdx == -1 {
+		return "", merr.WrapErrParameterInvalidMsg("invalid %s path structure: %s (expected '%s' layout matching source identity)",
+			indexType, sourcePath, keyword)
 	}
 
 	// Replace buildID if a mapping exists in target.NewBuildIds
@@ -1048,7 +1244,7 @@ func generateTargetIndexPath(
 	parts[keywordIdx+partitionOffset] = strconv.FormatInt(target.GetPartitionId(), 10)
 	parts[keywordIdx+segmentOffset] = strconv.FormatInt(target.GetSegmentId(), 10)
 
-	return path.Join(parts...), nil
+	return buildTargetPath(parts, sourcePath, target)
 }
 
 // ============================================================================
@@ -1110,7 +1306,7 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
 	for _, stats := range jsonStats {
 		for i, file := range stats.GetFiles() {
-			stats.Files[i] = shortenSingleJSONStatsPath(file)
+			stats.Files[i] = shortenJSONStatsFilePath(file, stats)
 		}
 	}
 	return jsonStats
@@ -1118,10 +1314,9 @@ func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 
 // shortenSingleJSONStatsPath shortens a single JSON stats file path.
 //
-// This function extracts the relative path from a full JSON stats file path by:
-//  1. Finding "shared_key_index" or "shredding_data" keywords and extracting from that position
-//  2. For files directly under fieldID directory (e.g., meta.json), extracting everything after
-//     the 7 path components following "json_stats"
+// This function finds a structurally valid json_stats layout and extracts the
+// path after its fieldID component. Exact components are used so reserved names
+// inside a configured storage root cannot become false anchors.
 //
 // Path format: {root}/json_stats/{dataFormat}/{buildID}/{version}/{collID}/{partID}/{segID}/{fieldID}/...
 //
@@ -1143,23 +1338,45 @@ func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 // Returns:
 //   - Shortened path relative to fieldID directory
 func shortenSingleJSONStatsPath(fullPath string) string {
-	// Find "shared_key_index" in path
-	if idx := strings.Index(fullPath, jsonStatsSharedIndexPath); idx != -1 {
-		return fullPath[idx:]
-	}
-	// Find "shredding_data" in path
-	if idx := strings.Index(fullPath, jsonStatsShreddingDataPath); idx != -1 {
-		return fullPath[idx:]
+	return shortenJSONStatsFilePath(fullPath, nil)
+}
+
+func shortenJSONStatsFilePath(fullPath string, stats *datapb.JsonKeyStats) string {
+	parts := strings.Split(fullPath, "/")
+	if len(parts) > 0 && (parts[0] == jsonStatsSharedIndexPath || parts[0] == jsonStatsShreddingDataPath) {
+		return path.Join(parts...)
 	}
 
-	// Handle files directly under fieldID directory (e.g., meta.json)
-	// Path format: .../json_stats/{dataFormat}/{build}/{ver}/{coll}/{part}/{seg}/{field}/filename
-	// json_stats is followed by 7 components, the 8th onwards is the file path
-	parts := strings.Split(fullPath, "/")
+	// Find the last structurally valid JSON-stats layout. Root prefixes may
+	// themselves contain json_stats/shared_key_index, so substring or first-key
+	// matching is not safe. When metadata is available, also match the layout's
+	// data format, build, version, and field components.
+	anchor := -1
 	for i, part := range parts {
-		if part == common.JSONStatsPath && i+8 < len(parts) {
-			return path.Join(parts[i+8:]...)
+		if part != common.JSONStatsPath || i+8 >= len(parts) {
+			continue
 		}
+		valid := true
+		for offset := 1; offset <= 7; offset++ {
+			if _, err := strconv.ParseInt(parts[i+offset], 10, 64); err != nil {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		if stats != nil &&
+			(parts[i+1] != strconv.FormatInt(stats.GetJsonKeyStatsDataFormat(), 10) ||
+				parts[i+2] != strconv.FormatInt(stats.GetBuildID(), 10) ||
+				parts[i+3] != strconv.FormatInt(stats.GetVersion(), 10) ||
+				parts[i+7] != strconv.FormatInt(stats.GetFieldID(), 10)) {
+			continue
+		}
+		anchor = i
+	}
+	if anchor >= 0 {
+		return path.Join(parts[anchor+8:]...)
 	}
 
 	// If already shortened or no json_stats found, return as-is

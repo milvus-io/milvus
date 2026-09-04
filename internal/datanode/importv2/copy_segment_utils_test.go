@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -151,6 +153,12 @@ func TestGenerateTargetPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "local complete filesystem path",
+			sourcePath: "/var/lib/milvus/data/insert_log/111/222/333/_data/0",
+			wantPath:   "/var/lib/milvus/data/insert_log/444/555/666/_data/0",
+			wantErr:    false,
+		},
+		{
 			name:       "external component in regular binlog root is not external table",
 			sourcePath: "files/external/insert_log/111/222/333/100/log1.log",
 			wantPath:   "files/external/insert_log/444/555/666/100/log1.log",
@@ -250,6 +258,92 @@ func TestCollectSegmentFiles_UsesSourceStorageConfigForV3(t *testing.T) {
 	assert.Equal(t, []string{"foreign-root/files/insert_log/100/1/lobs/101/_data/0"}, files.LobFiles)
 }
 
+func TestCollectSegmentFiles_LocalV3UsesCompletePaths(t *testing.T) {
+	root := t.TempDir()
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	sourceCfg := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    root,
+	}
+	logicalBasePath := "insert_log/100/1/10"
+	manifestPath := packed.MarshalManifestPath(logicalBasePath, 2)
+	source := &datapb.CopySegmentSource{
+		CollectionId:   100,
+		PartitionId:    1,
+		SegmentId:      10,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		DeltaBinlogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogPath: "insert_log/100/1/10/_delta/7"}},
+		}},
+	}
+	physicalBasePath := path.Join(root, logicalBasePath)
+
+	mList := mockey.Mock(listAllFiles).To(
+		func(_ context.Context, cm storage.ChunkManager, basePath string) ([]string, error) {
+			assert.Same(t, sourceCM, cm)
+			assert.Equal(t, physicalBasePath, basePath)
+			return []string{path.Join(physicalBasePath, "_data/0")}, nil
+		}).Build()
+	defer mList.UnPatch()
+
+	mLob := mockey.Mock(packed.GetManifestLobFiles).To(
+		func(gotManifestPath string, cfg *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
+			assert.Equal(t, manifestPath, gotManifestPath)
+			assert.Equal(t, root, cfg.GetRootPath())
+			return []packed.LobFileInfo{{
+				Path: "insert_log/100/1/lobs/101/_data/0",
+			}}, nil
+		}).Build()
+	defer mLob.UnPatch()
+
+	files, err := collectSegmentFiles(context.Background(), sourceCM, sourceCfg, source)
+	require.NoError(t, err)
+	assert.Equal(t, []string{path.Join(physicalBasePath, "_data/0")}, files.InsertBinlogs)
+	assert.Equal(t, []string{path.Join(root, "insert_log/100/1/lobs/101/_data/0")}, files.LobFiles)
+	assert.Equal(t, []string{path.Join(root, "insert_log/100/1/10/_delta/7")}, files.DeltaBinlogs)
+}
+
+func TestCollectSegmentFiles_LocalV3RejectsEmptyManifestBase(t *testing.T) {
+	root := t.TempDir()
+	_, err := collectSegmentFiles(
+		context.Background(),
+		storage.NewLocalChunkManager(objectstorage.RootPath(root)),
+		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
+		&datapb.CopySegmentSource{
+			SegmentId:      10,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("", 1),
+		},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty manifest base path")
+}
+
+func TestCompleteLocalStorageV3PathRejectsURI(t *testing.T) {
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	_, err := completeLocalStorageV3Path(cm, "s3://source-bucket/root/object")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a filesystem path")
+}
+
+func TestCollectSegmentFiles_LocalV3RejectsURIManifestBase(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	_, err := collectSegmentFiles(
+		context.Background(),
+		cm,
+		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
+		&datapb.CopySegmentSource{
+			SegmentId:      10,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("s3://source-bucket/root/object", 1),
+		},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a filesystem path")
+}
+
 func TestCollectSegmentFiles_NormalizesV3ManifestURIForListing(t *testing.T) {
 	sourceCM := &struct{ storage.ChunkManager }{}
 	basePath := "s3://foreign-source/foreign-root/files/insert_log/100/1/10"
@@ -329,6 +423,136 @@ func TestGenerateTargetPath_RemapExternalS3Root(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "target-cluster-root/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
+func TestGenerateTargetPath_RemapExternalRootToLocalCompletePath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "s3://bucket/source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "/var/lib/milvus/data",
+	}
+
+	gotPath, err := generateTargetPath(
+		"source-cluster-root/files/insert_log/111/222/333/100/log1.log",
+		source,
+		target,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "/var/lib/milvus/data/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
+func TestGenerateTargetPaths_ReservedNamesInStorageRoot(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+
+	t.Run("local binlog root contains stats log", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "/tmp/stats_log/root",
+		}
+		got, err := generateTargetPath(
+			"/tmp/stats_log/root/insert_log/111/222/333/_data/0",
+			source,
+			target,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "/tmp/stats_log/root/insert_log/444/555/666/_data/0", got)
+	})
+
+	t.Run("remote binlog root contains insert log", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "archive/insert_log/files",
+		}
+		got, err := generateTargetPath(
+			"archive/insert_log/files/insert_log/111/222/333/_data/0",
+			source,
+			target,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "archive/insert_log/files/insert_log/444/555/666/_data/0", got)
+	})
+
+	t.Run("LOB root contains insert log", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "archive/insert_log/files",
+		}
+		got, err := generateTargetLOBPath(
+			"archive/insert_log/files/insert_log/111/222/lobs/100/_data/0.vx",
+			source,
+			target,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "archive/insert_log/files/insert_log/444/555/lobs/100/_data/0.vx", got)
+	})
+
+	t.Run("index root contains text log", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "archive/text_log/files",
+		}
+		got, err := generateTargetIndexPath(
+			"archive/text_log/files/text_log/123/1/111/222/333/100/index",
+			source,
+			target,
+			IndexTypeText,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "archive/text_log/files/text_log/123/1/444/555/666/100/index", got)
+	})
+
+	t.Run("reject layout match that rewrites target root", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "/tmp/insert_log/111/222/333/root",
+		}
+		_, err := generateTargetPath(
+			"/tmp/insert_log/111/222/333/root/not-a-segment-file",
+			source,
+			target,
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "outside the configured target storage root")
+	})
+
+	t.Run("reject duplicate identity layouts", func(t *testing.T) {
+		target := &datapb.CopySegmentTarget{
+			CollectionId:   444,
+			PartitionId:    555,
+			SegmentId:      666,
+			TargetRootPath: "/tmp/insert_log/111/222/333/root",
+		}
+		_, err := generateTargetPath(
+			"/tmp/insert_log/111/222/333/root/insert_log/111/222/333/_data/0",
+			source,
+			target,
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ambiguous binlog path structure")
+	})
 }
 
 func TestGenerateTargetPath_RemapEndpointStyleExternalRoot(t *testing.T) {
@@ -594,6 +818,12 @@ func TestGenerateTargetLOBPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "local complete filesystem path",
+			sourcePath: "/var/lib/milvus/data/insert_log/111/222/lobs/200/_data/xyz.vx",
+			wantPath:   "/var/lib/milvus/data/insert_log/444/555/lobs/200/_data/xyz.vx",
+			wantErr:    false,
+		},
+		{
 			name:       "invalid path - no insert_log",
 			sourcePath: "files/other/111/222/lobs/100/_data/abc.vx",
 			wantPath:   "",
@@ -729,8 +959,8 @@ func TestCollectSegmentFiles_LOBFromManifest(t *testing.T) {
 	assert.NotNil(t, files)
 
 	// Verify LOB files come from manifest, not from directory listing.
-	// GetManifestLobFiles returns absolute paths (after ToAbsolutePaths in C++),
-	// so lobFileInfosToPaths uses them directly.
+	// The remote manifest base already contains its object root, so the
+	// manifest-expanded LOB paths are complete remote object keys.
 	assert.Equal(t, 2, len(files.LobFiles))
 	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", files.LobFiles[0])
 	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", files.LobFiles[1])
@@ -773,6 +1003,13 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			sourcePath: "files/text_log/123/1/111/222/333/100/index_file",
 			indexType:  IndexTypeText,
 			wantPath:   "files/text_log/123/1/444/555/666/100/index_file",
+			wantErr:    false,
+		},
+		{
+			name:       "local complete filesystem path",
+			sourcePath: "/var/lib/milvus/data/text_log/123/1/111/222/333/100/index_file",
+			indexType:  IndexTypeText,
+			wantPath:   "/var/lib/milvus/data/text_log/123/1/444/555/666/100/index_file",
 			wantErr:    false,
 		},
 		{
@@ -1001,7 +1238,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	}
 
 	t.Run("count rows for insert logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3000), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -1021,7 +1258,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	})
 
 	t.Run("no row counting for stats logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false, false)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -1039,7 +1276,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false, false)
+		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(result))
 	})
@@ -1056,7 +1293,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true, false)
+		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true, false, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no mapping found")
 		assert.Nil(t, result)
@@ -1836,7 +2073,7 @@ func TestBuildIndexInfoFromSource_UnmappedPaths(t *testing.T) {
 }
 
 func TestTransformFieldBinlogs_NilInput(t *testing.T) {
-	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true, false)
+	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), totalRows)
 	assert.Equal(t, 0, len(result))
@@ -1860,7 +2097,7 @@ func TestTransformFieldBinlogs_MultipleBinlogsPerField(t *testing.T) {
 		},
 	}
 
-	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
+	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(600), totalRows)
 	assert.Equal(t, 1, len(result))
@@ -1883,7 +2120,7 @@ func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
 		},
 	}
 
-	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
+	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no mapping found for source path")
 }
@@ -2099,6 +2336,24 @@ func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
 		result := shortenSingleJSONStatsPath(fullPath)
 		assert.Equal(t, "subdir/file.dat", result)
 	})
+
+	t.Run("reserved names in root", func(t *testing.T) {
+		fullPath := "archive/json_stats/shared_key_index/files/json_stats/2/123/1/444/555/666/100/shared_key_index/index"
+		result := shortenSingleJSONStatsPath(fullPath)
+		assert.Equal(t, "shared_key_index/index", result)
+	})
+
+	t.Run("shared key component in root", func(t *testing.T) {
+		fullPath := "archive/shared_key_index/files/json_stats/2/123/1/444/555/666/100/meta.json"
+		result := shortenSingleJSONStatsPath(fullPath)
+		assert.Equal(t, "meta.json", result)
+	})
+
+	t.Run("shared key substring is not an anchor", func(t *testing.T) {
+		fullPath := "archive/not_shared_key_index/file"
+		result := shortenSingleJSONStatsPath(fullPath)
+		assert.Equal(t, fullPath, result)
+	})
 }
 
 func TestTransformManifestPath(t *testing.T) {
@@ -2113,7 +2368,11 @@ func TestTransformManifestPath(t *testing.T) {
 		2,
 	)
 
-	source := &datapb.CopySegmentSource{}
+	source := &datapb.CopySegmentSource{
+		CollectionId: 449104612037410004,
+		PartitionId:  449104621518610066,
+		SegmentId:    449104621518610065,
+	}
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.NoError(t, err)
 
@@ -2125,6 +2384,40 @@ func TestTransformManifestPath(t *testing.T) {
 	assert.Contains(t, basePath, "2001")
 }
 
+func TestTransformManifestPath_ExternalSourceToLocalKeepsManifestRelative(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		SegmentId:      666,
+		CollectionId:   444,
+		PartitionId:    555,
+		TargetRootPath: "/var/lib/milvus/data",
+	}
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "s3://source-bucket/source-root",
+	}
+	sourceManifest := packed.MarshalManifestPath(
+		"source-root/files/insert_log/111/222/333",
+		2,
+	)
+
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	require.NoError(t, err)
+	basePath, version, err := packed.UnmarshalManifestPath(targetManifest)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), version)
+	assert.Equal(t, "files/insert_log/444/555/666", basePath)
+
+	physicalPath, err := generateTargetPath(
+		"source-root/files/insert_log/111/222/333/_data/0",
+		source,
+		target,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "/var/lib/milvus/data/files/insert_log/444/555/666/_data/0", physicalPath)
+}
+
 func TestTransformManifestPath_ExternalTable(t *testing.T) {
 	target := &datapb.CopySegmentTarget{
 		SegmentId:    666,
@@ -2133,7 +2426,12 @@ func TestTransformManifestPath_ExternalTable(t *testing.T) {
 	}
 
 	sourceManifest := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
-	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		IsExternalCollection: true,
+	}
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.NoError(t, err)
 
@@ -2151,7 +2449,12 @@ func TestTransformManifestPath_LegacyExternalTableLayoutUnsupported(t *testing.T
 	}
 
 	sourceManifest := packed.MarshalManifestPath("external/111/segments/333", 2)
-	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		IsExternalCollection: true,
+	}
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.Error(t, err)
 	assert.Empty(t, targetManifest)
@@ -2172,7 +2475,7 @@ func TestTransformFieldBinlogs_SkipsPathMappingForExternalTable(t *testing.T) {
 			},
 		},
 	}
-	got, totalRows, err := transformFieldBinlogs(src, nil, true, true)
+	got, totalRows, err := transformFieldBinlogs(src, nil, true, true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(123), totalRows)
 	assert.Len(t, got, 1)
@@ -2184,7 +2487,7 @@ func TestTransformFieldBinlogs_SkipsPathMappingForExternalTable(t *testing.T) {
 	assert.Equal(t, int64(456), got[0].GetBinlogs()[0].GetMemorySize())
 }
 
-func TestTransformFieldBinlogs_SkipsEmptyPathForInternalTable(t *testing.T) {
+func TestTransformFieldBinlogs_DropsPathlessSummaryWhenNotPreserved(t *testing.T) {
 	src := []*datapb.FieldBinlog{
 		{
 			FieldID: 100,
@@ -2194,10 +2497,36 @@ func TestTransformFieldBinlogs_SkipsEmptyPathForInternalTable(t *testing.T) {
 		},
 	}
 
-	got, totalRows, err := transformFieldBinlogs(src, nil, false, false)
+	got, totalRows, err := transformFieldBinlogs(src, nil, false, false, false)
 	assert.NoError(t, err)
 	assert.Zero(t, totalRows)
 	assert.Empty(t, got)
+}
+
+func TestTransformFieldBinlogs_PreservesPathlessSummary(t *testing.T) {
+	src := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:         10,
+					EntriesNum:    123,
+					MemorySize:    456,
+					TimestampFrom: 1000,
+					TimestampTo:   2000,
+				},
+			},
+		},
+	}
+
+	got, totalRows, err := transformFieldBinlogs(src, nil, true, false, true)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].GetBinlogs(), 1)
+	assert.Equal(t, int64(123), totalRows)
+	assert.Empty(t, got[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, src[0].GetBinlogs()[0], got[0].GetBinlogs()[0])
+	assert.NotSame(t, src[0].GetBinlogs()[0], got[0].GetBinlogs()[0])
 }
 
 func TestGenerateSegmentInfoFromSource_PreservesExternalTableBinlogMetadata(t *testing.T) {
@@ -2243,6 +2572,64 @@ func TestGenerateSegmentInfoFromSource_V3UsesDeclaredRowCount(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(4321), segmentInfo.GetImportedRows())
+}
+
+func TestGenerateSegmentInfoFromSource_V3PreservesPathlessSummaries(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		StorageVersion: storage.StorageV3,
+		NumOfRows:      4321,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     10,
+				ChildFields: []int64{10},
+				Format:      "parquet",
+				Binlogs: []*datapb.Binlog{
+					{
+						LogID:         1,
+						EntriesNum:    123,
+						MemorySize:    456,
+						TimestampFrom: 100,
+						TimestampTo:   200,
+					},
+				},
+			},
+		},
+		DeltaBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 10,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogID:         2,
+						EntriesNum:    3,
+						MemorySize:    128,
+						TimestampFrom: 300,
+						TimestampTo:   400,
+					},
+				},
+			},
+		},
+	}
+
+	segmentInfo, err := generateSegmentInfoFromSource(
+		source,
+		&datapb.CopySegmentTarget{SegmentId: 666},
+		nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4321), segmentInfo.GetImportedRows())
+	require.Len(t, segmentInfo.GetBinlogs(), 1)
+	require.Len(t, segmentInfo.GetDeltalogs(), 1)
+	assert.Equal(t, source.GetInsertBinlogs()[0], segmentInfo.GetBinlogs()[0])
+	assert.Equal(t, source.GetDeltaBinlogs()[0], segmentInfo.GetDeltalogs()[0])
+
+	stats := storage.BuildStatsFromFieldBinlogs(segmentInfo.GetBinlogs(), nil, nil, segmentInfo.GetDeltalogs())
+	assert.EqualValues(t, 456, stats.GetInsertBinlogSize())
+	assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+	assert.EqualValues(t, 128, stats.GetDeltaBinlogSize())
+	assert.EqualValues(t, 3, stats.GetDeleteNumRows())
+	assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
+	assert.EqualValues(t, 300, stats.GetDeltaTimestampFrom())
+	assert.EqualValues(t, 400, stats.GetDeltaTimestampTo())
 }
 
 func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
@@ -2863,7 +3250,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
-		assert.Contains(t, err.Error(), "failed to generate target path for pb insert binlog")
+		assert.Contains(t, err.Error(), "failed to generate target path for protobuf binlog")
 	})
 }
 
@@ -2996,6 +3383,115 @@ func TestListAllFiles(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, files)
 	})
+}
+
+func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) {
+	mockNoManifestLobFiles(t)
+
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "stats_log", "root")
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	sourceKey := "insert_log/111/222/333/100/10001"
+	sourcePath := path.Join(root, sourceKey)
+	targetPath := path.Join(root, "insert_log/444/555/666/100/10001")
+	sourceDeltaKey := "insert_log/111/222/333/_delta/10002"
+	sourceDeltaPath := path.Join(root, sourceDeltaKey)
+	targetDeltaPath := path.Join(root, "insert_log/444/555/666/_delta/10002")
+	sourcePathlessDeltaKey := "insert_log/111/222/333/_delta/10003"
+	sourcePathlessDeltaPath := path.Join(root, sourcePathlessDeltaKey)
+	targetPathlessDeltaPath := path.Join(root, "insert_log/444/555/666/_delta/10003")
+	require.NoError(t, cm.Write(ctx, sourcePath, []byte("segment-data")))
+	require.NoError(t, cm.Write(ctx, sourceDeltaPath, []byte("delta-data")))
+	require.NoError(t, cm.Write(ctx, sourcePathlessDeltaPath, []byte("pathless-delta-data")))
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("insert_log/111/222/333", 1),
+		InsertBinlogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    sourceKey,
+				EntriesNum: 10,
+			}},
+		}},
+		DeltaBinlogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{
+				{
+					// Already-complete protobuf paths occur in intermediate/local
+					// metadata. Step 3.5 must overwrite the physical mapping with a
+					// root-relative StorageV3 metadata mapping.
+					LogPath:    sourceDeltaPath,
+					EntriesNum: 1,
+				},
+				{
+					// V3 persists the physical delta in the manifest and keeps only
+					// this pathless summary in the protobuf metadata.
+					LogID:         10003,
+					EntriesNum:    2,
+					MemorySize:    128,
+					TimestampFrom: 300,
+					TimestampTo:   400,
+				},
+			},
+		}},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: root,
+	}
+	// The actual ChunkManager defines the physical namespace. Leave
+	// StorageType empty to verify local detection does not depend on config.
+	storageConfig := &indexpb.StorageConfig{RootPath: root}
+	copySources := make(map[string]string)
+	copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+		copySources[src] = dst
+		assert.True(t, path.IsAbs(src))
+		assert.True(t, path.IsAbs(dst))
+		return cm.Copy(ctx, src, dst)
+	})
+
+	result, copiedFiles, err := CopySegmentAndIndexFiles(
+		ctx,
+		cm,
+		storageConfig,
+		copier,
+		"",
+		"",
+		source,
+		target,
+		nil,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		sourcePath:              targetPath,
+		sourceDeltaPath:         targetDeltaPath,
+		sourcePathlessDeltaPath: targetPathlessDeltaPath,
+	}, copySources)
+	assert.ElementsMatch(t, []string{targetPath, targetDeltaPath, targetPathlessDeltaPath}, copiedFiles)
+	assert.Equal(t, packed.MarshalManifestPath("insert_log/444/555/666", 1), result.GetManifestPath())
+	require.Len(t, result.GetDeltalogs(), 1)
+	require.Len(t, result.GetDeltalogs()[0].GetBinlogs(), 2)
+	assert.Equal(t, int64(10002), result.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+	assert.Equal(t, int64(10003), result.GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
+	assert.Empty(t, result.GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
+	assert.Equal(t, int64(2), result.GetDeltalogs()[0].GetBinlogs()[1].GetEntriesNum())
+	assert.Equal(t, int64(128), result.GetDeltalogs()[0].GetBinlogs()[1].GetMemorySize())
+	content, err := cm.Read(ctx, targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("segment-data"), content)
+	deltaContent, err := cm.Read(ctx, targetDeltaPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("delta-data"), deltaContent)
+	pathlessDeltaContent, err := cm.Read(ctx, targetPathlessDeltaPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("pathless-delta-data"), pathlessDeltaContent)
+	assert.NoDirExists(t, path.Join(root, root), "local root must not be prepended twice")
 }
 
 // TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats verifies that V3 segments

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"path"
 	"strconv"
 	"time"
 
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,8 +74,7 @@ func NewSyncTask(ctx context.Context,
 		}
 		// init first manifest path
 		if useLoonFFI {
-			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+			basePath := storage.SegmentManifestBasePath(storageConfig, collectionID, partitionID, segmentID)
 			// ManifestEarliest for first write
 			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}

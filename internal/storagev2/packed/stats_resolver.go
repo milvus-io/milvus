@@ -17,6 +17,7 @@ package packed
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -129,7 +130,7 @@ func (r *StatsResolver) BloomFilterPaths(pkFieldID int64) ([]string, error) {
 		return nil, nil
 	}
 
-	resolved := r.resolveStatPaths(stat.Paths)
+	resolved := r.loonStatPaths(stat.Paths)
 	for i, p := range stat.Paths {
 		_, logidx := path.Split(p)
 		if logidx == compoundStatsLogIdx {
@@ -177,6 +178,17 @@ func (r *StatsResolver) BloomFilterMemorySize(pkFieldID int64) (int64, error) {
 	return memSize, nil
 }
 
+// ChunkManagerBloomFilterPaths returns bloom-filter paths in ChunkManager's
+// complete-key namespace. Callers that read through loon or an external-spec
+// filesystem must use BloomFilterPaths instead.
+func (r *StatsResolver) ChunkManagerBloomFilterPaths(pkFieldID int64) ([]string, error) {
+	paths, err := r.BloomFilterPaths(pkFieldID)
+	if err != nil {
+		return nil, err
+	}
+	return r.chunkManagerStatPaths(paths)
+}
+
 // BM25StatsPaths returns BM25 stat file paths grouped by field ID.
 func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 	if !r.isManifest() {
@@ -194,7 +206,7 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 			continue
 		}
 
-		resolved := r.resolveStatPaths(stat.Paths)
+		resolved := r.loonStatPaths(stat.Paths)
 
 		found := false
 		for i, p := range stat.Paths {
@@ -207,6 +219,23 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 		}
 		if !found {
 			result[fieldID] = resolved
+		}
+	}
+	return result, nil
+}
+
+// ChunkManagerBM25StatsPaths returns BM25 paths in ChunkManager's complete-key
+// namespace. Metadata-only and loon consumers must use BM25StatsPaths instead.
+func (r *StatsResolver) ChunkManagerBM25StatsPaths() (map[int64][]string, error) {
+	pathsByField, err := r.BM25StatsPaths()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int64][]string, len(pathsByField))
+	for fieldID, paths := range pathsByField {
+		result[fieldID], err = r.chunkManagerStatPaths(paths)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return result, nil
@@ -264,7 +293,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 		case "text_index":
 			// For V3: extract basePath and convert to relative paths.
 			statBasePath := basePath + "/_stats/" + key
-			resolvedPaths := r.resolveStatPaths(stat.Paths)
+			resolvedPaths := r.loonStatPaths(stat.Paths)
 			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
 			// Unified text indexes are opened through FileManager, which resolves
 			// the remote object from StatsBasePath plus the file basename. A manifest
@@ -304,7 +333,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			}
 			// For V3: extract basePath and convert to relative paths
 			statBasePath := basePath + "/_stats/" + key
-			resolvedPaths := r.resolveStatPaths(stat.Paths)
+			resolvedPaths := r.loonStatPaths(stat.Paths)
 			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
 
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
@@ -384,11 +413,64 @@ func (r *StatsResolver) loadManifest() error {
 	return nil
 }
 
-// resolveStatPaths returns stat file paths from the manifest.
-// C++ ToAbsolutePaths() already converts stored relative paths to absolute
-// by prepending basePath/_stats/, so the paths are ready to use as-is.
-func (r *StatsResolver) resolveStatPaths(paths []string) []string {
+// loonStatPaths returns paths expanded against the manifest base. The
+// resulting namespace is still owned by loon: remote paths are complete object
+// keys, while local paths remain relative to the configured filesystem root.
+// This form is used by text/JSON consumers that pass the paths back to loon.
+func (r *StatsResolver) loonStatPaths(paths []string) []string {
 	return paths
+}
+
+// chunkManagerStatPaths converts manifest-expanded bloom/BM25 paths to the
+// complete-key contract required by ChunkManager. Remote manifest paths are
+// already complete object keys. A local loon manifest is rooted at
+// localStorage.path and therefore returns root-relative paths, which must be
+// made into complete filesystem paths before Go storage I/O.
+//
+// Text/JSON index paths deliberately do not use this conversion: those paths
+// are passed back through loon/segcore, whose local filesystem applies the
+// configured root itself.
+func (r *StatsResolver) chunkManagerStatPaths(paths []string) ([]string, error) {
+	for _, filePath := range paths {
+		if strings.TrimSpace(filePath) == "" || strings.Contains(filePath, "://") {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid ChunkManager stats path")
+		}
+	}
+	if r.storageConfig.GetStorageType() != "local" {
+		rootPath := strings.Trim(path.Clean(r.storageConfig.GetRootPath()), "/")
+		for _, filePath := range paths {
+			rawPath := strings.TrimSpace(filePath)
+			cleanPath := path.Clean(rawPath)
+			if path.IsAbs(filePath) || cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
+				return nil, merr.WrapErrDataIntegrityMsg("remote ChunkManager stats path must be a bucket-relative object key")
+			}
+			if cleanPath != rawPath {
+				return nil, merr.WrapErrDataIntegrityMsg("remote ChunkManager stats path must be a canonical object key")
+			}
+			if rootPath != "" && rootPath != "." && cleanPath != rootPath && !strings.HasPrefix(cleanPath, rootPath+"/") {
+				return nil, merr.WrapErrDataIntegrityMsg("remote ChunkManager stats path is outside the configured storage root")
+			}
+		}
+		return paths, nil
+	}
+
+	rootPath := filepath.Clean(r.storageConfig.GetRootPath())
+	if !filepath.IsAbs(rootPath) {
+		return nil, merr.WrapErrDataIntegrityMsg("local storage root must be an absolute filesystem path")
+	}
+	result := make([]string, len(paths))
+	for i, filePath := range paths {
+		completePath := filepath.Clean(filepath.FromSlash(filePath))
+		if !filepath.IsAbs(completePath) {
+			completePath = filepath.Join(rootPath, completePath)
+		}
+		relativePath, err := filepath.Rel(rootPath, completePath)
+		if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+			return nil, merr.WrapErrDataIntegrityMsg("local ChunkManager stats path is outside the configured storage root")
+		}
+		result[i] = completePath
+	}
+	return result, nil
 }
 
 // ParseStatKey parses a "type.fieldID" stat key into its type prefix and field ID.

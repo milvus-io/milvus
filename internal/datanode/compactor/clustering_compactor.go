@@ -1032,9 +1032,10 @@ func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
-		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
-		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		// LOB base path at partition level, sharing the manifest root rule so
+		// the reader (which reconstructs lobs/ from the manifest base) resolves
+		// the same files (see #53051).
+		lobBasePath := storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig, t.collectionID, t.partitionID)
 		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
 			lobBasePath,
 			t.compactionParams.TextInlineThreshold,
