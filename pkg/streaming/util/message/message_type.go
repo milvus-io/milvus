@@ -62,6 +62,29 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeRollbackImport: {
 		ExclusiveRequired: true,
 	},
+	// SplitShard is the write fence of the source vchannel (T_switch),
+	// so it must be appended exclusively to force-fail all active txns
+	// and forbid any concurrent DML on the vchannel.
+	MessageTypeSplitShard: {
+		ExclusiveRequired: true,
+	},
+	// CreateVChannel is the genesis entry of a shard split target vchannel.
+	// Like CreateCollection it registers a vchannel and carries the schema.
+	// Unlike CreateCollection it is a single-vchannel append with no broadcast
+	// and no resource key, so no collection-level DDL lock is involved: only
+	// the vchannel-level exclusive lock applies, and reconciling the partition
+	// list and schema it carries against concurrent DDL is the coordinator's
+	// job, not this message's.
+	MessageTypeCreateVChannel: {
+		ExclusiveRequired: true,
+	},
+	// DropVChannel retires one vchannel a shard split left behind. Like
+	// DropCollection it tears a vchannel's registration down, so it is appended
+	// exclusively: nothing may still be assigning segments on the vchannel while
+	// its shard-manager entry is being removed.
+	MessageTypeDropVChannel: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeBatchUpdateManifest: {},
 	MessageTypeCreateSegment: {
 		SelfControlled: true,
