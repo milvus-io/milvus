@@ -131,8 +131,10 @@ doubling its length. At the cap, `M = 2^15`, the lists total 32,768 `uint64`s
 carried in the collection meta and in every `DescribeCollectionResponse`,
 including the ones SDK users receive. Accepted because a residue list is the
 only shape that makes the tiling check a set operation, the cap bounds the
-worst case at a few hundred kilobytes, and a collection needs fifteen
-consecutive doublings of the same lineage to reach it; a compressed
+worst case at a few hundred kilobytes, and reaching it takes as many
+consecutive doublings as fit under the cap from the collection's initial
+shard count (fifteen from one shard, thirteen from three, since M starts at
+that count and only ever doubles); a compressed
 representation (ranges of residues) is a later optimization the wire format
 does not preclude.
 
