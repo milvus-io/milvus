@@ -1338,6 +1338,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	collectionID := int64(1)
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
+	stats := &datapb.Statistics{InsertBinlogSize: 4096, StatsBinlogSize: 1024}
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
@@ -1364,6 +1365,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 		SegmentResults: []*datapb.CopySegmentResult{{
 			SegmentId:    segmentID,
 			ManifestPath: manifestPath,
+			Stats:        stats,
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{LogID: 3, LogPath: "files/binlog/3"}},
@@ -1379,6 +1381,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
 	s.False(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
+	s.Equal(stats, updated.GetStats())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
@@ -1538,7 +1541,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
 		},
 		Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
 		Segments: []*datapb.SegmentDescription{
-			{SegmentId: 1, PartitionId: 10},
+			{SegmentId: 1, PartitionId: 10, Stats: &datapb.Statistics{InsertBinlogSize: 4096}},
 		},
 	}
 
@@ -1595,6 +1598,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
 	require.NotNil(t, req)
 	assert.Len(t, req.Sources, 1)
 	assert.Len(t, req.Targets, 1)
+	assert.Equal(t, snapshotData.Segments[0].GetStats(), req.Sources[0].GetStats())
 	assert.Equal(t, "s3://bucket/source-root/files", req.Sources[0].GetSourceRootPath())
 	assert.Equal(t, "target-root", req.Targets[0].GetTargetRootPath())
 }

@@ -222,7 +222,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
-			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
+			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs(), info.GetTextLogV2())
 			if err != nil {
 				mlog.Warn(context.TODO(), "fail to CompressBinLogs for import binlogs",
 					WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))...)
@@ -236,7 +236,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// L0 imports carry only deletes; non-L0 imports carry inserts.
 			importStats := info.GetStats()
 			if importStats == nil {
-				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), nil, info.GetDeltalogs())
+				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), info.GetTextLogV2(), info.GetDeltalogs())
 			}
 			var minTs, maxTs uint64
 			isL0Import := importutilv2.IsL0Import(job.GetOptions())
@@ -248,7 +248,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				maxTs = importStats.GetTimestampTo()
 			}
 
-			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
+			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs(), info.GetTextLogV2())
 			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
 			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			opPosition := UpdateImportSegmentPosition(info.GetSegmentID(), minTs, maxTs)

@@ -216,7 +216,8 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups)
-	return bw.Write(context.Background(), pack)
+	inserts, deltas, stats, bm25Stats, _, manifest, size, segmentStats, err = bw.Write(context.Background(), pack)
+	return
 }
 
 func genInsertData(size int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
+	flushio "github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -114,6 +115,7 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	)
 
 	var result *datapb.CompactionPlanResult
+	rebuildTextTerms := len(diff.droppedFieldIDs) > 0
 	// Dropped physical fields always require a replacement rewrite. Zero-row
 	// segments still route to additive reconciliation, which rejects them as a
 	// data-integrity error rather than writing an empty materialized record.
@@ -127,6 +129,21 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	if err != nil {
 		log.Warn(ctx, "schema bump compact failed", mlog.Err(err), mlog.Duration("compact cost", time.Since(compactStart)))
 		return nil, err
+	}
+
+	// Bump-only and additive paths retain the same rows and source manifest
+	// entries, so their existing Segment FST remains valid. A full rewrite may
+	// filter rows and emits a new segment, so only that path rebuilds it.
+	if rebuildTextTerms {
+		segment := t.plan.GetSegmentBinlogs()[0]
+		binlogIO := flushio.NewBinlogIO(t.chunkManager)
+		for _, resultSegment := range result.GetSegments() {
+			err := writeCompactionTextTerms(ctx, t.plan.GetSchema(), resultSegment,
+				segment.GetCollectionID(), segment.GetPartitionID(), binlogIO, t.logIDAlloc, t.compactionParams)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	log.Info(ctx, "schema bump compact done", mlog.Duration("compact cost", time.Since(compactStart)))
@@ -678,7 +695,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		return nil, err
 	}
 
-	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
+	alloc := t.logIDAlloc
 	writerOpts := []storage.RwOption{
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return t.chunkManager.MultiWrite(ctx, kvs)

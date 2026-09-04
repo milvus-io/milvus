@@ -305,6 +305,10 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		mlog.Error(context.TODO(), "failed in mapping", mlog.Err(err))
 		return nil, err
 	}
+	if err := writeCompactionTextTermsForSegments(ctx, t.plan.GetSchema(), uploadSegments,
+		t.collectionID, t.partitionID, t.binlogIO, t.logIDAlloc, t.compactionParams); err != nil {
+		return nil, err
+	}
 
 	// 4, collect partition stats
 	err = t.uploadPartitionStats(ctx, t.collectionID, t.partitionID, partitionStats)

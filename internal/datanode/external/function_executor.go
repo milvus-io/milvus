@@ -111,7 +111,6 @@ func ExecuteFunctionsForSegment(
 	writer.AsNewColumnGroups()
 
 	bm25Acc := newBM25Accumulators(schema)
-
 	totalRows, err := streamBatches(ctx, schema, executionSchema, outputSchema, outputArrow,
 		requiredInputFields, reader, writer, bm25Acc, clusterID)
 	if err != nil {
@@ -357,7 +356,6 @@ func streamBatches(
 		if batch.GetRowNum() == 0 {
 			continue
 		}
-
 		if err := embedding.RunAll(ctx, schema, batch, embedding.RunOptions{
 			ClusterID: clusterID,
 			DBName:    schema.GetDbName(),

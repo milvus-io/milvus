@@ -971,6 +971,12 @@ func TestBumpUTBumpOnlyWhenFunctionOutputsPresent(t *testing.T) {
 			OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102},
 		}),
 	)
+	textField := typeutil.GetField(fix.targetSchema, bumpFxTextField)
+	textField.TypeParams = append(textField.GetTypeParams(),
+		&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+	fix.targetSchema.GetFunctions()[0].Params = []*commonpb.KeyValuePair{{
+		Key: common.EnableFuzzyKey, Value: "true",
+	}}
 
 	seg := runCompact(t, fix)
 	require.Equal(t, fix.segment.GetSegmentID(), seg.GetSegmentID())

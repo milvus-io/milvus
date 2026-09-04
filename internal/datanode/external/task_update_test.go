@@ -1894,7 +1894,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesSuccess() {
 	defer mockWrite.UnPatch()
 
 	rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-		typeutil.NewSet[int64](100), reader, writer, nil, "cluster")
+		typeutil.NewSet[int64](100), reader, writer, nil, nil, "cluster")
 	s.NoError(err)
 	s.Equal(int64(1), rows)
 }
@@ -1911,7 +1911,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesErrors() {
 
 	reader := &fakeRecordReader{errs: []error{fmt.Errorf("read failed")}}
 	rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-		requiredFields, reader, writer, nil, "cluster")
+		requiredFields, reader, writer, nil, nil, "cluster")
 	s.Error(err)
 	s.Equal(int64(0), rows)
 
@@ -1919,19 +1919,19 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesErrors() {
 		records: []storage.Record{s.makeStringStorageRecord(999, "wrong_col", []string{"hello"})},
 	}
 	rows, err = streamBatches(context.Background(), schema, executionSchema, nil, nil,
-		requiredFields, reader, writer, nil, "cluster")
+		requiredFields, reader, writer, nil, nil, "cluster")
 	s.Error(err)
 	s.Equal(int64(0), rows)
 
 	reader = &fakeRecordReader{}
 	rows, err = streamBatches(context.Background(), schema, executionSchema, nil, nil,
-		requiredFields, reader, writer, nil, "cluster")
+		requiredFields, reader, writer, nil, nil, "cluster")
 	s.NoError(err)
 	s.Equal(int64(0), rows)
 
 	reader = &fakeRecordReader{records: []storage.Record{nil}}
 	rows, err = streamBatches(context.Background(), schema, executionSchema, nil, nil,
-		requiredFields, reader, writer, nil, "cluster")
+		requiredFields, reader, writer, nil, nil, "cluster")
 	s.NoError(err)
 	s.Equal(int64(0), rows)
 }
@@ -1951,7 +1951,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesProcessingErrors()
 			records: []storage.Record{s.makeStringStorageRecord(100, "text_col", nil)},
 		}
 		rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-			requiredFields, reader, writer, nil, "cluster")
+			requiredFields, reader, writer, nil, nil, "cluster")
 		s.NoError(err)
 		s.Equal(int64(0), rows)
 	})
@@ -1963,7 +1963,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesProcessingErrors()
 		mockRun := mockey.Mock(embedding.RunAll).Return(fmt.Errorf("run failed")).Build()
 		defer mockRun.UnPatch()
 		rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-			requiredFields, reader, writer, nil, "cluster")
+			requiredFields, reader, writer, nil, nil, "cluster")
 		s.Error(err)
 		s.Equal(int64(0), rows)
 	})
@@ -1977,7 +1977,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesProcessingErrors()
 		mockAcc := mockey.Mock(accumulateBM25Stats).Return(fmt.Errorf("stats failed")).Build()
 		defer mockAcc.UnPatch()
 		rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-			requiredFields, reader, writer, nil, "cluster")
+			requiredFields, reader, writer, nil, nil, "cluster")
 		s.Error(err)
 		s.Equal(int64(0), rows)
 	})
@@ -1993,7 +1993,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesProcessingErrors()
 		mockWrite := mockey.Mock(writeOutputBatch).Return(fmt.Errorf("write failed")).Build()
 		defer mockWrite.UnPatch()
 		rows, err := streamBatches(context.Background(), schema, executionSchema, nil, nil,
-			requiredFields, reader, writer, nil, "cluster")
+			requiredFields, reader, writer, nil, nil, "cluster")
 		s.Error(err)
 		s.Equal(int64(0), rows)
 	})

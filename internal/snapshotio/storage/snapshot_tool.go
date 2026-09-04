@@ -42,6 +42,7 @@ const (
 	SnapshotFileTypeStatsBinlog             SnapshotFileType = "stats_binlog"
 	SnapshotFileTypeDeltaBinlog             SnapshotFileType = "delta_binlog"
 	SnapshotFileTypeBM25StatsBinlog         SnapshotFileType = "bm25_stats_binlog"
+	SnapshotFileTypeTextLogV2               SnapshotFileType = "text_log_v2"
 	SnapshotFileTypeIndexFile               SnapshotFileType = "index_file"
 	SnapshotFileTypeTextIndexFile           SnapshotFileType = "text_index_file"
 	SnapshotFileTypeJSONKeyIndexFile        SnapshotFileType = "json_key_index_file"
@@ -145,6 +146,7 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 		// are metadata placeholders and may be stale after format migration.
 	} else {
 		c.addFieldBinlogRefs(segment.GetBinlogs(), segment, SnapshotFileTypeInsertBinlog)
+		c.addFieldBinlogRefs(segment.GetTextLogV2(), segment, SnapshotFileTypeTextLogV2)
 		c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
 		c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
 		if segment.GetStorageVersion() == milvusstorage.StorageV2 && segment.GetManifestPath() != "" {
@@ -359,7 +361,7 @@ type snapshotPathRewriter struct {
 
 func (r snapshotPathRewriter) rewriteSegment(segment *datapb.SegmentDescription) error {
 	includeInsert := true
-	includeManifestOwnedIndexes := true
+	includeManifestOwnedPaths := true
 	if segment.GetStorageVersion() >= milvusstorage.StorageV3 {
 		// StorageV3 insert files are owned by the packed manifest. Drop legacy
 		// protobuf insert binlogs from exported metadata to avoid copying the
@@ -369,9 +371,9 @@ func (r snapshotPathRewriter) rewriteSegment(segment *datapb.SegmentDescription)
 			return err
 		}
 		includeInsert = false
-		includeManifestOwnedIndexes = false
+		includeManifestOwnedPaths = false
 	}
-	if err := rewriteSegmentFilePaths(segment, includeInsert, includeManifestOwnedIndexes, r.rewritePath); err != nil {
+	if err := rewriteSegmentFilePaths(segment, includeInsert, includeManifestOwnedPaths, r.rewritePath); err != nil {
 		return err
 	}
 	if segment.GetStorageVersion() == milvusstorage.StorageV2 && segment.GetManifestPath() != "" {
@@ -452,7 +454,7 @@ type segmentPathRewriteFunc func(src string, context string) (string, error)
 func rewriteSegmentFilePaths(
 	segment *datapb.SegmentDescription,
 	includeInsert bool,
-	includeManifestOwnedIndexes bool,
+	includeManifestOwnedPaths bool,
 	rewrite segmentPathRewriteFunc,
 ) error {
 	if includeInsert {
@@ -469,10 +471,15 @@ func rewriteSegmentFilePaths(
 	if err := rewriteFieldBinlogPaths(segment.GetBm25Statslogs(), "bm25 stats binlog", segment.GetSegmentId(), rewrite); err != nil {
 		return err
 	}
+	if includeManifestOwnedPaths {
+		if err := rewriteFieldBinlogPaths(segment.GetTextLogV2(), "text log v2", segment.GetSegmentId(), rewrite); err != nil {
+			return err
+		}
+	}
 	if err := rewriteIndexFilePaths(segment.GetIndexFiles(), segment.GetSegmentId(), rewrite); err != nil {
 		return err
 	}
-	if includeManifestOwnedIndexes {
+	if includeManifestOwnedPaths {
 		if err := rewriteTextIndexPaths(segment.GetTextIndexFiles(), segment.GetSegmentId(), rewrite); err != nil {
 			return err
 		}

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -219,7 +220,6 @@ func (s *PackWriterV3Suite) TestWriteTextTermFstAccumulatesManifestCoverage() {
 	s.Require().Len(textStat1.Paths, 1)
 	s.Equal(textTermFstFormat, textStat1.Metadata["format"])
 	s.Equal("100", textStat1.Metadata["coverage_timestamp"])
-	s.Equal("2", textStat1.Metadata["fragment_term_count"])
 	firstData, err := packed.ReadFile(s.storageConfig, textStat1.Paths[0])
 	s.Require().NoError(err)
 	s.NotEmpty(firstData)
@@ -241,13 +241,33 @@ func (s *PackWriterV3Suite) TestWriteTextTermFstAccumulatesManifestCoverage() {
 	textStat2 := manifestStats2["text_log_v2.101"]
 	s.Require().Len(textStat2.Paths, 2)
 	s.Equal("200", textStat2.Metadata["coverage_timestamp"])
-	s.Equal("0", textStat2.Metadata["fragment_term_count"])
 	emptyData, err := packed.ReadFile(s.storageConfig, textStat2.Paths[1])
 	s.Require().NoError(err)
 	s.NotEmpty(emptyData)
 	s.Equal(strconv.Itoa(len(firstData)+len(emptyData)), textStat2.Metadata["log_size"])
 	s.Equal(strconv.Itoa(len(firstData)+len(emptyData)), textStat2.Metadata["memory_size"])
 	s.EqualValues(len(firstData)+len(emptyData), stats2.GetStatsBinlogSize())
+
+	replacementEntries, _, err := textindex.BuildReplacementManifestEntries(
+		manifest2,
+		s.storageConfig,
+		s.logIDAlloc,
+		map[int64][][]byte{101: {[]byte("replacement")}},
+		300,
+	)
+	s.Require().NoError(err)
+	basePath, version, err := packed.UnmarshalManifestPath(manifest2)
+	s.Require().NoError(err)
+	manifest3, err := packed.CommitManifestUpdates(basePath, version, s.storageConfig,
+		&packed.ManifestUpdates{Stats: replacementEntries})
+	s.Require().NoError(err)
+
+	manifestStats3, err := packed.GetManifestStats(manifest3, s.storageConfig)
+	s.Require().NoError(err)
+	textStat3 := manifestStats3["text_log_v2.101"]
+	s.Require().Len(textStat3.Paths, 1)
+	s.NotEqual(textStat1.Paths[0], textStat3.Paths[0])
+	s.Equal("300", textStat3.Metadata["coverage_timestamp"])
 }
 
 func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch() {

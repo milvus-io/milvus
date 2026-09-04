@@ -43,6 +43,7 @@ func clearSegmentNonInsertFiles(segment *datapb.SegmentDescription) {
 	segment.Statslogs = nil
 	segment.Deltalogs = nil
 	segment.Bm25Statslogs = nil
+	segment.TextLogV2 = nil
 	segment.IndexFiles = nil
 	segment.TextIndexFiles = nil
 	segment.JsonKeyIndexFiles = nil
@@ -112,8 +113,10 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	ctx := context.Background()
 
 	sourceBinlog := path.Join(tempDir, "files/insert_log/1/2/1001/field1/1")
+	sourceTextLogV2 := path.Join(tempDir, "files/text_log_v2/1/2/1001/field1/2.fst")
 	sourceIndex := path.Join(tempDir, "files/index_files/1001/2001/3001/index")
 	assert.NoError(t, cm.Write(ctx, sourceBinlog, []byte("binlog")))
+	assert.NoError(t, cm.Write(ctx, sourceTextLogV2, []byte("text-log-v2")))
 	assert.NoError(t, cm.Write(ctx, sourceIndex, []byte("index")))
 
 	snapshotData := createTestSnapshotDataForMeta()
@@ -129,6 +132,14 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	segment.Statslogs = nil
 	segment.Deltalogs = nil
 	segment.Bm25Statslogs = nil
+	segment.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 1,
+		Format:  "milvus_text_fst_v1",
+		Binlogs: []*datapb.Binlog{{
+			LogID:   2,
+			LogPath: sourceTextLogV2,
+		}},
+	}}
 	segment.TextIndexFiles = nil
 	segment.JsonKeyIndexFiles = nil
 	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
@@ -159,10 +170,14 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	assert.Equal(t, path.Join(targetRoot, snapshotstorage.SnapshotRootPath, "100", snapshotstorage.SnapshotMetadataSubPath, "1.json"), metadataURI)
 
 	copiedBinlog := path.Join(targetRoot, snapshotstorage.ExportedSnapshotFilesPath, "files/insert_log/1/2/1001/field1/1")
+	copiedTextLogV2 := path.Join(targetRoot, snapshotstorage.ExportedSnapshotFilesPath, "files/text_log_v2/1/2/1001/field1/2.fst")
 	copiedIndex := path.Join(targetRoot, snapshotstorage.ExportedSnapshotFilesPath, "files/index_files/1001/2001/3001/index")
 	binlogData, err := cm.Read(ctx, copiedBinlog)
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("binlog"), binlogData)
+	textLogV2Data, err := cm.Read(ctx, copiedTextLogV2)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("text-log-v2"), textLogV2Data)
 	indexData, err := cm.Read(ctx, copiedIndex)
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("index"), indexData)
@@ -172,6 +187,7 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	assert.Equal(t, datapb.SnapshotLayout_SnapshotLayoutSelfContained, readSnapshot.Layout)
 	assert.Equal(t, metadataURI, readSnapshot.SnapshotInfo.GetS3Location())
 	assert.Equal(t, copiedBinlog, readSnapshot.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, copiedTextLogV2, readSnapshot.Segments[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, copiedIndex, readSnapshot.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
 }
 

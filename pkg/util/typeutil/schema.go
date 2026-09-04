@@ -2703,6 +2703,9 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	if !IsExternalCollection(schema) {
 		return nil
 	}
+	if err := validateExternalCollectionFuzzyBM25(schema); err != nil {
+		return err
+	}
 
 	if schema.GetEnableDynamicField() {
 		return merr.WrapErrParameterInvalidMsg("external collection %s does not support dynamic field", schema.GetName())
@@ -2843,6 +2846,9 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 	if !IsExternalCollection(schema) {
 		return nil
 	}
+	if err := validateExternalCollectionFuzzyBM25(schema); err != nil {
+		return err
+	}
 	generatedColumns := externalGeneratedColumnOwners(schema)
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
@@ -2871,6 +2877,17 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 			ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
 	}
 	return validateUniqueExternalFieldOwners(externalFieldOwners)
+}
+
+func validateExternalCollectionFuzzyBM25(schema *schemapb.CollectionSchema) error {
+	for _, function := range schema.GetFunctions() {
+		if IsFuzzyEnabledBM25Function(function) {
+			return merr.WrapErrParameterInvalidMsg(
+				"external collection %s does not support %s on BM25 function %s",
+				schema.GetName(), common.EnableFuzzyKey, function.GetName())
+		}
+	}
+	return nil
 }
 
 func hasUserPrimaryKey(schema *schemapb.CollectionSchema) bool {

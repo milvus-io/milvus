@@ -404,6 +404,8 @@ type StatsTaskInfo struct {
 	StatsLogs        []*datapb.FieldBinlog
 	TextStatsLogs    map[int64]*datapb.TextIndexStats
 	Bm25Logs         []*datapb.FieldBinlog
+	TextLogV2        []*datapb.FieldBinlog
+	Stats            *datapb.Statistics
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
 	BaseManifest     string
@@ -424,6 +426,8 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		StatsLogs:        s.CloneStatsLogs(),
 		TextStatsLogs:    s.CloneTextStatsLogs(),
 		Bm25Logs:         s.CloneBm25Logs(),
+		TextLogV2:        s.CloneTextLogV2(),
+		Stats:            typeutil.Clone(s.Stats),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
 		BaseManifest:     s.BaseManifest,
@@ -444,6 +448,8 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		StatsLogs:        s.StatsLogs,
 		TextStatsLogs:    s.TextStatsLogs,
 		Bm25Logs:         s.Bm25Logs,
+		TextLogV2:        s.TextLogV2,
+		Stats:            s.Stats,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
 		BaseManifest:     s.BaseManifest,
@@ -486,6 +492,14 @@ func (s *StatsTaskInfo) CloneTextStatsLogs() map[int64]*datapb.TextIndexStats {
 func (s *StatsTaskInfo) CloneBm25Logs() []*datapb.FieldBinlog {
 	clone := make([]*datapb.FieldBinlog, len(s.Bm25Logs))
 	for i, log := range s.Bm25Logs {
+		clone[i] = typeutil.Clone(log)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneTextLogV2() []*datapb.FieldBinlog {
+	clone := make([]*datapb.FieldBinlog, len(s.TextLogV2))
+	for i, log := range s.TextLogV2 {
 		clone[i] = typeutil.Clone(log)
 	}
 	return clone
@@ -545,6 +559,8 @@ func (m *TaskManager) StorePKSortStatsResult(
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
 	bm25Logs []*datapb.FieldBinlog,
+	textLogV2 []*datapb.FieldBinlog,
+	stats *datapb.Statistics,
 	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
@@ -559,6 +575,8 @@ func (m *TaskManager) StorePKSortStatsResult(
 		info.InsertLogs = insertLogs
 		info.StatsLogs = statsLogs
 		info.Bm25Logs = bm25Logs
+		info.TextLogV2 = textLogV2
+		info.Stats = stats
 		info.Manifest = manifest
 		return
 	}

@@ -1879,6 +1879,7 @@ func TestGenSnapshot(t *testing.T) {
 					},
 				},
 				Deltalogs: []*datapb.FieldBinlog{},
+				Stats:     &datapb.Statistics{InsertBinlogSize: 100, StatsBinlogSize: 20},
 			})
 		}
 		return nil
@@ -1906,6 +1907,8 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, 1, len(snapshotData.Indexes))
 	assert.Equal(t, 1, len(snapshotData.Segments))
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
+	assert.Equal(t, int64(100), snapshotData.Segments[0].GetStats().GetInsertBinlogSize())
+	assert.Equal(t, int64(20), snapshotData.Segments[0].GetStats().GetStatsBinlogSize())
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }

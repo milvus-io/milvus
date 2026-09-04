@@ -54,6 +54,7 @@ type SegmentFiles struct {
 	DeltaBinlogs      []string
 	StatsBinlogs      []string
 	Bm25Binlogs       []string
+	TextLogV2         []string
 	VectorScalarIndex []string
 
 	// From PB before StorageV3; manifest-owned from StorageV3 onward.
@@ -264,10 +265,11 @@ func collectSegmentFiles(
 	files.Bm25Binlogs = extractFromPb(source.GetBm25Binlogs())
 	files.VectorScalarIndex = extractIndexFiles(source.GetIndexFiles())
 
-	// For V3, text/json stats files live under basePath/_stats/ and are already
+	// For V3, text-log-v2/text/json stats files live under basePath/_stats/ and are already
 	// included in InsertBinlogs via listAllFiles(). Skip pb extraction to avoid
 	// using potentially stale or wrong-format paths from etcd metadata.
 	if source.GetStorageVersion() < storage.StorageV3 {
+		files.TextLogV2 = extractFromPb(source.GetTextLogV2())
 		files.TextIndex = extractTextIndexFiles(source.GetTextIndexFiles())
 		files.JSONKeyIndex, files.JSONStats = extractJSONFiles(source.GetJsonKeyIndexFiles())
 	}
@@ -320,6 +322,9 @@ func generateMappingsFromFiles(
 		return nil, err
 	}
 	if err := addMappings(files.Bm25Binlogs, BinlogTypeBM25); err != nil {
+		return nil, err
+	}
+	if err := addMappings(files.TextLogV2, BinlogTypeTextLogV2); err != nil {
 		return nil, err
 	}
 	// Vector/scalar index copy uses the v0 type as the logical input; the
@@ -438,7 +443,7 @@ func CopySegmentAndIndexFiles(
 
 	// Step 6: Compress paths
 	err = binlog.CompressBinLogs(segmentInfo.GetBinlogs(), segmentInfo.GetStatslogs(),
-		segmentInfo.GetDeltalogs(), segmentInfo.GetBm25Logs())
+		segmentInfo.GetDeltalogs(), segmentInfo.GetBm25Logs(), segmentInfo.GetTextLogV2())
 	if err != nil {
 		return nil, copiedFiles, merr.Wrap(err, "failed to compress binlog paths")
 	}
@@ -462,9 +467,11 @@ func CopySegmentAndIndexFiles(
 		Statslogs:         segmentInfo.GetStatslogs(),
 		Deltalogs:         segmentInfo.GetDeltalogs(),
 		Bm25Logs:          segmentInfo.GetBm25Logs(),
+		TextLogV2:         segmentInfo.GetTextLogV2(),
 		IndexInfos:        indexInfos,
 		TextIndexInfos:    textIndexInfos,
 		JsonKeyIndexInfos: jsonKeyIndexInfos,
+		Stats:             segmentInfo.GetStats(),
 	}
 
 	// Step 8: Transform and propagate manifest_path.
@@ -584,6 +591,8 @@ func generateSegmentInfoFromSource(
 		Statslogs:    []*datapb.FieldBinlog{},
 		Deltalogs:    []*datapb.FieldBinlog{},
 		Bm25Logs:     []*datapb.FieldBinlog{},
+		TextLogV2:    []*datapb.FieldBinlog{},
+		Stats:        source.GetStats(),
 	}
 
 	// Process insert binlogs (count rows)
@@ -617,6 +626,14 @@ func generateSegmentInfoFromSource(
 		return nil, merr.Wrap(err, "failed to transform BM25 binlogs")
 	}
 	segmentInfo.Bm25Logs = bm25logs
+
+	if source.GetStorageVersion() < storage.StorageV3 {
+		textLogV2, _, err := transformFieldBinlogs(source.GetTextLogV2(), mappings, false, false)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to transform text log v2")
+		}
+		segmentInfo.TextLogV2 = textLogV2
+	}
 
 	return segmentInfo, nil
 }
@@ -703,11 +720,13 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
 
-	// Find the log type index (insert_log, delta_log, stats_log, bm25_stats)
+	// Find the log type index (insert_log, delta_log, stats_log, bm25_stats,
+	// text_log_v2).
 	// Path structure: .../log_type/collectionID/partitionID/segmentID/...
 	logTypeIndex := -1
 	for i, part := range parts {
-		if part == BinlogTypeInsert || part == BinlogTypeDelta || part == BinlogTypeStats || part == BinlogTypeBM25 {
+		if part == BinlogTypeInsert || part == BinlogTypeDelta || part == BinlogTypeStats ||
+			part == BinlogTypeBM25 || part == BinlogTypeTextLogV2 {
 			logTypeIndex = i
 			break
 		}
@@ -910,9 +929,10 @@ const (
 	BinlogTypeStats         = "stats_log"
 	BinlogTypeDelta         = "delta_log"
 	BinlogTypeBM25          = "bm25_stats"
+	BinlogTypeTextLogV2     = "text_log_v2"
 	IndexTypeVectorScalarV0 = "index_files"
 	IndexTypeVectorScalarV1 = "index_v1"
-	IndexTypeText           = "text_log"
+	IndexTypeText           = "text_log"           // Text Log V1 (Tantivy TextMatchIndex)
 	IndexTypeJSONKey        = "json_key_index_log" // Legacy: JSON Key Inverted Index
 	IndexTypeJSONStats      = "json_stats"         // New: JSON Stats with Shredding Design
 	FileTypeLOB             = "lob"                // LOB files at partition level for TEXT fields

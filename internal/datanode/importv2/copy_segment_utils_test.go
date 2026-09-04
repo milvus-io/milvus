@@ -145,6 +145,12 @@ func TestGenerateTargetPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "Text Log V2 path",
+			sourcePath: "files/text_log_v2/111/222/333/100/12345.fst",
+			wantPath:   "files/text_log_v2/444/555/666/100/12345.fst",
+			wantErr:    false,
+		},
+		{
 			name:       "v3 bm25 stats numeric log id path",
 			sourcePath: "files/insert_log/111/222/333/_stats/bm25.100/12345",
 			wantPath:   "files/insert_log/444/555/666/_stats/bm25.100/12345",
@@ -1604,6 +1610,7 @@ func TestGenerateTargetPath_AllConstants(t *testing.T) {
 		{"delta uses delta_log", BinlogTypeDelta, "delta_log"},
 		{"stats uses stats_log", BinlogTypeStats, "stats_log"},
 		{"bm25 uses bm25_stats", BinlogTypeBM25, "bm25_stats"},
+		{"text terms use text_log_v2", BinlogTypeTextLogV2, "text_log_v2"},
 	}
 
 	for _, tt := range tests {
@@ -1656,6 +1663,15 @@ func TestGenerateSegmentInfoFromSource_AllBinlogTypes(t *testing.T) {
 				},
 			},
 		},
+		TextLogV2: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Format:  "milvus_text_fst_v1",
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/text_log_v2/111/222/333/100/1001.fst"},
+				},
+			},
+		},
 	}
 
 	target := &datapb.CopySegmentTarget{
@@ -1665,10 +1681,11 @@ func TestGenerateSegmentInfoFromSource_AllBinlogTypes(t *testing.T) {
 	}
 
 	mappings := map[string]string{
-		"files/insert_log/111/222/333/100/log1":   "files/insert_log/444/555/666/100/log1",
-		"files/stats_log/111/222/333/100/stats1":  "files/stats_log/444/555/666/100/stats1",
-		"files/delta_log/111/222/333/100/delta1":  "files/delta_log/444/555/666/100/delta1",
-		"files/bm25_stats/111/222/333/100/bm25_1": "files/bm25_stats/444/555/666/100/bm25_1",
+		"files/insert_log/111/222/333/100/log1":      "files/insert_log/444/555/666/100/log1",
+		"files/stats_log/111/222/333/100/stats1":     "files/stats_log/444/555/666/100/stats1",
+		"files/delta_log/111/222/333/100/delta1":     "files/delta_log/444/555/666/100/delta1",
+		"files/bm25_stats/111/222/333/100/bm25_1":    "files/bm25_stats/444/555/666/100/bm25_1",
+		"files/text_log_v2/111/222/333/100/1001.fst": "files/text_log_v2/444/555/666/100/1001.fst",
 	}
 
 	segmentInfo, err := generateSegmentInfoFromSource(source, target, mappings)
@@ -1680,8 +1697,11 @@ func TestGenerateSegmentInfoFromSource_AllBinlogTypes(t *testing.T) {
 	assert.Equal(t, 1, len(segmentInfo.Statslogs))
 	assert.Equal(t, 1, len(segmentInfo.Deltalogs))
 	assert.Equal(t, 1, len(segmentInfo.Bm25Logs))
+	assert.Equal(t, 1, len(segmentInfo.TextLogV2))
 	assert.Equal(t, "files/delta_log/444/555/666/100/delta1", segmentInfo.Deltalogs[0].Binlogs[0].LogPath)
 	assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1", segmentInfo.Bm25Logs[0].Binlogs[0].LogPath)
+	assert.Equal(t, "files/text_log_v2/444/555/666/100/1001.fst", segmentInfo.TextLogV2[0].Binlogs[0].LogPath)
+	assert.Equal(t, "milvus_text_fst_v1", segmentInfo.TextLogV2[0].GetFormat())
 }
 
 func TestGenerateSegmentInfoFromSource_EmptySource(t *testing.T) {
@@ -2653,6 +2673,7 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			DeltaBinlogs:      []string{"files/delta_log/111/222/333/100/delta1"},
 			StatsBinlogs:      []string{"files/stats_log/111/222/333/100/stats1"},
 			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
+			TextLogV2:         []string{"files/text_log_v2/111/222/333/100/1001.fst"},
 			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
 			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
 			JSONKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
@@ -2661,7 +2682,7 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 
 		mappings, err := generateMappingsFromFiles(files, source, target)
 		assert.NoError(t, err)
-		assert.Len(t, mappings, 8)
+		assert.Len(t, mappings, 9)
 
 		assert.Equal(t, "files/insert_log/444/555/666/100/log1",
 			mappings["files/insert_log/111/222/333/100/log1"])
@@ -2669,6 +2690,8 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			mappings["files/delta_log/111/222/333/100/delta1"])
 		assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1",
 			mappings["files/bm25_stats/111/222/333/100/bm25_1"])
+		assert.Equal(t, "files/text_log_v2/444/555/666/100/1001.fst",
+			mappings["files/text_log_v2/111/222/333/100/1001.fst"])
 		assert.Equal(t, "files/index_files/1002/1/555/666/idx1",
 			mappings["files/index_files/1002/1/222/333/idx1"])
 	})
@@ -2702,6 +2725,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		SegmentId:      333,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   manifestPath,
+		Stats:          &datapb.Statistics{InsertBinlogSize: 3072, StatsBinlogSize: 512},
 		InsertBinlogs: []*datapb.FieldBinlog{
 			{
 				FieldID: 100,
@@ -2732,6 +2756,12 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 				},
 			},
 		},
+		TextLogV2: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "stale/text-log-v2/path",
+			}},
+		}},
 	}
 
 	target := &datapb.CopySegmentTarget{
@@ -2747,6 +2777,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			return []string{
 				"files/insert_log/111/222/333/_data/0",
 				"files/insert_log/111/222/333/_metadata/manifest.json",
+				"files/insert_log/111/222/333/_stats/text_log_v2.100/1001.fst",
 			}, nil
 		}).Build()
 		defer mList.UnPatch()
@@ -2776,23 +2807,27 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 
 		assert.Equal(t, int64(666), result.SegmentId)
 		assert.Equal(t, int64(1000), result.ImportedRows)
+		assert.Equal(t, source.GetStats(), result.GetStats())
 
 		assert.Equal(t, 2, len(result.Binlogs))
 		assert.Equal(t, 1, len(result.Statslogs))
 		assert.Equal(t, 1, len(result.Deltalogs))
+		assert.Empty(t, result.TextLogV2)
 
 		expectedManifestPath := packed.MarshalManifestPath("files/insert_log/444/555/666", 2)
 		assert.Equal(t, expectedManifestPath, result.ManifestPath)
 
-		assert.Len(t, copiedFiles, 4)
+		assert.Len(t, copiedFiles, 5)
 
 		for _, src := range copiedSrcPaths {
 			assert.NotEqual(t, "files/insert_log/111/222/333/100/10001", src)
 			assert.NotEqual(t, "files/insert_log/111/222/333/101/10002", src)
+			assert.NotEqual(t, "stale/text-log-v2/path", src)
 		}
 
 		assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/_data/0")
 		assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/_metadata/manifest.json")
+		assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/_stats/text_log_v2.100/1001.fst")
 		assert.Contains(t, copiedSrcPaths, "files/stats_log/111/222/333/100/20001")
 		assert.Contains(t, copiedSrcPaths, "files/delta_log/111/222/333/0/30001")
 	})

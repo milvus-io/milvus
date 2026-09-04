@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -33,6 +32,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	writerOpts []storage.RwOption,
 	lobContext *compaction.LOBCompactionContext,
 	sortByFields []int64,
+	compAlloc *compactionAlloactor,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -43,9 +43,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	writerSchema := plan.GetSchema()
 
-	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
-	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), writerSchema, compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
 		writerOpts...)
 	if err != nil {

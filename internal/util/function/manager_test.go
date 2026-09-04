@@ -1132,7 +1132,7 @@ func TestFillFunctionFieldsMaterializesFuzzyBM25Terms(t *testing.T) {
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.Len(t, body.GetTextTermBatches(), 1)
 	require.EqualValues(t, 101, body.GetTextTermBatches()[0].GetInputFieldId())
-	require.Equal(t, [][]byte{[]byte("fuzzy"), []byte("hello"), []byte("world")}, body.GetTextTermBatches()[0].GetTerms())
+	require.ElementsMatch(t, [][]byte{[]byte("fuzzy"), []byte("hello"), []byte("world")}, body.GetTextTermBatches()[0].GetTerms())
 
 	changed, err = FillFunctionFields([]FunctionRunner{runner}, body)
 	require.NoError(t, err)

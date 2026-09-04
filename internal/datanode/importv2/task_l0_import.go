@@ -252,7 +252,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
-			nil, storage.StorageV2, false, t.req.GetStorageConfig())
+			nil, storage.StorageV2, false, t.req.GetStorageConfig(), nil)
 		if err != nil {
 			return nil, nil, err
 		}

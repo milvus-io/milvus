@@ -275,6 +275,11 @@ message StatsResult {
   map<int64, data.JsonKeyStats> json_key_stats_logs = 13;
   string manifest = 14;
   string base_manifest = 15;
+  // Text Log V2 artifacts for non-manifest output segments. Storage V3
+  // returns them through manifest.
+  repeated data.FieldBinlog text_log_v2 = 16;
+  // Complete aggregate statistics for the sorted output segment.
+  data.Statistics stats = 17;
 }
 
 message StatsResults {

@@ -160,14 +160,19 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 
 	for i := 0; i < len(text); i++ {
 		if len(text[i]) == 0 {
-			dst[i] = map[uint32]float32{}
+			if dst != nil {
+				dst[i] = map[uint32]float32{}
+			}
 			continue
 		}
 
 		if !typeutil.IsUTF8(text[i]) {
 			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
 		}
-		embeddingMap := map[uint32]float32{}
+		var embeddingMap map[uint32]float32
+		if dst != nil {
+			embeddingMap = map[uint32]float32{}
+		}
 
 		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
 		if err != nil {
@@ -179,28 +184,37 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
 			// TODO More Hash Option
-			hash := typeutil.HashString2LessUint32(token)
-			embeddingMap[hash] += 1
+			if dst != nil {
+				hash := typeutil.HashString2LessUint32(token)
+				embeddingMap[hash] += 1
+			}
 			if terms != nil {
 				terms[token] = struct{}{}
 			}
 		}
 		tokenStream.Destroy()
-		dst[i] = embeddingMap
+		if dst != nil {
+			dst[i] = embeddingMap
+		}
 	}
 	return nil
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
-	output, _, err := v.batchRun(false, inputs...)
+	output, _, err := v.batchRun(true, false, inputs...)
 	return output, err
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchRunWithTextTerms(inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
-	return v.batchRun(true, inputs...)
+	return v.batchRun(true, true, inputs...)
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
+func (v *MultiAnalyzerBM25FunctionRunner) BatchTextTerms(inputs ...any) ([]AnalyzedTextTermBatch, error) {
+	_, terms, err := v.batchRun(false, true, inputs...)
+	return terms, err
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) batchRun(buildEmbedding, collectTerms bool, inputs ...any) ([]any, []AnalyzedTextTermBatch, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
@@ -227,7 +241,10 @@ func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...
 	}
 
 	rowNum := len(text)
-	embedData := make([]map[uint32]float32, rowNum)
+	var embedData []map[uint32]float32
+	if buildEmbedding {
+		embedData = make([]map[uint32]float32, rowNum)
+	}
 	wg := sync.WaitGroup{}
 	concurrency := getAnalyzerRunnerConcurrency()
 	termSets := make([]map[string]struct{}, concurrency)
@@ -248,7 +265,11 @@ func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...
 				terms = make(map[string]struct{})
 				termSets[chunk] = terms
 			}
-			err := v.run(text[start:end], analyzer[start:end], embedData[start:end], terms)
+			var output []map[uint32]float32
+			if buildEmbedding {
+				output = embedData[start:end]
+			}
+			err := v.run(text[start:end], analyzer[start:end], output, terms)
 			if err != nil {
 				errCh <- err
 				return
@@ -265,7 +286,10 @@ func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...
 		}
 	}
 
-	output := []any{buildSparseFloatArray(embedData)}
+	var output []any
+	if buildEmbedding {
+		output = []any{buildSparseFloatArray(embedData)}
+	}
 	if !collectTerms {
 		return output, nil, nil
 	}
@@ -278,7 +302,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) batchRun(collectTerms bool, inputs ...
 	}
 	return output, []AnalyzedTextTermBatch{{
 		InputFieldID: v.inputFields[0].GetFieldID(),
-		Terms:        sortedTermBytes(merged),
+		Terms:        termBytes(merged),
 	}}, nil
 }
 

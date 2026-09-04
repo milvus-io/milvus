@@ -35,7 +35,8 @@ import (
 // helper avoids the trap of trying to recompute from FieldBinlog arrays —
 // V3 writers deliberately leave the statslog and bm25 FieldBinlogs nil
 // because stats are embedded in the manifest, so an array-based recompute
-// would silently report zero.
+// would silently report zero. Text Log V2 is written later and added by
+// writeCompactionTextTerms.
 //
 // deltalogs is normally nil for insert-side compactors (mix / sort /
 // bump-schema produce fresh segments without deltas) and non-nil only for

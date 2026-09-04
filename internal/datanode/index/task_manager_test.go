@@ -53,6 +53,12 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	baseManifest := "test_base_manifest_path"
 	textBaseManifest := "test_text_base_manifest_path"
 	manifest := "test_manifest_path"
+	textLogV2 := []*datapb.FieldBinlog{{
+		FieldID: 101,
+		Format:  "milvus_text_fst_v1",
+		Binlogs: []*datapb.Binlog{{LogID: 3}},
+	}}
+	stats := &datapb.Statistics{InsertBinlogSize: 4096, StatsBinlogSize: 1024}
 	jsonKeyStatsLogs := map[int64]*datapb.JsonKeyStats{
 		100: {
 			FieldID:                100,
@@ -94,6 +100,8 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
+			textLogV2,
+			stats,
 			"test_manifest_path",
 		)
 	})
@@ -133,6 +141,8 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.Equal(baseManifest, result.GetBaseManifest())
 		s.Equal(manifest, result.GetManifest())
 		s.Equal(jsonKeyStatsLogs, result.GetJsonKeyStatsLogs())
+		s.Equal(textLogV2, result.GetTextLogV2())
+		s.Equal(stats, result.GetStats())
 	})
 
 	s.Run("deleteStatsTaskInfos", func() {

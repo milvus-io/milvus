@@ -387,6 +387,12 @@ func checkSegmentSnapshotPaths(
 	checkPath func(string) error,
 	checkManifestOwnedPath func(string) error,
 ) error {
+	manifestOwnedPathCheck := checkPath
+	if segment.GetStorageVersion() >= milvusstorage.StorageV3 {
+		// StorageV3 text-log/text/JSON PB paths are placeholders. Validate URI
+		// safety, but do not require them under the self-contained bundle root.
+		manifestOwnedPathCheck = checkManifestOwnedPath
+	}
 	for _, fieldBinlog := range segment.GetBinlogs() {
 		if err := checkFieldBinlogs(fieldBinlog, checkPath); err != nil {
 			return err
@@ -407,18 +413,17 @@ func checkSegmentSnapshotPaths(
 			return err
 		}
 	}
+	for _, fieldBinlog := range segment.GetTextLogV2() {
+		if err := checkFieldBinlogs(fieldBinlog, manifestOwnedPathCheck); err != nil {
+			return err
+		}
+	}
 	for _, indexFile := range segment.GetIndexFiles() {
 		for _, filePath := range indexFile.GetIndexFilePaths() {
 			if err := checkPath(filePath); err != nil {
 				return err
 			}
 		}
-	}
-	manifestOwnedPathCheck := checkPath
-	if segment.GetStorageVersion() >= milvusstorage.StorageV3 {
-		// StorageV3 text/JSON PB paths are placeholders. Validate URI safety, but
-		// do not require them to remain under the self-contained bundle root.
-		manifestOwnedPathCheck = checkManifestOwnedPath
 	}
 	for _, textIndex := range segment.GetTextIndexFiles() {
 		for _, filePath := range textIndex.GetFiles() {
