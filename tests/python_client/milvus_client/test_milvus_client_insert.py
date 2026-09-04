@@ -738,10 +738,14 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
 
         # 3. Verify error on insert
-        error, succeeded = self.insert(client, collection_name, data=rows, check_task=CheckTasks.check_nothing)
-        assert not succeeded, "insert unexpectedly accepted a message larger than maxInsertSize"
+        error = self.insert(
+            client,
+            collection_name,
+            data=rows,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1102, ct.err_msg: "exceeds maxInsertSize"},
+        )[0]
         assert error.code == 1102, error
-        assert "exceeds maxInsertSize" in error.message, error
 
         self.drop_collection(client, collection_name)
 
