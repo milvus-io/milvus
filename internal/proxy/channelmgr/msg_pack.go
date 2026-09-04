@@ -128,12 +128,61 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	}
 
 	fieldsData := insertMsg.GetFieldsData()
-	sizeIdxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
+	_, _, contiguous := contiguousRowRange(rowOffsets)
+	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
+	repackedMsgs := make([]msgstream.TsMsg, 0)
+	var (
+		copiedMsg                 *msgstream.InsertMsg
+		firstFieldIdxs            []int64
+		singletonRangeIdxComputer *typeutil.FieldDataIdxComputer
+	)
+	appendRow := func(msg *msgstream.InsertMsg, offset int, fieldIdxs []int64) {
+		if msg.FieldsData == nil {
+			msg.FieldsData = make([]*schemapb.FieldData, len(fieldsData))
+		}
+		typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
+		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
+		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
+		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
+		msg.NumRows++
+	}
+	emitSparseBatch := func(rowStart int) {
+		if copiedMsg != nil {
+			repackedMsgs = append(repackedMsgs, copiedMsg)
+			copiedMsg = nil
+			return
+		}
+
+		// A singleton batch can share its row even when the overall selection
+		// is sparse. Its starting indexes were saved before sizing the next row.
+		msg := createInsertMsg(segmentID, channelName)
+		rowEnd := rowStart + 1
+		if canCreateInsertRangeView(insertMsg, rowStart, rowEnd) {
+			if singletonRangeIdxComputer == nil {
+				singletonRangeIdxComputer = typeutil.NewFieldDataIdxComputer(fieldsData)
+			}
+			dataEnds := singletonRangeIdxComputer.Compute(int64(rowEnd))
+			fieldViews, ok := typeutil.CreateFieldDataRangeView(
+				fieldsData, int64(rowStart), int64(rowEnd), firstFieldIdxs, dataEnds,
+			)
+			if ok {
+				msg.FieldsData = fieldViews
+				msg.HashValues = insertMsg.HashValues[rowStart:rowEnd:rowEnd]
+				msg.Timestamps = insertMsg.Timestamps[rowStart:rowEnd:rowEnd]
+				msg.RowIDs = insertMsg.RowIDs[rowStart:rowEnd:rowEnd]
+				msg.NumRows = 1
+				repackedMsgs = append(repackedMsgs, msg)
+				return
+			}
+		}
+		appendRow(msg, rowStart, firstFieldIdxs)
+		repackedMsgs = append(repackedMsgs, msg)
+	}
 	batches := make([]insertMsgBatch, 0, 1)
 	batchStart := 0
 	requestSize := 0
 	for i, offset := range rowOffsets {
-		fieldIdxs := sizeIdxComputer.Compute(int64(offset))
+		fieldIdxs := idxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
 			return nil, err
@@ -148,17 +197,44 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		// If the insert message size exceeds the threshold, finish the current
 		// batch first. Do not emit an empty batch before adding the first row.
 		if i > batchStart && requestSize+curRowMessageSize >= splitThreshold {
-			batches = append(batches, insertMsgBatch{start: batchStart, end: i})
+			if contiguous {
+				batches = append(batches, insertMsgBatch{start: batchStart, end: i})
+			} else {
+				emitSparseBatch(rowOffsets[batchStart])
+			}
 			batchStart = i
 			requestSize = 0
 		}
 		requestSize += curRowMessageSize
+
+		if !contiguous {
+			if i == batchStart {
+				// Defer the first row so singleton batches can use a view. Keep
+				// only its indexes because Compute reuses its result buffer.
+				if firstFieldIdxs == nil {
+					firstFieldIdxs = make([]int64, len(fieldsData))
+				}
+				copy(firstFieldIdxs, fieldIdxs)
+			} else {
+				if copiedMsg == nil {
+					copiedMsg = createInsertMsg(segmentID, channelName)
+					appendRow(copiedMsg, rowOffsets[batchStart], firstFieldIdxs)
+				}
+				appendRow(copiedMsg, offset, fieldIdxs)
+			}
+		}
+	}
+	if !contiguous {
+		if batchStart < len(rowOffsets) {
+			emitSparseBatch(rowOffsets[batchStart])
+		}
+		return repackedMsgs, nil
 	}
 	if batchStart < len(rowOffsets) {
 		batches = append(batches, insertMsgBatch{start: batchStart, end: len(rowOffsets)})
 	}
 
-	repackedMsgs := make([]msgstream.TsMsg, 0, len(batches))
+	repackedMsgs = make([]msgstream.TsMsg, 0, len(batches))
 	var (
 		rangeIdxComputer  *typeutil.FieldDataIdxComputer
 		appendIdxComputer *typeutil.FieldDataIdxComputer
@@ -167,8 +243,9 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	for _, batch := range batches {
 		msg := createInsertMsg(segmentID, channelName)
 		batchOffsets := rowOffsets[batch.start:batch.end]
-		rowStart, rowEnd, contiguous := contiguousRowRange(batchOffsets)
-		if contiguous && canCreateInsertRangeView(insertMsg, rowStart, rowEnd) {
+		rowStart := batchOffsets[0]
+		rowEnd := rowStart + len(batchOffsets)
+		if canCreateInsertRangeView(insertMsg, rowStart, rowEnd) {
 			if rangeIdxComputer == nil {
 				rangeIdxComputer = typeutil.NewFieldDataIdxComputer(fieldsData)
 				dataStarts = make([]int64, len(fieldsData))
@@ -196,14 +273,9 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		if appendIdxComputer == nil {
 			appendIdxComputer = typeutil.NewFieldDataIdxComputer(fieldsData)
 		}
-		msg.FieldsData = make([]*schemapb.FieldData, len(fieldsData))
 		for _, offset := range batchOffsets {
 			fieldIdxs := appendIdxComputer.Compute(int64(offset))
-			typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
-			msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
-			msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
-			msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-			msg.NumRows++
+			appendRow(msg, offset, fieldIdxs)
 		}
 		repackedMsgs = append(repackedMsgs, msg)
 	}
