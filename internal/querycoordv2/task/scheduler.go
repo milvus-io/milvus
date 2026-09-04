@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -548,6 +549,7 @@ type Scheduler interface {
 	RemoveByNode(node int64)
 	GetChannelTaskNum(filters ...TaskFilter) int
 	GetSegmentTaskNum(filters ...TaskFilter) int
+	WaitCollectionIdle(ctx context.Context, collectionID int64) error
 	GetTasksJSON() string
 
 	// GetSegmentTaskDeltaSnapshot returns pending segment-task deltas for nodeIDs.
@@ -561,16 +563,18 @@ type taskScheduler struct {
 	executors   *ConcurrentMap[int64, *Executor] // NodeID -> Executor
 	idAllocator func() UniqueID
 
-	distMgr   *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr meta.TargetManagerInterface
-	broker    meta.Broker
-	cluster   session.Cluster
-	nodeMgr   *session.NodeManager
+	distMgr     *meta.DistributionManager
+	meta        *meta.Meta
+	targetMgr   meta.TargetManagerInterface
+	broker      meta.Broker
+	cluster     session.Cluster
+	nodeMgr     *session.NodeManager
+	installGate *schemaevolution.GateManager
 
 	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
 	collKeyLock  *lock.KeyLock[int64] // guards Add()
 	tasks        *ConcurrentMap[UniqueID, struct{}]
+	leases       *ConcurrentMap[UniqueID, func()]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
 	processQueue *nodeTaskQueue
@@ -590,8 +594,13 @@ func NewScheduler(ctx context.Context,
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	installGates ...*schemaevolution.GateManager,
 ) *taskScheduler {
 	id := atomic.NewInt64(time.Now().UnixMilli())
+	var installGate *schemaevolution.GateManager
+	if len(installGates) > 0 {
+		installGate = installGates[0]
+	}
 	return &taskScheduler{
 		ctx:       ctx,
 		executors: NewConcurrentMap[int64, *Executor](),
@@ -608,6 +617,7 @@ func NewScheduler(ctx context.Context,
 
 		collKeyLock:      lock.NewKeyLock[int64](),
 		tasks:            NewConcurrentMap[UniqueID, struct{}](),
+		leases:           NewConcurrentMap[UniqueID, func()](),
 		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
 		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
 		processQueue:     newNodeTaskQueue(),
@@ -615,6 +625,7 @@ func NewScheduler(ctx context.Context,
 		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
 		segmentTaskDelta: NewSegmentTaskDelta(),
 		channelTaskDelta: NewChannelTaskDelta(),
+		installGate:      installGate,
 	}
 }
 
@@ -663,13 +674,28 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 func (scheduler *taskScheduler) Add(task Task) error {
 	scheduler.collKeyLock.Lock(task.CollectionID())
 	defer scheduler.collKeyLock.Unlock(task.CollectionID())
+	var release func()
+	if scheduler.installGate != nil && !schemaevolution.HasAdmissionBypass(task.Context()) {
+		var err error
+		release, err = scheduler.installGate.Acquire(task.Context(), task.CollectionID())
+		if err != nil {
+			task.Cancel(err)
+			return err
+		}
+	}
 	err := scheduler.preAdd(task)
 	if err != nil {
+		if release != nil {
+			release()
+		}
 		task.Cancel(err)
 		return err
 	}
 
 	task.SetID(scheduler.idAllocator())
+	if release != nil {
+		scheduler.leases.Insert(task.ID(), release)
+	}
 	scheduler.waitQueue.Add(task)
 	scheduler.tasks.Insert(task.ID(), struct{}{})
 	scheduler.incExecutingTaskDelta(task)
@@ -928,6 +954,23 @@ func (scheduler *taskScheduler) GetSegmentTaskDeltaSnapshot(nodeIDs []int64, col
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {
 	return scheduler.channelTaskDelta.Get(nodeID, collectionID)
+}
+
+func (scheduler *taskScheduler) WaitCollectionIdle(ctx context.Context, collectionID int64) error {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		idle := scheduler.GetSegmentTaskNum(WithCollectionID2TaskFilter(collectionID)) == 0 &&
+			scheduler.GetChannelTaskNum(WithCollectionID2TaskFilter(collectionID)) == 0
+		if idle {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
@@ -1246,6 +1289,14 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
 }
 
+func shouldRecordSegmentTaskError(err error) bool {
+	return err != nil && !errors.IsAny(err,
+		merr.ErrChannelNotFound,
+		merr.ErrServiceTooManyRequests,
+		merr.ErrCollectionSchemaVersionNotReady,
+	)
+}
+
 func (scheduler *taskScheduler) remove(task Task) {
 	log := mlog.With(
 		mlog.Int64("taskID", task.ID()),
@@ -1287,6 +1338,9 @@ func (scheduler *taskScheduler) remove(task Task) {
 		task.Cancel(nil)
 	}
 	_, ok := scheduler.tasks.GetAndRemove(task.ID())
+	if release, exists := scheduler.leases.GetAndRemove(task.ID()); exists {
+		release()
+	}
 	scheduler.waitQueue.Remove(task)
 	scheduler.processQueue.Remove(task)
 	if ok {
@@ -1306,9 +1360,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
-		if task.Status() == TaskStatusFailed &&
-			task.Err() != nil &&
-			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
+		if task.Status() == TaskStatusFailed && shouldRecordSegmentTaskError(task.Err()) {
 			scheduler.recordSegmentTaskError(task)
 		}
 

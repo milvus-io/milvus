@@ -117,6 +117,10 @@ type QueryNode struct {
 
 	// segment loader
 	loader segments.Loader
+	// topologyMutationLocks serializes collection-scoped QueryNode topology
+	// RPCs. Long-running work may happen outside the collection schema fence,
+	// but each RPC's final visible commit is still ordered under this lock.
+	topologyMutationLocks *lock.KeyLock[int64]
 
 	// Search/Query
 	scheduler scheduler.Scheduler
@@ -155,12 +159,13 @@ type QueryNode struct {
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:              ctx,
-		cancel:           cancel,
-		factory:          factory,
-		lifetime:         lifetime.NewLifetime(commonpb.StateCode_Abnormal),
-		metricsRequest:   metricsinfo.NewMetricsRequest(),
-		distDeltaTracker: newDataDistributionDeltaTracker(),
+		ctx:                   ctx,
+		cancel:                cancel,
+		factory:               factory,
+		lifetime:              lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		metricsRequest:        metricsinfo.NewMetricsRequest(),
+		distDeltaTracker:      newDataDistributionDeltaTracker(),
+		topologyMutationLocks: lock.NewKeyLock[int64](),
 	}
 
 	return node

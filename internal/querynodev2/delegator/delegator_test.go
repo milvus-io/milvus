@@ -2769,7 +2769,7 @@ func TestUpdateSchemaUpdatesDelegatorRuntimeAfterCollectionAdvanced(t *testing.T
 	require.NoError(t, sd.UpdateSchema(context.Background(), newSchema, 100))
 	require.Equal(t, uint64(1), sd.collectionVersion.Load())
 	require.Equal(t, uint64(100), sd.schemaBarrierTs)
-	require.Error(t, sd.addDistributionIfSchemaBarrierOK(99))
+	require.Error(t, sd.addDistributionIfSchemaBarrierOK(newSchema, 99))
 	require.NotNil(t, sd.getIDFOracle())
 	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, key, 102, func(function.FunctionRunner) error {
 		return nil
@@ -2886,6 +2886,50 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 
 	assert.Equal(t, uint64(100), sd.schemaBarrierTs)
 	assert.Equal(t, uint64(2), sd.collection.SchemaVersion())
+}
+
+func TestInstallSchemaPropagatesEqualRetryToWorker(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+	collectionID := int64(1000)
+	schema := newFunctionRuntimeTestSchemaWithVersion(2)
+	manager := segments.NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
+	defer manager.Collection.Unref(collectionID, 1)
+	collection := manager.Collection.Get(collectionID)
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.MatchedBy(func(req *querypb.UpdateSchemaRequest) bool {
+		return req.GetCollectionID() == collectionID &&
+			req.GetSchema().GetVersion() == schema.GetVersion() &&
+			req.GetSchemaBarrierTs() == 100
+	})).Return(merr.Success(), nil).Once()
+	localWorker := cluster.NewMockWorker(t)
+	localWorker.EXPECT().UpdateSchema(mock.Anything, mock.MatchedBy(func(req *querypb.UpdateSchemaRequest) bool {
+		return req.GetCollectionID() == collectionID && req.GetSchemaBarrierTs() == 100
+	})).Return(merr.Success(), nil).Once()
+	workerManager := cluster.NewMockManager(t)
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(2)).Return(worker, nil).Once()
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(localWorker, nil).Once()
+	distribution := NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	distribution.AddDistributions(SegmentEntry{SegmentID: 10, PartitionID: 1, NodeID: 2, Version: 1})
+	sd := &shardDelegator{
+		collectionID:               collectionID,
+		vchannelName:               "test-channel",
+		collection:                 collection,
+		collectionManager:          manager.Collection,
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               distribution,
+		workerManager:              workerManager,
+		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
+		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		schemaBarrierTs:            100,
+	}
+	sd.collectionVersion.Store(uint64(schema.GetVersion()))
+	defer sd.Close()
+
+	require.NoError(t, sd.InstallSchema(context.Background(), schema, 100))
+	require.NoError(t, sd.UpdateSchema(context.Background(), schema, 100))
 }
 
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -99,8 +100,10 @@ type Server struct {
 	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
-	jobScheduler  *job.Scheduler
-	taskScheduler task.Scheduler
+	jobScheduler                 *job.Scheduler
+	taskScheduler                task.Scheduler
+	installGate                  *schemaevolution.GateManager
+	schemaInstallVersionProvider schemaevolution.SessionProvider
 
 	// HeartBeat
 	distController dist.Controller
@@ -146,6 +149,7 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 		ctx:            ctx,
 		cancel:         cancel,
 		metricsRequest: metricsinfo.NewMetricsRequest(),
+		installGate:    schemaevolution.NewGateManager(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -158,6 +162,7 @@ func (s *Server) Register() error {
 
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
+	s.schemaInstallVersionProvider = session
 	if s.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
@@ -319,6 +324,7 @@ func (s *Server) initQueryCoord() error {
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+		s.gateManager(),
 	)
 
 	// init proxy client manager
@@ -429,6 +435,7 @@ func (s *Server) initObserver() {
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+		s.installGate,
 	)
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,
@@ -480,9 +487,6 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 
-	s.wg.Add(1)
-	go s.watchNodes(revision)
-
 	// check whether old node exist, if yes suspend auto balance until all old nodes down
 	s.updateBalanceConfigLoop(s.ctx)
 
@@ -490,7 +494,15 @@ func (s *Server) startQueryCoord() error {
 		mlog.Warn(s.ctx, "querycoord failed to watch proxy", mlog.Err(err))
 	}
 
-	s.startServerLoop()
+	if err := s.startServerLoop(); err != nil {
+		return err
+	}
+
+	// Do not consume membership changes until the initial distribution snapshot
+	// has recovered successfully. Startup failure must not leave a background
+	// watcher mutating an otherwise unstarted QueryCoord instance.
+	s.wg.Add(1)
+	go s.watchNodes(revision)
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -500,11 +512,15 @@ func (s *Server) startQueryCoord() error {
 	return nil
 }
 
-func (s *Server) startServerLoop() {
-	// leader cache observer shall be started before `SyncAll` call
-	s.leaderCacheObserver.Start(s.ctx)
+func (s *Server) startServerLoop() error {
 	// Recover dist, to avoid generate too much task when dist not ready after restart
-	s.distController.SyncAll(s.ctx)
+	if err := s.distController.SyncAll(s.ctx); err != nil {
+		return merr.Wrap(err, "failed to recover querynode distribution")
+	}
+	// No scheduler/observer may run against a partial recovery snapshot. Start
+	// the remaining loops only after every registered QueryNode has reported its
+	// initial distribution successfully.
+	s.leaderCacheObserver.Start(s.ctx)
 
 	// start the components from inside to outside,
 	// to make the dependencies ready for every component
@@ -525,6 +541,7 @@ func (s *Server) startServerLoop() {
 
 	mlog.Info(s.ctx, "start job scheduler...")
 	s.jobScheduler.Start()
+	return nil
 }
 
 func (s *Server) Stop() error {

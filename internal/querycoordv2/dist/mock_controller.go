@@ -121,8 +121,21 @@ func (_c *MockController_Stop_Call) RunAndReturn(run func()) *MockController_Sto
 }
 
 // SyncAll provides a mock function with given fields: ctx
-func (_m *MockController) SyncAll(ctx context.Context) {
-	_m.Called(ctx)
+func (_m *MockController) SyncAll(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncAll")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // MockController_SyncAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncAll'
@@ -143,13 +156,13 @@ func (_c *MockController_SyncAll_Call) Run(run func(ctx context.Context)) *MockC
 	return _c
 }
 
-func (_c *MockController_SyncAll_Call) Return() *MockController_SyncAll_Call {
-	_c.Call.Return()
+func (_c *MockController_SyncAll_Call) Return(_a0 error) *MockController_SyncAll_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockController_SyncAll_Call) RunAndReturn(run func(context.Context)) *MockController_SyncAll_Call {
-	_c.Run(run)
+func (_c *MockController_SyncAll_Call) RunAndReturn(run func(context.Context) error) *MockController_SyncAll_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

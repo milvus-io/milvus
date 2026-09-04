@@ -65,6 +65,7 @@ const (
 	reopenBM25LoadRetryCount          = 5
 	reopenBM25LoadRetryInitialBackoff = 200 * time.Millisecond
 	reopenBM25LoadRetryMaxBackoff     = time.Minute
+	staleLoadCleanupTimeout           = 10 * time.Second
 )
 
 func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
@@ -632,9 +633,12 @@ func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.L
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
-func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (retErr error) {
 	if len(req.GetInfos()) == 0 {
 		return nil
+	}
+	if err := validateLoadSchemaBarrier(sd.collection, req); err != nil {
+		return err
 	}
 
 	log := sd.getLogger(ctx)
@@ -670,6 +674,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	req.Base.TargetID = targetNodeID
 	log.Debug(ctx, "worker loads segments...")
+	ownedLoads := typeutil.NewConcurrentSet[int64]()
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 		segmentID := req.GetInfos()[0].GetSegmentID()
@@ -678,7 +683,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		// caller's ctx ends; the shared load keeps running for its initiator.
 		select {
 		case res := <-sd.sf.DoChan(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
-			return struct{}{}, worker.LoadSegments(ctx, req)
+			err := worker.LoadSegments(ctx, req)
+			if err == nil {
+				ownedLoads.Insert(segmentID)
+			}
+			return struct{}{}, err
 		}):
 			return res.Err
 		case <-ctx.Done():
@@ -712,6 +721,36 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 	log.Debug(ctx, "work loads segments done")
+	if req.GetLoadScope() == querypb.LoadScope_Full {
+		defer func() {
+			if retErr == nil || !errors.Is(retErr, merr.ErrCollectionSchemaVersionNotReady) {
+				return
+			}
+			segmentIDs := lo.FilterMap(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) (int64, bool) {
+				segmentID := info.GetSegmentID()
+				return segmentID, ownedLoads.Contain(segmentID) && !sd.distribution.SealedSegmentExistsOnNode(segmentID, targetNodeID)
+			})
+			if len(segmentIDs) == 0 {
+				return
+			}
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleLoadCleanupTimeout)
+			defer cancel()
+			cleanupReq := &querypb.ReleaseSegmentsRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				NodeID:       targetNodeID,
+				CollectionID: req.GetCollectionID(),
+				Scope:        querypb.DataScope_Historical,
+				SegmentIDs:   segmentIDs,
+			}
+			if cleanupErr := worker.ReleaseSegments(cleanupCtx, cleanupReq); cleanupErr != nil {
+				log.Warn(cleanupCtx, "failed to clean rejected worker load", mlog.Err(cleanupErr))
+			}
+		}()
+	}
+
+	if err := validateLoadSchemaBarrier(sd.collection, req); err != nil {
+		return err
+	}
 
 	if err := sd.syncCollectionMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))
@@ -765,7 +804,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+			entries, req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs())
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -776,6 +815,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 		return nil
 	})
+}
+
+func validateLoadSchemaBarrier(collection *segments.Collection, req *querypb.LoadSegmentsRequest) error {
+	if collection == nil {
+		return nil
+	}
+	return segments.ValidateCollectionSchemaBarrier(
+		collection,
+		req.GetCollectionID(),
+		req.GetSchema(),
+		req.GetLoadMeta().GetSchemaBarrierTs(),
+	)
 }
 
 func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error) error {
@@ -796,11 +847,14 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
+func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schema *schemapb.CollectionSchema, schemaBarrierTs uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
+	if err := segments.ValidateCollectionSchemaBarrier(sd.collection, sd.collectionID, schema, schemaBarrierTs); err != nil {
+		return err
+	}
 	if schemaBarrierTs < sd.schemaBarrierTs {
-		return merr.WrapErrServiceInternal("schema barrier changed")
+		return merr.WrapErrCollectionSchemaVersionNotReady(sd.collectionID, 0, 1)
 	}
 
 	// alter distribution
@@ -1015,6 +1069,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
+	schema *schemapb.CollectionSchema,
 	schemaBarrierTs uint64,
 ) error {
 	log := sd.getLogger(ctx)
@@ -1145,7 +1200,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// Atomically add to distribution while still holding RLock, so no
 			// ProcessDelete can run between "deletes applied" and "segment
 			// visible".
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaBarrierOK(schema, schemaBarrierTs, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
@@ -1181,7 +1236,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
 				)
 			}
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaBarrierOK(schema, schemaBarrierTs, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
