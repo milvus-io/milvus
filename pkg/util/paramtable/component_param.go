@@ -3928,6 +3928,9 @@ type queryNodeConfig struct {
 	InterimIndexSubDim                 ParamItem `refreshable:"false"`
 	InterimIndexRefineRatio            ParamItem `refreshable:"false"`
 	InterimIndexBuildRatio             ParamItem `refreshable:"false"`
+	InterimIndexAsyncBuild             ParamItem `refreshable:"true"`
+	InterimIndexAsyncFinalizeBudgetMs  ParamItem `refreshable:"true"`
+	InterimIndexAsyncCatchupDeadlineMs ParamItem `refreshable:"true"`
 	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
 	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
@@ -4756,6 +4759,50 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildRatio.Init(base.mgr)
+
+	p.InterimIndexAsyncBuild = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.asyncGrowingBuild",
+		Version:      "2.6.5",
+		DefaultValue: "false",
+		Doc: `build the first growing interim index in a background pool instead of on the insert path.
+Hot-updatable; a change only affects growing segments created afterwards.
+Set true to enable the asynchronous build; false keeps the legacy synchronous build.`,
+		Export: true,
+	}
+	p.InterimIndexAsyncBuild.Init(base.mgr)
+
+	p.InterimIndexAsyncFinalizeBudgetMs = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.asyncGrowingFinalizeBudgetMs",
+		Version:      "2.6.5",
+		DefaultValue: "20",
+		Formatter: func(v string) string {
+			if getAsInt(v) <= 0 {
+				return "20"
+			}
+			return v
+		},
+		Doc: `maximum estimated time in milliseconds allowed for the final locked catch-up of an async growing interim index.
+Hot-updatable; a change only affects growing segments created afterwards.`,
+		Export: true,
+	}
+	p.InterimIndexAsyncFinalizeBudgetMs.Init(base.mgr)
+
+	p.InterimIndexAsyncCatchupDeadlineMs = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.asyncGrowingCatchupDeadlineMs",
+		Version:      "2.6.5",
+		DefaultValue: "30000",
+		Formatter: func(v string) string {
+			if getAsInt(v) <= 0 {
+				return "30000"
+			}
+			return v
+		},
+		Doc: `maximum total time in milliseconds for async growing interim-index catch-up after the first build.
+When the deadline expires before the final gap fits the finalize budget, the unpublished index is discarded and the segment permanently falls back to raw search.
+Hot-updatable; a change only affects growing segments created afterwards.`,
+		Export: true,
+	}
+	p.InterimIndexAsyncCatchupDeadlineMs.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

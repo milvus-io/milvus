@@ -607,6 +607,17 @@ queryNode:
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
       indexBuildRatio: 0.1 # the ratio of building interim index rows count with max row count of a flush segment, should set to be < 1.0
+      # build the first growing interim index in a background pool instead of on the insert path.
+      # Hot-updatable; a change only affects growing segments created afterwards.
+      # Set true to enable the asynchronous build; false keeps the legacy synchronous build.
+      asyncGrowingBuild: false
+      # maximum estimated time in milliseconds allowed for the final locked catch-up of an async growing interim index.
+      # Hot-updatable; a change only affects growing segments created afterwards.
+      asyncGrowingFinalizeBudgetMs: 20
+      # maximum total time in milliseconds for async growing interim-index catch-up after the first build.
+      # When the deadline expires before the final gap fits the finalize budget, the unpublished index is discarded and the segment permanently falls back to raw search.
+      # Hot-updatable; a change only affects growing segments created afterwards.
+      asyncGrowingCatchupDeadlineMs: 30000
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
       refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
