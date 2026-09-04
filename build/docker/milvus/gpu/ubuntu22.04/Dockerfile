@@ -44,3 +44,4 @@ ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus
 
+EXPOSE 19530
