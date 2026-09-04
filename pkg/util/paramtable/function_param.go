@@ -125,6 +125,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
 			case "huggingface.enable":
 				return "Whether to enable Hugging Face text embedding service"
+			case "orcarouter.credential":
+				return "The name in the credential configuration item"
+			case "orcarouter.url":
+				return "Your OrcaRouter embedding url, Default is the official embedding url"
+			case "orcarouter.enable":
+				return "Whether to enable OrcaRouter model service"
 			default:
 				return ""
 			}

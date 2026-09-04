@@ -1678,6 +1678,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service
         url:  # Your openai embedding url, Default is the official embedding url
+      orcarouter:
+        credential:  # The name in the crendential configuration item
+        enable: true # Whether to enable OrcaRouter model service
+        url:  # Your orcarouter embedding url, Default is the official embedding url
       siliconflow:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable siliconflow model service
