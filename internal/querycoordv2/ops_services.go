@@ -336,13 +336,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	// Mark the node as stopping (same path as a session with Stopping=true),
-	// so that querycoord stops treating it as a valid target and the stopping
-	// balance migrates its delegator vchannels/segments off the node.
-	// This also works for nodes that are not in any resource group (e.g. the
-	// embedded query node of a streaming node whose session reports another
-	// resource group), where HandleNodeDown would silently no-op.
-	s.handleNodeStopping(req.GetNodeID())
+	s.meta.HandleNodeDown(ctx, req.GetNodeID())
 	return merr.Success(), nil
 }
 
@@ -369,10 +363,6 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 			merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be resumed")), nil
 	}
 
-	// Reset the node state back to normal before handling node up, otherwise
-	// handleNodeUp skips nodes in stopping state and the node can never be
-	// re-assigned to a resource group after SuspendNode.
-	info.SetState(session.NodeStateNormal)
 	s.meta.HandleNodeUp(ctx, req.GetNodeID())
 
 	return merr.Success(), nil

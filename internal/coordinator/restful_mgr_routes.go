@@ -859,10 +859,13 @@ func (s *mixCoordImpl) handlePutStreamingNodeStatus(w http.ResponseWriter, req *
 		return
 	}
 	err = s.handleQueryNodeStatusUpdate(req.Context(), requestBody.NodeID, requestBody.Status)
-	if err != nil {
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		logger.Info(req.Context(), "handlePutStreamingNodeStatus handleQueryNodeStatusUpdate update failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "%s, %s"}`, errMsg, err.Error()), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"msg": "%s", "%s"}`, errMsg, err.Error()), http.StatusInternalServerError)
 		return
+	}
+	if err != nil {
+		logger.Info(req.Context(), "handlePutStreamingNodeStatus QueryCoord ingore node")
 	}
 	logger.Info(req.Context(), "handlePutStreamingNodeStatus success", mlog.Any("status", requestBody.Status))
 	w.Header().Set("Content-Type", "application/json")
