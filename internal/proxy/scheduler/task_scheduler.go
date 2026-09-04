@@ -445,7 +445,7 @@ type DqTaskQueue struct {
 }
 
 func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
-	element, err := queue.BaseTaskQueue.enqueue(t)
+	element, err := queue.enqueue(t)
 	if err != nil {
 		return err
 	}
