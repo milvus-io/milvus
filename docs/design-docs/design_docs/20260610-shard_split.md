@@ -1,7 +1,21 @@
-# Design Document: Online Shard Split for Namespace Collections
+# Design Document: Online Shard Split
 
 **Date**: June 2026
 **Related Issue**: [#50463](https://github.com/milvus-io/milvus/issues/50463)
+
+**Revision, September 2026.** Two changes, both recorded in place:
+
+- **Routing is by residues** against one collection-wide modulus, not by the
+  byte-comparable key ranges this document originally specified. §3.1 records
+  why. Everything from §4 on is unaffected by that change.
+- **The design now covers hash-routed (primary-key) collections too**, not only
+  namespace ones. They share the whole spine — the fence, target genesis, the
+  write switch, the fronting read window, the freeze defenses, adoption — and
+  diverge in exactly three places, each marked *hash-routed* where it appears:
+  the redistribution rewrites rows instead of relabeling segments (§6.5), a
+  request's fence retry is per row rather than per request (§3.3), and the shard
+  count can be set to an arbitrary value, which fences every shard at once
+  (§3.5, §6.6).
 
 ---
 
@@ -30,7 +44,21 @@ This design adds **online shard split** for namespace-enabled (multi-tenant)
 collections: a loaded shard is split into two shards without stopping reads
 or writes, with **zero data rewrite** — segments only need to be relabeled
 to their new shard, because every segment belongs to exactly one partition
-(namespace) and the split point always falls on a namespace boundary.
+(namespace) and a namespace never spans shards (§3.1).
+
+**Hash-routed collections.** An ordinary collection is routed by
+`hash(pk) % shardNum`. Its shard's segments hold rows whose primary keys spread
+uniformly over the whole key space, so there is no boundary on which a segment
+can be cut whole and the relabel argument above does not apply. Such a collection
+is split by the same machinery with one phase replaced: the redistribution
+**rewrites** the source shard's rows into per-target segments (§6.5) instead of
+relabeling them. Everything else — the fence, the target genesis, the write
+switch, the fronting window, the freeze defenses, adoption — is shared.
+
+That also makes the shard count settable to an arbitrary value rather than only
+doubled, because a rewrite can move a row anywhere. A **rehash** fences every
+shard at once and rewrites the whole collection (§3.5, §6.6); it is never
+proposed automatically.
 
 **Prerequisite.** Current master implements namespaces as a hidden VarChar
 partition-key field with isolation (`handleNamespaceField`,
@@ -41,15 +69,19 @@ yet. This design **depends on the in-progress namespace(=partition) work**
 delivering exactly those guarantees (every segment belongs to one
 namespace; L0 segments are namespace-scoped). Without them, the
 zero-data-rewrite relabel argument does not hold for segments containing
-multiple namespaces that straddle the split key.
+multiple namespaces that straddle the split.
 
 ### 1.2 Goals
 
 - Split one shard of a namespace collection into two shards online; reads
   and writes keep working through the whole procedure (a short latency
   increase is acceptable, data loss or inconsistency is not).
-- No data rewrite: redistribution is a metadata-only relabel of segments
-  (including the namespace-scoped L0 segments).
+- Change a hash-routed collection's shard count to an arbitrary `M`, online,
+  with the same guarantees.
+- No data rewrite **for a namespace collection**: its redistribution is a
+  metadata-only relabel of segments (including the namespace-scoped L0
+  segments). A hash-routed collection cannot have that — its segments straddle
+  every boundary — and pays an `O(bytes)` rewrite instead (§6.5).
 - Full consistency: no message loss or duplication, ordering preserved,
   no MVCC ghost reads, deletes correct throughout the transition window.
 - Crash safety: every step is idempotent and resumable; before the write
@@ -85,65 +117,125 @@ The following properties of the current system shape the design:
 
 ## 3. Routing Design
 
-### 3.1 Range routing
+### 3.1 Residue routing
 
-A shard owns a contiguous range `[lower, upper)` of a byte-comparable
-routing-key space. For a namespace collection the routing key is
+A collection has one **routing modulus** `M`, and each shard owns a set of
+**residues** taken against it. A shard's predicate is
 
 ```
-routing_key = big_endian(hash(namespace)) || namespace_utf8
+hash(namespace) % M  ∈  residues(shard)
 ```
 
-The hash prefix spreads namespaces uniformly to avoid hotspots; appending
-the original value makes the key unique and deterministic per namespace,
-and big-endian encoding keeps byte order equal to logical order. Lookup is
-a binary search over the shard ranges, `O(log #shards)`.
+where `hash` is `typeutil.HashString2Uint32`. The residues of all shards tile
+`[0, M)` exactly, so every namespace has exactly one owning shard.
 
-A split picks a split key on a namespace boundary (chosen from per-namespace
-size statistics so the two halves are balanced) and divides one range into
-two. A single oversized namespace can be isolated into a dedicated shard
-(its range degenerates to a single key prefix).
+Initial state of an `N`-shard collection: `M = N`, shard `k` owns `{k}`. That
+state is **implicit** — a collection that has never been split carries no
+residues in meta, and a shard list with no residues anywhere is read as "shard
+`i` owns residue `i` at modulus `len(shards)`". Since the legacy
+`HashNamespace2Channels` is `HashString2Uint32(namespace) % len(channels)`, this
+is the existing assignment bit for bit, and an existing collection needs no
+migration.
 
-Collections that do not enable namespaces keep the existing
-`hash(pk) % shardNum` routing unchanged.
+Splitting a shard **divides the residues it owns**: the set is cut in two,
+weighted by the data actually sitting on each residue, and `M` does not move. Only
+a shard down to a single residue has nothing left to divide; then `M` doubles and
+the residue `r` becomes `{r}` and `{r + M}`.
+
+> **A doubling is a collection-wide change.** Residue `r` at `M` covers
+> `{r, r + M}` at `2M`, so when `M` doubles every untouched shard's residues must
+> be re-expressed at the new modulus in the same commit, or half of that shard's
+> keys route nowhere.
+
+**A namespace still never spans shards.** One namespace has one hash, so it falls
+on one residue at any modulus and therefore belongs to exactly one shard. That is
+what keeps the zero-rewrite relabel of §1.2 valid: a segment holds one namespace,
+so it moves whole.
+
+For the same reason a shard holding a **single namespace** is still excluded from
+the trigger (§6.1): every key in it hashes alike, so no division and no doubling
+separates anything, and its growth is bounded by the namespace hard limit
+instead.
+
+**Why residues rather than the key ranges this design originally specified.** An
+earlier revision routed on a byte-comparable key space,
+`big_endian(hash(namespace)) || namespace_utf8`, with each shard owning a list of
+`[lower, upper)` ranges and a binary search at lookup. Three things decided
+against it:
+
+1. Extending the split to hash-routed collections needs hash routing regardless.
+   Two routing models means two derivations, two write paths, and two places to
+   get the tiling check wrong; one model means the proxy, the routing commit and
+   the DataNode partitioner all derive from the same package.
+2. The legacy assignment already **is** a residue assignment, so backward
+   compatibility is an identity rather than a special case.
+3. Balance came from *searching* for a split point; with residues the same
+   per-namespace statistics are used to **weigh** the division instead, and the
+   encoding no longer has to carry byte-comparable keys.
+
+What is given up is ordering: a range table could keep adjacent namespaces on one
+shard, and residues cannot. Nothing in this design relied on that.
 
 ### 3.2 Metadata
 
-The collection meta is already the authoritative source of the vchannel
-list, so the shard routing facts live next to it and are updated in the
-same transaction:
+The collection meta is already the authoritative source of the vchannel list, so
+the shard routing facts live next to it and are updated in the same transaction
+(all defined in milvus-proto #618):
 
-- `etcdpb.CollectionShardInfo` (parallel to `virtual_channel_names`) gains
-  a `ShardState` (`Normal / Creating / Splitting / Dropped`) and a routing
-  predicate carried as a `oneof`: `RangeRouting` — a *list* of
-  byte-comparable `[lower, upper)` ranges — or `HashRouting` — a list of
-  hash buckets (reserved for hash-table split). A shard owns a *list* of
-  pieces, not a single contiguous range, so it can hold multiple disjoint
-  ranges: this is required to carve a hot tenant out of the middle of a
-  shard (leaving the cold remainder as two ranges), and symmetrically to
-  merge non-buddy hash shards. The flat single `lower/upper` form cannot
-  express that. (Defined in milvus-proto #618; `model.ShardInfo` mirrors it.)
-- `etcdpb.CollectionInfo` gains `routing_mode` (`Hash` for legacy
-  collections, `Range` for namespace collections subject to split).
+- `etcdpb.CollectionShardInfo` (parallel to `virtual_channel_names`) gains a
+  `ShardState` (`Normal / Creating / Splitting / Dropped`) and its residues, as
+  `schema.HashRouting { repeated uint64 buckets; }`. A shard owns a *set*, not a
+  single residue, so a shard produced by an earlier division can be halved again
+  without moving the modulus.
+- `etcdpb.CollectionInfo` gains `routing_modulus` — the one modulus every
+  shard's residues are taken against — and `shard_by`, which records the field
+  the hash is taken over (the namespace here, the primary key for a hash-routed
+  collection).
 
-All new fields default to legacy-compatible zero values, so existing
-collections are unaffected. The in-memory routing table is *derived* from
-the collection meta; it is not persisted separately.
+All new fields default to legacy-compatible zero values, so existing collections
+are unaffected; the implicit form of §3.1 is what a zero modulus and empty
+residue sets mean. The in-memory routing table is *derived* from the collection
+meta and is not persisted separately.
+
+**Provenance is not here.** Which sources a target was carved from lives in the
+split task and is discarded with it, so the collection meta never carries it and
+nothing has to sweep it. An earlier revision put `source_vchannels` on the shard
+info; the readiness question that needed it is asked collection-wide instead
+(§6.3).
 
 ### 3.3 Routing refresh on fence
 
-There is no routing version on the write path. The proxy caches the routing
-table (derived from `DescribeCollection`) and routes each write directly to
-the owning shard's vchannel. When a write reaches a vchannel already fenced
-by a split, the StreamingNode's shard interceptor rejects it with
+There is no routing version on the write path. The proxy derives the routing
+table once, when the meta cache fills the collection's entry, and routes each
+write directly to the owning shard's vchannel. When a write reaches a vchannel
+already fenced by a split, the StreamingNode's shard interceptor rejects it with
 `STREAMING_CODE_SHARD_FENCED` (the source vchannel is `Splitting`/`Dropped`).
 The proxy treats this as a stale-routing signal: it invalidates the cached
-collection meta, refetches `DescribeCollection`, re-resolves the write to the
-new owning shard, and retries. A single namespace write maps to exactly one
-shard, so the retry is all-or-nothing and cannot double-write. The refresh
-can race the routing commit (the new table may not be visible yet), so the
-retry is bounded with backoff; once the commit lands the refreshed table
-routes to the target and the loop terminates.
+collection meta, refetches `DescribeCollection`, re-derives the table, re-resolves
+the write to the new owning shard, and retries. The refresh can race the routing
+commit (the new table may not be visible yet), so the retry is bounded with
+backoff; once the commit lands the refreshed table routes to the target and the
+loop terminates.
+
+**For a namespace collection the retry is all-or-nothing**, because a namespace
+write maps to exactly one shard: either it was refused or it was not, and
+re-sending it cannot double-write.
+
+> ***Hash-routed*: the retry unit is the ROW.** `AppendMessages` hands one
+> message per vchannel to its own producer and commits them **independently**. A
+> hash-routed request spans several shards, and a doubling fences exactly one of
+> them, so the request's other shards commit while the fenced one is refused —
+> and re-sending the whole request would write the committed rows twice. Only the
+> rows of a refused message are re-routed, against the post-split topology they
+> now belong to. Per-message granularity is what makes this exact: a message
+> belongs to one vchannel and is appended or refused whole, never in part, so the
+> rows of a refused message are precisely the rows still to write.
+>
+> Upsert retries its two halves differently, because they fail differently: the
+> insert half by row for the reason above, the delete half re-packed whole — safe
+> because applying a delete twice is indistinguishable from applying it once. A
+> partial update keeps its own CAS unwrapping and never enters the fence retry,
+> so a CAS outcome is never swallowed as a fence.
 
 (`STREAMING_CODE_ROUTING_STALE` is defined alongside `SHARD_FENCED` for a
 future routing-version fast path, but is not on the implemented write path —
@@ -159,6 +251,69 @@ Both rejection codes are classified *unrecoverable* in the streaming
 client, so the resumable producer does not retry the same vchannel; the
 error surfaces to the proxy, which refreshes the routing table through the
 existing collection-meta invalidation path and re-dispatches.
+
+### 3.4 Why a hash-routed doubling always relieves the shard
+
+Halving a shard by hash relies on the two halves coming out roughly equal. For a
+hash-routed collection that holds because **a primary key is unique**: it is
+either auto-generated or a user-supplied identifier, so every key contributes one
+row and the hashes spread evenly. No single routing key can dominate the shard.
+
+This is the substantive difference from a namespace collection, whose routing key
+is a *tenant*: one tenant legitimately holds a large share of a shard, which is
+why that case must weigh the residues before dividing them (§3.1) and must
+exclude a shard holding a single namespace from the trigger.
+
+A pathological workload — inserting the same primary key millions of times, which
+Milvus does not forbid — could still defeat a doubling: every copy of that key
+has the same hash, so one half comes out holding everything, is still over the
+threshold, and is split again. §10.2 is the guard that stops that looping.
+
+### 3.5 Rehash to an arbitrary shard count
+
+A split refines one shard's residues and leaves the rest of the assignment
+intact. Setting the shard count to an arbitrary `M` cannot work that way: the new
+assignment is `M` shards owning one residue each at modulus `M`, and those
+residues do **not** nest inside the old ones unless `M` is a multiple of the old
+modulus. For `N = 3 → M = 4`, the keys of residue `0` at modulus `4` are
+scattered across all three old shards, because `hash % 4 == 0` says nothing about
+`hash % 3`. So:
+
+> **Every target draws keys from every source.**
+
+Three consequences follow, and they are the whole reason a rehash is more than a
+bigger split:
+
+1. **Every shard is a source.** The task holds `N` sources, not one.
+2. **The routing flip is global.** It cannot be applied one source at a time,
+   because no target's key set is contained in one source. That is what forces
+   the multi-source fence ordering of §6.6.
+3. **The whole collection is rewritten**, `O(collection size)` rather than
+   `O(shard size)`.
+
+Decomposition is deliberately not used. `3 → 6` *could* be done as three
+independent single-source splits, since every intermediate state is a legal
+residue table at a shared modulus — but it leaves the collection observable at 4
+and then 5 shards, and a failure partway leaves a shape nobody asked for. A
+non-multiple `M` does not decompose at all: expressing `3 → 4` through doublings
+means refining to 12 shards and merging back down, which rewrites the data twice.
+A manual change therefore always takes the one-shot multi-source path, whatever
+the arithmetic between `N` and `M`.
+
+**Shrinking** (`M < N`) is the same operation. The split machinery is symmetric
+in the source and target counts: `M` targets owning one residue each tiles the
+key space for any `M`, every shard is a source either way, and a target fed by
+several sources is already the normal case for a rehash. What shrinking needs
+beyond that is that the retired vchannels are actually reclaimed — a shrink that
+left them behind would raise the collection's shard count back up on the next
+restart.
+
+A rehash is **never proposed automatically**: it makes the collection briefly
+write-unavailable while every shard is fenced, and keeps it resident twice until
+adoption, which is not a decision to take on a size threshold. It arrives as a
+declarative property (`collection.shardNum` on AlterCollection) that DataCoord
+reconciles toward, so it survives a coordinator restart and a request that
+arrives while another split is running simply waits its turn.
 
 ## 4. Design Overview
 
@@ -230,7 +385,7 @@ Four principles work around the constraints of §2 simultaneously:
   there, each born at the barrier timetick DataCoord allocates after the
   fence ack (necessarily past `T_switch`).
 - **delegator0 (old)** consumes up to the split message; from it learns
-  the target vchannels and key ranges, fetches their consume start
+  the target vchannels and their residues, fetches their consume start
   positions via a one-shot Coordinator RPC (the positions were persisted
   to the collection meta when the targets were created), spawns
   delegator1/2 in place, serves all sealed segments (including those
@@ -280,12 +435,20 @@ interceptor chain.
    their target pchannels via StreamingCoord (so the fence message can
    carry the target names). Shards holding a single namespace are
    excluded from the trigger: they satisfy the size thresholds but cannot
-   be split further (the split point must fall on a namespace boundary),
-   and writes to them are rejected at the namespace hard limit — without
-   the exclusion the trigger would loop on them.
+   be split further (every key in them hashes alike, so no division and no
+   doubling separates anything — §3.1), and writes to them are rejected at
+   the namespace hard limit — without the exclusion the trigger would loop
+   on them.
+
+   *Hash-routed*: the same size thresholds apply and `maxNamespaceCount` is
+   inert. There is no boundary search and no single-namespace exclusion — the
+   residues divide evenly by construction (§3.4) — so the plan is simply to
+   halve the largest over-threshold shard's residues. A shard still over
+   threshold afterwards is split again on a later tick, and §10.2 stops that
+   from looping when a doubling relieves nothing.
 2. **Fence.** DataCoord appends a single `SplitShard` message to
-   vchannel0, carrying the target vchannel names and their key ranges
-   (allocated in step 1) — but *not* start positions, which do not exist
+   vchannel0, carrying the target vchannel names, the residues each one takes
+   and the collection's routing modulus (allocated in step 1) — but *not* start positions, which do not exist
    yet. On processing it the source StreamingNode's shard handler
    auto-flushes every growing segment of the vchannel (embedding the
    sealed segment IDs into the message header, exactly as the
@@ -297,7 +460,8 @@ interceptor chain.
    DataCoord **awaits the `SplitShard` append result** (so `T_switch` is
    allocated and sequenced) and only then allocates a **barrier timetick**
    from the global TSO and appends a `CreateVChannel` message — carrying the
-   collection schema, partition list, key range and that barrier
+   collection schema, partition list, the target's residues, the routing
+   modulus and that barrier
    (`BarrierTimeTick`) — to each target pchannel (whose WALs are hosted by
    whichever StreamingNodes own them; a node cannot open a WAL for another
    node). The target StreamingNode floors the genesis timetick at the
@@ -607,6 +771,107 @@ The view of one segment `S` across the phases:
   removing delegator0 only drops a reference — physical unload happens
   only when no distribution references the segment.
 
+### 6.5 Redistribution by rewrite (hash-routed collections)
+
+A namespace segment holds one namespace and therefore belongs to one shard, which
+is what makes §6.3 a metadata relabel. A hash-routed segment holds rows whose keys
+spread over the whole key space, so it straddles every boundary, and a segment
+cannot belong to two shards at once (§2.4). It has to be **physically divided**.
+
+For each sealed segment `S` of a source shard, produce one output segment per
+target, each on that target's vchannel, by partitioning `S`'s rows on the targets'
+residues:
+
+```
+for each row r in S:
+    dest = the unique target owning  hash(pk(r)) % M
+    write r into the dest segment
+```
+
+Structurally this is the existing clustering compaction
+(`internal/datanode/compactor/clustering_compactor.go`), which already streams a
+segment's rows through a `MultiSegmentWriter` and routes each row to a buffer by a
+key; here there is one output buffer per target, pinned to that target's vchannel,
+and only the row-routing predicate is new. A dedicated lightweight compaction type
+avoids overloading clustering semantics (no clustering-key stats, no
+clustering-key requirement).
+
+Three things about this are worth a reader's attention:
+
+- **The modulus travels with the plan.** Residues are meaningless without it, and
+  a DataNode that assumed one would partition by a different rule than the routing
+  commit published. It rides on the compaction plan and task beside the targets; a
+  plan without one is refused rather than defaulted.
+- **The predicate is the routing package's own table**, derived from the plan's
+  targets and modulus — one package, one derivation, so the row a proxy would
+  place on a target is the row the rewrite puts there. It is derived as a
+  *partial* table: a doubling's targets tile only their source's residues, not the
+  whole key space. What is still rejected is a residue claimed twice (one row
+  written into two output segments and counted twice), and a key claimed by no
+  target fails the plan rather than being placed by a guess.
+- **Getting it wrong is quiet.** A fan-out read still finds a misplaced row, so a
+  misrouted rewrite looks fine until a delete of that row resolves to the shard
+  that *does* own the key and finds nothing there — arbitrarily later, with
+  nothing in the logs pointing back here.
+
+Consequences for the surrounding phases:
+
+- The **merged recovery view** of §6.4 applies to a relabel only. A relabel moves
+  a segment off the source channel, so the source's recovery info would lose it
+  mid-window; a rewrite's outputs are *copies*, and merging them in would make the
+  source delegator serve every rewritten row twice.
+- **Adoption retires the source segments** for a rewrite only. A relabel already
+  moved them, so anything left on the source channel at adoption is a state to
+  notice, not to clean up.
+- The children **load real sealed segments** rather than reusing relabeled
+  instances, so the adoption flip is not free of I/O the way §6.3 step 3 is.
+- A rewrite is **idempotent under retry**: it is deterministic in its inputs (the
+  source segment) and its partition function (fixed residues at a fixed modulus),
+  so a re-dispatch after a crash produces the same outputs. The task records the
+  dispatched plan IDs and commits a source segment as rewritten only when its plan
+  completes.
+- Because an import is deliberately *not* stopped by the fence, the rewrite
+  re-derives its work list every round, so the segments an import adds after the
+  fence are rewritten rather than retired unread at adoption.
+
+An import routes its rows the same way. A job snapshots the collection's topology
+when it is created and routes against that snapshot, so a split that starts
+mid-import cannot pair a stale vchannel list with newer residues; a job with no
+snapshot keeps the legacy `hash % shardNum` placement bit for bit.
+
+### 6.6 Multi-source fencing (rehash)
+
+A split and a doubling fence one shard. A rehash fences every shard, because every
+target draws keys from every source (§3.5), and that changes what the fence
+ordering has to guarantee.
+
+What must hold is that **no key has two live writers**. With one source, the
+per-source fence gives it: the source is fenced, the targets are routable, and
+nothing else owned those keys. With `N` sources it does not follow from the
+per-source fences alone — a target's keys come from all of them, so a target that
+became routable while any source was still accepting writes for the same key would
+have two writers for it.
+
+The ordering that closes this needs no distributed commit:
+
+1. Append `SplitShard` to **every** source concurrently and record each one's
+   `T_switch`.
+2. Only once **all** are recorded, allocate the barrier and append
+   `CreateVChannel` per target — the barrier is then later than every source's
+   `T_switch`, not just one.
+3. Only then commit the routing, which is the single instant at which any target
+   becomes routable.
+
+Because the routing commit is one transaction and is the only thing that makes a
+target routable, the flip is global by construction; the fences merely have to all
+precede it. A fence appended to a source that another task already fenced is
+rejected, which is what enforces the exclusion between a rehash and an automatic
+split on the same collection rather than assuming it.
+
+The cost is a **write-unavailability window on the whole collection** rather than
+on one shard, lasting from the first landed fence to the routing commit. That is
+the main reason a rehash is user-requested and never automatic (§3.5).
+
 ## 7. Consistency Guarantees
 
 - **Total order.** WAL0 holds only messages ≤ `T_switch`; the new
@@ -715,7 +980,25 @@ The view of one segment `S` across the phases:
    children's distributions are registered — with segment instances shared
    by ID so that the release never unloads data still referenced by a new
    shard.
-10. **Import × split interaction.** No mutual exclusion between import and
+10. ***Hash-routed*: DataNodes upgrade first.** Once a collection has been split
+    its shards own explicit residues and no modulo over the vchannel list
+    reproduces them, so every write entry point routes by the table — import
+    included, carrying the collection's routing snapshot on the job. The three
+    new pieces behave differently under version skew and only one can go wrong
+    quietly: a new compaction type falls into an old DataNode's `default:` branch
+    and the plan is re-dispatched; a new WAL message is never delivered to a node
+    that does not know it; but a new *optional field* on an existing import
+    request is silently dropped by proto3, and the rows land on shards that do
+    not own their keys. The ordering closes it with no version check: residues
+    are written in exactly one place, the routing commit in DataCoord, so no
+    collection can carry a residue until DataCoord runs the new binary — and
+    while DataCoord is old, no snapshot exists and a new DataNode takes the
+    legacy modulo, bit for bit what the old one did.
+11. ***Hash-routed*: the collection is resident twice during the window.** The
+    source data and its rewrite outputs coexist until adoption drops the source.
+    A doubling costs one shard's worth of that; a rehash costs the whole
+    collection, which is what `rehashMaxCollectionSize` bounds (§9).
+12. **Import × split interaction.** No mutual exclusion between import and
     split is needed — the conjunction completion check of §6.3 step 2
     already waits out every import that has registered segments, and
     relabel skips `IsImporting` segments (§6.3 step 1). The one case that
@@ -739,15 +1022,22 @@ The view of one segment `S` across the phases:
 | `dataCoord.shardSplit.maxShardRows` | 500M | Per-shard row count that triggers a split. |
 | `dataCoord.shardSplit.maxNamespaceCount` | 100K | Per-shard namespace count that triggers a split. |
 | `dataCoord.shardSplit.maxConcurrentTasks` | 1 | Cluster-wide concurrent split tasks. |
-| `dataCoord.shardSplit.relabelBatchSize` | 256 | Segments relabeled to the target shards per redistribution round. |
+| `dataCoord.shardSplit.relabelBatchSize` | 256 | Segments processed per redistribution round — relabeled, or rewritten for a hash-routed collection. |
+| `dataCoord.shardSplit.autoTriggerEnable` | `true` | Selects the mode, and the two are exclusive. `true`: the size trigger sizes shards on its own and a manual `collection.shardNum` is refused. `false`: the trigger is off and the count is the user's to set. Letting both act would have them fence the same shards from two directions. |
+| `dataCoord.shardSplit.minSiblingRatio` | 0.05 | Guards the automatic path only: refuses to double a shard whose last doubling relieved nothing (§10.2). |
+| `dataCoord.shardSplit.rehashMaxCollectionSize` | 0 (off) | Largest collection, in GB, whose shard count may be changed by hand. A rehash keeps the collection resident twice until adoption (§8), so set this to the largest collection the query nodes can hold twice. |
+| `dataCoord.shardSplit.taskRetention` | 1800s | How long a terminal (`Done`/`Aborted`) task is kept before it is reaped. The task is where a target's provenance lives (§3.2), so it must outlive adoption. |
 
 Even with the switch on, split stays disabled on clusters with replication
 enabled, and on WAL backends that cannot host additional topics. The
 thresholds never trigger on a shard holding a single namespace (§6.1,
 step 1): such a shard cannot be split further, and its growth is bounded
-by the namespace hard limit instead.
+by the namespace hard limit instead. `maxNamespaceCount` is inert for a
+hash-routed collection.
 
 ## 10. Failure Handling
+
+### 10.1 Ordering and recovery
 
 - **Ordering: fence first.** The `SplitShard` fence is the first WAL
   action and the single commit point; the new vchannels are created only
@@ -758,7 +1048,7 @@ by the namespace hard limit instead.
   does not change write availability: in *either* ordering the new shards
   become routable only at the final routing/meta commit (the proxy cannot
   see a new shard before its collection-meta write lands), so the
-  write-unavailability window for the split key range is fence → routing
+  write-unavailability window for the split shard's keys is fence → routing
   commit either way, gated on one idempotent post-fence append (here
   `CreateVChannel`; create-first would instead gate on `Activate`). The
   one property fence-first gives up is a clean abort on a *target-creation*
@@ -795,14 +1085,41 @@ by the namespace hard limit instead.
 - **BM25/index rebuild failure**: the new shards stay un-adopted (the
   window simply extends), the rebuild is retried.
 
+### 10.2 The runaway-doubling guard (hash-routed)
+
+A doubling relieves a shard by cutting its key space on the next hash bit, which
+works because primary keys are unique and the hash spreads them (§3.4). It stops
+working if the **same key** is inserted enough times to dominate the shard —
+Milvus does not enforce uniqueness on insert — because every copy of that key has
+the same hash and lands on the same half. The shard is rewritten in full, one half
+comes out holding everything, it is still over the threshold, and the trigger
+splits it again. Nothing is relieved and a full rewrite burns every round,
+forever.
+
+The test is made from **live state rather than remembered history**: a doubling
+produces a sibling pair, residues `r` and `r + M/2` at modulus `M`, so if the last
+one relieved nothing then this shard's sibling half is nearly empty. Deciding it
+from the sibling rather than from "how big was my parent" is what makes it survive
+task reaping, GC and a coordinator restart — there is nothing to remember.
+
+Because the residues tile `[0, M)`, exactly one shard owns the sibling residue, so
+this is a lookup rather than the interval arithmetic a per-shard modulus would
+have needed (§3.1). A shard whose modulus is odd has no doubling in its ancestry —
+the collection was rehashed to an odd shard count, and its shards were carved from
+every source at once rather than cut from a parent — so it has no sibling to
+compare against and is never refused. `minSiblingRatio` (§9) is the threshold.
+
 ## 11. Implementation Surface
 
 | Component | Work |
 |-----------|------|
-| Common | `SplitShard` / `CreateVChannel` message types (codegen; `SplitShard` is `ExclusiveRequired` and its handler auto-flushes growing; `CreateVChannel` carries a DataCoord-allocated `BarrierTimeTick` lower bound, not `T_switch`'s value); no separate `Activate` or `ManualFlush` message; `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable; `SHARD_FENCED` carries `fenced_time_tick` = `T_switch`, read back on a re-fence to recover it); `etcdpb` shard routing fields; range routing table derived from collection meta |
+| Common | `SplitShard` / `CreateVChannel` message types (codegen; `SplitShard` is `ExclusiveRequired` and its handler auto-flushes growing; `CreateVChannel` carries a DataCoord-allocated `BarrierTimeTick` lower bound, not `T_switch`'s value); no separate `Activate` or `ManualFlush` message; `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable; `SHARD_FENCED` carries `fenced_time_tick` = `T_switch`, read back on a re-fence to recover it); `etcdpb` shard routing fields (`routing_modulus`, `shard_by`, per-shard residues); the residue routing table derived from collection meta, shared with the primary-key split |
 | DataCoord | Split task FSM driving the sequence via streaming-client appends (`SplitShard` to fence → `CreateVChannel` → routing commit; `T_switch` recorded on the task for the drain gate and recovered on a re-fence; the barrier is a DataCoord-allocated lower bound carried on `CreateVChannel`; start positions persisted into the collection meta; Broadcaster `ExclusiveCollectionName` key held across fence→create→routing-commit; recovery re-sends idempotent messages), trigger and split-point selection, batched relabel (segments + L0, skipping `IsImporting`), multi-round redistribution with the three-way (no source segment / checkpoint ≥ `T_switch` / no active import job) drain check, import-job queueing during `Fencing`, source-shard freeze, adoption gate |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion |
 | StreamingNode | Source side: `SplitShard` handler auto-flushes growing segments (embedding their IDs) and fences the vchannel on the lock interceptor, persisted fence state (the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers this fenced source vchannel), rejection codes. Target side: `CreateVChannel` handler runs the three genesis paths (shard manager / RecoveryStorage observe / flusher) and floors the genesis timetick at the `BarrierTimeTick` DataCoord allocates after the fence ack, so the vchannel is born past `T_switch` (the barrier is a lower bound, not `T_switch`'s value; no separate `Creating`/`Activate` state); it also persists `split_time_tick` on the source `VChannelMeta` so a re-fence can return `T_switch`. The append's `LastConfirmedMessageID` is returned so DataCoord can persist it as the child start position |
-| Proxy | Range routing lookup, reject-and-refetch loop, routing-version header, cache invalidation on adoption |
+| Proxy | Residue routing lookup derived once when the meta cache fills the entry, reject-and-refetch loop on `SHARD_FENCED` (no routing-version header), cache invalidation on adoption |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
+| DataCoord (*hash-routed*) | Rewrite phase dispatching hash-split compactions and tracking per-source-segment completion (§6.5); concurrent multi-source fencing with a per-source `T_switch` and the all-sources-fenced precondition on the routing commit (§6.6); the reconciler that drives `collection.shardNum` toward its target; the runaway-doubling guard (§10.2) |
+| DataNode (*hash-routed*) | Hash-split compactor — a specialization of the clustering compactor with an `M`-way partition driven by the routing table and target-vchannel-pinned output buffers, with the modulus carried on the plan (§6.5); import rows routed by the job's routing snapshot |
+| `internal/util/routing` | The residue table and its `route[M]` derivation from `CollectionShardInfo`, in two flavours — whole-space cover for live routing, and disjoint-but-not-covering for a plan's targets — sharing one validation path; plus the split plan (divide, or double) and the rebase of a shard's residues onto a doubled modulus (§3.1) |
