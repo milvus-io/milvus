@@ -55,22 +55,9 @@ func (lcm *LocalChunkManager) RootPath() string {
 	return lcm.localPath
 }
 
-// resolve returns the filesystem path for an object key. Absolute keys are
-// used as-is (V2 layout); relative keys (V3 manifest layout) are resolved
-// against the local storage root, mirroring how the loon filesystem roots
-// local storage at localStorage.path. Without this, V3 readers pass manifest
-// keys straight to os.ReadFile and resolve against the process CWD.
-func (lcm *LocalChunkManager) resolve(filePath string) string {
-	if filepath.IsAbs(filePath) {
-		return filePath
-	}
-	return path.Join(lcm.localPath, filePath)
-}
-
 // Path returns the path of local data if exists.
 func (lcm *LocalChunkManager) Path(ctx context.Context, filePath string) (string, error) {
-	resolved := lcm.resolve(filePath)
-	exist, err := lcm.Exist(ctx, resolved)
+	exist, err := lcm.Exist(ctx, filePath)
 	if err != nil {
 		return "", err
 	}
@@ -79,11 +66,11 @@ func (lcm *LocalChunkManager) Path(ctx context.Context, filePath string) (string
 		return "", merr.WrapErrIoKeyNotFound(filePath)
 	}
 
-	return resolved, nil
+	return filePath, nil
 }
 
 func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
-	file, err := Open(lcm.resolve(filePath))
+	file, err := Open(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +98,7 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	resolved := lcm.resolve(filePath)
-	dir := path.Dir(resolved)
+	dir := path.Dir(filePath)
 	exist, err := lcm.Exist(ctx, dir)
 	if err != nil {
 		return err
@@ -123,7 +109,7 @@ func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, conten
 			return merr.WrapErrIoFailed(filePath, err)
 		}
 	}
-	return WriteFile(resolved, content, os.ModePerm)
+	return WriteFile(filePath, content, os.ModePerm)
 }
 
 // MultiWrite writes the data to local storage.
@@ -140,7 +126,7 @@ func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[strin
 
 // Exist checks whether chunk is saved to local storage.
 func (lcm *LocalChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
-	_, err := os.Stat(lcm.resolve(filePath))
+	_, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -152,7 +138,7 @@ func (lcm *LocalChunkManager) Exist(ctx context.Context, filePath string) (bool,
 
 // Read reads the local storage data if exists.
 func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	return ReadFile(lcm.resolve(filePath))
+	return ReadFile(filePath)
 }
 
 // MultiRead reads the local storage data if exists.
@@ -170,7 +156,6 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 }
 
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
-	prefix = lcm.resolve(prefix)
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 	logger.Info(ctx, "start walk through objects")
 	defer func() {
@@ -229,7 +214,7 @@ func (lcm *LocalChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		return nil, io.EOF
 	}
 
-	file, err := Open(path.Clean(lcm.resolve(filePath)))
+	file, err := Open(path.Clean(filePath))
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +229,7 @@ func (lcm *LocalChunkManager) ReadAt(ctx context.Context, filePath string, off i
 }
 
 func (lcm *LocalChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
-	reader, err := mmap.Open(path.Clean(lcm.resolve(filePath)))
+	reader, err := mmap.Open(path.Clean(filePath))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, merr.WrapErrIoKeyNotFound(filePath, err.Error())
 	}
@@ -253,7 +238,7 @@ func (lcm *LocalChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.
 }
 
 func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
-	fi, err := os.Stat(lcm.resolve(filePath))
+	fi, err := os.Stat(filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, merr.WrapErrIoKeyNotFound(filePath, err.Error())
@@ -266,7 +251,17 @@ func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64,
 }
 
 func (lcm *LocalChunkManager) Remove(ctx context.Context, filePath string) error {
-	err := os.RemoveAll(lcm.resolve(filePath))
+	// Keep an empty key as a no-op and never allow this API to remove the
+	// configured storage root. Some existing local-only cleanup paths remove a
+	// derived job subdirectory recursively, so retain that behavior below the
+	// root while making the dangerous root cases explicit.
+	if filePath == "" {
+		return nil
+	}
+	if lcm.localPath != "" && filepath.Clean(filePath) == filepath.Clean(lcm.localPath) {
+		return merr.WrapErrParameterInvalidMsg("refuse to remove local storage root")
+	}
+	err := os.RemoveAll(filePath)
 	return merr.WrapErrIoFailed(filePath, err)
 }
 
@@ -301,8 +296,6 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	srcFilePath = lcm.resolve(srcFilePath)
-	dstFilePath = lcm.resolve(dstFilePath)
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {

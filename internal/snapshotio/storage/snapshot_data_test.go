@@ -1522,10 +1522,16 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	ctx := context.Background()
 
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	require.NoError(t, cm.Write(ctx, path.Join(basePath, "manifest"), []byte("manifest")))
-	require.NoError(t, cm.Write(ctx, path.Join(basePath, "_data/cg0.parquet"), []byte("data")))
-	siblingPath := basePath + "0/manifest"
+	basePath := "files/insert_log/100/20/1001"
+	completeBasePath := path.Join(tempDir, basePath)
+	require.NoError(t, cm.Write(ctx, path.Join(completeBasePath, "manifest"), []byte("manifest")))
+	require.NoError(t, cm.Write(ctx, path.Join(completeBasePath, "_data/cg0.parquet"), []byte("data")))
+	logicalDeltaPath := path.Join(basePath, "_delta/7")
+	completeDeltaPath := path.Join(tempDir, logicalDeltaPath)
+	require.NoError(t, cm.Write(ctx, completeDeltaPath, []byte("delta")))
+	pathlessDeltaPhysicalPath := path.Join(completeBasePath, "_delta/8")
+	require.NoError(t, cm.Write(ctx, pathlessDeltaPhysicalPath, []byte("pathless delta")))
+	siblingPath := completeBasePath + "0/manifest"
 	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
 
 	snapshot := createTestSnapshotData()
@@ -1552,25 +1558,30 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		},
 	}
 	segment.Statslogs = nil
-	segment.Deltalogs = nil
+	segment.Deltalogs = []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{
+			{LogPath: logicalDeltaPath},
+			{LogID: 8}, // Normal compressed StorageV3 summary placeholder.
+		},
+	}}
 	segment.Bm25Statslogs = nil
 	segment.IndexFiles = nil
 
-	foreignStorageConfig := &indexpb.StorageConfig{
-		BucketName: "foreign-bucket",
-		RootPath:   "foreign-root",
-	}
+	getLobCalls := 0
 	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).To(
 		func(gotManifestPath string, gotStorageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
 			assert.Equal(t, segment.GetManifestPath(), gotManifestPath)
-			assert.Same(t, foreignStorageConfig, gotStorageConfig)
+			if getLobCalls == 0 {
+				assert.NotNil(t, gotStorageConfig)
+			}
+			getLobCalls++
 			return []packed.LobFileInfo{
 				{Path: "files/insert_log/100/20/lobs/30/_data/lob.vx", FieldID: 30},
 			}, nil
 		}).Build()
 	defer mockGetLobFiles.UnPatch()
 
-	refs, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, foreignStorageConfig)
+	refs, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, nil)
 	require.NoError(t, err)
 
 	byPath := make(map[string]snapshotstorage.SnapshotFileRef)
@@ -1578,14 +1589,38 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		byPath[ref.NormalizedPath] = ref
 	}
 
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot, byPath[basePath].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "manifest")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "_data/cg0.parquet")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath["files/insert_log/100/20/lobs/30/_data/lob.vx"].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot, byPath[completeBasePath].Type)
+	assert.Equal(t, basePath, byPath[completeBasePath].Path)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(completeBasePath, "manifest")].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(completeBasePath, "_data/cg0.parquet")].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeDeltaBinlog, byPath[completeDeltaPath].Type)
+	assert.Equal(t, logicalDeltaPath, byPath[completeDeltaPath].Path)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[pathlessDeltaPhysicalPath].Type)
+	completeLOBPath := path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx")
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath[completeLOBPath].Type)
+	assert.Equal(t, "files/insert_log/100/20/lobs/30/_data/lob.vx", byPath[completeLOBPath].Path)
 	assert.NotContains(t, byPath, "files/text_index/100/12/1001/7002/posting")
 	assert.NotContains(t, byPath, "files/json_index/100/13/1001/7003/key")
 	assert.NotContains(t, byPath, siblingPath)
-	assert.Len(t, byPath, 4)
+	assert.Len(t, byPath, 6)
+
+	mappings := make(map[string]string, len(refs)*2)
+	for _, ref := range refs {
+		destination := snapshotstorage.ExportedSnapshotPath(cm, ref.NormalizedPath, "bundle")
+		mappings[ref.Path] = destination
+		mappings[ref.NormalizedPath] = destination
+	}
+	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
+		snapshot,
+		mappings,
+		"bundle",
+		"s3://bucket/bundle/snapshots/100/metadata/1.json",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 2, getLobCalls)
+	assert.Equal(t, mappings[logicalDeltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
+	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
 }
 
 func validateSnapshotDataFiles(
@@ -1791,6 +1826,55 @@ func TestValidateSnapshotDataFiles_StorageV3RejectsEmptyManifestBasePath(t *test
 	err := validateSnapshotDataFiles(context.Background(), cm, snapshot, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "storage v3 segment 1001 requires manifest base path")
+}
+
+func TestListSnapshotDataFiles_LocalV3RejectsURIManifestBasePath(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	snapshot := createTestSnapshotData()
+	segment := snapshot.Segments[0]
+	segment.StorageVersion = storage.StorageV3
+	segment.ManifestPath = packed.MarshalManifestPath("s3://source-bucket/root/object", 1)
+	segment.Binlogs = nil
+	segment.Statslogs = nil
+	segment.Deltalogs = nil
+	segment.Bm25Statslogs = nil
+	segment.IndexFiles = nil
+
+	_, err := snapshotstorage.ListSnapshotDataFiles(context.Background(), cm, snapshot, &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    root,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a filesystem path")
+}
+
+func TestListSnapshotDataFiles_LocalV3RejectsURILOBPath(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	basePath := "files/insert_log/100/20/1001"
+	require.NoError(t, cm.Write(context.Background(), path.Join(root, basePath, "manifest"), []byte("manifest")))
+	snapshot := createTestSnapshotData()
+	segment := snapshot.Segments[0]
+	segment.StorageVersion = storage.StorageV3
+	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
+	segment.Binlogs = nil
+	segment.Statslogs = nil
+	segment.Deltalogs = nil
+	segment.Bm25Statslogs = nil
+	segment.IndexFiles = nil
+
+	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
+		{Path: "s3://source-bucket/root/lob.vx", FieldID: 30},
+	}, nil).Build()
+	defer mockGetLobFiles.UnPatch()
+
+	_, err := snapshotstorage.ListSnapshotDataFiles(context.Background(), cm, snapshot, &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    root,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a filesystem path")
 }
 
 func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) {

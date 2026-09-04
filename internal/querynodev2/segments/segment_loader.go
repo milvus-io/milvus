@@ -677,7 +677,14 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 
 	pkField := GetPkField(schema)
 	mlog.Info(context.TODO(), "loading bloom filter for remote...")
-	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
+	resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
+	var pkStatsBinlogs []string
+	var err error
+	if isMilvusTableRealPK {
+		pkStatsBinlogs, err = resolver.BloomFilterPaths(pkField.GetFieldID())
+	} else {
+		pkStatsBinlogs, err = resolver.ChunkManagerBloomFilterPaths(pkField.GetFieldID())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +787,14 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		bfs := bfSets[idx]
 
 		mlog.Info(context.TODO(), "loading bloom filter for remote...")
-		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
+		resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
+		var pkStatsBinlogs []string
+		var err error
+		if isMilvusTableRealPK {
+			pkStatsBinlogs, err = resolver.BloomFilterPaths(pkFieldID)
+		} else {
+			pkStatsBinlogs, err = resolver.ChunkManagerBloomFilterPaths(pkFieldID)
+		}
 		if err != nil {
 			return err
 		}
@@ -1146,7 +1160,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		if bf, ok := segment.pkCandidate.(*pkoracle.BloomFilterSet); ok {
 			mlog.Info(context.TODO(), "loading statslog...")
 			resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
-			bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
+			bfPaths, err := resolver.ChunkManagerBloomFilterPaths(pkField.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -1154,7 +1168,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 				return err
 			}
 
-			bm25Paths, err := resolver.BM25StatsPaths()
+			bm25Paths, err := resolver.ChunkManagerBM25StatsPaths()
 			if err != nil {
 				return err
 			}

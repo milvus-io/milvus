@@ -704,16 +704,14 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 			"bloom filter stat path must not use legacy stats_log/ layout")
 	}
 
-	// Reader-side check: the resolver returns paths RELATIVE to the loon
-	// filesystem root (localStorage.path). A querynode resolves them through
-	// a LocalChunkManager rooted at localStorage.path, so verify the stats
-	// are actually readable through that exact path — i.e. the localStorage.path
-	// prefix is applied exactly once, not doubled (#53051).
+	// Reader-side check: manifest paths stay relative to the loon filesystem
+	// root. LocalChunkManager keeps its filesystem-path contract, so callers
+	// must explicitly resolve a manifest key against localStorage.path.
 	cm := NewLocalChunkManager(objectstorage.RootPath(dir))
 	for _, p := range bfStat.Paths {
 		assert.False(s.T(), path.IsAbs(p),
 			"reader-facing stat path %q must stay relative to the loon filesystem root", p)
-		_, err := cm.Read(s.ctx, p)
+		_, err := cm.Read(s.ctx, path.Join(dir, p))
 		assert.NoError(s.T(), err,
 			"reader must resolve stat path %q against localStorage.path", p)
 	}

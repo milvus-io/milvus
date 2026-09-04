@@ -30,6 +30,35 @@ import (
 
 var localPath string
 
+func TestLocalChunkManagerEmptyKeyDoesNotDeleteRoot(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	testCM := NewLocalChunkManager(objectstorage.RootPath(root))
+	sentinelPath := filepath.Join(root, "sentinel")
+	removedPath := filepath.Join(root, "remove-me")
+	require.NoError(t, testCM.Write(ctx, sentinelPath, []byte("keep")))
+	require.NoError(t, testCM.Write(ctx, removedPath, []byte("remove")))
+
+	require.NoError(t, testCM.Remove(ctx, ""))
+	content, err := testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+
+	err = testCM.Remove(ctx, root)
+	require.Error(t, err)
+	content, err = testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+
+	require.NoError(t, testCM.MultiRemove(ctx, []string{"", removedPath}))
+	content, err = testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+	exists, err := testCM.Exist(ctx, removedPath)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 func TestLocalCM(t *testing.T) {
 	ctx := context.Background()
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -136,15 +137,38 @@ type snapshotFileRefCollector struct {
 	byPath        map[string]SnapshotFileRef
 }
 
+func (c *snapshotFileRefCollector) isLocalStorage() bool {
+	if _, ok := c.cm.(*milvusstorage.LocalChunkManager); ok {
+		return true
+	}
+	return c.storageConfig.GetStorageType() == "local"
+}
+
 func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *datapb.SegmentDescription) error {
-	if segment.GetStorageVersion() >= milvusstorage.StorageV3 {
+	storageV3 := segment.GetStorageVersion() >= milvusstorage.StorageV3
+	if storageV3 {
+		// Preserve logical metadata aliases before manifest walking discovers the
+		// same physical objects. add() de-duplicates on the complete I/O path, so
+		// the logical Path remains available to snapshot rewriting while export
+		// still copies each object once.
+		if err := c.addFieldBinlogRefs(segment.GetStatslogs(), segment, SnapshotFileTypeStatsBinlog, true); err != nil {
+			return err
+		}
+		if err := c.addFieldBinlogRefs(segment.GetDeltalogs(), segment, SnapshotFileTypeDeltaBinlog, true); err != nil {
+			return err
+		}
+		if err := c.addFieldBinlogRefs(segment.GetBm25Statslogs(), segment, SnapshotFileTypeBM25StatsBinlog, true); err != nil {
+			return err
+		}
 		if err := c.addStorageV3Segment(ctx, segment); err != nil {
 			return err
 		}
 		// Manifest listing already includes text/JSON physical files. PB paths
 		// are metadata placeholders and may be stale after format migration.
 	} else {
-		c.addFieldBinlogRefs(segment.GetBinlogs(), segment, SnapshotFileTypeInsertBinlog)
+		if err := c.addFieldBinlogRefs(segment.GetBinlogs(), segment, SnapshotFileTypeInsertBinlog, false); err != nil {
+			return err
+		}
 		c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
 		c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
 		if segment.GetStorageVersion() == milvusstorage.StorageV2 && segment.GetManifestPath() != "" {
@@ -154,11 +178,17 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 				SegmentID: segment.GetSegmentId(),
 			})
 		}
+		if err := c.addFieldBinlogRefs(segment.GetStatslogs(), segment, SnapshotFileTypeStatsBinlog, false); err != nil {
+			return err
+		}
+		if err := c.addFieldBinlogRefs(segment.GetDeltalogs(), segment, SnapshotFileTypeDeltaBinlog, false); err != nil {
+			return err
+		}
+		if err := c.addFieldBinlogRefs(segment.GetBm25Statslogs(), segment, SnapshotFileTypeBM25StatsBinlog, false); err != nil {
+			return err
+		}
 	}
 
-	c.addFieldBinlogRefs(segment.GetStatslogs(), segment, SnapshotFileTypeStatsBinlog)
-	c.addFieldBinlogRefs(segment.GetDeltalogs(), segment, SnapshotFileTypeDeltaBinlog)
-	c.addFieldBinlogRefs(segment.GetBm25Statslogs(), segment, SnapshotFileTypeBM25StatsBinlog)
 	c.addIndexRefs(segment.GetIndexFiles(), segment)
 	return nil
 }
@@ -171,9 +201,19 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 	if basePath == "" {
 		return merr.WrapErrDataIntegrityMsg("storage v3 segment %d requires manifest base path", segment.GetSegmentId())
 	}
-	normalizedBasePath := NormalizeSnapshotObjectPath(basePath)
-	if normalizedBasePath == "" {
-		return merr.WrapErrDataIntegrityMsg("storage v3 segment %d requires manifest object prefix", segment.GetSegmentId())
+	normalizedBasePath := ""
+	if c.isLocalStorage() {
+		// Validate the raw manifest value before URI normalization; otherwise
+		// s3://bucket/key would be mistaken for a local key below RootPath.
+		normalizedBasePath, err = c.completeLocalStorageV3Path(basePath)
+		if err != nil {
+			return merr.Wrap(err, fmt.Sprintf("invalid local manifest path for segment %d", segment.GetSegmentId()))
+		}
+	} else {
+		normalizedBasePath = NormalizeSnapshotObjectPath(basePath)
+		if normalizedBasePath == "" {
+			return merr.WrapErrDataIntegrityMsg("storage v3 segment %d requires manifest object prefix", segment.GetSegmentId())
+		}
 	}
 	c.add(SnapshotFileRef{
 		Path:           basePath,
@@ -215,25 +255,75 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 		return merr.Wrap(err, fmt.Sprintf("failed to list LOB files for segment %d", segment.GetSegmentId()))
 	}
 	for _, info := range lobFileInfos {
+		normalizedPath := ""
+		if c.isLocalStorage() {
+			normalizedPath, err = c.completeLocalStorageV3Path(info.Path)
+			if err != nil {
+				return merr.Wrap(err, fmt.Sprintf("invalid local LOB path for segment %d", segment.GetSegmentId()))
+			}
+		} else {
+			normalizedPath = NormalizeSnapshotObjectPath(info.Path)
+		}
 		c.add(SnapshotFileRef{
-			Path:      info.Path,
-			Type:      SnapshotFileTypeStorageV3LOBFile,
-			SegmentID: segment.GetSegmentId(),
+			Path:           info.Path,
+			NormalizedPath: normalizedPath,
+			Type:           SnapshotFileTypeStorageV3LOBFile,
+			SegmentID:      segment.GetSegmentId(),
 		})
 	}
 	return nil
 }
 
-func (c *snapshotFileRefCollector) addFieldBinlogRefs(fieldBinlogs []*datapb.FieldBinlog, segment *datapb.SegmentDescription, fileType SnapshotFileType) {
+func (c *snapshotFileRefCollector) addFieldBinlogRefs(
+	fieldBinlogs []*datapb.FieldBinlog,
+	segment *datapb.SegmentDescription,
+	fileType SnapshotFileType,
+	storageV3 bool,
+) error {
 	for _, fieldBinlog := range fieldBinlogs {
 		for _, binlog := range fieldBinlog.GetBinlogs() {
+			// StorageV3 may keep pathless summary placeholders in protobuf
+			// metadata. They do not reference an object and must not be expanded
+			// into the local storage root.
+			if binlog.GetLogPath() == "" {
+				continue
+			}
+			normalizedPath := ""
+			if storageV3 && c.isLocalStorage() {
+				var err error
+				normalizedPath, err = c.completeLocalStorageV3Path(binlog.GetLogPath())
+				if err != nil {
+					return merr.Wrap(err, fmt.Sprintf("invalid local %s path for segment %d", fileType, segment.GetSegmentId()))
+				}
+			}
 			c.add(SnapshotFileRef{
-				Path:      binlog.GetLogPath(),
-				Type:      fileType,
-				SegmentID: segment.GetSegmentId(),
+				Path:           binlog.GetLogPath(),
+				NormalizedPath: normalizedPath,
+				Type:           fileType,
+				SegmentID:      segment.GetSegmentId(),
 			})
 		}
 	}
+	return nil
+}
+
+func (c *snapshotFileRefCollector) completeLocalStorageV3Path(filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" || strings.Contains(filePath, "://") {
+		return "", merr.WrapErrDataIntegrityMsg("local StorageV3 path is not a filesystem path")
+	}
+	rootPath := filepath.Clean(c.cm.RootPath())
+	if !filepath.IsAbs(rootPath) {
+		return "", merr.WrapErrDataIntegrityMsg("local storage root must be an absolute filesystem path")
+	}
+	completePath := filepath.Clean(filepath.FromSlash(filePath))
+	if !filepath.IsAbs(completePath) {
+		completePath = filepath.Join(rootPath, completePath)
+	}
+	relativePath, err := filepath.Rel(rootPath, completePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", merr.WrapErrDataIntegrityMsg("local StorageV3 path is outside the configured storage root")
+	}
+	return completePath, nil
 }
 
 func (c *snapshotFileRefCollector) addIndexRefs(indexFiles []*indexpb.IndexFilePathInfo, segment *datapb.SegmentDescription) {
@@ -489,6 +579,11 @@ func rewriteFieldBinlogPaths(fieldBinlogs []*datapb.FieldBinlog, fileType string
 		for binlogIdx, binlog := range fieldBinlog.GetBinlogs() {
 			if binlog == nil {
 				return merr.WrapErrDataIntegrityMsg("%s segment %d field %d binlog at index %d cannot be nil", fileType, segmentID, fieldBinlog.GetFieldID(), binlogIdx)
+			}
+			// Compressed StorageV3 metadata keeps summary entries with LogID but
+			// no object path. The packed manifest owns those physical files.
+			if binlog.GetLogPath() == "" {
+				continue
 			}
 			rewritten, err := rewrite(binlog.GetLogPath(), fmt.Sprintf("%s segment %d field %d", fileType, segmentID, fieldBinlog.GetFieldID()))
 			if err != nil {

@@ -1841,12 +1841,15 @@ func TestHandleJobFinished_SourceChangedOnly(t *testing.T) {
 type recordingChunkManager struct {
 	storage.ChunkManager
 	mu               sync.Mutex
+	rootPath         string
 	prefixCalls      []string
 	removeCalls      []string
 	prefixErr        error
 	removeErr        error
 	prefixBlockUntil <-chan struct{}
 }
+
+func (r *recordingChunkManager) RootPath() string { return r.rootPath }
 
 func (r *recordingChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	if r.prefixBlockUntil != nil {
@@ -1893,6 +1896,17 @@ func TestCleanupExploreTempForJob_Success(t *testing.T) {
 	prefixes, removes := cm.snapshot()
 	assert.Equal(t, []string{"__explore_temp__/coord_42/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_42"}, removes)
+}
+
+func TestCleanupExploreTempForJob_UsesCompleteChunkManagerKey(t *testing.T) {
+	cm := &recordingChunkManager{rootPath: "files"}
+	mgr := newManagerWithChunkManager(t, cm)
+
+	mgr.cleanupExploreTempForJob(42)
+
+	prefixes, removes := cm.snapshot()
+	assert.Equal(t, []string{"files/__explore_temp__/coord_42/"}, prefixes)
+	assert.Equal(t, []string{"files/__explore_temp__/coord_42"}, removes)
 }
 
 func TestCleanupExploreTempForJob_NilChunkManager(t *testing.T) {
