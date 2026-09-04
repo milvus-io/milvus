@@ -448,8 +448,13 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer span.End()
 	compactStart := time.Now()
 
-	mlog.Info(context.TODO(), "compact start", mlog.Any("compactionParams", t.compactionParams),
-		mlog.Any("plan", t.plan))
+	mlog.Info(ctx, "compact start",
+		mlog.Int64("planID", t.plan.GetPlanID()),
+		mlog.String("type", t.plan.GetType().String()),
+		mlog.String("channel", t.plan.GetChannel()),
+		mlog.Int("segmentNum", len(t.plan.GetSegmentBinlogs())),
+		mlog.Int64("totalRows", t.plan.GetTotalRows()),
+		mlog.Any("compactionParams", t.compactionParams))
 
 	if err := t.preCompact(); err != nil {
 		mlog.Warn(context.TODO(), "compact wrong, failed to preCompact", mlog.Err(err))
