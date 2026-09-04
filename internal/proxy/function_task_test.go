@@ -135,7 +135,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		}
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(0, fmt.Errorf("Mock Error")).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "Mock Error")
@@ -162,7 +162,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, fmt.Errorf("Mock info error")).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "Mock info error")
@@ -193,7 +193,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, nil).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "not support alter BM25")
 	}
@@ -223,7 +223,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						{Name: req.FunctionName, Type: schemapb.FunctionType_BM25},
@@ -233,7 +233,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		}
 
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "not support alter BM25")
 	}
@@ -263,7 +263,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, nil).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "invalid function config, name not match")
 	}
@@ -291,7 +291,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Fields: []*schemapb.FieldSchema{
 						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
@@ -306,7 +306,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
@@ -335,7 +335,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						// identity matches the request; a valid alter changes only params
@@ -350,7 +350,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
 		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
 		defer m.UnPatch()
-		globalMetaCache = cache
+		task.MetaCache = cache
 		err := task.PreExecute(ctx)
 		f.NoError(err)
 	}
@@ -373,7 +373,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
@@ -384,7 +384,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		globalMetaCache = cache
+		task.MetaCache = cache
 		err := task.PreExecute(ctx)
 		f.ErrorContains(err, "output fields cannot be altered")
 	}
@@ -395,18 +395,16 @@ func (f *FunctionTaskSuite) TestGetCollectionInfo() {
 	{
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, "db", "collection").Return(0, fmt.Errorf("Mock Error")).Maybe()
-		globalMetaCache = cache
 
-		_, err := getCollectionInfo(ctx, "db", "collection")
+		_, err := getCollectionInfo(ctx, cache, "db", "collection")
 		f.ErrorContains(err, "Mock Error")
 	}
 	{
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, "db", "collection").Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, "db", "collection", int64(1)).Return(nil, fmt.Errorf("Mock info error")).Maybe()
-		globalMetaCache = cache
 
-		_, err := getCollectionInfo(ctx, "db", "collection")
+		_, err := getCollectionInfo(ctx, cache, "db", "collection")
 		f.ErrorContains(err, "Mock info error")
 	}
 }

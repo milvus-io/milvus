@@ -1,9 +1,124 @@
 package typeutil
 
 import (
+	"slices"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// FieldData valid_data is handled in three stages:
+//   - At an input boundary, ValidateAndNormalizeFieldDataValidData validates
+//     that the legacy and field-specific values do not conflict, then keeps
+//     only the field-specific representation.
+//   - Internal code uses GetFieldDataValidData and SetFieldDataValidData to
+//     process validity without depending on where it is physically stored.
+//   - At a user-facing response boundary,
+//     ProjectFieldDataValidDataForLegacy restores the legacy representation
+//     while retaining the field-specific value for SDK compatibility.
+
+// GetFieldDataValidData returns the validity of the immediate values carried by
+// FieldData. New payloads store it on ScalarField or VectorField; FieldData is
+// retained as a legacy fallback for older payloads.
+func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
+	if legacy := fieldData.GetValidData(); len(legacy) > 0 {
+		return legacy
+	}
+	return getFieldSpecificValidData(fieldData)
+}
+
+// SetFieldDataValidData writes validity to the current field-specific location
+// and clears the legacy FieldData.valid_data source.
+func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
+	if fieldData == nil {
+		return
+	}
+
+	if scalars := fieldData.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fieldData.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
+	}
+
+	fieldData.ValidData = nil
+}
+
+// ValidateAndNormalizeFieldDataValidData checks the legacy and current
+// validity locations once at an input boundary. Matching values are accepted
+// and normalized to the current field-specific location. It returns false if
+// any immediate or nested FieldData carries different values in both places.
+func ValidateAndNormalizeFieldDataValidData(fieldData *schemapb.FieldData) bool {
+	if !fieldDataValidDataConsistent(fieldData) {
+		return false
+	}
+	normalizeFieldDataValidData(fieldData)
+	return true
+}
+
+func fieldDataValidDataConsistent(fieldData *schemapb.FieldData) bool {
+	if fieldData == nil {
+		return true
+	}
+
+	legacy := fieldData.GetValidData()
+	current := getFieldSpecificValidData(fieldData)
+	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
+		return false
+	}
+
+	for _, subField := range fieldData.GetStructArrays().GetFields() {
+		if !fieldDataValidDataConsistent(subField) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
+	if fieldData == nil {
+		return
+	}
+
+	switch fieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
+		if validData := GetFieldDataValidData(fieldData); len(validData) > 0 {
+			SetFieldDataValidData(fieldData, validData)
+		} else {
+			fieldData.ValidData = nil
+		}
+	case *schemapb.FieldData_StructArrays:
+		fieldData.ValidData = nil
+		for _, subField := range fieldData.GetStructArrays().GetFields() {
+			normalizeFieldDataValidData(subField)
+		}
+	default:
+		fieldData.ValidData = nil
+	}
+}
+
+// ProjectFieldDataValidDataForLegacy copies current top-level validity to the
+// legacy location without clearing the current value. This is intended only
+// for user-facing response boundaries so old SDKs can read the validity mask.
+func ProjectFieldDataValidDataForLegacy(fieldData *schemapb.FieldData) {
+	if fieldData == nil {
+		return
+	}
+	if validData := getFieldSpecificValidData(fieldData); len(validData) > 0 {
+		fieldData.ValidData = slices.Clone(validData)
+	}
+	for _, subField := range fieldData.GetStructArrays().GetFields() {
+		ProjectFieldDataValidDataForLegacy(subField)
+	}
+}
+
+func getFieldSpecificValidData(fieldData *schemapb.FieldData) []bool {
+	if scalars := fieldData.GetScalars(); scalars != nil {
+		return scalars.GetValidData()
+	}
+	return fieldData.GetVectors().GetValidData()
+}
 
 type FieldDataBuilder struct {
 	dt         schemapb.DataType
@@ -45,9 +160,6 @@ func (b *FieldDataBuilder) Add(data any) *FieldDataBuilder {
 func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 	field := &schemapb.FieldData{
 		Type: b.dt,
-	}
-	if b.hasInvalid {
-		field.ValidData = b.valid
 	}
 
 	switch b.dt {
@@ -153,6 +265,9 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 		}
 	default:
 		return nil
+	}
+	if b.hasInvalid {
+		SetFieldDataValidData(field, b.valid)
 	}
 	return field
 }

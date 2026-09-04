@@ -153,7 +153,7 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const T* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -209,7 +209,7 @@ VerifyElementFullScanSkipCursor(SegmentExpr& segment_expr,
     int64_t null_elements = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -271,15 +271,15 @@ VerifyNullableElementFullScanLogicalCount(
             query_context->get_op_context(), array_fid, 0, 0, 2);
         const auto& [data, valid] = pw.get();
         ASSERT_EQ(data.size(), 2);
-        ASSERT_EQ(valid.size(), 2);
+        ASSERT_TRUE(valid);
         EXPECT_FALSE(valid[1]);
     } else {
         auto pw = segment->chunk_data<Array>(
             query_context->get_op_context(), array_fid, 0);
         auto chunk = pw.get();
         ASSERT_EQ(chunk.row_count(), 2);
-        ASSERT_NE(chunk.valid_data(), nullptr);
-        EXPECT_FALSE(chunk.valid_data()[1]);
+        ASSERT_TRUE(chunk.validity());
+        EXPECT_FALSE(chunk.is_valid(1));
         EXPECT_EQ(chunk.data()[1].length(), 2);
     }
     const auto null_row_range = array_offsets->ElementIDRangeOfRow(1);
@@ -305,7 +305,7 @@ VerifyNullableElementFullScanLogicalCount(
     int64_t live_elements = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -444,7 +444,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchDrivesCallbackPerCandidate) {
     int64_t data_rows = 0;
     auto probe = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -504,7 +504,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchKeepsBitmapCursorAligned) {
     int64_t processed_cursor = 0;
     auto probe = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -566,7 +566,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     int64_t null_batches = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -787,7 +787,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -1002,7 +1002,7 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,

@@ -150,6 +150,45 @@ func TestMixCompactionMaterializesMissingBM25OutputNoDelete(t *testing.T) {
 	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
 }
 
+func TestMixCompactionPrefillsMissingBM25InputBeforeOutput(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	s.SetupBM25()
+	inputField := typeutil.GetField(s.task.plan.GetSchema(), 101)
+	inputField.Nullable = true
+
+	segments := []int64{5, 6, 7}
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0, len(segments))
+	for _, segID := range segments {
+		s.initSegBufferWithBM25(segID)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		removeFieldBinlogForTest(kvs, fBinlogs, 101)
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+			return downloadValuesForPathsForTest(kvs, keys)
+		}).Once()
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetInsertLogs(), 101))
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
 func TestMixCompactionMaterializesMissingFieldWithDeleteFilter(t *testing.T) {
 	s := newMixCompactionStorageV1SuiteForDirectTest(t)
 
@@ -305,6 +344,43 @@ func TestMixCompactionMergeSortMaterializesMissingBM25Output(t *testing.T) {
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.True(segment.GetIsSorted())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func TestMixCompactionMergeSortPrefillsMissingBM25InputBeforeOutput(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	mergeSortKey := paramtable.Get().DataNodeCfg.UseMergeSort.Key
+	paramtable.Get().Save(mergeSortKey, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(mergeSortKey) })
+	s.SetupBM25()
+	typeutil.GetField(s.task.plan.GetSchema(), 101).Nullable = true
+
+	segments := []int64{5, 6, 7}
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0, len(segments))
+	for _, segID := range segments {
+		s.initSegBufferWithBM25(segID)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		removeFieldBinlogForTest(kvs, fBinlogs, 101)
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+			return downloadValuesForPathsForTest(kvs, keys)
+		}).Once()
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1, SegmentID: segID, FieldBinlogs: lo.Values(fBinlogs), IsSorted: true,
+		})
+	}
+	s.task.compactionParams = compaction.GenParams()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetInsertLogs(), 101))
 	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
 }
 
@@ -1524,4 +1600,110 @@ func BenchmarkMixCompactor(b *testing.B) {
 	}
 
 	s.TearDownTest()
+}
+
+func TestCanMergeSort(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
+	// the flag canMergeSort requires. TestCanMergeSortMatchesMergeKey covers
+	// the namespace-enabled half.
+	namespaceDisabledSchema := &schemapb.CollectionSchema{}
+
+	t.Run("disabled by param", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.False(t, canMergeSort(plan, compaction.Params{UseMergeSort: false, MaxSegmentMergeSort: 30}))
+	})
+
+	t.Run("unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1}},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("single sorted segment allowed", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("too many segments rejected", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort+1)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("exactly max segments allowed", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("later unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true},
+				{SegmentID: 2},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+}
+
+func TestCanMergeSortMatchesMergeKey(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+
+	t.Run("namespace enabled rejects pk-only sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true, IsSortedByNamespace: false},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace enabled accepts namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace disabled rejects namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: false},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("mixed flags rejected when one does not match", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSortedByNamespace: true},
+				{SegmentID: 2, IsSorted: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
 }

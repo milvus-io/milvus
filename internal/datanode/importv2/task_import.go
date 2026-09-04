@@ -66,7 +66,9 @@ func NewImportTask(req *datapb.ImportRequest,
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
 	}
-	// Allocator for autoIDs and logIDs.
+	// Local allocator for binlog logIDs (and the legacy autoID fallback when a file
+	// carries no primary-allocated PK range). Deterministic cross-cluster autoID PKs
+	// are derived per file from ImportFile.PreAllocatedAutoIds, not from this allocator.
 	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
@@ -166,7 +168,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		mlog.Int64("bufferSize", bufferSize),
 		mlog.Int64("taskSlot", t.GetSlots()),
 		mlog.Any("files", t.req.GetFiles()),
-		mlog.Any("schema", t.GetSchema()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -181,8 +183,23 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 			return err
 		}
 		defer reader.Close()
+		// Deterministic autoID: each file owns a disjoint PK range replicated from
+		// the primary. A nil cursor (no range) falls back to the local allocator.
+		var cur *pkCursor
+		if r := file.GetPreAllocatedAutoIds(); r.GetEnd() > r.GetBegin() {
+			cur = &pkCursor{begin: r.GetBegin(), end: r.GetEnd(), next: r.GetBegin()}
+		} else if pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema()); err == nil &&
+			pkField.GetAutoID() && !importutilv2.IsBackup(req.GetOptions()) && !importutilv2.IsL0Import(req.GetOptions()) {
+			// The coordinator assigns a range to every autoID import, so an absent one
+			// means this job predates the mechanism or the coordinator is older than
+			// this datanode. Keys then come from the local allocator, which diverges
+			// from the source cluster if the job is replicated -- log it so the
+			// rolling-upgrade window is greppable instead of silent.
+			mlog.Warn(t.ctx, "no PK range on an autoID import file, falling back to the local allocator",
+				WrapLogFields(t, mlog.String("file", file.String()))...)
+		}
 		start := time.Now()
-		err = t.importFile(reader)
+		err = t.importFile(reader, cur)
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -212,7 +229,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -234,7 +251,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		err = AppendSystemFieldsData(t, data, rowNum)
+		err = appendSystemFieldsDataWithCursor(t, data, rowNum, cur)
 		if err != nil {
 			return err
 		}

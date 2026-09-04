@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -320,7 +321,7 @@ type lexicalHighlightOperator struct {
 	tasks     []*highlightTask
 	schema    *schemaInfo
 	lbPolicy  shardclient.LBPolicy
-	scheduler *taskScheduler
+	scheduler *scheduler.TaskScheduler
 
 	collectionName string
 	collectionID   int64
@@ -361,7 +362,7 @@ func rowAlignedStringFieldData(fieldData *schemapb.FieldData, rowNum int) ([]str
 	}
 
 	data := fieldData.GetScalars().GetStringData().GetData()
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	if len(validData) == 0 {
 		if len(data) != rowNum {
 			return nil, merr.WrapErrServiceInternalMsg(
@@ -466,7 +467,7 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		collectionID:        op.collectionID,
 		dbName:              op.dbName,
 	}
-	if err := op.scheduler.dqQueue.Enqueue(task); err != nil {
+	if err := op.scheduler.DqQueue.Enqueue(task); err != nil {
 		return nil, err
 	}
 
@@ -569,6 +570,7 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 	}
 	highlightResults := []*commonpb.HighlightResult{}
 	topks := result.Results.GetTopks()
+	rowNum := searchResultHitCount(resultData)
 
 	// Process schema fields
 	for _, fieldID := range op.highlight.FieldIDs() {
@@ -576,7 +578,10 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, text field not in output field %d", fieldID)
 		}
-		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		texts, err := rowAlignedStringFieldData(fieldDatas, rowNum)
+		if err != nil {
+			return nil, err
+		}
 		fieldName := op.highlight.GetFieldName(fieldID)
 
 		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
@@ -617,6 +622,14 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 
 		for _, dynFieldName := range dynFieldNames {
 			texts := allDynFieldTexts[dynFieldName]
+			// Process slices documents by topks without checking that they sum to
+			// len(documents), so an undersized $meta payload would go out of range
+			// there. Fail with the same error the schema branch returns instead.
+			if len(texts) != rowNum {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"get highlight failed, dynamic field %s has %d rows, expected %d",
+					dynFieldName, len(texts), rowNum)
+			}
 
 			highlightResult, err := op.processFieldHighlight(ctx, dynFieldName, texts, topks)
 			if err != nil {

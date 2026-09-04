@@ -234,7 +234,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
          schema_proto.struct_array_fields()) {
         for (const auto& sub_field : child.fields()) {
-            process_field(sub_field);
+            auto field = sub_field;
+            field.set_nullable(field.nullable() || child.nullable());
+            process_field(field);
         }
     }
 
@@ -300,9 +302,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     return schema;
 }
-
-const FieldMeta FieldMeta::RowIdMeta(
-    FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
 
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {

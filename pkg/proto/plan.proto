@@ -64,7 +64,7 @@ message GenericValue {
     Array array_val = 5;
     // Raw binary payload, carried from a schemapb.TemplateValue.bytes_val. Used
     // to pass a client pre-built membership-filter blob into an expression
-    // (e.g. bloom_match) without base64-inflating a string field.
+    // (e.g. membership_match with type=bloom) without base64-inflating a string field.
     bytes bytes_val = 6;
   };
 }
@@ -309,6 +309,15 @@ message BloomFilterExpr {
   bytes filter_blob = 2;
 }
 
+message RoaringFilterExpr {
+  ColumnInfo column_info = 1;
+  // MRB1-enveloped portable Roaring64 bitmap for exact signed-integer
+  // membership (see design doc 20260714). Unlike bloom_filter_expr this is
+  // exact: it has no false positives, and its size follows the value
+  // distribution rather than the member count alone.
+  bytes bitmap_blob = 2;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -332,6 +341,7 @@ message Expr {
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
     BloomFilterExpr bloom_filter_expr = 22;
+    RoaringFilterExpr roaring_filter_expr = 23;
   };
   bool is_template = 20;
 }

@@ -42,7 +42,7 @@ func TestNewInterceptor(t *testing.T) {
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	mixCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 	var err error
-	globalMetaCache, err = NewMetaCache(mixCoord)
+	node.setMetaCache(mustNewMetaCacheForTest(mixCoord))
 	assert.NoError(t, err)
 	interceptor, err := NewInterceptor[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse](node, "DescribeCollection")
 	assert.NoError(t, err)
@@ -56,9 +56,6 @@ func TestNewInterceptor(t *testing.T) {
 
 func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBackfill(t *testing.T) {
 	ctx := context.Background()
-
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
 
 	dbName := "test_db"
 	collectionName := "test_collection"
@@ -77,13 +74,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -95,9 +90,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 
 func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesRequestID(t *testing.T) {
 	ctx := context.Background()
-
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
 
 	dbName := "db1"
 	dbID := int64(3)
@@ -120,15 +112,13 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesReque
 	// is mocked, so any redundant identifier round-trip would fail the test.
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		dbName:    dbName,
-		dbID:      dbID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		DBName:    dbName,
+		DBID:      dbID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	request := &milvuspb.DescribeCollectionRequest{
 		CollectionID: collectionID,
 	}
@@ -147,9 +137,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesReque
 
 func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *testing.T) {
 	ctx := context.Background()
-
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
 
 	dbName := "test_db"
 	collectionName := "test_collection"
@@ -183,13 +170,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -213,9 +198,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t *testing.T) {
 	ctx := context.Background()
 
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
-
 	collectionID := int64(2000)
 	schema := &schemapb.CollectionSchema{
 		Name: "coll1",
@@ -229,16 +211,14 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
-		collID: collectionID,
+		CollID: collectionID,
 		// resolved by the coordinator and carried in the cache entry
-		dbID:      7,
-		dbName:    "db1",
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		DBID:      7,
+		DBName:    "db1",
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	// the monitoring http path passes only the collection id, both db name and
 	// collection name are empty
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionID: collectionID})
@@ -254,16 +234,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t
 func TestCachedProxyServiceProvider_DescribeCollection_ByIDNotFoundUsesCollectionNotExistsCode(t *testing.T) {
 	ctx := context.Background()
 
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
-
 	collectionID := int64(4242)
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).
 		Return(nil, merr.WrapErrCollectionNotFound(collectionID))
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionID: collectionID})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
@@ -280,13 +255,8 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDNotFoundUsesCollectio
 func TestCachedProxyServiceProvider_DescribeCollection_EmptyRequestFailsValidation(t *testing.T) {
 	ctx := context.Background()
 
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
-
 	// no expectations: any cache call is an unexpected-call failure
-	globalMetaCache = &MockCache{}
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: &MockCache{}}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode(),
@@ -299,9 +269,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_EmptyRequestFailsValidati
 // which the access log and metric labels read after the call.
 func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequest(t *testing.T) {
 	ctx := context.Background()
-
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
 
 	dbName := "db"
 	collectionName := "coll1"
@@ -319,13 +286,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequ
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:    collectionID,
-		schema:    mustNewSchemaInfo(schema),
-		shardsNum: common.DefaultShardsNum,
+		CollID:    collectionID,
+		Schema:    mustNewSchemaInfo(schema),
+		ShardsNum: common.DefaultShardsNum,
 	}, nil)
-	globalMetaCache = mockCache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	request := &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: collectionName}
 	resp, err := provider.DescribeCollection(ctx, request)
 	assert.NoError(t, err)
@@ -337,9 +302,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequ
 
 func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOneDescribeAndKeepsUnknownDB(t *testing.T) {
 	ctx := context.Background()
-	origCache := globalMetaCache
-	defer func() { globalMetaCache = origCache }()
-
 	const collectionID = int64(101)
 	var describeCount atomic.Int32
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -363,9 +325,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOne
 	cache, err := NewMetaCache(mixCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
-	globalMetaCache = cache
-
-	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}
 	request := &milvuspb.DescribeCollectionRequest{CollectionID: collectionID}
 	interceptor := DatabaseInterceptor()
 	result, err := interceptor(ctx, request, &grpc.UnaryServerInfo{}, func(ctx context.Context, req interface{}) (interface{}, error) {
@@ -518,26 +478,22 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, database, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, database, collectionName, collectionID).Return(&collectionInfo{
-		collID:              collectionID,
-		dbID:                raw.GetDbId(),
-		dbName:              database,
-		schema:              mustNewSchemaInfo(cacheSchema),
-		createdTimestamp:    raw.GetCreatedTimestamp(),
-		createdUtcTimestamp: raw.GetCreatedUtcTimestamp(),
-		consistencyLevel:    raw.GetConsistencyLevel(),
-		updateTimestamp:     raw.GetUpdateTimestamp(),
-		vChannels:           raw.GetVirtualChannelNames(),
-		pChannels:           raw.GetPhysicalChannelNames(),
-		numPartitions:       raw.GetNumPartitions(),
-		shardsNum:           raw.GetShardsNum(),
-		aliases:             raw.GetAliases(),
-		properties:          raw.GetProperties(),
+		CollID:              collectionID,
+		DBID:                raw.GetDbId(),
+		DBName:              database,
+		Schema:              mustNewSchemaInfo(cacheSchema),
+		CreatedTimestamp:    raw.GetCreatedTimestamp(),
+		CreatedUtcTimestamp: raw.GetCreatedUtcTimestamp(),
+		ConsistencyLevel:    raw.GetConsistencyLevel(),
+		UpdateTimestamp:     raw.GetUpdateTimestamp(),
+		VChannels:           raw.GetVirtualChannelNames(),
+		PChannels:           raw.GetPhysicalChannelNames(),
+		NumPartitions:       raw.GetNumPartitions(),
+		ShardsNum:           raw.GetShardsNum(),
+		Aliases:             raw.GetAliases(),
+		Properties:          raw.GetProperties(),
 	}, nil)
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
-	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{}}).DescribeCollection(ctx,
+	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}).DescribeCollection(ctx,
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 	assert.NoError(t, finalizeDescribeCollectionResponse(cachedResp))
@@ -570,10 +526,7 @@ func TestDescribeCollectionCachedAndRemoteNotFoundStatusEquivalent(t *testing.T)
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, database, collectionName).Return(int64(0), notFound)
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{}}).DescribeCollection(ctx,
+	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}).DescribeCollection(ctx,
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 
@@ -608,10 +561,7 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, database, collectionName).Return(int64(0), notFound)
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{}}).DescribeCollection(ctx,
+	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}).DescribeCollection(ctx,
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 

@@ -69,7 +69,7 @@ func sbbfBodyBytes(n uint64, fpp float64) int {
 // worth printing: rebuilding at the suggested fpr must actually fit the cap.
 // A hint that still overflows would send the caller round the loop twice.
 func TestOversizedBlobHintSuggestsWorkableFPR(t *testing.T) {
-	const maxSize = 64 * 1024 * 1024 // the new proxy.maxBloomFilterSize default
+	const maxSize = 64 * 1024 * 1024 // the unified proxy.maxMembershipFilterSize default
 	usable := 64 * 1024 * 1024       // largest power-of-two body under the cap
 
 	for _, n := range []uint64{

@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -936,12 +935,12 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	if partitionID != common.AllPartitionsID {
 		prefix = buildPartitionPrefix(collectionID, partitionID)
 	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ctx, prefix)
+	exists, err := kc.MetaKv.HasPrefix(ctx, prefix)
 	if err != nil {
 		// error case can be regarded as not finished.
 		return false
 	}
-	return len(keys) == 0 && len(values) == 0
+	return !exists
 }
 
 func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
@@ -980,6 +979,65 @@ func (kc *Catalog) SaveCompactionTask(ctx context.Context, coll *datapb.Compacti
 
 func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	key := buildCompactionTaskPath(task)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
+	records := make([]*datapb.CompactionTarget, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		record := &datapb.CompactionTarget{}
+		if err := proto.Unmarshal(value, record); err != nil {
+			return err
+		}
+		records = append(records, record)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTargetPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (kc *Catalog) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	cloned := proto.Clone(record).(*datapb.CompactionTarget)
+	key, value, err := buildCompactionTargetKV(cloned)
+	if err != nil {
+		return err
+	}
+	return kc.SaveByBatch(ctx, map[string]string{key: value})
+}
+
+func (kc *Catalog) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+	key := buildCompactionTargetPath(targetID)
+	value, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	record := &datapb.CompactionTarget{}
+	if err := proto.Unmarshal([]byte(value), record); err != nil {
+		return err
+	}
+	record.State = state
+	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
+		record.InactivatedAtTS = inactivatedAtTS
+	} else {
+		record.InactivatedAtTS = 0
+	}
+	return kc.SaveCompactionTarget(ctx, record)
+}
+
+func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
 	return kc.MetaKv.Remove(ctx, key)
 }
 
@@ -1153,75 +1211,6 @@ func (kc *Catalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *
 	return kc.MetaKv.Save(ctx, key, string(value))
 }
 
-func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
-	kvs := make(map[string]string)
-
-	k := BuildFileResourceKey(resource.Id)
-	v, err := proto.Marshal(resource)
-	if err != nil {
-		mlog.Error(ctx, "failed to marshal resource info", mlog.Err(err))
-		return err
-	}
-	kvs[k] = string(v)
-	kvs[FileResourceVersionKey] = fmt.Sprint(version)
-
-	if err = kc.MetaKv.MultiSave(ctx, kvs); err != nil {
-		mlog.Warn(ctx, "fail to save resource info", mlog.String("key", k), mlog.Err(err))
-		return err
-	}
-	return nil
-}
-
-func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
-	k := BuildFileResourceKey(resourceID)
-	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
-		mlog.Warn(ctx, "fail to remove resource info", mlog.String("key", k), mlog.Err(err))
-		return err
-	}
-	return nil
-}
-
-func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix+"/")
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var version uint64 = 0
-	exist, err := kc.MetaKv.Has(ctx, FileResourceVersionKey)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if exist {
-		strVersion, err := kc.MetaKv.Load(ctx, FileResourceVersionKey)
-		if err != nil {
-			return nil, 0, err
-		}
-		v, err := strconv.ParseUint(strVersion, 10, 64)
-		if err != nil {
-			return nil, 0, err
-		}
-		version = v
-	}
-
-	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
-	for _, v := range values {
-		info := &internalpb.FileResourceInfo{}
-		err := proto.Unmarshal([]byte(v), info)
-		if err != nil {
-			return nil, 0, err
-		}
-		infos = append(infos, info)
-	}
-
-	return infos, version, nil
-}
-
-func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
-}
-
 func (kc *Catalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
 	key := buildSnapshotKey(snapshot.GetCollectionId(), snapshot.GetId())
 	value, err := proto.Marshal(snapshot)
@@ -1254,4 +1243,32 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 		return nil, err
 	}
 	return snapshots, nil
+}
+
+func (kc *Catalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, buildExportSnapshotJobKey(job.GetJobId()), string(value))
+}
+
+func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	jobs := make([]*datapb.ExportSnapshotJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.ExportSnapshotJob{}
+		if err := proto.Unmarshal(value, job); err != nil {
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ExportSnapshotJobPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
+	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }

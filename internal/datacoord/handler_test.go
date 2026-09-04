@@ -29,7 +29,233 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRetrieveSegment(t *testing.T) {
+	segment := func(id int64, state commonpb.SegmentState, parents ...int64) *SegmentInfo {
+		return NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             id,
+			State:          state,
+			CompactionFrom: parents,
+		})
+	}
+
+	t.Run("all direct parents indexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Empty(t, dropped.Collect())
+	})
+
+	t.Run("one direct parent unindexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("does not walk to indexed grandparent", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped, 1),
+			3: segment(3, commonpb.SegmentState_Flushed, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("indexed child wins", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Flushed, 1),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(2),
+			typeutil.NewUniqueSet(1),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{2}, flushed.Collect())
+		assert.Equal(t, []int64{1}, dropped.Collect())
+	})
+
+	t.Run("keeps compactFrom before retirement starts", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Flushed),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 2, 3, 4),
+			make(typeutil.UniqueSet),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Empty(t, dropped.Collect())
+	})
+
+	t.Run("keeps compactTo after retirement starts", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 3, 4),
+			typeutil.NewUniqueSet(2),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{3, 4}, flushed.Collect())
+		assert.Equal(t, []int64{2}, dropped.Collect())
+	})
+
+	t.Run("deduplicates candidates from an immutable snapshot", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Flushed),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 3),
+		}
+		flushed, _ := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 2, 3, 4),
+			make(typeutil.UniqueSet),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+	})
+
+	t.Run("deduplicates selected ancestors across multiple generations", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Flushed, 3),
+		}
+		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
+		// Recursive deduplication must remove 5 without selecting unready 3.
+		indexed := typeutil.NewUniqueSet(1, 2, 5)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 5),
+			typeutil.NewUniqueSet(1, 2, 3),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Equal(t, []int64{3}, dropped.Collect())
+	})
+
+	t.Run("keeps child when fallback parent is not explicitly ready", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Flushed, 1),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(2),
+			typeutil.NewUniqueSet(1),
+			func(segmentID UniqueID) bool { return segmentID == 1 },
+			func(UniqueID) bool { return false },
+		)
+
+		assert.Equal(t, []int64{2}, flushed.Collect())
+		assert.Equal(t, []int64{1}, dropped.Collect())
+	})
+
+	t.Run("cancels fallback on partial ancestor coverage", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Dropped),
+			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2, 6)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 6),
+			typeutil.NewUniqueSet(1, 2, 3, 5),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{4, 6}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2, 3, 5}, dropped.Collect())
+	})
+
+	t.Run("expands partial coverage through ready parents", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Dropped),
+			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 6),
+			typeutil.NewUniqueSet(1, 2, 3, 5),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2, 5}, flushed.Collect())
+		assert.Equal(t, []int64{3}, dropped.Collect())
+	})
+}
 
 func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	svr := newTestServer(t)
@@ -596,8 +822,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		//        \         /     \        /                              |
 		//         \       /       \      /                               |
 		//           [16u]          [17u]       [18u](unsorted)     [20u](sorted)      [21i](unsorted)
-		// all leaf nodes are [1,2,3,4,5,6,7], but because segment3 has been gced, the leaf node becomes [7,8,9,10,4,5,6]
-		// should be returned: flushed: [7, 8, 9, 10, 4, 5, 6, 20, 21], growing: [18]
+		// Segments 7-15 are not valid fallbacks for the current frontier, so keep
+		// their children 16 and 17. The independent leaves 20 and 21 are unchanged.
+		// Expected: flushed [16, 17, 20, 21], growing [18].
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
@@ -972,9 +1199,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		assert.NoError(t, err)
 
 		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		assert.ElementsMatch(t, []int64{7, 8, 9, 10, 4, 5, 6, 20, 21}, vchan.FlushedSegmentIds)
+		assert.ElementsMatch(t, []int64{16, 17, 20, 21}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{18}, vchan.UnflushedSegmentIds)
-		assert.ElementsMatch(t, []int64{1, 2, 19}, vchan.DroppedSegmentIds)
+		assert.ElementsMatch(t, []int64{1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19}, vchan.DroppedSegmentIds)
 	})
 
 	t.Run("compaction iterate", func(t *testing.T) {
@@ -1908,6 +2135,77 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
+}
+
+func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
+	properties := []*commonpb.KeyValuePair{
+		{Key: common.CollectionTTLConfigKey, Value: "360"},
+		{Key: common.CollectionAutoCompactionKey, Value: "false"},
+		{Key: common.MmapEnabledKey, Value: "false"},
+		{Key: common.AllowInsertAutoIDKey, Value: "false"},
+	}
+	schema := newTestSchema()
+	schema.Properties = common.CloneKeyValuePairs(properties)
+
+	mixCoord := newMockMixCoord()
+	mockMeta := &meta{indexMeta: &indexMeta{}}
+	handler := &ServerHandler{
+		s: &Server{
+			broker: broker.NewCoordinatorBroker(mixCoord),
+			meta:   mockMeta,
+		},
+	}
+
+	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
+		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				Schema:              schema,
+				ShardsNum:           1,
+				NumPartitions:       1,
+				ConsistencyLevel:    commonpb.ConsistencyLevel_Bounded,
+				Properties:          properties,
+				CollectionID:        200,
+				VirtualChannelNames: []string{"ch-1"},
+			}, nil
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
+		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			return &milvuspb.ShowPartitionsResponse{
+				Status:         merr.Success(),
+				PartitionIDs:   []int64{0},
+				PartitionNames: []string{"_default"},
+			}, nil
+		}).Build()
+	defer mockShowPartitions.UnPatch()
+
+	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
+		func(_ *ServerHandler, _ context.Context, _ UniqueID, _ ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
+			return []*msgpb.MsgPosition{
+				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+			}, uint64(100), nil
+		}).Build()
+	defer mockSeekPositions.UnPatch()
+
+	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).
+		Return([]*model.Index{}).
+		Build()
+	defer mockIndexes.UnPatch()
+
+	mockSelectSegments := mockey.Mock((*meta).SelectSegments).
+		Return([]*SegmentInfo{}).
+		Build()
+	defer mockSelectSegments.UnPatch()
+
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	require.NoError(t, err)
+	require.NotNil(t, snapshotData.Collection)
+	assert.Equal(t, commonpb.ConsistencyLevel_Bounded, snapshotData.Collection.GetConsistencyLevel())
+	assert.Equal(t, properties, snapshotData.Collection.GetProperties())
+	require.NotEmpty(t, snapshotData.Collection.GetProperties())
+	assert.NotSame(t, properties[0], snapshotData.Collection.GetProperties()[0])
 }
 
 func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {

@@ -854,8 +854,9 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     // Build query from first valid vector
     std::vector<float> query_data(base_data.begin(), base_data.begin() + dim);
 
-    // Create an all-zero bitset (no filtering) for the physical data range
-    TargetBitmap search_bitset(total_valid, false);
+    // Search bitsets stay in logical row space; CachedSearchIterator attaches
+    // the chunk-local physical->logical window before entering Knowhere BF.
+    TargetBitmap search_bitset(chunk_rows * num_chunks, false);
     BitsetView search_bitview(search_bitset);
 
     dataset::SearchDataset search_dataset{
@@ -875,8 +876,6 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     iter_v2_info.batch_size = batch_size;
     search_info.iterator_v2_info_ = iter_v2_info;
 
-    // Create CachedSearchIterator - this tests Fix 1:
-    // The lambda should use valid_count_per_chunk[chunk_id] as chunk_size
     CachedSearchIterator iter(column.get(),
                               search_dataset,
                               search_info,
@@ -890,8 +889,7 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     ASSERT_EQ(result.seg_offsets_.size(), batch_size);
     ASSERT_EQ(result.distances_.size(), batch_size);
 
-    // All returned offsets should be physical offsets in [0, total_valid)
-    // (TransformOffset is NOT called here - that's the caller's job)
+    // Knowhere BF returns logical offsets through the BitsetView out-id window.
     int valid_count = 0;
     for (auto& offset : result.seg_offsets_) {
         if (offset == INVALID_SEG_OFFSET) {
@@ -899,9 +897,8 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
         }
         valid_count++;
         ASSERT_GE(offset, 0);
-        ASSERT_LT(offset, total_valid)
-            << "Physical offset " << offset << " exceeds valid count "
-            << total_valid;
+        ASSERT_LT(offset, chunk_rows * num_chunks);
+        ASSERT_EQ(offset % 2, 0) << "logical offset should be a valid row";
     }
     ASSERT_GT(valid_count, 0);
 }

@@ -349,6 +349,15 @@ class VectorFieldIndexing : public FieldIndexing {
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
+
+    void
+    DisableIndexAfterBuildFailure();
+
+    // Number of threads a single growing index build/add may use, derived from
+    // queryNode.segcore.interimIndex.growingBuildThreadRate.
+    int64_t
+    resolve_build_thread_num() const;
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -356,6 +365,9 @@ class VectorFieldIndexing : public FieldIndexing {
     // whether all insertd data has been added to growing index and can be
     // searched.
     std::atomic<bool> sync_with_index_;
+    // whether growing index build has failed and future appends should keep
+    // using brute force over raw chunks.
+    std::atomic<bool> index_unavailable_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
@@ -530,16 +542,6 @@ class IndexingRecord {
     bool
     is_in(FieldId field_id) const {
         return field_indexings_.count(field_id);
-    }
-
-    template <typename T>
-    auto
-    get_scalar_field_indexing(FieldId field_id) const
-        -> const ScalarFieldIndexing<T>& {
-        auto& entry = get_field_indexing(field_id);
-        auto ptr = dynamic_cast<const ScalarFieldIndexing<T>*>(&entry);
-        AssertInfo(ptr, "invalid indexing");
-        return *ptr;
     }
 
  private:

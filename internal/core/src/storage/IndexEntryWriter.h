@@ -49,13 +49,6 @@ struct SliceMeta {
     uint64_t size;
 };
 
-struct EncryptedDirectoryEntry {
-    std::string name;
-    uint64_t original_size;
-    uint32_t crc32;
-    std::vector<SliceMeta> slices;
-};
-
 class IndexEntryWriter {
  public:
     virtual ~IndexEntryWriter() = default;

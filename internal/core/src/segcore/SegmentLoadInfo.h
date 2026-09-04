@@ -150,11 +150,6 @@ struct LoadDiff {
                load_external_manifest;
     }
 
-    [[nodiscard]] bool
-    HasManifestChange() const {
-        return manifest_updated;
-    }
-
     [[nodiscard]] std::string
     ToString() const {
         std::ostringstream oss;
@@ -643,17 +638,6 @@ class SegmentLoadInfo {
         return info_.index_infos_size();
     }
 
-    [[nodiscard]] const proto::segcore::FieldIndexInfo&
-    GetIndexInfo(int index) const {
-        return info_.index_infos(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldIndexInfo>&
-    GetIndexInfos() const {
-        return info_.index_infos();
-    }
-
     /**
      * @brief Check if a field has index info
      * @param field_id The field ID to check
@@ -702,12 +686,6 @@ class SegmentLoadInfo {
     [[nodiscard]] const proto::segcore::FieldBinlog&
     GetBinlogPath(int index) const {
         return info_.binlog_paths(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetBinlogPaths() const {
-        return info_.binlog_paths();
     }
 
     /**
@@ -854,12 +832,6 @@ class SegmentLoadInfo {
         return info_.statslogs(index);
     }
 
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetStatslogs() const {
-        return info_.statslogs();
-    }
-
     [[nodiscard]] int
     GetDeltalogCount() const {
         return info_.deltalogs_size();
@@ -868,12 +840,6 @@ class SegmentLoadInfo {
     [[nodiscard]] const proto::segcore::FieldBinlog&
     GetDeltalog(int index) const {
         return info_.deltalogs(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetDeltalogs() const {
-        return info_.deltalogs();
     }
 
     // ==================== Text Index Stats ====================
@@ -911,12 +877,6 @@ class SegmentLoadInfo {
         return info_.bm25logs(index);
     }
 
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetBm25logs() const {
-        return info_.bm25logs();
-    }
-
     // ==================== JSON Key Stats ====================
 
     [[nodiscard]] bool
@@ -945,11 +905,6 @@ class SegmentLoadInfo {
     void
     SetFieldFilledWithDefault(FieldId field_id) {
         fields_filled_with_default_.insert(field_id);
-    }
-
-    void
-    ClearFieldFilledWithDefault(FieldId field_id) {
-        fields_filled_with_default_.erase(field_id);
     }
 
     [[nodiscard]] bool
@@ -1136,18 +1091,6 @@ class SegmentLoadInfo {
         int64_t segment_id) const;
 
     /**
-    * @brief Check if a field's index has raw data
-    *
-    * Determines whether the index for a given field contains raw data
-    * by querying the IndexFactory with the index parameters.
-    *
-    * @param load_index_info The LoadIndexInfo containing index parameters
-    * @return true if the index has raw data, false otherwise
-    */
-    [[nodiscard]] static bool
-    CheckIndexHasRawData(const LoadIndexInfo& load_index_info);
-
-    /**
      * @brief Convert a TextIndexStats to LoadTextIndexInfo
      *
      * This method converts the protobuf TextIndexStats to the
@@ -1242,20 +1185,21 @@ class SegmentLoadInfo {
                 (!IsVectorDataType(load_index_info.field_type) &&
                  index_type_it != load_index_info.index_params.end() &&
                  index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
+            auto request =
+                milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                    load_index_info.field_type,
+                    load_index_info.element_type,
+                    load_index_info.index_engine_version,
+                    load_index_info.index_size,
+                    load_index_info.index_params,
+                    load_index_info.enable_mmap,
+                    load_index_info.num_rows,
+                    load_index_info.dim);
             if (!needs_file_context) {
-                load_index_info.load_resource_request =
-                    milvus::index::IndexFactory::GetInstance()
-                        .IndexLoadResource(load_index_info.field_type,
-                                           load_index_info.element_type,
-                                           load_index_info.index_engine_version,
-                                           load_index_info.index_size,
-                                           load_index_info.index_params,
-                                           load_index_info.enable_mmap,
-                                           load_index_info.num_rows,
-                                           load_index_info.dim);
+                load_index_info.load_resource_request = request;
             }
-            // Check if index has raw data before moving
-            if (CheckIndexHasRawData(load_index_info)) {
+            if (milvus::index::IndexFactory::CanUseIndexRawDataForField(
+                    load_index_info.field_type, request.has_raw_data)) {
                 field_index_has_raw_data_.insert(field_id);
             }
             if (load_index_info.field_type == DataType::JSON) {

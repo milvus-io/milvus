@@ -30,6 +30,7 @@ func TestFieldSchema(t *testing.T) {
 		NewField().WithName("array_field").WithDataType(FieldTypeArray).WithElementType(FieldTypeBool).WithMaxCapacity(128),
 		NewField().WithName("clustering_key").WithDataType(FieldTypeInt32).WithIsClusteringKey(true),
 		NewField().WithName("varchar_text").WithDataType(FieldTypeVarChar).WithMaxLength(65535).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{}).WithMultiAnalyzerParams(map[string]any{}).WithEnableMatch(true),
+		NewField().WithName("native_text").WithDataType(FieldTypeText).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"}).WithEnableMatch(true),
 
 		NewField().WithName("default_value_bool").WithDataType(FieldTypeBool).WithDefaultValueBool(true),
 		NewField().WithName("default_value_int").WithDataType(FieldTypeInt32).WithDefaultValueInt(1),
@@ -71,6 +72,14 @@ func TestFieldSchema(t *testing.T) {
 	assert.NotPanics(t, func() {
 		(&Field{}).WithTypeParams("a", "b")
 	})
+}
+
+func TestFieldTypeText(t *testing.T) {
+	assert.Equal(t, "Text", FieldTypeText.Name())
+	assert.Equal(t, "string", FieldTypeText.String())
+	pbType, goType := FieldTypeText.PbFieldType()
+	assert.Equal(t, "Text", pbType)
+	assert.Equal(t, "string", goType)
 }
 
 func TestStructSchema(t *testing.T) {

@@ -76,13 +76,13 @@ class ChunkVectorTest : public ::testing::TestWithParam<bool> {
     SetUp() override {
         auto& mmap_config =
             milvus::storage::MmapManager::GetInstance().GetMmapConfig();
-        mmap_config.SetEnableGrowingMmap(true);
+        mmap_config.growing_enable_mmap = true;
     }
     void
     TearDown() override {
         auto& mmap_config =
             milvus::storage::MmapManager::GetInstance().GetMmapConfig();
-        mmap_config.SetEnableGrowingMmap(false);
+        mmap_config.growing_enable_mmap = false;
     }
     knowhere::MetricType metric_type = "IP";
     milvus::segcore::SegcoreConfig config;

@@ -18,7 +18,9 @@ package storage
 
 import (
 	"math"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -60,6 +62,8 @@ type StatisticsCollector struct {
 	timestampTo        uint64
 	nullCounts         map[int64]int64
 	quantileEntries    []quantileEntry
+	columnGroups       map[int64]*datapb.ColumnGroupStatistics
+	formats            map[string]struct{}
 }
 
 // NewStatisticsCollector returns an empty collector.
@@ -92,10 +96,22 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 	c.deltaTimestampTo = stats.GetDeltaTimestampTo()
 	c.timestampFrom = stats.GetTimestampFrom()
 	c.timestampTo = stats.GetTimestampTo()
+	if loadResource := stats.GetLoadResource(); loadResource != nil {
+		c.columnGroups = make(map[int64]*datapb.ColumnGroupStatistics, len(loadResource.GetColumnGroups()))
+		for _, group := range loadResource.GetColumnGroups() {
+			c.columnGroups[group.GetGroupId()] = cloneColumnGroup(group)
+		}
+	}
 	if nc := stats.GetNullCounts(); len(nc) > 0 {
 		c.nullCounts = make(map[int64]int64, len(nc))
 		for f, n := range nc {
 			c.nullCounts[f] = n
+		}
+	}
+	if fmts := stats.GetFormats(); len(fmts) > 0 {
+		c.formats = make(map[string]struct{}, len(fmts))
+		for _, f := range fmts {
+			c.formats[f] = struct{}{}
 		}
 	}
 	// Rebuild quantile buckets from the persisted marks: bucket i carries the
@@ -118,6 +134,81 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 		}
 	}
 	return c
+}
+
+// mergeColumnGroups folds one sync's insert metadata into the current map in
+// place. Packed formats use ChildFields to describe a physical column group;
+// legacy field binlogs naturally form one group per field.
+func mergeColumnGroups(current map[int64]*datapb.ColumnGroupStatistics, inserts map[int64]*datapb.FieldBinlog) map[int64]*datapb.ColumnGroupStatistics {
+	if current == nil {
+		current = make(map[int64]*datapb.ColumnGroupStatistics)
+	}
+	for _, fieldBinlog := range inserts {
+		mergeColumnGroup(current, fieldBinlog)
+	}
+	return current
+}
+
+func mergeColumnGroup(groups map[int64]*datapb.ColumnGroupStatistics, fieldBinlog *datapb.FieldBinlog) {
+	if fieldBinlog == nil {
+		return
+	}
+	groupID := fieldBinlog.GetFieldID()
+	group, ok := groups[groupID]
+	if !ok {
+		group = &datapb.ColumnGroupStatistics{GroupId: groupID}
+		groups[groupID] = group
+	}
+	fieldIDs := fieldBinlog.GetChildFields()
+	if len(fieldIDs) == 0 {
+		fieldIDs = []int64{groupID}
+	}
+	for _, fieldID := range fieldIDs {
+		if !slices.Contains(group.FieldIds, fieldID) {
+			group.FieldIds = append(group.FieldIds, fieldID)
+		}
+	}
+	for _, binlog := range fieldBinlog.GetBinlogs() {
+		group.MemorySize += binlog.GetMemorySize()
+	}
+}
+
+// BuildLoadResourceStatistics builds deterministic load-estimation metadata
+// from final or incremental insert groups. It has no file paths and excludes
+// PK Bloom, BM25, and every other stats blob.
+func BuildLoadResourceStatistics(inserts []*datapb.FieldBinlog) *datapb.LoadResourceStatistics {
+	groupByID := make(map[int64]*datapb.ColumnGroupStatistics, len(inserts))
+	for _, fieldBinlog := range inserts {
+		mergeColumnGroup(groupByID, fieldBinlog)
+	}
+	groups := make([]*datapb.ColumnGroupStatistics, 0, len(groupByID))
+	for _, group := range groupByID {
+		slices.Sort(group.FieldIds)
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].GetGroupId() < groups[j].GetGroupId() })
+	return &datapb.LoadResourceStatistics{
+		ColumnGroups: groups,
+	}
+}
+
+func cloneColumnGroup(group *datapb.ColumnGroupStatistics) *datapb.ColumnGroupStatistics {
+	return &datapb.ColumnGroupStatistics{
+		GroupId:    group.GetGroupId(),
+		FieldIds:   slices.Clone(group.GetFieldIds()),
+		MemorySize: group.GetMemorySize(),
+	}
+}
+
+func cloneColumnGroups(groups map[int64]*datapb.ColumnGroupStatistics) map[int64]*datapb.ColumnGroupStatistics {
+	if groups == nil {
+		return nil
+	}
+	cloned := make(map[int64]*datapb.ColumnGroupStatistics, len(groups))
+	for groupID, group := range groups {
+		cloned[groupID] = cloneColumnGroup(group)
+	}
+	return cloned
 }
 
 // Digest folds one sync task's writes into the cumulative state. inserts are
@@ -157,6 +248,15 @@ func (c *StatisticsCollector) Digest(
 				c.nullCounts[f] += n
 			}
 		}
+		if fmt := strings.TrimSpace(fb.GetFormat()); fmt != "" {
+			if c.formats == nil {
+				c.formats = make(map[string]struct{})
+			}
+			c.formats[fmt] = struct{}{}
+		}
+	}
+	if len(inserts) > 0 {
+		c.columnGroups = mergeColumnGroups(c.columnGroups, inserts)
 	}
 	c.statsBinlogSize += statsBlobSize
 	if delta != nil {
@@ -187,7 +287,7 @@ func (c *StatisticsCollector) Digest(
 // has been digested. No scaling — the value reflects exactly what the collector
 // has seen.
 func (c *StatisticsCollector) Publish() *datapb.Statistics {
-	if c.numRows == 0 && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 {
+	if c.numRows == 0 && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 && c.columnGroups == nil {
 		return nil
 	}
 	var nullCounts map[int64]int64
@@ -197,7 +297,15 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 			nullCounts[f] = n
 		}
 	}
-	return &datapb.Statistics{
+	var formats []string
+	if len(c.formats) > 0 {
+		formats = make([]string, 0, len(c.formats))
+		for f := range c.formats {
+			formats = append(formats, f)
+		}
+		slices.Sort(formats)
+	}
+	stats := &datapb.Statistics{
 		InsertBinlogSize:   c.insertBinlogSize,
 		InsertBinlogCount:  c.insertBinlogCount,
 		StatsBinlogSize:    c.statsBinlogSize,
@@ -210,7 +318,21 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 		TimestampTo:        c.timestampTo,
 		NullCounts:         nullCounts,
 		TimestampQuantiles: c.quantiles(),
+		Formats:            formats,
 	}
+	if c.columnGroups != nil {
+		groups := make([]*datapb.ColumnGroupStatistics, 0, len(c.columnGroups))
+		for _, group := range c.columnGroups {
+			cloned := cloneColumnGroup(group)
+			slices.Sort(cloned.FieldIds)
+			groups = append(groups, cloned)
+		}
+		sort.Slice(groups, func(i, j int) bool {
+			return groups[i].GetGroupId() < groups[j].GetGroupId()
+		})
+		stats.LoadResource = &datapb.LoadResourceStatistics{ColumnGroups: groups}
+	}
+	return stats
 }
 
 // quantiles picks the 20/40/60/80/100% TimestampTo marks over the digested
@@ -250,12 +372,19 @@ func (c *StatisticsCollector) Clone() *StatisticsCollector {
 	if c.quantileEntries != nil {
 		cp.quantileEntries = append([]quantileEntry(nil), c.quantileEntries...)
 	}
+	cp.columnGroups = cloneColumnGroups(c.columnGroups)
+	if c.formats != nil {
+		cp.formats = make(map[string]struct{}, len(c.formats))
+		for f := range c.formats {
+			cp.formats[f] = struct{}{}
+		}
+	}
 	return &cp
 }
 
 // BuildStatsFromFieldBinlogs reconstructs a datapb.Statistics from the
-// cumulative FieldBinlog arrays. Used by the DataCoord side as the V2 /
-// legacy fallback when the writer didn't ship Statistics directly.
+// cumulative FieldBinlog arrays. Used by the DataCoord side as the legacy or
+// nil-stats fallback when the writer didn't ship Statistics directly.
 //
 // TimestampQuantiles is approximated from binlog-level TimestampTo
 // weighted by EntriesNum: walk the (first field's) binlogs sorted by
@@ -274,7 +403,14 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 	var tsFrom uint64 = math.MaxUint64
 	var tsTo uint64
 	var nullCounts map[int64]int64
+	var formatSet map[string]struct{}
 	for _, fb := range binlogs {
+		if fmt := strings.TrimSpace(fb.GetFormat()); fmt != "" {
+			if formatSet == nil {
+				formatSet = make(map[string]struct{})
+			}
+			formatSet[fmt] = struct{}{}
+		}
 		if len(fb.GetBinlogs()) == 0 {
 			continue
 		}
@@ -317,6 +453,14 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 	}
 	s.TimestampTo = tsTo
 	s.NullCounts = nullCounts
+	if len(formatSet) > 0 {
+		formats := make([]string, 0, len(formatSet))
+		for f := range formatSet {
+			formats = append(formats, f)
+		}
+		slices.Sort(formats)
+		s.Formats = formats
+	}
 	for _, fb := range statslogs {
 		for _, l := range fb.GetBinlogs() {
 			s.StatsBinlogSize += l.GetMemorySize()
@@ -346,6 +490,9 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 		s.DeltaTimestampFrom = deltaFrom
 	}
 	s.DeltaTimestampTo = deltaTo
+	if len(binlogs) > 0 {
+		s.LoadResource = BuildLoadResourceStatistics(binlogs)
+	}
 
 	if len(binlogs) > 0 {
 		type tsEntry struct {

@@ -142,13 +142,18 @@ type CopySegmentJob interface {
 	GetSnapshotName() string
 	GetSourceCollectionId() int64
 	GetPinId() int64
+	GetExternal() bool
+	GetSnapshotS3Location() string
+	GetExternalSpec() string
+	GetSnapshotFingerprint() string
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentJob
 }
 
 type copySegmentJob struct {
 	*datapb.CopySegmentJob
-	tr *timerecord.TimeRecorder
+	tr            *timerecord.TimeRecorder
+	snapshotCache *copySegmentSnapshotCache
 }
 
 func (j *copySegmentJob) GetTR() *timerecord.TimeRecorder {
@@ -159,5 +164,6 @@ func (j *copySegmentJob) Clone() CopySegmentJob {
 	return &copySegmentJob{
 		CopySegmentJob: proto.Clone(j.CopySegmentJob).(*datapb.CopySegmentJob),
 		tr:             j.tr,
+		snapshotCache:  j.snapshotCache,
 	}
 }

@@ -51,6 +51,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    HybridScalarIndex(uint32_t tantivy_index_version,
+                      const storage::FileManagerContext& file_manager_context,
+                      bool is_nested_index);
+
     ~HybridScalarIndex() override = default;
 
     BinarySet
@@ -70,6 +74,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType
     GetIndexType() const override {
         return ScalarIndexType::HYBRID;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
     }
 
     void
@@ -99,6 +108,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     IsNull() override {
         return internal_index_->IsNull();
     }
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override {
@@ -221,10 +235,15 @@ class HybridScalarIndex : public ScalarIndex<T> {
     int32_t bitmap_index_cardinality_limit_;
     ScalarIndexType low_cardinality_index_type_;
     ScalarIndexType high_cardinality_index_type_;
+    // Resolved scalar index engine version from the last Build() call;
+    // gates whether nested (struct sub-field) high-cardinality data may
+    // select STL_SORT (see kNestedHybridStlSortMinVersion).
+    int32_t scalar_index_version_{0};
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
+    bool is_nested_index_{false};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node

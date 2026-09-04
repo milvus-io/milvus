@@ -23,7 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 type limiterMock struct {
@@ -56,22 +59,49 @@ func (l *limiterMock) Alloc(ctx context.Context, dbID int64, collectionIDToPartI
 	return l.Check(dbID, collectionIDToPartIDs, rt, n)
 }
 
+type snapshotLimiterCheck struct {
+	dbID            int64
+	collectionCount int
+	rateType        internalpb.RateType
+	n               int
+}
+
+type rejectingSnapshotLimiter struct {
+	checks []snapshotLimiterCheck
+}
+
+func (l *rejectingSnapshotLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	l.checks = append(l.checks, snapshotLimiterCheck{
+		dbID:            dbID,
+		collectionCount: len(collectionIDToPartIDs),
+		rateType:        rateType,
+		n:               n,
+	})
+	if n <= 0 {
+		return nil
+	}
+	return merr.ErrServiceRateLimit
+}
+
+func (l *rejectingSnapshotLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	return l.Check(dbID, collectionIDToPartIDs, rateType, n)
+}
+
 func TestRateLimitInterceptor(t *testing.T) {
 	t.Run("test getRequestInfo", func(t *testing.T) {
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil)
-		globalMetaCache = mockCache
-		database, col2part, rt, size, err := GetRequestInfo(context.Background(), &milvuspb.InsertRequest{
+		database, col2part, rt, size, err := GetRequestInfo(context.Background(), mockCache, &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -87,7 +117,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.UpsertRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.UpsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -103,7 +133,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DeleteRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DeleteRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -119,7 +149,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ImportRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ImportRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -135,7 +165,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.SearchRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.SearchRequest{
 			Nq: 5,
 			PartitionNames: []string{
 				"p1",
@@ -148,7 +178,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 1, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.QueryRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.QueryRequest{
 			CollectionName: "foo",
 			PartitionNames: []string{
 				"p1",
@@ -162,7 +192,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 1, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreateCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -170,7 +200,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.RestoreExternalSnapshotRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.RestoreExternalSnapshotRequest{
 			DbName:               "db1",
 			TargetCollectionName: "restored",
 			SnapshotMetadataUri:  "s3://bucket/export-root/snapshots/100/metadata/1.json",
@@ -181,7 +211,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, database, int64(100))
 		assert.Empty(t, col2part)
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ExportSnapshotRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ExportSnapshotRequest{
 			DbName:         "db1",
 			CollectionName: "foo",
 			Name:           "snapshot",
@@ -194,7 +224,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -202,7 +232,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ReleaseCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ReleaseCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -210,7 +240,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -218,7 +248,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreatePartitionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CreatePartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -226,7 +256,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadPartitionsRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.LoadPartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -234,7 +264,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ReleasePartitionsRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ReleasePartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -242,7 +272,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropPartitionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DropPartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -250,7 +280,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreateIndexRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CreateIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
@@ -258,7 +288,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropIndexRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DropIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
@@ -266,7 +296,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.FlushRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.FlushRequest{
 			CollectionNames: []string{
 				"col1",
 			},
@@ -277,16 +307,16 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, database, int64(100))
 		assert.Equal(t, 1, len(col2part))
 
-		database, _, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ManualCompactionRequest{})
+		database, _, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ManualCompactionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
 		assert.Equal(t, database, int64(100))
 
-		_, _, _, _, err = GetRequestInfo(context.Background(), nil)
+		_, _, _, _, err = GetRequestInfo(context.Background(), mockCache, nil)
 		assert.Error(t, err)
 
-		_, _, _, _, err = GetRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
+		_, _, _, _, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CalcDistanceRequest{})
 		assert.NoError(t, err)
 	})
 
@@ -300,20 +330,18 @@ func TestRateLimitInterceptor(t *testing.T) {
 		}
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Times(4)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Times(4)
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schema), nil).Times(4)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, namespace).Return(&partitionInfo{
-			name:                namespace,
-			partitionID:         20,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                namespace,
+			PartitionID:         20,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil).Times(4)
-		globalMetaCache = mockCache
-
-		database, col2part, rt, _, err := GetRequestInfo(context.Background(), &milvuspb.InsertRequest{
+		database, col2part, rt, _, err := GetRequestInfo(context.Background(), mockCache, &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			DbName:         "db1",
 			Namespace:      &namespace,
@@ -323,7 +351,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
 		assert.Equal(t, []int64{20}, col2part[1])
 
-		database, col2part, rt, _, err = GetRequestInfo(context.Background(), &milvuspb.DeleteRequest{
+		database, col2part, rt, _, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DeleteRequest{
 			CollectionName: "foo",
 			DbName:         "db1",
 			Namespace:      &namespace,
@@ -333,7 +361,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
 		assert.Equal(t, []int64{20}, col2part[1])
 
-		database, col2part, rt, size, err := GetRequestInfo(context.Background(), &milvuspb.SearchRequest{
+		database, col2part, rt, size, err := GetRequestInfo(context.Background(), mockCache, &milvuspb.SearchRequest{
 			CollectionName: "foo",
 			DbName:         "db1",
 			Nq:             5,
@@ -345,7 +373,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 5, size)
 		assert.Equal(t, []int64{20}, col2part[1])
 
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.HybridSearchRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.HybridSearchRequest{
 			CollectionName: "foo",
 			DbName:         "db1",
 			Namespace:      &namespace,
@@ -387,21 +415,132 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Nil(t, rsp)
 	})
 
+	t.Run("snapshot mutations are rate limited", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		databaseNames := make([]string, 0)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, database string) {
+				databaseNames = append(databaseNames, database)
+			}).
+			Return(&databaseInfo{
+				DBID:             100,
+				CreatedTimestamp: 1,
+			}, nil)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+
+		testCases := []struct {
+			name            string
+			ctx             context.Context
+			request         proto.Message
+			expectedDBID    int64
+			expectedCollNum int
+		}{
+			{
+				name: "create snapshot",
+				request: &milvuspb.CreateSnapshotRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name: "drop snapshot",
+				request: &milvuspb.DropSnapshotRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name: "restore snapshot",
+				request: &milvuspb.RestoreSnapshotRequest{
+					DbName:               "source_db",
+					CollectionName:       "source",
+					TargetDbName:         "target_db",
+					TargetCollectionName: "target",
+				},
+				expectedDBID: 100,
+			},
+			{
+				name: "restore snapshot to active database",
+				ctx: metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+					util.HeaderDBName, "active_db",
+				)),
+				request: &milvuspb.RestoreSnapshotRequest{
+					DbName:               "source_db",
+					CollectionName:       "source",
+					TargetCollectionName: "target",
+				},
+				expectedDBID: 100,
+			},
+			{
+				name: "pin snapshot",
+				request: &milvuspb.PinSnapshotDataRequest{
+					DbName:         "db1",
+					CollectionName: "source",
+				},
+				expectedDBID:    100,
+				expectedCollNum: 1,
+			},
+			{
+				name:         "unpin snapshot",
+				request:      &milvuspb.UnpinSnapshotDataRequest{PinId: 1},
+				expectedDBID: util.InvalidDBID,
+			},
+		}
+
+		limiter := &rejectingSnapshotLimiter{}
+		handlerCalls := 0
+		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+			handlerCalls++
+			return merr.Success(), nil
+		}
+		interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, limiter)
+		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockSnapshotMethod"}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				testCtx := testCase.ctx
+				if testCtx == nil {
+					testCtx = context.Background()
+				}
+				response, err := interceptor(testCtx, testCase.request, serverInfo, handler)
+				require.NoError(t, err)
+				status, ok := requestutil.GetStatusFromResponse(response)
+				require.True(t, ok)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, status.GetErrorCode())
+			})
+		}
+
+		assert.Zero(t, handlerCalls)
+		require.Len(t, limiter.checks, len(testCases))
+		for i, testCase := range testCases {
+			assert.Equal(t, snapshotLimiterCheck{
+				dbID:            testCase.expectedDBID,
+				collectionCount: testCase.expectedCollNum,
+				rateType:        internalpb.RateType_DDLCollection,
+				n:               1,
+			}, limiter.checks[i])
+		}
+		assert.Equal(t, []string{"db1", "db1", "target_db", "active_db", "db1"}, databaseNames)
+	})
+
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil)
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil)
-		globalMetaCache = mockCache
 
 		limiter := limiterMock{rate: 100}
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
@@ -412,7 +551,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}
 
 		limiter.limit = true
-		interceptorFun := RateLimitInterceptor(&limiter)
+		interceptorFun := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err := interceptorFun(context.Background(), &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
@@ -422,7 +561,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 
 		limiter.limit = false
-		interceptorFun = RateLimitInterceptor(&limiter)
+		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
@@ -433,7 +572,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 		// test 0 rate, force deny
 		limiter.rate = 0
-		interceptorFun = RateLimitInterceptor(&limiter)
+		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_ForceDeny, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
@@ -442,12 +581,6 @@ func TestRateLimitInterceptor(t *testing.T) {
 	t.Run("request info fail", func(t *testing.T) {
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: get database info"))
-		originCache := globalMetaCache
-		globalMetaCache = mockCache
-		defer func() {
-			globalMetaCache = originCache
-		}()
-
 		limiter := limiterMock{rate: 100}
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 			return &milvuspb.MutationResult{
@@ -457,7 +590,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}
 
 		limiter.limit = true
-		interceptorFun := RateLimitInterceptor(&limiter)
+		interceptorFun := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
 		rsp, err := interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
@@ -467,16 +600,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 func TestGetInfo(t *testing.T) {
 	mockCache := NewMockCache(t)
 	ctx := context.Background()
-	originCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() {
-		globalMetaCache = originCache
-	}()
 
 	t.Run("fail to get database", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: get database info")).Times(5)
 		{
-			_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			_, _, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionName:  "p1",
@@ -484,7 +612,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, err := getCollectionAndPartitionIDs(ctx, &milvuspb.SearchRequest{
+			_, _, err := getCollectionAndPartitionIDs(ctx, mockCache, &milvuspb.SearchRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionNames: []string{"p1"},
@@ -492,17 +620,17 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.FlushRequest{
+			_, _, _, _, err := GetRequestInfo(ctx, mockCache, &milvuspb.FlushRequest{
 				DbName: "foo",
 			})
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.ManualCompactionRequest{})
+			_, _, _, _, err := GetRequestInfo(ctx, mockCache, &milvuspb.ManualCompactionRequest{})
 			assert.Error(t, err)
 		}
 		{
-			dbID, collectionIDInfos := getCollectionID(&milvuspb.CreateCollectionRequest{})
+			dbID, collectionIDInfos := getCollectionID(mockCache, &milvuspb.CreateCollectionRequest{})
 			assert.Equal(t, util.InvalidDBID, dbID)
 			assert.Equal(t, 0, len(collectionIDInfos))
 		}
@@ -510,12 +638,12 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("fail to get collection", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Times(3)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(0), errors.New("mock error: get collection id")).Times(3)
 		{
-			_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			_, _, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionName:  "p1",
@@ -523,7 +651,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, err := getCollectionAndPartitionIDs(ctx, &milvuspb.SearchRequest{
+			_, _, err := getCollectionAndPartitionIDs(ctx, mockCache, &milvuspb.SearchRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionNames: []string{"p1"},
@@ -531,7 +659,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.FlushRequest{
+			_, _, _, _, err := GetRequestInfo(ctx, mockCache, &milvuspb.FlushRequest{
 				DbName:          "foo",
 				CollectionNames: []string{"coo"},
 			})
@@ -541,13 +669,13 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("fail to get collection schema", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Once()
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
-		_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+		_, _, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 			DbName:         "foo",
 			CollectionName: "coo",
 		})
@@ -556,15 +684,15 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("partition key mode", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Once()
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			hasPartitionKeyField: true,
+			HasPartitionKeyField: true,
 		}, nil).Once()
 
-		db, col2par, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+		db, col2par, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 			DbName:         "foo",
 			CollectionName: "coo",
 		})
@@ -576,13 +704,13 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("fail to get partition", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Twice()
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Twice()
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error: get partition info")).Twice()
 		{
-			_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			_, _, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionName:  "p1",
@@ -590,7 +718,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, err := getCollectionAndPartitionIDs(ctx, &milvuspb.SearchRequest{
+			_, _, err := getCollectionAndPartitionIDs(ctx, mockCache, &milvuspb.SearchRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionNames: []string{"p1"},
@@ -601,17 +729,17 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID:             100,
-			createdTimestamp: 1,
+			DBID:             100,
+			CreatedTimestamp: 1,
 		}, nil).Times(3)
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil).Times(1)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(10), nil).Times(3)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:        "p1",
-			partitionID: 100,
+			Name:        "p1",
+			PartitionID: 100,
 		}, nil).Times(3)
 		{
-			db, col2par, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			db, col2par, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionName:  "p1",
@@ -622,7 +750,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, int64(100), col2par[10][0])
 		}
 		{
-			db, col2par, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			db, col2par, err := getCollectionAndPartitionID(ctx, mockCache, &milvuspb.InsertRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 			})
@@ -632,7 +760,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, int64(100), col2par[10][0])
 		}
 		{
-			db, col2par, err := getCollectionAndPartitionIDs(ctx, &milvuspb.SearchRequest{
+			db, col2par, err := getCollectionAndPartitionIDs(ctx, mockCache, &milvuspb.SearchRequest{
 				DbName:         "foo",
 				CollectionName: "coo",
 				PartitionNames: []string{"p1"},
@@ -646,7 +774,7 @@ func TestGetInfo(t *testing.T) {
 
 	t.Run("get db request info", func(t *testing.T) {
 		{
-			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.CreateDatabaseRequest{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, mockCache, &milvuspb.CreateDatabaseRequest{
 				DbName: "foo",
 			})
 			assert.NoError(t, err)
@@ -656,7 +784,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, 1, cost)
 		}
 		{
-			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.DropDatabaseRequest{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, mockCache, &milvuspb.DropDatabaseRequest{
 				DbName: "foo",
 			})
 			assert.NoError(t, err)
@@ -666,7 +794,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, 1, cost)
 		}
 		{
-			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.AlterDatabaseRequest{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, mockCache, &milvuspb.AlterDatabaseRequest{
 				DbName: "foo",
 			})
 			assert.NoError(t, err)
@@ -683,7 +811,7 @@ func TestGetInfo(t *testing.T) {
 			&milvuspb.RemoveFileResourceRequest{},
 		}
 		for _, request := range requests {
-			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, request)
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, mockCache, request)
 			assert.NoError(t, err)
 			assert.Equal(t, util.InvalidDBID, dbID)
 			assert.Empty(t, collectionInfos)
@@ -691,7 +819,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, 1, cost)
 		}
 
-		dbID, collectionInfos, _, cost, err := GetRequestInfo(ctx, &milvuspb.ListFileResourcesRequest{})
+		dbID, collectionInfos, _, cost, err := GetRequestInfo(ctx, mockCache, &milvuspb.ListFileResourcesRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, util.InvalidDBID, dbID)
 		assert.Empty(t, collectionInfos)

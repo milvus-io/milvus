@@ -1,5 +1,11 @@
 # Bloom Filter Membership Expression: `bloom_match`
 
+> **Superseded.** `bloom_match` never shipped in a release. Its syntax is
+> superseded by the unified `membership_match` surface (identical MBF1 blob,
+> magic-header dispatch); see
+> [20260822-membership-match-expression.md](./20260822-membership-match-expression.md).
+> No deprecation period is needed because the name was never part of a release.
+
 - Status: Draft
 - Date: 2026-07-07
 - Issue: https://github.com/milvus-io/milvus/issues/51139
@@ -69,7 +75,7 @@ usable capacity comes in size tiers, so the practical ceilings under the default
 
 - **32 MiB body → ~24.3 M members.**
 - **64 MiB body → ~48.6 M members**, the effective out-of-the-box cap: it is the default
-  `proxy.maxBloomFilterSize`, and a 64 MiB body plus envelope and framing fits the default
+  `proxy.maxMembershipFilterSize`, and a 64 MiB body plus envelope and framing fits the default
   128 MiB `serverMaxRecvSize`.
 - **128 MiB body → ~97 M members**, the MBF1 format cap on a single blob. Reaching it needs
   both limits raised.
@@ -143,7 +149,7 @@ not bloom_match(...)
 - `<blob>`: an expression template placeholder resolved from `expr_template_values`, carrying
   a **client pre-built filter blob** as a **raw bytes** template value
   (`schemapb.TemplateValue.bytes_val`). There is no proxy-side build and no raw-list path: the
-  client always builds the MBF1/SBBF blob (`client/sbbf`, reproducible cross-language) and
+  client always builds the MBF1/SBBF blob (`client/membership/sbbf`, reproducible cross-language) and
   ships the compact ~32 MiB blob. proto3 `bytes` carries the blob with **zero base64 inflation**.
   The proxy validates the MBF1 envelope (`sbbf.Parse`) and embeds it verbatim.
 - **No `<fpr>` argument.** The FPR is chosen by the client at build time
@@ -403,7 +409,7 @@ Java, ...) must reproduce the vectors bit-for-bit.
 
 ### Build path (client builds, proxy validates & embeds)
 
-1. **Client** builds the SBBF with the spec-conformant Go package `client/sbbf`
+1. **Client** builds the SBBF with the spec-conformant Go package `client/membership/sbbf`
    (`NewBloomFilterBlob(members, fpr)`; XXH64 via `cespare/xxhash/v2`), sizes it from (n, fpr)
    per the SBBF formula, and wraps it in the MBF1 envelope. Any SDK reproduces the same bytes
    from the shared spec. There is **no proxy-side build** and no raw-list path.
@@ -457,25 +463,29 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
 
 ### Resource protection
 
-- **`proxy.maxBloomFilterSize`** (default 64 MiB, refreshable): operator-tunable **per-blob**
-  cap on the SBBF **body**, enforced in `validateBloomFilterBlob`, so an oversized blob is
-  rejected at the proxy rather than fanned out to QueryNodes. The fixed 32-byte MBF1 header is
-  allowed on top of the budget (`len(blob) > maxSize + kHeaderSize`), so a full 64 MiB body
-  passes exactly. Budgeting the body rather than the whole blob keeps the limit a clean power
-  of two: a whole-blob cap of exactly 64 MiB would reject a 64 MiB body (64 MiB + 32 B) and
-  silently halve the usable ceiling to a 32 MiB body. Since bodies are powers of two, every
-  value in [64 MiB, 128 MiB) admits the same filters, so the default is set to the smallest of
-  them and states the real ceiling. The 128 MiB MBF1 num_blocks format cap remains the hard
-  per-blob ceiling on both sides.
-- **`proxy.maxBloomFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap on the
-  serialized size of every bloom-bearing plan, enforced with `proto.Size(plan)` before
-  `proto.Marshal`. Reusing one `{bf}` in multiple expressions therefore consumes the budget for
-  every embedded copy. Hybrid search accumulates all bloom-bearing sub-plans against the same
-  request budget, and scorer filters are included. Exceeding the cap returns
+- **`proxy.maxMembershipFilterSize`** (default 64 MiB, refreshable): operator-tunable
+  **per-blob** cap shared by `bloom_match` and `roaring_match`. For Bloom it caps the SBBF
+  **body**, enforced in `validateBloomFilterBlob`, so an oversized blob is rejected at the
+  proxy rather than fanned out to QueryNodes. The fixed 32-byte MBF1 header is allowed on top
+  of the budget (`len(blob) > maxSize + kHeaderSize`), so a full 64 MiB body passes exactly.
+  Budgeting the body rather than the whole blob keeps the limit a clean power of two: a
+  whole-blob cap of exactly 64 MiB would reject a 64 MiB body (64 MiB + 32 B) and silently
+  halve the usable ceiling to a 32 MiB body. Since SBBF bodies are powers of two, every value
+  in [64 MiB, 128 MiB) admits the same Bloom filters, so the default is set to the smallest
+  of them and states the real ceiling. The 128 MiB MBF1 num_blocks format cap remains the
+  hard Bloom per-blob ceiling. The legacy `proxy.maxBloomFilterSize` key remains a fallback.
+- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap
+  on the serialized size of every membership-filter-bearing plan, enforced with
+  `proto.Size(plan)` before `proto.Marshal`. Reusing one template in multiple expressions
+  therefore consumes the budget for every embedded copy. Hybrid search accumulates all
+  membership-filter-bearing sub-plans against the same request budget, and scorer filters are
+  included: a membership expression is allowed in a scorer filter and its blob is charged to
+  the same budget.
+  Exceeding the cap returns
   `ErrParameterTooLarge` (1102, InputError, non-retriable) at the proxy, before QueryNode routing,
   so an over-budget Bloom request cannot turn into a gRPC `ResourceExhausted` or blacklist a
   healthy QueryNode. Invalid, zero, negative, or integer-overflowing configuration values fall
-  back to 128 MiB.
+  back to 128 MiB. The legacy `proxy.maxBloomFilterPlanSize` key remains a fallback.
 - **Log redaction is copy-free**: when a bloom-bearing plan is debug-logged, the blob byte
   slices are temporarily swapped for a `{N bytes}` marker (pointer assignment, no
   duplication of the up-to-tens-of-MiB body), stringified, then restored — never `proto.Clone`d.
@@ -513,7 +523,7 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
 
 ## Testing plan
 
-1. Go unit: `client/sbbf` golden vectors; empirical FPR check (build from set A, probe
+1. Go unit: `client/membership/sbbf` golden vectors; empirical FPR check (build from set A, probe
    disjoint set B, assert measured FPR ≈ declared within tolerance); envelope validation
    fuzz (truncated/corrupt headers).
 2. Parser unit: syntax, arg validation (exactly two args; second must be a `{template}` bytes

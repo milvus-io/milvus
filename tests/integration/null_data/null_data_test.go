@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -58,7 +59,7 @@ func getTargetFieldData(fieldName string, fieldDatas []*schemapb.FieldData) *sch
 func (s *NullDataSuite) checkNullableFieldData(fieldName string, fieldDatas []*schemapb.FieldData, start int64) {
 	actual := getTargetFieldData(fieldName, fieldDatas)
 	fieldData := actual.GetScalars().GetLongData().Data
-	validData := actual.GetValidData()
+	validData := typeutil.GetFieldDataValidData(actual)
 	s.Equal(len(validData), len(fieldData))
 	for i, ans := range actual.GetScalars().GetLongData().Data {
 		if ans < start {
@@ -250,6 +251,7 @@ func (s *NullDataSuite) run() {
 		FieldName: nullableFid.GetName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: make([]bool, rowNum),
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{},
@@ -257,7 +259,6 @@ func (s *NullDataSuite) run() {
 				},
 			},
 		},
-		ValidData: make([]bool, rowNum),
 	}
 	fieldsDataForUpsert = append(fieldsDataForUpsert, nullableFidDataForUpsert)
 	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
@@ -387,7 +388,6 @@ func (s *NullDataSuite) run() {
 	// s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 	// target := getTargetFieldData(nullableFid.Name, exprResult.GetFieldsData())
 	// s.Equal(len(target.GetScalars().GetLongData().GetData()), 1)
-	// s.Equal(len(target.GetValidData()), 1)
 
 	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,

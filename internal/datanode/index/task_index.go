@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -236,6 +239,25 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb.BuildIndexInfo {
+	if params == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(params).(*indexcgopb.BuildIndexInfo)
+	if config := redacted.GetStorageConfig(); config != nil {
+		redactStorageCredentialsForLog(
+			&config.AccessKeyID,
+			&config.SecretAccessKey,
+			&config.SslCACert,
+			&config.GcpCredentialJSON,
+		)
+	}
+	redacted.ExternalSource = externalspec.RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = externalspec.RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
+}
+
 func (it *indexBuildTask) Execute(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
@@ -340,7 +362,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.ExternalSource = it.req.GetExternalSource()
 		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
-	log.Info(ctx, "create index", mlog.Any("buildIndexParams", buildIndexParams))
+	log.Info(ctx, "create index", mlog.Any("buildIndexParams", redactBuildIndexParamsForLog(buildIndexParams)))
 
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {

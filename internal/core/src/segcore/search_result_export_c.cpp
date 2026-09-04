@@ -30,6 +30,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Utils.h"
 #include "log/Log.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -333,19 +334,19 @@ BuildFixedWidthArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const bool has_valid_data = field_data.valid_data_size() > 0;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
-        AssertInfo(
-            static_cast<size_t>(field_data.valid_data_size()) == total_valid,
-            "valid_data length {} does not match expected row count {}",
-            field_data.valid_data_size(),
-            total_valid);
+        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
+                   "valid_data length {} does not match expected row count {}",
+                   valid_data.size(),
+                   total_valid);
     }
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
     for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !field_data.valid_data(i)) {
+        if (has_valid_data && !valid_data[i]) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
@@ -366,19 +367,19 @@ BuildVarLenArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const bool has_valid_data = field_data.valid_data_size() > 0;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
-        AssertInfo(
-            static_cast<size_t>(field_data.valid_data_size()) == total_valid,
-            "valid_data length {} does not match expected row count {}",
-            field_data.valid_data_size(),
-            total_valid);
+        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
+                   "valid_data length {} does not match expected row count {}",
+                   valid_data.size(),
+                   total_valid);
     }
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
     for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !field_data.valid_data(i)) {
+        if (has_valid_data && !valid_data[i]) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
@@ -471,6 +472,13 @@ FieldDataToArrow(const std::string& field_name,
             auto arr,
             BuildFixedWidthArray<arrow::Int64Builder>(
                 scalars.long_data().data(), field_data, total_valid));
+        return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
+    }
+    if (scalars.has_timestamptz_data()) {
+        ARROW_ASSIGN_OR_RAISE(
+            auto arr,
+            BuildFixedWidthArray<arrow::Int64Builder>(
+                scalars.timestamptz_data().data(), field_data, total_valid));
         return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
     }
     if (scalars.has_float_data()) {
@@ -817,6 +825,211 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
     return export_chunk_sizes();
 }
 
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+BuildExplicitFieldsBatch(
+    milvus::query::Plan* plan,
+    const int64_t* field_ids,
+    int64_t num_fields,
+    const std::map<milvus::FieldId, std::unique_ptr<milvus::DataArray>>&
+        field_data,
+    int64_t total_rows) {
+    std::vector<std::shared_ptr<arrow::Field>> fields;
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    fields.reserve(num_fields);
+    arrays.reserve(num_fields);
+
+    for (int64_t i = 0; i < num_fields; ++i) {
+        auto field_id = milvus::FieldId(field_ids[i]);
+        auto& field_meta = plan->schema_->operator[](field_id);
+        auto name = std::string(field_meta.get_name().get());
+
+        std::shared_ptr<arrow::Array> array;
+        if (total_rows == 0) {
+            ARROW_ASSIGN_OR_RAISE(auto arrow_type,
+                                  EmptyExtraFieldArrowType(field_meta));
+            ARROW_ASSIGN_OR_RAISE(array, arrow::MakeEmptyArray(arrow_type));
+        } else {
+            auto it = field_data.find(field_id);
+            if (it == field_data.end()) {
+                return arrow::Status::Invalid(
+                    "missing ordered field data for field id ", field_id.get());
+            }
+            ARROW_ASSIGN_OR_RAISE(
+                auto converted,
+                FieldDataToArrow(name, *it->second, total_rows));
+            array = converted.second;
+        }
+
+        fields.push_back(MilvusField(name,
+                                     array->type(),
+                                     field_meta.is_nullable(),
+                                     field_id,
+                                     field_meta.get_data_type()));
+        arrays.push_back(std::move(array));
+    }
+
+    return arrow::RecordBatch::Make(
+        arrow::schema(std::move(fields)), total_rows, std::move(arrays));
+}
+
+using OrderedFieldMap =
+    std::map<milvus::FieldId, std::unique_ptr<milvus::DataArray>>;
+
+void
+AssertSearchResultReadLeases(CSearchResult* search_results,
+                             int64_t num_search_results) {
+    AssertInfo(num_search_results >= 0,
+               "number of search results must not be negative");
+    AssertInfo(num_search_results == 0 || search_results != nullptr,
+               "null search results");
+    for (int64_t i = 0; i < num_search_results; ++i) {
+        AssertSearchResultReadLease(
+            static_cast<SearchResult*>(search_results[i]));
+    }
+}
+
+struct OrderedSegmentFields {
+    SearchResult* search_result;
+    std::vector<int64_t> segment_offsets;
+    std::vector<int64_t> result_positions;
+    OrderedFieldMap fields;
+    int64_t scanned_remote_bytes{0};
+    int64_t scanned_total_bytes{0};
+};
+
+template <typename MaterializeSegmentFields>
+OrderedFieldMap
+MaterializeOrderedFields(
+    CSearchResult* search_results,
+    int64_t num_search_results,
+    milvus::query::Plan* plan,
+    const std::vector<milvus::FieldId>& field_ids,
+    const int32_t* result_seg_indices,
+    const int64_t* result_seg_offsets,
+    int64_t total_rows,
+    const folly::CancellationToken& cancel_token,
+    MaterializeSegmentFields&& materialize_segment_fields) {
+    OrderedFieldMap ordered_fields;
+    if (total_rows == 0 || field_ids.empty()) {
+        return ordered_fields;
+    }
+
+    AssertInfo(num_search_results > 0,
+               "number of search results must be positive");
+    AssertInfo(result_seg_indices != nullptr,
+               "null segment indices for non-empty rows");
+    AssertInfo(result_seg_offsets != nullptr,
+               "null segment offsets for non-empty rows");
+
+    std::map<int32_t, OrderedSegmentFields> segment_fields;
+    for (int64_t position = 0; position < total_rows; ++position) {
+        auto segment_index = result_seg_indices[position];
+        AssertInfo(segment_index >= 0 && segment_index < num_search_results,
+                   "segment index {} out of range [0, {})",
+                   segment_index,
+                   num_search_results);
+        auto it =
+            segment_fields
+                .try_emplace(segment_index,
+                             OrderedSegmentFields{static_cast<SearchResult*>(
+                                 search_results[segment_index])})
+                .first;
+        it->second.result_positions.push_back(position);
+        it->second.segment_offsets.push_back(result_seg_offsets[position]);
+    }
+
+    auto materialize_one = [&](OrderedSegmentFields& materialized) {
+        milvus::futures::throwIfCancelled(cancel_token);
+        auto segment = static_cast<milvus::segcore::SegmentInternalInterface*>(
+            materialized.search_result->segment_);
+        AssertInfo(segment != nullptr, "search result has no segment");
+        materialize_segment_fields(segment, materialized);
+    };
+
+    if (segment_fields.size() > 1) {
+        auto& pool = milvus::ThreadPools::GetThreadPool(
+            milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> futures;
+        futures.reserve(segment_fields.size());
+        auto futures_guard = folly::makeGuard([&futures]() {
+            for (auto& future : futures) {
+                if (future.valid()) {
+                    try {
+                        future.get();
+                    } catch (...) {
+                    }
+                }
+            }
+        });
+        for (auto& entry : segment_fields) {
+            auto* materialized = &entry.second;
+            futures.emplace_back(pool.Submit([&materialize_one, materialized] {
+                materialize_one(*materialized);
+            }));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        materialize_one(segment_fields.begin()->second);
+    }
+
+    std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
+    for (auto& entry : segment_fields) {
+        auto& materialized = entry.second;
+        materialized.search_result->search_storage_cost_.scanned_remote_bytes +=
+            materialized.scanned_remote_bytes;
+        materialized.search_result->search_storage_cost_.scanned_total_bytes +=
+            materialized.scanned_total_bytes;
+        for (size_t row_index = 0;
+             row_index < materialized.result_positions.size();
+             ++row_index) {
+            auto position = materialized.result_positions[row_index];
+            result_pairs[position] = {&materialized.fields, row_index};
+        }
+    }
+
+    // Nullable vector materialization may compact physical vector values while
+    // retaining a logical validity bitmap. Record the compacted physical offset
+    // for each output row before MergeDataArray scatters rows into final order.
+    for (auto& entry : segment_fields) {
+        auto& materialized = entry.second;
+        for (auto field_id : field_ids) {
+            auto& field_meta = plan->schema_->operator[](field_id);
+            if (!field_meta.is_vector() || !field_meta.is_nullable()) {
+                continue;
+            }
+            auto it = materialized.fields.find(field_id);
+            if (it == materialized.fields.end()) {
+                continue;
+            }
+            const auto& valid_data =
+                milvus::GetFieldDataRowValidData(*it->second);
+            if (valid_data.empty()) {
+                continue;
+            }
+            int64_t valid_index = 0;
+            for (size_t row_index = 0;
+                 row_index < materialized.result_positions.size();
+                 ++row_index) {
+                auto position = materialized.result_positions[row_index];
+                result_pairs[position].setValidDataOffset(field_id,
+                                                          valid_index);
+                if (valid_data[row_index]) {
+                    ++valid_index;
+                }
+            }
+        }
+    }
+
+    for (auto field_id : field_ids) {
+        auto& field_meta = plan->schema_->operator[](field_id);
+        ordered_fields[field_id] =
+            milvus::segcore::MergeDataArray(result_pairs, field_meta);
+    }
+    return ordered_fields;
+}
+
 }  // namespace
 
 CStatus
@@ -895,12 +1108,7 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
     try {
         AssertEmptyCProto(out_result);
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
-        milvus::OpContext op_ctx(cancel_token);
-
-        for (int64_t i = 0; i < num_search_results; ++i) {
-            AssertSearchResultReadLease(
-                static_cast<SearchResult*>(search_results[i]));
-        }
+        AssertSearchResultReadLeases(search_results, num_search_results);
 
         if (plan->target_entries_.empty()) {
             return milvus::SuccessCStatus();
@@ -937,133 +1145,40 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 "failed to serialize empty field data proto");
         }
 
-        std::unordered_map<int32_t, std::vector<std::pair<int64_t, int64_t>>>
-            seg_groups;
-        for (int64_t i = 0; i < total_rows; i++) {
-            seg_groups[result_seg_indices[i]].emplace_back(
-                i, result_seg_offsets[i]);
-        }
-
-        struct SegResult {
-            SearchResult temp_result;
-            std::vector<int64_t> result_positions;
-        };
-        std::unordered_map<int32_t, SegResult> seg_results;
-
-        for (auto& [seg_idx, pairs] : seg_groups) {
-            AssertInfo(seg_idx >= 0 && seg_idx < num_search_results,
-                       "seg_idx {} out of range [0, {})",
-                       seg_idx,
-                       num_search_results);
-            auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
-
-            auto& seg_res = seg_results[seg_idx];
-            seg_res.temp_result.segment_ = sr->segment_;
-            seg_res.result_positions.reserve(pairs.size());
-
-            for (auto& [pos, offset] : pairs) {
-                seg_res.temp_result.seg_offsets_.push_back(offset);
-                seg_res.result_positions.push_back(pos);
-            }
-            seg_res.temp_result.distances_.resize(pairs.size(), 0.0f);
-        }
-
-        if (seg_results.size() > 1) {
-            auto& pool = milvus::ThreadPools::GetThreadPool(
-                milvus::ThreadPoolPriority::MIDDLE);
-            std::vector<std::future<void>> futures;
-            futures.reserve(seg_results.size());
-            auto futures_guard = folly::makeGuard([&futures]() {
-                for (auto& f : futures) {
-                    if (f.valid()) {
-                        try {
-                            f.get();
-                        } catch (...) {
-                        }
-                    }
-                }
+        std::vector<milvus::FieldId> field_ids(plan->target_entries_.begin(),
+                                               plan->target_entries_.end());
+        auto ordered_fields = MaterializeOrderedFields(
+            search_results,
+            num_search_results,
+            plan,
+            field_ids,
+            result_seg_indices,
+            result_seg_offsets,
+            total_rows,
+            cancel_token,
+            [plan, &cancel_token](
+                milvus::segcore::SegmentInternalInterface* segment,
+                OrderedSegmentFields& materialized) {
+                SearchResult temp_result;
+                temp_result.segment_ = materialized.search_result->segment_;
+                temp_result.seg_offsets_ = materialized.segment_offsets;
+                temp_result.distances_.resize(
+                    materialized.segment_offsets.size(), 0.0f);
+                milvus::OpContext op_ctx(cancel_token);
+                segment->FillTargetEntry(plan, temp_result, &op_ctx);
+                materialized.fields =
+                    std::move(temp_result.output_fields_data_);
+                materialized.scanned_remote_bytes =
+                    temp_result.search_storage_cost_.scanned_remote_bytes;
+                materialized.scanned_total_bytes =
+                    temp_result.search_storage_cost_.scanned_total_bytes;
             });
-            for (auto& [seg_idx, seg_res] : seg_results) {
-                auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
-                auto segment =
-                    static_cast<milvus::segcore::SegmentInternalInterface*>(
-                        sr->segment_);
-                auto* seg_res_ptr = &seg_res;
-                futures.emplace_back(
-                    pool.Submit([segment, plan, seg_res_ptr, &op_ctx] {
-                        segment->FillTargetEntry(
-                            plan, seg_res_ptr->temp_result, &op_ctx);
-                    }));
-            }
-            for (auto& future : futures) {
-                future.get();
-            }
-        } else if (seg_results.size() == 1) {
-            auto& [seg_idx, seg_res] = *seg_results.begin();
-            auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
-            auto segment =
-                static_cast<milvus::segcore::SegmentInternalInterface*>(
-                    sr->segment_);
-            segment->FillTargetEntry(plan, seg_res.temp_result, &op_ctx);
-        }
-
-        // Write storage cost back to original search results
-        for (auto& [seg_idx, seg_res] : seg_results) {
-            auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
-            sr->search_storage_cost_.scanned_remote_bytes +=
-                seg_res.temp_result.search_storage_cost_.scanned_remote_bytes;
-            sr->search_storage_cost_.scanned_total_bytes +=
-                seg_res.temp_result.search_storage_cost_.scanned_total_bytes;
-        }
-
-        std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
-        for (auto& [seg_idx, seg_res] : seg_results) {
-            for (size_t i = 0; i < seg_res.result_positions.size(); i++) {
-                auto pos = seg_res.result_positions[i];
-                result_pairs[pos] = {&seg_res.temp_result.output_fields_data_,
-                                     i};
-            }
-        }
-
-        // For nullable vector fields, FillTargetEntry compacts the vector
-        // buffer via FilterVectorValidOffsets (null rows dropped), while the
-        // valid_data bitmap keeps its logical length. MergeDataArray reads
-        // vectors at physical_offset = getValidDataOffset(), which falls back
-        // to the logical offset unless we set it. Compute the per-row physical
-        // offset = count of valid rows preceding this one, mirroring the
-        // logic in master's reduce/Reduce.cpp.
-        for (auto& [seg_idx, seg_res] : seg_results) {
-            for (auto field_id : plan->target_entries_) {
-                auto& field_meta = plan->schema_->operator[](field_id);
-                if (!field_meta.is_vector() || !field_meta.is_nullable()) {
-                    continue;
-                }
-                auto it =
-                    seg_res.temp_result.output_fields_data_.find(field_id);
-                if (it == seg_res.temp_result.output_fields_data_.end()) {
-                    continue;
-                }
-                auto& field_data = it->second;
-                if (field_data->valid_data_size() == 0) {
-                    continue;
-                }
-                int64_t valid_idx = 0;
-                for (size_t i = 0; i < seg_res.result_positions.size(); i++) {
-                    auto pos = seg_res.result_positions[i];
-                    result_pairs[pos].setValidDataOffset(field_id, valid_idx);
-                    if (field_data->valid_data(i)) {
-                        valid_idx++;
-                    }
-                }
-            }
-        }
 
         auto result_data =
             std::make_unique<milvus::proto::schema::SearchResultData>();
-        for (auto field_id : plan->target_entries_) {
+        for (auto field_id : field_ids) {
             auto& field_meta = plan->schema_->operator[](field_id);
-            auto field_data =
-                milvus::segcore::MergeDataArray(result_pairs, field_meta);
+            auto field_data = std::move(ordered_fields[field_id]);
             SetFieldDataElementTypeIfNeeded(field_data.get(), field_meta);
             result_data->mutable_fields_data()->AddAllocated(
                 field_data.release());
@@ -1074,6 +1189,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             out_result,
             "failed to allocate memory for proto serialization",
             "failed to serialize SearchResultData proto");
+    } catch (folly::FutureCancellation& e) {
+        return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
@@ -1111,6 +1228,110 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                                        folly::CancellationToken());
 }
 
+CStatus
+FillFieldsOrderedAsArrowRecordBatch(CSearchResult* search_results,
+                                    int64_t num_search_results,
+                                    CSearchPlan c_plan,
+                                    const int64_t* field_ids,
+                                    int64_t num_fields,
+                                    const int32_t* result_seg_indices,
+                                    const int64_t* result_seg_offsets,
+                                    int64_t total_rows,
+                                    ArrowSchema* out_schema,
+                                    ArrowArray* out_array,
+                                    void* cancellation_source) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(search_results != nullptr, "null search results");
+        AssertInfo(num_search_results > 0,
+                   "number of search results must be positive");
+        AssertInfo(c_plan != nullptr, "null search plan");
+        AssertInfo(num_fields >= 0, "number of fields must not be negative");
+        AssertInfo(total_rows >= 0, "number of rows must not be negative");
+        AssertInfo(num_fields == 0 || field_ids != nullptr,
+                   "null field ids for non-empty field list");
+        AssertInfo(total_rows == 0 || result_seg_indices != nullptr,
+                   "null segment indices for non-empty rows");
+        AssertInfo(total_rows == 0 || result_seg_offsets != nullptr,
+                   "null segment offsets for non-empty rows");
+        AssertInfo(out_schema != nullptr, "null ArrowSchema output");
+        AssertInfo(out_array != nullptr, "null ArrowArray output");
+        AssertInfo(out_schema->release == nullptr,
+                   "ArrowSchema output must be empty before export");
+        AssertInfo(out_array->release == nullptr,
+                   "ArrowArray output must be empty before export");
+
+        auto cancel_token = folly::CancellationToken();
+        if (cancellation_source != nullptr) {
+            auto source =
+                static_cast<folly::CancellationSource*>(cancellation_source);
+            cancel_token = source->getToken();
+        }
+        auto plan = static_cast<milvus::query::Plan*>(c_plan);
+        AssertSearchResultReadLeases(search_results, num_search_results);
+        std::vector<milvus::FieldId> requested_field_ids;
+        requested_field_ids.reserve(num_fields);
+        for (int64_t field_index = 0; field_index < num_fields; ++field_index) {
+            requested_field_ids.emplace_back(field_ids[field_index]);
+        }
+        auto ordered_fields = MaterializeOrderedFields(
+            search_results,
+            num_search_results,
+            plan,
+            requested_field_ids,
+            result_seg_indices,
+            result_seg_offsets,
+            total_rows,
+            cancel_token,
+            [plan, &requested_field_ids, &cancel_token](
+                milvus::segcore::SegmentInternalInterface* segment,
+                OrderedSegmentFields& materialized) {
+                milvus::OpContext op_ctx(cancel_token);
+                for (auto field_id : requested_field_ids) {
+                    milvus::futures::throwIfCancelled(cancel_token);
+                    auto& field_meta = plan->schema_->operator[](field_id);
+                    std::unique_ptr<milvus::DataArray> data;
+                    if (!segment->is_field_exist(field_id)) {
+                        data = segment->bulk_subscript_not_exist_field(
+                            field_meta, materialized.segment_offsets.size());
+                    } else {
+                        data = segment->bulk_subscript(
+                            &op_ctx,
+                            field_id,
+                            materialized.segment_offsets.data(),
+                            materialized.segment_offsets.size());
+                    }
+                    materialized.fields[field_id] = std::move(data);
+                }
+                materialized.scanned_remote_bytes =
+                    op_ctx.storage_usage.scanned_cold_bytes.load();
+                materialized.scanned_total_bytes =
+                    op_ctx.storage_usage.scanned_total_bytes.load();
+            });
+
+        auto batch_result = BuildExplicitFieldsBatch(
+            plan, field_ids, num_fields, ordered_fields, total_rows);
+        if (!batch_result.ok()) {
+            return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
+                                          batch_result.status().ToString());
+        }
+        auto export_status =
+            arrow::ExportRecordBatch(**batch_result, out_array, out_schema);
+        if (!export_status.ok()) {
+            ReleaseArrowArrayIfNeeded(out_array);
+            ReleaseArrowSchemaIfNeeded(out_schema);
+            return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
+                                          export_status.ToString());
+        }
+        return milvus::SuccessCStatus();
+    } catch (folly::FutureCancellation& e) {
+        return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 void
 GetSearchResultMetadata(CSearchResult c_search_result,
                         bool* has_group_by,
@@ -1143,6 +1364,7 @@ PrepareSearchResultsForExportImpl(
     try {
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
         AssertInfo(num_slices > 0, "num_slices must be greater than 0");
+        milvus::futures::throwIfCancelled(cancel_token);
 
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         auto placeholder_group =
@@ -1176,6 +1398,8 @@ PrepareSearchResultsForExportImpl(
             *all_search_count = helper.GetAllSearchCount();
         }
         return milvus::SuccessCStatus();
+    } catch (folly::FutureCancellation& e) {
+        return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }

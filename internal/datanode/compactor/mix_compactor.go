@@ -132,15 +132,15 @@ func (t *mixCompactionTask) preCompact() error {
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
 		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
-				// numRows just need to add entries num of ONE field.
 				if i == 0 {
 					t.maxRows += binlog.GetEntriesNum()
 				}
-
-				// MemorySize might be incorrectly
 				currSize += binlog.GetMemorySize()
 			}
 		}
+	}
+	if t.maxRows == 0 {
+		t.maxRows = t.plan.GetTotalRows()
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
@@ -465,47 +465,29 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		mlog.Warn(context.TODO(), "compact wrong, fail to decompress compaction binlogs", mlog.Err(err))
 		return nil, err
 	}
-	// Unable to deal with all empty segments cases, so return error
-	isEmpty := lo.EveryBy(lo.FlatMap(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) []*datapb.FieldBinlog {
-		return seg.GetFieldBinlogs()
-	}), func(field *datapb.FieldBinlog) bool {
-		return len(field.GetBinlogs()) == 0
-	})
-
-	if isEmpty {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
-	}
-
 	if err := t.ensureLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
 
-	sortMergeAppicable := t.compactionParams.UseMergeSort
-	if sortMergeAppicable {
-		for _, segment := range t.plan.GetSegmentBinlogs() {
-			if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
-				sortMergeAppicable = false
-				break
-			}
-		}
-
-		if len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
-			// sort merge is not applicable if there is only one segment or too many segments
-			sortMergeAppicable = false
-		}
-	}
+	useMergeSort := canMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
-	if sortMergeAppicable {
+	if useMergeSort {
 		mlog.Info(context.TODO(), "compact by merge sort")
 		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
 			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
-			mlog.Warn(context.TODO(), "compact wrong, fail to merge sort segments", mlog.Err(err))
+			// Compactor-boundary catch-all: mergeSortMultipleSegments can fail
+			// before it ever reaches the merge sort step (reader/writer
+			// construction, deltalog composition, ...), and those paths don't
+			// log on their own, so this line is their only record.
+			mlog.Warn(ctx, "compact wrong, merge sort compaction failed (compactor boundary)",
+				mlog.Int64("planID", t.GetPlanID()),
+				mlog.Int64("collectionID", t.collectionID),
+				mlog.Err(err))
 			return nil, err
 		}
 	} else {
@@ -585,6 +567,37 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
+}
+
+// canMergeSort reports whether this plan is eligible for storage.MergeSort,
+// which merges without sorting and so requires every input to already be
+// ordered by the plan's merge key. A plan that is not eligible falls back to
+// mergeSplit, which does not assume ordering.
+func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
+	if !params.UseMergeSort {
+		return false
+	}
+	// The two sorted flags record which order the compactors that write sorted
+	// output used. datanode/services.go derives this plan's merge key from the
+	// same EnableNamespace setting -- [pk], or [partitionKey, pk] -- so the flag
+	// that must be set is the matching one, not either one. It also rejects the
+	// plan outright when a namespace-enabled collection has no partition key
+	// (namespace.mode=partition), which is why reading the setting is enough
+	// here rather than inspecting the merge key itself.
+	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
+	for _, segment := range plan.GetSegmentBinlogs() {
+		sortedByMergeKey := segment.GetIsSorted()
+		if namespaceEnabled {
+			sortedByMergeKey = segment.GetIsSortedByNamespace()
+		}
+		if !sortedByMergeKey {
+			return false
+		}
+	}
+	// Each reader holds a live record, so memory grows with the reader count. A
+	// single segment is allowed: merge sort keeps the output flagged sorted,
+	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
+	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {

@@ -92,8 +92,10 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	var err error
 	// mock
 	loadSegmetns := []int64{}
+	var loadedInfos []*querypb.SegmentLoadInfo
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	delegator.EXPECT().LoadGrowing(mock.Anything, mock.Anything, mock.Anything).Run(func(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) {
+		loadedInfos = infos
 		for _, info := range infos {
 			loadSegmetns = append(loadSegmetns, info.SegmentID)
 		}
@@ -126,15 +128,31 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	suite.Equal(0, len(loadSegmetns))
 
 	// V3 storage: binlog is empty but ManifestPath is set, should load
+	stats := &datapb.Statistics{
+		InsertBinlogSize: 10,
+		LoadResource: &datapb.LoadResourceStatistics{
+			ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 0, FieldIds: []int64{100}, MemorySize: 10}},
+		},
+	}
+	textStats := map[int64]*datapb.TextIndexStats{101: {MemorySize: 20}}
+	jsonStats := map[int64]*datapb.JsonKeyStats{102: {}}
 	req.SegmentInfos[suite.segmentID] = &datapb.SegmentInfo{
-		ID:           suite.segmentID,
-		CollectionID: suite.collectionID,
-		Binlogs:      make([]*datapb.FieldBinlog, 0),
-		ManifestPath: "files/binlogs/1/2/1000/manifest_0",
+		ID:             suite.segmentID,
+		CollectionID:   suite.collectionID,
+		Binlogs:        make([]*datapb.FieldBinlog, 0),
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "files/binlogs/1/2/1000/manifest_0",
+		Stats:          stats,
+		TextStatsLogs:  textStats,
+		JsonKeyStats:   jsonStats,
 	}
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
 	suite.Equal(1, len(loadSegmetns))
+	suite.Require().Len(loadedInfos, 1)
+	suite.Same(stats, loadedInfos[0].GetStats())
+	suite.Equal(textStats, loadedInfos[0].GetTextStatsLogs())
+	suite.Equal(jsonStats, loadedInfos[0].GetJsonKeyStatsLogs())
 
 	// normal load with binlogs
 	loadSegmetns = loadSegmetns[:0]

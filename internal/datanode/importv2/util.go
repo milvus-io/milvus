@@ -106,19 +106,29 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
-	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
-	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(retryOpts...)
+		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
+}
+
+// newWriteRetryOptions builds the retry options for import writes. The options are
+// order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
+// be applied last. The paramtable formatters guarantee both intervals are positive,
+// which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
+func newWriteRetryOptions() []retry.Option {
+	params := &paramtable.Get().DataNodeCfg
+	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
+	maxInterval := time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
+	return []retry.Option{
+		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
+		retry.Sleep(initialInterval),
+		retry.MaxSleepTime(maxInterval),
+	}
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
@@ -382,15 +392,57 @@ func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
 	}
 }
 
+// pkCursor derives deterministic autoID primary keys from a per-file id range
+// [begin, end) that was allocated once on the primary and replicated. It is
+// advanced sequentially as batches of a single import file are read; files are
+// read in order and each file owns a disjoint range, so the assignment is stable
+// and identical across clusters. A nil or empty cursor selects the legacy
+// local-allocator path (non-autoID / backup / pre-upgrade jobs).
+type pkCursor struct {
+	begin, end, next int64
+}
+
+// take reserves n contiguous ids and returns the starting id, failing loudly if
+// the file yields more rows than its reserved range (the files differ between the
+// two clusters, or the file exceeded the size bound the range was computed from).
+func (c *pkCursor) take(n int) (int64, error) {
+	if c.next+int64(n) > c.end {
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf(
+			"import file produced more rows than its reserved PK range [%d, %d): the "+
+				"reservation is too small, or this file differs from the one the "+
+				"primary cluster sized", c.begin, c.end))
+	}
+	start := c.next
+	c.next += int64(n)
+	return start, nil
+}
+
+// AppendSystemFieldsData assigns autoID PK/RowID/timestamp using the task's local
+// allocator (legacy path). appendSystemFieldsDataWithCursor is the deterministic
+// per-file path used for cross-cluster-consistent autoID imports.
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
+	return appendSystemFieldsDataWithCursor(task, data, rowNum, nil)
+}
+
+func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData, rowNum int, cur *pkCursor) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
 	ids := make([]int64, rowNum)
-	start, _, err := task.allocator.Alloc(uint32(rowNum))
-	if err != nil {
-		return err
+	var start int64
+	if cur != nil && cur.end > cur.begin {
+		// Deterministic path: derive PKs from the primary-allocated per-file range.
+		start, err = cur.take(rowNum)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Legacy path: allocate PKs from the task's local allocator.
+		start, _, err = task.allocator.Alloc(uint32(rowNum))
+		if err != nil {
+			return err
+		}
 	}
 	for i := 0; i < rowNum; i++ {
 		ids[i] = start + int64(i)

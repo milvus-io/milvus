@@ -55,6 +55,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

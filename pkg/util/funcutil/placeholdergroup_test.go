@@ -66,12 +66,12 @@ func TestFieldDataToPlaceholderGroupBytesWithCount_AllNullSparseVector(t *testin
 		FieldName: "sparse_vec",
 		Field: &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
+				ValidData: []bool{false, false, false},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{},
 				},
 			},
 		},
-		ValidData: []bool{false, false, false},
 	}
 
 	_, valueCount, err := FieldDataToPlaceholderGroupBytesWithCount(fieldData)

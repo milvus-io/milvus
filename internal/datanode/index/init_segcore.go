@@ -87,6 +87,9 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitLocalChunkManager(localDataRootPath); err != nil {
 		return err
 	}
+	// Select the segcore remote chunk manager backend before any index
+	// build/load creates one from the per-request storage config.
+	initcore.SetArrowFSChunkManagerEnabled(paramtable.Get())
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
@@ -99,6 +102,15 @@ func InitSegcore(nodeID int64) error {
 
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+	if err := initcore.InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Publish the External Table IOPS policy once for native IndexBuilder
+	// readers. Reader config watchers must not rewrite this startup policy.
+	if err := initcore.InitExternalIopsConfig(paramtable.Get()); err != nil {
 		return err
 	}
 

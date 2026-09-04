@@ -639,6 +639,7 @@ message RestoreSnapshotMessageHeader {
     bool external = 6;           // True for external snapshot restore
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
+    string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
@@ -706,6 +707,15 @@ message LegacyProxyCollectionMetaCache {
     int64 collection_id = 3;
     string partition_name = 4;
     common.MsgType msg_type = 5;
+}
+
+// PartialUpdateCAS carries attempt-scoped commit-admission proof from Proxy to
+// StreamingNode.
+message PartialUpdateCAS {
+    // read_ts must be non-zero.
+    uint64 read_ts = 1;
+    // observed_pchannel_term must be non-zero.
+    int64 observed_pchannel_term = 2;
 }
 
 ///

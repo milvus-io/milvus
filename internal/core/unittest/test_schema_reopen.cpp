@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -92,9 +93,10 @@ TEST_F(SchemaReopenTest, LoadWithAbsentNullableVectorFieldShouldReadAllNull) {
     // row must read as null.
     seg_impl->FillAbsentFields();
     auto col = seg_impl->bulk_subscript(&op_ctx, added_fid, offsets.data(), N);
-    ASSERT_EQ(col->valid_data_size(), N);
+    const auto& loaded_valid_data = GetFieldDataRowValidData(*col);
+    ASSERT_EQ(loaded_valid_data.size(), N);
     for (int i = 0; i < N; ++i) {
-        ASSERT_FALSE(col->valid_data(i)) << "row " << i << " should be null";
+        ASSERT_FALSE(loaded_valid_data[i]) << "row " << i << " should be null";
     }
     ASSERT_EQ(col->vectors().float_vector().data_size(), 0);
 
@@ -114,9 +116,11 @@ TEST_F(SchemaReopenTest, LoadWithAbsentNullableVectorFieldShouldReadAllNull) {
     std::iota(all_offsets.begin(), all_offsets.end(), 0);
     col =
         seg_impl->bulk_subscript(&op_ctx, added_fid, all_offsets.data(), 2 * N);
-    ASSERT_EQ(col->valid_data_size(), 2 * N);
+    const auto& replayed_valid_data = GetFieldDataRowValidData(*col);
+    ASSERT_EQ(replayed_valid_data.size(), 2 * N);
     for (int i = 0; i < 2 * N; ++i) {
-        ASSERT_FALSE(col->valid_data(i)) << "row " << i << " should be null";
+        ASSERT_FALSE(replayed_valid_data[i])
+            << "row " << i << " should be null";
     }
 }
 

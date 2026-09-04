@@ -14,11 +14,12 @@ from api.milvus import (
     PartitionClient,
     Requests,
     RoleClient,
+    SnapshotClient,
     StorageClient,
     UserClient,
     VectorClient,
 )
-from pymilvus import connections, db
+from pymilvus import connections
 from utils.util_log import test_log as logger
 from utils.utils import get_data_by_payload
 
@@ -49,10 +50,12 @@ class Base:
     milvus_client = None
     database_client = None
     file_resource_client = None
+    snapshot_client = None
 
 
 class TestBase(Base):
     req = None
+    connect_with_pymilvus = True
 
     @pytest.fixture(scope="class", autouse=True)
     def init_class_config(self, endpoint, token):
@@ -118,12 +121,14 @@ class TestBase(Base):
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         self.database_client = DatabaseClient(self.endpoint, self.api_key)
         self.file_resource_client = FileResourceClient(self.endpoint, self.api_key)
+        self.snapshot_client = SnapshotClient(self.endpoint, self.api_key)
 
         if token is None:
             self.vector_client.api_key = None
             self.collection_client.api_key = None
             self.partition_client.api_key = None
-        connections.connect(uri=endpoint, token=token)
+        if self.connect_with_pymilvus:
+            connections.connect(uri=endpoint, token=token)
 
     def init_collection(
         self,
@@ -188,23 +193,6 @@ class TestBase(Base):
                 break
             else:
                 time.sleep(5)
-
-    def create_database(self, db_name="default"):
-        all_db = db.list_database()
-        logger.info(f"all database: {all_db}")
-        if db_name not in all_db:
-            logger.info(f"create database: {db_name}")
-            try:
-                db.create_database(db_name=db_name)
-            except Exception as e:
-                logger.error(e)
-
-    def update_database(self, db_name="default"):
-        self.create_database(db_name=db_name)
-        db.using_database(db_name=db_name)
-        self.collection_client.db_name = db_name
-        self.vector_client.db_name = db_name
-        self.import_job_client.db_name = db_name
 
     def wait_load_completed(self, collection_name, db_name="default", timeout=5):
         t0 = time.time()

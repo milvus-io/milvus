@@ -29,6 +29,9 @@ SegcoreSetChunkRows(const int64_t);
 void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
+CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
+
 void
 SegcoreSetStorageV3Enabled(const bool);
 
@@ -64,7 +67,7 @@ void
 SegcoreSetIndexBuildRatio(const float);
 
 void
-SegcoreInterminDenseIndexType(const char*);
+SegcoreSetGrowingIndexBuildThreadRate(const float);
 
 CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
@@ -108,6 +111,12 @@ SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
+
+int64_t
+SegcoreGetTakeForOutputResultCountLimit();
 
 void
 SegcoreCloseGlog();

@@ -132,6 +132,26 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 	return rc
 }
 
+// ResolvePChannelInfo returns the current pchannel assignment for the vchannel.
+func (w *walAccesserImpl) ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return types.PChannelInfo{}, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return types.PChannelInfo{}, err
+	}
+	for _, assignment := range assignments.Assignments {
+		if pchannelInfo, ok := assignment.Channels[pchannel]; ok {
+			return pchannelInfo, nil
+		}
+	}
+	return types.PChannelInfo{}, status.NewChannelNotExist(pchannel)
+}
+
 // Broadcast returns a broadcast for broadcasting records to the wal.
 func (w *walAccesserImpl) Broadcast() Broadcast {
 	return broadcast{w}

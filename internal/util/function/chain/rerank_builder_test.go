@@ -143,12 +143,39 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> SortOp -> LimitOp -> SelectOp
-	s.Equal(4, len(fc.operators))
+	// Verify chain structure: MergeOp -> SortOp -> LimitOp
+	s.Equal(3, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Sort", fc.operators[1].Name())
 	s.Equal("Limit", fc.operators[2].Name())
-	s.Equal("Select", fc.operators[3].Name())
+	s.Nil(fc.operators[0].(*MergeOp).weights)
+}
+
+func (s *RerankBuilderTestSuite) TestBuildRRFChainWithWeights() {
+	collSchema := s.createCollectionSchema()
+	searchParams := s.createSearchParams()
+	searchMetrics := []string{"COSINE", "IP"}
+
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: "rrf"},
+					{Key: "k", Value: "30"},
+					{Key: "weights", Value: "[0.8, 0.2]"},
+				},
+			},
+		},
+	}
+
+	fc, err := BuildRerankChain(collSchema, funcScoreSchema, searchMetrics, searchParams, s.pool)
+	s.Require().NoError(err)
+
+	mergeOp := fc.operators[0].(*MergeOp)
+	s.Equal(MergeStrategyRRF, mergeOp.strategy)
+	s.Equal(30.0, mergeOp.rrfK)
+	s.Equal([]float64{0.8, 0.2}, mergeOp.weights)
 }
 
 func (s *RerankBuilderTestSuite) TestBuildRRFChainDefaultK() {
@@ -233,6 +260,66 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChainKNotANumber() {
 	_, err := BuildRerankChain(collSchema, funcScoreSchema, searchMetrics, searchParams, s.pool)
 	s.Error(err)
 	s.Contains(err.Error(), "is not a number")
+}
+
+func (s *RerankBuilderTestSuite) TestBuildRRFChainWeightsValidation() {
+	collSchema := s.createCollectionSchema()
+	searchParams := s.createSearchParams()
+	searchMetrics := []string{"COSINE", "IP"}
+
+	tests := []struct {
+		name          string
+		weights       string
+		expectedError string
+	}{
+		{name: "malformed", weights: "not-json", expectedError: "failed to parse weights"},
+		{name: "not numeric", weights: `["0.8", 0.2]`, expectedError: "failed to parse weights"},
+		{name: "null element", weights: "[null, 0.2]", expectedError: "failed to parse weights"},
+		{name: "null", weights: "null", expectedError: "non-empty array"},
+		{name: "empty", weights: "[]", expectedError: "non-empty array"},
+		{name: "negative", weights: "[-0.1, 0.2]", expectedError: "range [0, 1]"},
+		{name: "greater than one", weights: "[0.8, 1.1]", expectedError: "range [0, 1]"},
+		{name: "count mismatch", weights: "[0.8]", expectedError: "length of weights param mismatch"},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			funcScoreSchema := &schemapb.FunctionScore{
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Type: schemapb.FunctionType_Rerank,
+						Params: []*commonpb.KeyValuePair{
+							{Key: "reranker", Value: "rrf"},
+							{Key: "weights", Value: test.weights},
+						},
+					},
+				},
+			}
+
+			_, err := BuildRerankChain(collSchema, funcScoreSchema, searchMetrics, searchParams, s.pool)
+			s.Error(err)
+			s.Contains(err.Error(), test.expectedError)
+		})
+	}
+}
+
+func (s *RerankBuilderTestSuite) TestBuildRRFChainWeightsBoundaries() {
+	collSchema := s.createCollectionSchema()
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: "rrf"},
+					{Key: "weights", Value: "[0, 1]"},
+				},
+			},
+		},
+	}
+
+	fc, err := BuildRerankChain(collSchema, funcScoreSchema, []string{"COSINE", "IP"}, s.createSearchParams(), s.pool)
+	s.Require().NoError(err)
+	s.Equal([]float64{0, 1}, fc.operators[0].(*MergeOp).weights)
 }
 
 // =============================================================================
@@ -380,14 +467,13 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp -> SelectOp
-	s.Equal(6, len(fc.operators))
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp
+	s.Equal(5, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
 	s.Equal("Map", fc.operators[2].Name())
 	s.Equal("Sort", fc.operators[3].Name())
 	s.Equal("Limit", fc.operators[4].Name())
-	s.Equal("Select", fc.operators[5].Name())
 }
 
 func (s *RerankBuilderTestSuite) TestBuildDecayChainMissingRequired() {
@@ -532,11 +618,11 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChainWithScoreMode() {
 func (s *RerankBuilderTestSuite) TestBuildLegacyRRF() {
 	collSchema := s.createCollectionSchema()
 	searchParams := s.createSearchParams()
-	searchMetrics := []string{"COSINE"}
+	searchMetrics := []string{"COSINE", "IP"}
 
 	rankParams := []*commonpb.KeyValuePair{
 		{Key: "strategy", Value: "rrf"},
-		{Key: "params", Value: `{"k": 60}`},
+		{Key: "params", Value: `{"k": 60, "weights": [0.8, 0.2]}`},
 	}
 
 	fc, err := BuildRerankChainWithLegacy(collSchema, rankParams, searchMetrics, searchParams, s.pool)
@@ -546,6 +632,38 @@ func (s *RerankBuilderTestSuite) TestBuildLegacyRRF() {
 	mergeOp := fc.operators[0].(*MergeOp)
 	s.Equal(MergeStrategyRRF, mergeOp.strategy)
 	s.Equal(60.0, mergeOp.rrfK)
+	s.Equal([]float64{0.8, 0.2}, mergeOp.weights)
+}
+
+func (s *RerankBuilderTestSuite) TestRRFPublicPathsBuildEquivalentMergeOps() {
+	collSchema := s.createCollectionSchema()
+	searchParams := s.createSearchParams()
+	searchMetrics := []string{"COSINE", "IP"}
+
+	funcScore := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+		Type: schemapb.FunctionType_Rerank,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "reranker", Value: "rrf"},
+			{Key: "k", Value: "30"},
+			{Key: "weights", Value: "[0.7, 0.2]"},
+		},
+	}}}
+	legacyParams := []*commonpb.KeyValuePair{
+		{Key: "strategy", Value: "rrf"},
+		{Key: "params", Value: `{"k": 30, "weights": [0.7, 0.2]}`},
+	}
+
+	functionChain, err := BuildRerankChain(collSchema, funcScore, searchMetrics, searchParams, s.pool)
+	s.Require().NoError(err)
+	legacyChain, err := BuildRerankChainWithLegacy(collSchema, legacyParams, searchMetrics, searchParams, s.pool)
+	s.Require().NoError(err)
+
+	functionMerge := functionChain.operators[0].(*MergeOp)
+	legacyMerge := legacyChain.operators[0].(*MergeOp)
+	s.Equal(functionMerge.strategy, legacyMerge.strategy)
+	s.Equal(functionMerge.rrfK, legacyMerge.rrfK)
+	s.Equal(functionMerge.weights, legacyMerge.weights)
+	s.Equal(functionMerge.weightsSet, legacyMerge.weightsSet)
 }
 
 func (s *RerankBuilderTestSuite) TestBuildLegacyWeighted() {
@@ -679,11 +797,10 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> GroupByOp -> SelectOp (no Sort/Limit when grouping)
-	s.Equal(3, len(fc.operators))
+	// Verify chain structure: MergeOp -> GroupByOp (no Sort/Limit when grouping)
+	s.Equal(2, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("GroupBy", fc.operators[1].Name())
-	s.Equal("Select", fc.operators[2].Name())
 }
 
 func (s *RerankBuilderTestSuite) createCollectionSchemaWithCategory() *schemapb.CollectionSchema {
@@ -1213,13 +1330,12 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp -> SelectOp
-	s.Equal(5, len(fc.operators))
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp
+	s.Equal(4, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
 	s.Equal("Map", fc.operators[2].Name())
 	s.Equal("GroupBy", fc.operators[3].Name())
-	s.Equal("Select", fc.operators[4].Name())
 }
 
 func (s *RerankBuilderTestSuite) TestExecuteDecayWithGrouping_Basic() {
@@ -2709,8 +2825,8 @@ func (s *RerankBuilderTestSuite) TestBuildRerankChainInternal_RoundDecimalZero()
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Chain: Merge -> Sort -> Limit -> Map(RoundDecimal) -> Select = 5 operators
-	s.Equal(5, len(fc.operators))
+	// Chain: Merge -> Sort -> Limit -> Map(RoundDecimal) = 4 operators
+	s.Equal(4, len(fc.operators))
 	s.Equal("Map", fc.operators[3].Name())
 }
 
@@ -2903,11 +3019,10 @@ func (s *RerankBuilderTestSuite) TestBuildRerankChain_NoLimitOp() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Chain: Merge -> Sort -> Select (no Limit when limit=0)
-	s.Equal(3, len(fc.operators))
+	// Chain: Merge -> Sort (no Limit when limit=0)
+	s.Equal(2, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Sort", fc.operators[1].Name())
-	s.Equal("Select", fc.operators[2].Name())
 }
 
 // =============================================================================

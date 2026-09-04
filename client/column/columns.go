@@ -426,7 +426,10 @@ func int32ToType[T ~int8 | int16](data []int32) []T {
 // FieldDataColumn converts schemapb.FieldData to Column, used int search result conversion logic
 // begin, end specifies the start and end positions
 func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
-	validData := fd.GetValidData()
+	if !validateAndNormalizeFieldDataValidData(fd) {
+		return nil, fmt.Errorf("field %q has different legacy and field-specific valid_data", fd.GetFieldName())
+	}
+	validData := getFieldDataValidData(fd)
 
 	switch fd.GetType() {
 	case schemapb.DataType_Bool:
@@ -460,6 +463,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_VarChar:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
+
+	case schemapb.DataType_Text:
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnText, NewNullableColumnText)
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)

@@ -99,6 +99,71 @@ func TestIDColumns(t *testing.T) {
 	})
 }
 
+func TestFieldDataColumnValidDataSources(t *testing.T) {
+	validData := []bool{true, false}
+	makeField := func(legacy, current []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "value",
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: current,
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 0}},
+					},
+				},
+			},
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		legacy  []bool
+		current []bool
+		wantErr bool
+	}{
+		{name: "legacy fallback", legacy: validData},
+		{name: "field-specific", current: validData},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			field := makeField(test.legacy, test.current)
+			col, err := FieldDataColumn(field, 0, -1)
+			if test.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, col)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, col)
+			assert.Nil(t, field.GetValidData())
+			assert.Equal(t, validData, field.GetScalars().GetValidData())
+		})
+	}
+}
+
+func TestValidateAndNormalizeFieldDataValidDataRejectsNestedMismatch(t *testing.T) {
+	legacy := []bool{true, false}
+	current := []bool{false, true}
+	subField := &schemapb.FieldData{
+		ValidData: legacy,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{ValidData: current},
+		},
+	}
+	field := &schemapb.FieldData{
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+		},
+	}
+
+	assert.False(t, validateAndNormalizeFieldDataValidData(field))
+	assert.Equal(t, legacy, subField.GetValidData())
+	assert.Equal(t, current, subField.GetScalars().GetValidData())
+}
+
 func TestGetIntData(t *testing.T) {
 	type testCase struct {
 		tag      string

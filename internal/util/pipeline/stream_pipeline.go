@@ -220,7 +220,9 @@ func NewDMLMsgPackBatcher(maxMsgNum func() int) MsgPackBatcher {
 
 func (b *dmlMsgPackBatcher) Batch(first *msgstream.MsgPack, input <-chan *msgstream.MsgPack) (*msgstream.MsgPack, *msgstream.MsgPack) {
 	maxMsgNum := b.getMaxMsgNum()
-	if maxMsgNum <= 1 || !isDMLMsgPack(first) {
+	// Preserve original pack boundaries for inserts because insertNode merges
+	// records by segment without normalizing different schema field sets.
+	if maxMsgNum <= 1 || !isDeleteOnlyMsgPack(first) {
 		return first, nil
 	}
 
@@ -232,7 +234,7 @@ func (b *dmlMsgPackBatcher) Batch(first *msgstream.MsgPack, input <-chan *msgstr
 			if !ok {
 				return mergeMsgPacks(packs), nil
 			}
-			if !isDMLMsgPack(next) {
+			if !isDeleteOnlyMsgPack(next) {
 				return mergeMsgPacks(packs), next
 			}
 			if msgNum+len(next.Msgs) > maxMsgNum {
@@ -254,15 +256,13 @@ func (b *dmlMsgPackBatcher) getMaxMsgNum() int {
 	return b.maxMsgNum()
 }
 
-func isDMLMsgPack(pack *msgstream.MsgPack) bool {
+func isDeleteOnlyMsgPack(pack *msgstream.MsgPack) bool {
 	if pack == nil || len(pack.Msgs) == 0 {
 		return false
 	}
 
 	for _, msg := range pack.Msgs {
-		switch msg.Type() {
-		case commonpb.MsgType_Insert, commonpb.MsgType_Delete:
-		default:
+		if msg.Type() != commonpb.MsgType_Delete {
 			return false
 		}
 	}

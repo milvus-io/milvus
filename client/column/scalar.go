@@ -283,6 +283,30 @@ func (c *ColumnVarChar) Slice(start, end int) Column {
 	}
 }
 
+/* Text */
+
+var _ Column = (*ColumnText)(nil)
+
+type ColumnText struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnText(name string, values []string) *ColumnText {
+	return &ColumnText{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeText,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnText) Slice(start, end int) Column {
+	return &ColumnText{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
 /* String */
 /* NOT USED */
 

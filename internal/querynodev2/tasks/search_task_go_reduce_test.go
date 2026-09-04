@@ -19,6 +19,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -38,11 +39,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
+	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -50,6 +55,26 @@ import (
 )
 
 // testSegments holds pre-created segments and search results for testing.
+type fixedTopKQueryHook struct {
+	topK        int64
+	searchParam string
+}
+
+func (h fixedTopKQueryHook) Run(params map[string]any) error {
+	params[common.TopKKey] = h.topK
+	params[common.SearchParamKey] = h.searchParam
+	return nil
+}
+
+func (fixedTopKQueryHook) Init(string) error                        { return nil }
+func (fixedTopKQueryHook) InitTuningConfig(map[string]string) error { return nil }
+func (fixedTopKQueryHook) DeleteTuningConfig(string) error          { return nil }
+func (fixedTopKQueryHook) CalculateEffectiveSegmentNum([]int64, int64) int {
+	return 1
+}
+
+var _ optimizers.QueryHook = fixedTopKQueryHook{}
+
 type testSegments struct {
 	manager       *segments.Manager
 	collection    *segments.Collection
@@ -141,16 +166,18 @@ func TestExportSearchResultsAsArrowReleasesCompletedDataFramesOnMultiSegmentErro
 // When SkipSearchReq is true NQ/TopK are ignored and no SearchRequest is built.
 // NullableVec marks the float_vector field as Nullable so the insert data
 // generator stamps ValidData using mock_segcore.NullablePatternValidData —
-// required to cover the nullable-vector output path.
+// required to cover the nullable-vector output path. MutateInsertData lets a
+// test make generated segment rows deterministic before binlog serialization.
 type setupOpts struct {
-	NQ             int64
-	TopK           int64
-	OutputFieldIDs []int64
-	GroupByFieldID int64
-	GroupSize      int64
-	FilterOnly     bool
-	SkipSearchReq  bool
-	NullableVec    bool
+	NQ               int64
+	TopK             int64
+	OutputFieldIDs   []int64
+	GroupByFieldID   int64
+	GroupSize        int64
+	FilterOnly       bool
+	SkipSearchReq    bool
+	NullableVec      bool
+	MutateInsertData func(segmentIdx int, data *storage.InsertData)
 }
 
 func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupOpts) *testSegments {
@@ -229,6 +256,9 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 		if err != nil {
 			t.Fatal(err)
 		}
+		if opts.MutateInsertData != nil {
+			opts.MutateInsertData(i, insertData)
+		}
 		ts.insertData[i] = insertData
 		binlogs, _, err := mock_segcore.SaveBinLogWithData(ctx,
 			collectionID, partitionID, segmentID, insertData, schema, chunkManager)
@@ -291,8 +321,8 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 	return ts
 }
 
-// runGoReducePipeline runs the same pipeline as executeGoReduce
-// and returns the merged mergeResult and DataFrames (caller must release).
+// runGoReducePipeline runs the reduce stage and returns the merged
+// mergeResult and DataFrames (caller must release).
 // Group-by is auto-detected from the first SearchResult, mirroring production.
 func runGoReducePipeline(t *testing.T, ts *testSegments) (*mergeResult, []*chain.DataFrame) {
 	t.Helper()
@@ -458,6 +488,139 @@ func TestLateMaterializeOutputFields(t *testing.T) {
 	assert.Len(t, searchResultData.Scores, totalRows)
 
 	t.Logf("Late Mat OK: %d output fields, %d total rows", len(searchResultData.FieldsData), totalRows)
+}
+
+func TestL1RerankLateMaterializationKeepsOutputFieldsAligned(t *testing.T) {
+	const (
+		int32FieldID int64 = 103
+		floatFieldID int64 = 104
+		pkFieldID    int64 = 109
+		topK         int64 = 6
+	)
+
+	ts := setupTestSegments(t, 2, 20, setupOpts{
+		NQ:             1,
+		TopK:           topK,
+		OutputFieldIDs: []int64{floatFieldID},
+		MutateInsertData: func(segmentIdx int, data *storage.InsertData) {
+			pks := data.Data[pkFieldID].(*storage.Int64FieldData)
+			output := data.Data[floatFieldID].(*storage.FloatFieldData)
+			for row := range pks.Data {
+				pks.Data[row] = int64(row*2 + segmentIdx)
+				output.Data[row] = float32((segmentIdx+1)*100000 + row)
+			}
+		},
+	})
+	defer ts.cleanup()
+
+	reduced, segDFs := runGoReducePipeline(t, ts)
+	defer func() {
+		for _, df := range segDFs {
+			df.Release()
+		}
+	}()
+
+	originalSources := make([]segmentSource, len(reduced.Sources[0]))
+	copy(originalSources, reduced.Sources[0])
+	selected := []int{3, 0, 4, 1}
+	l1Values := make([]int64, len(originalSources))
+	for rank, row := range selected {
+		l1Values[row] = int64((len(selected) - rank) * 1000000)
+	}
+
+	repr, err := chain.ProtoChainToRepr(l1FunctionChainForTest(
+		mapOpWithParamsForTest(
+			"l1_sort_key",
+			chainexpr.NumCombineFuncName,
+			map[string]*schemapb.FunctionParamValue{
+				chaintypes.NumCombineParamMode: stringParamForTest(chaintypes.NumCombineModeSum),
+			},
+			columnArgForTest(chaintypes.ScoreFieldName),
+			columnArgForTest("int32Field"),
+		),
+		&schemapb.FunctionChainOp{
+			Op:     chaintypes.OpTypeSort,
+			Inputs: []string{"l1_sort_key", chaintypes.IDFieldName},
+			Params: map[string]*schemapb.FunctionParamValue{
+				"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+			},
+		},
+		&schemapb.FunctionChainOp{
+			Op: chaintypes.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: int64(len(selected))}},
+			},
+		},
+		mapOpWithParamsForTest(
+			chaintypes.ScoreFieldName,
+			chainexpr.NumCombineFuncName,
+			map[string]*schemapb.FunctionParamValue{
+				chaintypes.NumCombineParamMode: stringParamForTest(chaintypes.NumCombineModeSum),
+			},
+			columnArgForTest("l1_sort_key"),
+			columnArgForTest(chaintypes.IDFieldName),
+		),
+	))
+	require.NoError(t, err)
+
+	oldReader := fillL1FieldsOrdered
+	fillL1FieldsOrdered = func(
+		ctx context.Context,
+		results []*segcore.SearchResult,
+		plan *segcore.SearchPlan,
+		fieldIDs []int64,
+		segIndices []int32,
+		segOffsets []int64,
+	) (arrow.Record, error) {
+		require.NoError(t, ctx.Err())
+		require.Equal(t, []int64{int32FieldID}, fieldIDs)
+		require.Len(t, segIndices, len(originalSources))
+		require.Len(t, segOffsets, len(originalSources))
+		builder := array.NewInt32Builder(defaultAllocator)
+		for row := range originalSources {
+			builder.Append(int32(l1Values[row]))
+		}
+		values := builder.NewArray()
+		builder.Release()
+		field := arrow.Field{
+			Name: "int32Field",
+			Type: arrow.PrimitiveTypes.Int32,
+			Metadata: arrow.NewMetadata(
+				[]string{arrowMetadataFieldIDKey, arrowMetadataDataTypeKey},
+				[]string{strconv.FormatInt(int32FieldID, 10), strconv.Itoa(int(schemapb.DataType_Int32))},
+			),
+		}
+		record := array.NewRecord(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Array{values}, int64(values.Len()))
+		values.Release()
+		return record, nil
+	}
+	t.Cleanup(func() { fillL1FieldsOrdered = oldReader })
+
+	task := &SearchTask{ctx: t.Context()}
+	reranked, err := task.applyL1RerankResult(reduced, ts.searchResults, ts.searchReq.Plan(), &preparedL1FunctionChain{
+		chain:         repr,
+		inputFieldIDs: []int64{int32FieldID},
+	})
+	require.NoError(t, err)
+	defer reranked.DF.Release()
+
+	searchResultData, err := marshalReduceResult(reranked)
+	require.NoError(t, err)
+	require.NoError(t, lateMaterializeOutputFields(t.Context(), ts.searchResults, ts.searchReq.Plan(), reranked.Sources, searchResultData))
+
+	require.Len(t, searchResultData.GetFieldsData(), 1)
+	assert.Equal(t, floatFieldID, searchResultData.GetFieldsData()[0].GetFieldId())
+	ids := searchResultData.GetIds().GetIntId().GetData()
+	outputs := searchResultData.GetFieldsData()[0].GetScalars().GetFloatData().GetData()
+	require.Len(t, ids, len(selected))
+	require.Len(t, outputs, len(selected))
+	for row, source := range reranked.Sources[0] {
+		assert.Equal(t, ts.insertData[source.InputIdx].Data[pkFieldID].(*storage.Int64FieldData).Data[source.SegOffset], ids[row])
+		assert.Equal(t, ts.insertData[source.InputIdx].Data[floatFieldID].(*storage.FloatFieldData).Data[source.SegOffset], outputs[row])
+	}
+	assert.False(t, reranked.DF.HasColumn("int32Field"))
+	assert.False(t, reranked.DF.HasColumn("l1_sort_key"))
+	assert.False(t, reranked.DF.HasColumn(l1SourceIndexColumn))
 }
 
 func TestLateMaterializeOutputFields_NoOutputFields(t *testing.T) {
@@ -718,11 +881,129 @@ func TestHeapMergeReduceRangeGroupByMixedTopKMatchesPerSliceReduce(t *testing.T)
 		"row truncating a max-topK group reduce is not equivalent to per-slice group reduce")
 }
 
-func TestRequiresPerSliceReduce(t *testing.T) {
-	require.False(t, requiresPerSliceReduce(nil, []int64{10, 20}))
-	require.False(t, requiresPerSliceReduce(&groupByOptions{GroupSize: 1}, []int64{10, 20}))
-	require.False(t, requiresPerSliceReduce(&groupByOptions{GroupSize: 2}, []int64{10, 10}))
-	require.True(t, requiresPerSliceReduce(&groupByOptions{GroupSize: 2}, []int64{10, 20}))
+func TestRequiresPerRequestReduce(t *testing.T) {
+	require.False(t, requiresPerRequestReduce(nil, []int64{10, 20}, false))
+	require.True(t, requiresPerRequestReduce(nil, []int64{10, 20}, true))
+	require.True(t, requiresPerRequestReduce(&groupByOptions{GroupSize: 2}, []int64{10, 20}, false))
+	require.True(t, requiresPerRequestReduce(&groupByOptions{GroupSize: 2}, []int64{10, 20}, true))
+	require.False(t, requiresPerRequestReduce(&groupByOptions{GroupSize: 1}, []int64{10, 20}, false))
+	require.False(t, requiresPerRequestReduce(&groupByOptions{GroupSize: 2}, []int64{10, 10}, true))
+}
+
+func TestHasMixedTopK(t *testing.T) {
+	require.False(t, hasMixedTopK(nil))
+	require.False(t, hasMixedTopK([]int64{10}))
+	require.False(t, hasMixedTopK([]int64{10, 10}))
+	require.True(t, hasMixedTopK([]int64{10, 20}))
+}
+
+type reduceLayoutTestCase struct {
+	name        string
+	groupByOpts *groupByOptions
+	hasL1       bool
+	wantPerReq  bool
+}
+
+func TestBuildReduceLayoutPerRequestL1(t *testing.T) {
+	for _, tc := range []reduceLayoutTestCase{
+		{name: "ordinary mixed topk without l1", hasL1: false, wantPerReq: false},
+		{name: "ordinary mixed topk with l1", hasL1: true, wantPerReq: true},
+		{name: "group mixed topk without l1", groupByOpts: &groupByOptions{GroupSize: 2}, hasL1: false, wantPerReq: true},
+		{name: "group size one mixed topk without l1", groupByOpts: &groupByOptions{GroupSize: 1}, hasL1: false, wantPerReq: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &SearchTask{
+				nq:          3,
+				topk:        20,
+				originNqs:   []int64{1, 2},
+				originTopks: []int64{10, 20},
+			}
+			layout, err := task.buildReduceLayout(tc.groupByOpts, tc.hasL1)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPerReq, layout.PerRequestReduce)
+		})
+	}
+}
+
+// TestBuildReduceLayout retains detailed range assertions for the group-by
+// mixed TopK path.
+func TestBuildReduceLayout(t *testing.T) {
+	t.Run("shared standard reduce keeps merged candidate topk", func(t *testing.T) {
+		task := &SearchTask{
+			nq:          3,
+			topk:        20,
+			originNqs:   []int64{1, 2},
+			originTopks: []int64{10, 20},
+		}
+
+		layout, err := task.buildReduceLayout(nil, false)
+		require.NoError(t, err)
+		require.False(t, layout.PerRequestReduce)
+		require.Equal(t, 3, layout.NQ)
+		require.Equal(t, int64(1), layout.GroupSize)
+		require.Equal(t, []reduceRange{
+			{NQOffset: 0, NQCount: 1, ReduceTopK: 20, OutputTopK: 10},
+			{NQOffset: 1, NQCount: 2, ReduceTopK: 20, OutputTopK: 20},
+		}, layout.Ranges)
+	})
+
+	t.Run("mixed group topk reduces each request range independently", func(t *testing.T) {
+		task := &SearchTask{
+			nq:          5,
+			topk:        20,
+			originNqs:   []int64{2, 3},
+			originTopks: []int64{10, 20},
+		}
+
+		layout, err := task.buildReduceLayout(&groupByOptions{GroupSize: 2, Columns: []string{"$group_by_100"}}, false)
+		require.NoError(t, err)
+		require.True(t, layout.PerRequestReduce)
+		require.Equal(t, int64(2), layout.GroupSize)
+		require.Equal(t, []reduceRange{
+			{NQOffset: 0, NQCount: 2, ReduceTopK: 10, OutputTopK: 10},
+			{NQOffset: 2, NQCount: 3, ReduceTopK: 20, OutputTopK: 20},
+		}, layout.Ranges)
+	})
+
+	t.Run("equal group topk shares reduce", func(t *testing.T) {
+		task := &SearchTask{
+			nq:          2,
+			topk:        10,
+			originNqs:   []int64{1, 1},
+			originTopks: []int64{10, 10},
+		}
+
+		layout, err := task.buildReduceLayout(&groupByOptions{GroupSize: 3}, false)
+		require.NoError(t, err)
+		require.False(t, layout.PerRequestReduce)
+		require.Equal(t, int64(3), layout.GroupSize)
+	})
+
+	t.Run("rejects inconsistent task metadata", func(t *testing.T) {
+		_, err := (&SearchTask{
+			nq:          2,
+			topk:        10,
+			originNqs:   []int64{1, 1},
+			originTopks: []int64{10},
+		}).buildReduceLayout(nil, false)
+		require.Error(t, err)
+
+		_, err = (&SearchTask{
+			nq:          3,
+			topk:        10,
+			originNqs:   []int64{1, 1},
+			originTopks: []int64{10, 10},
+		}).buildReduceLayout(nil, false)
+		require.Error(t, err)
+
+		_, err = (&SearchTask{
+			nq:          1,
+			topk:        10,
+			originNqs:   []int64{1},
+			originTopks: []int64{-1},
+		}).buildReduceLayout(nil, false)
+		require.Error(t, err)
+	})
 }
 
 func TestAttributeStorageCostZeroNQAndEmptyResults(t *testing.T) {
@@ -1046,6 +1327,134 @@ func TestExecuteMergedSubTasks(t *testing.T) {
 	t.Logf("merged slicing OK: sub-task NQs=%v, topK=%d", subTaskNqs, topK)
 }
 
+func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
+	const (
+		numSegments = 2
+		msgLength   = 200
+		maxTopK     = int64(8)
+	)
+	originNqs := []int64{1, 2}
+	originTopks := []int64{3, maxTopK}
+
+	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{SkipSearchReq: true})
+	defer ts.cleanup()
+	ctx := context.Background()
+
+	l1Chain := l1FunctionChainForTest(mapOpWithParamsForTest(
+		chaintypes.ScoreFieldName,
+		chainexpr.RoundDecimalFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			"decimal": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 0}},
+		},
+		columnArgForTest(chaintypes.ScoreFieldName),
+	))
+
+	rawRequests := make([]*querypb.SearchRequest, len(originNqs))
+	for i := range originNqs {
+		req, err := mock_segcore.GenQueryRequest(
+			ts.collection.GetCCollection(), ts.segIDs, originNqs[i], originTopks[i], testCollectionID)
+		require.NoError(t, err)
+		rawRequests[i] = req
+	}
+
+	buildRequests := func(withL1 bool) []*querypb.SearchRequest {
+		t.Helper()
+		requests := make([]*querypb.SearchRequest, len(originNqs))
+		for i := range originNqs {
+			req := proto.Clone(rawRequests[i]).(*querypb.SearchRequest)
+			if withL1 {
+				plan := &planpb.PlanNode{}
+				require.NoError(t, proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan))
+				plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l1Chain}
+				var err error
+				req.Req.SerializedExprPlan, err = proto.Marshal(plan)
+				require.NoError(t, err)
+			}
+			requests[i] = req
+		}
+		require.NotEqual(t, requests[0].GetReq().GetSerializedExprPlan(), requests[1].GetReq().GetSerializedExprPlan())
+
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key) })
+		hook := fixedTopKQueryHook{topK: maxTopK, searchParam: `{}`}
+		for i, req := range requests {
+			optimized, err := optimizers.OptimizeSearchParams(ctx, req, hook, numSegments, false, func(int64) int64 { return 128 })
+			require.NoError(t, err)
+			requests[i] = optimized
+		}
+
+		require.Equal(t, requests[0].GetReq().GetSerializedExprPlan(), requests[1].GetReq().GetSerializedExprPlan())
+		require.Equal(t, originTopks[0], requests[0].GetReq().GetTopk())
+		require.Equal(t, originTopks[1], requests[1].GetReq().GetTopk())
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(requests[0].GetReq().GetSerializedExprPlan(), plan))
+		require.Equal(t, maxTopK, plan.GetVectorAnns().GetQueryInfo().GetTopk())
+		if withL1 {
+			require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+			require.True(t, proto.Equal(l1Chain, plan.GetQuerynodeFunctionChains()[0]))
+		} else {
+			require.Empty(t, plan.GetQuerynodeFunctionChains())
+		}
+		return requests
+	}
+
+	execute := func(requests []*querypb.SearchRequest) []*schemapb.SearchResultData {
+		t.Helper()
+		receiver := NewSearchTask(ctx, ts.collection, ts.manager, requests[0], 1)
+		other := NewSearchTask(ctx, ts.collection, ts.manager, requests[1], 1)
+		require.True(t, receiver.Merge(other))
+		require.Equal(t, int64(3), receiver.nq)
+		require.Equal(t, maxTopK, receiver.topk)
+		require.Equal(t, originNqs, receiver.originNqs)
+		require.Equal(t, originTopks, receiver.originTopks)
+		require.Len(t, receiver.others, 1)
+		require.True(t, other.merged)
+		require.NoError(t, receiver.PreExecute())
+		require.NoError(t, receiver.Execute())
+
+		results := make([]*schemapb.SearchResultData, len(originNqs))
+		for i := range originNqs {
+			res := receiver.subTaskAt(i).SearchResult()
+			require.NotNil(t, res)
+			require.Equal(t, originNqs[i], res.GetNumQueries())
+			require.Equal(t, originTopks[i], res.GetTopK())
+			data := &schemapb.SearchResultData{}
+			require.NoError(t, proto.Unmarshal(res.GetSlicedBlob(), data))
+			require.Equal(t, originNqs[i], data.GetNumQueries())
+			require.Equal(t, originTopks[i], data.GetTopK())
+			require.Len(t, data.GetTopks(), int(originNqs[i]))
+			var rowCount int64
+			for _, topK := range data.GetTopks() {
+				require.LessOrEqual(t, topK, originTopks[i])
+				rowCount += topK
+			}
+			require.Len(t, data.GetScores(), int(rowCount))
+			require.Equal(t, int(rowCount), typeutil.GetSizeOfIDs(data.GetIds()))
+			require.Equal(t, int64(numSegments*msgLength), data.GetAllSearchCount())
+			results[i] = data
+		}
+		return results
+	}
+
+	baseline := execute(buildRequests(false))
+	reranked := execute(buildRequests(true))
+	for i := range baseline {
+		require.Equal(t, baseline[i].GetTopks(), reranked[i].GetTopks())
+		require.Len(t, reranked[i].GetScores(), len(baseline[i].GetScores()))
+		for _, score := range reranked[i].GetScores() {
+			assert.Equal(t, float32(math.Trunc(float64(score))), score)
+		}
+		var changed bool
+		for _, score := range baseline[i].GetScores() {
+			if score != float32(math.Trunc(float64(score))) {
+				changed = true
+				break
+			}
+		}
+		require.True(t, changed, "baseline scores must contain a fractional value to prove L1 rounding executed")
+	}
+}
+
 // TestExecuteMergedSubTasks_MixedTopK exercises mixed-topK slicing: when two
 // sub-tasks with DIFFERENT originTopks[i] share one reduced result, each slice
 // must carry at most originTopks[i] rows per NQ. The old C++ reduce enforced
@@ -1053,8 +1462,8 @@ func TestExecuteMergedSubTasks(t *testing.T) {
 //
 // The mock request bakes topK into SerializedExprPlan, so Merge() rejects
 // different-topK tasks via the bytes.Equal guard — we cannot reach this state
-// through Merge(). Instead we drive executeGoReduce directly, which is where
-// the per-slice truncation contract lives. Receiver is constructed with
+// through Merge(). Instead we drive the explicit reduce, rerank, and finalize
+// stages directly. Receiver is constructed with
 // plan.topK=maxTopK (so segment search + heapMergeReduce emit up to maxTopK
 // rows per NQ), and originTopks[0] is set smaller than maxTopK — the missing
 // per-slice truncation leaves sub 0 with > smallTopK rows per NQ.
@@ -1079,7 +1488,7 @@ func TestExecuteMergedSubTasks_MixedTopK(t *testing.T) {
 	ctx := context.Background()
 
 	// Receiver holds all totalNq vectors and plan.topK=maxTopK. We drive
-	// executeGoReduce rather than Execute to bypass combinePlaceHolderGroups.
+	// the explicit stages rather than Execute to bypass combinePlaceHolderGroups.
 	receiverReq, err := mock_segcore.GenQueryRequest(
 		ts.collection.GetCCollection(), ts.segIDs, totalNq, maxTopK, testCollectionID)
 	require.NoError(t, err)
@@ -1119,7 +1528,20 @@ func TestExecuteMergedSubTasks_MixedTopK(t *testing.T) {
 	}()
 
 	tr := timerecord.NewTimeRecorder("mixed-topk-test")
-	require.NoError(t, receiver.executeGoReduce(segDFs, ts.searchResults, ts.searchReq, "IP", tr, 0, allSearchCount))
+	groupByOpts := resolveGroupByOptions(segDFs, ts.searchResults)
+	nqOffset := 0
+	for i, nq := range receiver.originNqs {
+		reduced, err := receiver.executeGoReduce(segDFs, receiver.originTopks[i], groupByOpts, nqOffset, int(nq))
+		require.NoError(t, err)
+
+		searchResultData, err := receiver.marshalReducedResult(i, reduced, allSearchCount)
+		require.NoError(t, err)
+		require.NoError(t, lateMaterializeOutputFields(ctx, ts.searchResults, ts.searchReq.Plan(), reduced.Sources, searchResultData))
+		require.NoError(t, receiver.encodeAndAssignReducedResult(i, searchResultData, "IP", tr, 0))
+		reduced.DF.Release()
+		nqOffset += int(nq)
+	}
+	receiver.attributeStorageCost(ts.searchResults)
 
 	for i, wantTopK := range subTaskTopks {
 		sub := receiver.subTaskAt(i)
@@ -1158,6 +1580,226 @@ func TestExecuteMergedSubTasks_MixedTopK(t *testing.T) {
 
 	t.Logf("mixed-topK slicing OK: originTopks=%v, originNqs=%v, maxTopK=%d",
 		subTaskTopks, subTaskNqs, maxTopK)
+}
+
+func TestExecuteMergedSubTasks_MixedTopKWithL1RerankMatchesIndependentRequests(t *testing.T) {
+	const (
+		maxTopK      int64 = 8
+		nqSmall      int64 = 1
+		nqLarge      int64 = 2
+		msgLength          = 200
+		int32FieldID int64 = 103
+		pkFieldID    int64 = 109
+	)
+
+	// Keep the inserted vectors generated by the mock so the ANN search returns
+	// a stable candidate ranking; the scalar field below makes the L1 stage
+	// sensitive to whether the reduce window is 3 or 8.
+	ts := setupTestSegments(t, 2, msgLength, setupOpts{
+		SkipSearchReq: true,
+		MutateInsertData: func(segmentIdx int, data *storage.InsertData) {
+			pks := data.Data[pkFieldID].(*storage.Int64FieldData)
+			values := data.Data[int32FieldID].(*storage.Int32FieldData)
+			for row := range pks.Data {
+				pks.Data[row] = int64(segmentIdx*msgLength + row)
+				values.Data[row] = int32(segmentIdx*msgLength + row)
+			}
+		},
+	})
+	defer ts.cleanup()
+
+	ctx := context.Background()
+	l1Chain := l1FunctionChainForTest(mapOpWithParamsForTest(
+		chaintypes.ScoreFieldName,
+		chainexpr.NumCombineFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			chaintypes.NumCombineParamMode: stringParamForTest(chaintypes.NumCombineModeSum),
+		},
+		columnArgForTest(chaintypes.ScoreFieldName),
+		columnArgForTest("int32Field"),
+	))
+
+	setPlanTopK := func(req *querypb.SearchRequest, topK int64) {
+		t.Helper()
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan))
+		plan.GetVectorAnns().GetQueryInfo().Topk = topK
+		plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l1Chain}
+		serialized, err := proto.Marshal(plan)
+		require.NoError(t, err)
+		req.Req.SerializedExprPlan = serialized
+	}
+
+	makeRequest := func(nq, requestTopK int64) *querypb.SearchRequest {
+		req, err := mock_segcore.GenQueryRequest(
+			ts.collection.GetCCollection(), ts.segIDs, nq, requestTopK, testCollectionID)
+		require.NoError(t, err)
+		setPlanTopK(req, maxTopK)
+		return req
+	}
+
+	baseRequests := []*querypb.SearchRequest{
+		makeRequest(nqSmall, 3),
+		makeRequest(nqLarge, maxTopK),
+	}
+	// Merge() compares serialized plans, while the request-level TopK remains
+	// in internalpb and is retained in originTopks for the reduce layout.
+	baseRequests[1].Req.SerializedExprPlan = append([]byte(nil), baseRequests[0].Req.SerializedExprPlan...)
+
+	execute := func(requests ...*querypb.SearchRequest) []*schemapb.SearchResultData {
+		t.Helper()
+		receiver := NewSearchTask(ctx, ts.collection, ts.manager, requests[0], 1)
+		for _, req := range requests[1:] {
+			other := NewSearchTask(ctx, ts.collection, ts.manager, req, 1)
+			require.True(t, receiver.Merge(other))
+		}
+		require.NoError(t, receiver.PreExecute())
+		require.NoError(t, receiver.Execute())
+
+		results := make([]*schemapb.SearchResultData, len(receiver.originNqs))
+		for i := range receiver.originNqs {
+			searchResult := receiver.subTaskAt(i).SearchResult()
+			require.NotNil(t, searchResult)
+			data := &schemapb.SearchResultData{}
+			require.NoError(t, proto.Unmarshal(searchResult.GetSlicedBlob(), data))
+			results[i] = data
+		}
+		return results
+	}
+
+	cloneRequest := func(req *querypb.SearchRequest, requestTopK, planTopK int64) *querypb.SearchRequest {
+		cloned := proto.Clone(req).(*querypb.SearchRequest)
+		cloned.Req.Topk = requestTopK
+		setPlanTopK(cloned, planTopK)
+		return cloned
+	}
+
+	merged := execute(
+		cloneRequest(baseRequests[0], 3, maxTopK),
+		cloneRequest(baseRequests[1], maxTopK, maxTopK),
+	)
+	independentSmall := execute(cloneRequest(baseRequests[0], 3, 3))[0]
+	independentLarge := execute(cloneRequest(baseRequests[1], maxTopK, maxTopK))[0]
+
+	ids := func(data *schemapb.SearchResultData) []int64 {
+		t.Helper()
+		intIDs, ok := data.GetIds().GetIdField().(*schemapb.IDs_IntId)
+		require.True(t, ok)
+		return intIDs.IntId.GetData()
+	}
+	assertEquivalent := func(name string, got, want *schemapb.SearchResultData) {
+		t.Helper()
+		require.Equal(t, want.GetTopks(), got.GetTopks(), "%s topks", name)
+		require.Equal(t, ids(want), ids(got), "%s ids and ordering", name)
+		require.Len(t, got.GetScores(), len(want.GetScores()), "%s score count", name)
+		for i := range want.GetScores() {
+			assert.InDelta(t, want.GetScores()[i], got.GetScores()[i], 1e-5, "%s score[%d]", name, i)
+		}
+		require.Equal(t, want.GetAllSearchCount(), got.GetAllSearchCount(), "%s all search count", name)
+	}
+
+	// The independent TopK=3 result is the reference candidate-window
+	// behavior: a merged task must not rerank it using the merged TopK=8 window.
+	assertEquivalent("small merged request", merged[0], independentSmall)
+	assertEquivalent("large merged request", merged[1], independentLarge)
+}
+
+func TestExecuteMergedSubTasks_MixedGroupByTopKWithL1Rerank(t *testing.T) {
+	const (
+		maxTopK        int64 = 8
+		groupByFieldID int64 = 103 // Int32, provides more than two groups
+		groupSize      int64 = 2
+	)
+	originNqs := []int64{1, 2}
+	originTopks := []int64{3, maxTopK}
+
+	ts := setupTestSegments(t, 2, 200, setupOpts{SkipSearchReq: true})
+	defer ts.cleanup()
+	ctx := context.Background()
+
+	l1Chain := l1FunctionChainForTest(mapOpWithParamsForTest(
+		chaintypes.ScoreFieldName,
+		chainexpr.RoundDecimalFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			"decimal": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 0}},
+		},
+		columnArgForTest(chaintypes.ScoreFieldName),
+	))
+
+	buildRequest := func(nq, requestTopK int64) *querypb.SearchRequest {
+		req, err := mock_segcore.GenQueryRequest(
+			ts.collection.GetCCollection(), ts.segIDs, nq, requestTopK, testCollectionID)
+		require.NoError(t, err)
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan))
+		plan.GetVectorAnns().QueryInfo.GroupByFieldId = groupByFieldID
+		plan.GetVectorAnns().QueryInfo.GroupSize = groupSize
+		plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l1Chain}
+		req.Req.SerializedExprPlan, err = proto.Marshal(plan)
+		require.NoError(t, err)
+		return req
+	}
+
+	// The receiver contributes one query vector and the second sub-task
+	// contributes two. Execute combines their placeholder groups into the
+	// receiver's three-query search while preserving request-level TopKs below.
+	receiverReq := buildRequest(originNqs[0], originTopks[0])
+	otherReq := buildRequest(originNqs[1], originTopks[1])
+	// Make the plan bytes identical so the normal Merge guard accepts the
+	// requests, while retaining their request-level TopKs in internalpb.
+	var receiverPlan planpb.PlanNode
+	require.NoError(t, proto.Unmarshal(receiverReq.GetReq().GetSerializedExprPlan(), &receiverPlan))
+	receiverPlan.GetVectorAnns().QueryInfo.Topk = maxTopK
+	serializedPlan, err := proto.Marshal(&receiverPlan)
+	require.NoError(t, err)
+	receiverReq.Req.SerializedExprPlan = serializedPlan
+	otherReq.Req.SerializedExprPlan = append([]byte(nil), serializedPlan...)
+	receiver := NewSearchTask(ctx, ts.collection, ts.manager, receiverReq, 1)
+	other := NewSearchTask(ctx, ts.collection, ts.manager, otherReq, 1)
+	require.True(t, receiver.Merge(other))
+	require.Equal(t, originNqs, receiver.originNqs)
+	require.Equal(t, originTopks, receiver.originTopks)
+	require.Equal(t, maxTopK, receiver.topk)
+
+	require.NoError(t, receiver.PreExecute())
+	require.NoError(t, receiver.Execute())
+
+	for i, expectedNQ := range originNqs {
+		result := receiver.subTaskAt(i).SearchResult()
+		require.NotNil(t, result)
+		require.Equal(t, expectedNQ, result.GetNumQueries())
+		require.Equal(t, originTopks[i], result.GetTopK())
+
+		data := &schemapb.SearchResultData{}
+		require.NoError(t, proto.Unmarshal(result.GetSlicedBlob(), data))
+		require.Equal(t, expectedNQ, data.GetNumQueries())
+		require.Equal(t, originTopks[i], data.GetTopK())
+		require.Len(t, data.GetTopks(), int(expectedNQ))
+		require.Len(t, data.GetGroupByFieldValues(), 1)
+		require.Equal(t, groupByFieldID, data.GetGroupByFieldValues()[0].GetFieldId())
+
+		var rowCount int
+		for _, topK := range data.GetTopks() {
+			require.LessOrEqual(t, topK, originTopks[i]*groupSize)
+			rowCount += int(topK)
+		}
+		require.Len(t, data.GetScores(), rowCount)
+		require.Equal(t, rowCount, typeutil.GetSizeOfIDs(data.GetIds()))
+
+		groups := data.GetGroupByFieldValues()[0].GetScalars().GetIntData().GetData()
+		require.Len(t, groups, rowCount)
+		counts := make(map[int32]int)
+		for _, group := range groups {
+			counts[group]++
+			require.LessOrEqual(t, counts[group], int(groupSize))
+		}
+		require.GreaterOrEqual(t, len(counts), 2,
+			"group-by reduce should retain multiple groups for sub-task %d", i)
+		for _, score := range data.GetScores() {
+			assert.Equal(t, float32(math.Trunc(float64(score))), score,
+				"L1 normalization should round scores for sub-task %d", i)
+		}
+	}
 }
 
 func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) {
@@ -1215,7 +1857,13 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 	}
 
 	tr := timerecord.NewTimeRecorder("reduced-plan-topk-test")
-	require.NoError(t, task.executeGoReduceFastPath(segDFs, nil, reducedPlan, "IP", tr, 0, 6, nil))
+	reduced, err := task.executeGoReduce(segDFs, task.topk, nil, 0, 1)
+	require.NoError(t, err)
+	defer reduced.DF.Release()
+	searchResultData, err := task.marshalReducedResult(0, reduced, 6)
+	require.NoError(t, err)
+	require.NoError(t, lateMaterializeOutputFields(task.ctx, nil, reducedPlan, reduced.Sources, searchResultData))
+	require.NoError(t, task.encodeAndAssignReducedResult(0, searchResultData, "IP", tr, 0))
 
 	require.NotNil(t, task.result)
 	assert.Equal(t, int64(1), task.result.NumQueries)
@@ -1282,7 +1930,14 @@ func TestExecuteGoReduceHonorsEnableResultZeroCopy(t *testing.T) {
 	}()
 
 	tr := timerecord.NewTimeRecorder("zero-copy-test")
-	require.NoError(t, task.executeGoReduce(segDFs, ts.searchResults, ts.searchReq, "IP", tr, 0, allSearchCount))
+	reduced, err := task.executeGoReduce(segDFs, task.topk, resolveGroupByOptions(segDFs, ts.searchResults), 0, int(nq))
+	require.NoError(t, err)
+	defer reduced.DF.Release()
+	searchResultData, err := task.marshalReducedResult(0, reduced, allSearchCount)
+	require.NoError(t, err)
+	require.NoError(t, lateMaterializeOutputFields(ctx, ts.searchResults, ts.searchReq.Plan(), reduced.Sources, searchResultData))
+	require.NoError(t, task.encodeAndAssignReducedResult(0, searchResultData, "IP", tr, 0))
+	task.attributeStorageCost(ts.searchResults)
 
 	res := task.SearchResult()
 	require.NotNil(t, res)
@@ -1379,7 +2034,7 @@ func TestExecuteNullableVectorOutput(t *testing.T) {
 	}
 	require.NotNil(t, vecFD, "float_vector must be in output FieldsData")
 	returnedVecs := vecFD.GetVectors().GetFloatVector().GetData()
-	validBits := vecFD.GetValidData()
+	validBits := typeutil.GetFieldDataValidData(vecFD)
 
 	// Ground truth: the inserted FloatVectorFieldData.Data is already compacted
 	// to valid_count * dim (binlog convention for nullable vectors). Map each

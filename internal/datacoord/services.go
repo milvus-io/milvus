@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -763,14 +765,26 @@ func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
 		return nil
 	}
-	if !s.meta.collectionHasTextFields(req.GetCollectionID()) {
+	textFieldIDs := s.meta.collectionTextFieldIDs(req.GetCollectionID())
+	if len(textFieldIDs) == 0 {
 		return nil
 	}
 	if storageVersion < storage.StorageV3 {
-		return merr.WrapErrParameterInvalidMsg(
-			"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
-			req.GetSegmentID(),
-			storageVersion)
+		// A legacy V2 segment whose data was written before the collection gained
+		// TEXT fields carries no TEXT column in its binlogs and can be flushed
+		// safely without a StorageV3 manifest (the query path fills the missing
+		// TEXT column with empty values). A V2 segment that DOES carry a TEXT
+		// column is still rejected: TEXT cannot be persisted without a StorageV3
+		// manifest (LOB spillover / query path requires it).
+		for _, fieldBinlog := range req.GetField2BinlogPaths() {
+			if lo.Contains(textFieldIDs, fieldBinlog.GetFieldID()) {
+				return merr.WrapErrParameterInvalidMsg(
+					"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
+					req.GetSegmentID(),
+					storageVersion)
+			}
+		}
+		return nil
 	}
 	if req.GetManifestPath() == "" {
 		return merr.WrapErrParameterInvalidMsg(
@@ -976,13 +990,19 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
-		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
-			mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-				mlog.Int64("segmentID", segment.GetID()),
-				mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
-				mlog.Int64("segment bin log row count (correct)", newCount))
-			segmentsNumOfRows[id] = newCount
+		if segment.GetStorageVersion() != storage.StorageV3 {
+			if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
+				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segment bin log row count (correct)", newCount))
+				segmentsNumOfRows[id] = newCount
+			} else {
+				segmentsNumOfRows[id] = segment.NumOfRows
+			}
 		} else {
+			// V3 segments: NumOfRows is authoritative (advanced from the writer
+			// checkpoint); binlog arrays may be empty or delta-only.
 			segmentsNumOfRows[id] = segment.NumOfRows
 		}
 
@@ -1086,14 +1106,15 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetManifestPath() == "" {
 			continue
 		}
-		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if rowCount != segment.NumOfRows && rowCount > 0 {
-			mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-				mlog.Int64("segmentID", segment.GetID()),
-				mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
-				mlog.Int64("segment bin log row count (correct)", rowCount))
-		} else {
-			rowCount = segment.NumOfRows
+		rowCount := segment.NumOfRows
+		if segment.GetStorageVersion() != storage.StorageV3 {
+			if binlogCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); binlogCount != segment.NumOfRows && binlogCount > 0 {
+				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segment bin log row count (correct)", binlogCount))
+				rowCount = binlogCount
+			}
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
@@ -1331,8 +1352,9 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction(), req.GetTargetSize())
+	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 ||
+		isTargetBasedManualRewriteCompactionRequest(req) {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req)
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1343,8 +1365,19 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		)
 	}
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to trigger manual compaction", mlog.Err(err))
+		mlog.Error(ctx, "failed to trigger manual compaction", mlog.Err(err))
 		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	if isTargetBasedManualRewriteCompactionRequest(req) {
+		targetID := id
+		// Manual rewrite records a durable target first. The reconciler later
+		// uses the same target ID as the trigger ID for generated compaction tasks,
+		// so the legacy compactionID response remains the polling handle.
+		resp.CompactionID = targetID
+		resp.CompactionPlanCount = 0
+		mlog.Info(ctx, "success to record manual rewrite compaction target", mlog.Int64("targetID", targetID))
 		return resp, nil
 	}
 
@@ -1357,7 +1390,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	mlog.Info(context.TODO(), "success to trigger manual compaction", mlog.Bool("isL0Compaction", req.GetL0Compaction()),
+	mlog.Info(ctx, "success to trigger manual compaction", mlog.Bool("isL0Compaction", req.GetL0Compaction()),
 		mlog.Bool("isMajorCompaction", req.GetMajorCompaction()), mlog.Int64("targetSize", req.GetTargetSize()), mlog.Int64("compactionID", id), mlog.Int("taskNum", taskCnt))
 	return resp, nil
 }
@@ -2455,10 +2488,22 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 			Status: merr.Status(err),
 		}, nil
 	}
+	if snapshotData == nil || snapshotData.SnapshotInfo == nil {
+		err := merr.WrapErrDataIntegrityMsg("snapshot info cannot be nil")
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	snapshotInfo := proto.Clone(snapshotData.SnapshotInfo).(*datapb.SnapshotInfo)
+	snapshotInfo.S3Location, err = snapshotstorage.BuildInstanceSnapshotURI(
+		snapshotstorage.InstanceConfigFromParamtable(Params),
+		snapshotInfo.GetS3Location(),
+	)
+	if err != nil {
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 
 	resp := &datapb.DescribeSnapshotResponse{
 		Status:       merr.Success(),
-		SnapshotInfo: snapshotData.SnapshotInfo,
+		SnapshotInfo: snapshotInfo,
 	}
 	if req.GetIncludeCollectionInfo() {
 		resp.CollectionInfo = snapshotData.Collection
@@ -2475,20 +2520,26 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			Status: merr.Status(err),
 		}, nil
 	}
-	mlog.Info(context.TODO(), "receive RestoreSnapshot request")
+	mlog.Info(ctx, "receive RestoreSnapshot request",
+		mlog.String("snapshot", req.GetName()),
+		mlog.Int64("sourceCollectionID", req.GetSourceCollectionId()),
+		mlog.String("targetDbName", req.GetTargetDbName()),
+		mlog.String("targetCollectionName", req.GetTargetCollectionName()),
+		mlog.Bool("external", req.GetExternal()),
+		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(req.GetSnapshotS3Location())),
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""))
 
-	if req.GetExternal() {
-		err := merr.WrapErrServiceUnimplemented(errors.New("RestoreExternalSnapshot is not implemented"))
-		mlog.Warn(ctx, "restore external snapshot is not implemented", mlog.Err(err))
+	// Validate parameters
+	if !req.GetExternal() && req.GetName() == "" {
+		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
+		mlog.Warn(ctx, "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	// Validate parameters
-	if req.GetName() == "" {
-		err := merr.WrapErrParameterMissingMsg("snapshot name is required")
-		mlog.Warn(context.TODO(), "invalid request", mlog.Err(err))
+	if req.GetExternal() && req.GetSnapshotS3Location() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot_s3_location is required")
+		mlog.Warn(ctx, "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2498,6 +2549,32 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		mlog.Warn(context.TODO(), "invalid request", mlog.Err(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
+		}, nil
+	}
+
+	if req.GetExternal() {
+		jobID, err := s.snapshotManager.RestoreExternalSnapshot(
+			ctx,
+			req.GetSnapshotS3Location(),
+			req.GetTargetCollectionName(),
+			req.GetTargetDbName(),
+			req.GetExternalSpec(),
+			s.startExternalRestoreSnapshotLock,
+			s.startBroadcastForRestoreSnapshot,
+			s.rollbackRestoreSnapshot,
+			s.validateRestoredCollectionResources,
+		)
+		if err != nil {
+			mlog.Error(ctx, "restore external snapshot failed", mlog.Err(err))
+			return &datapb.RestoreSnapshotResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		mlog.Info(ctx, "restore external snapshot completed", mlog.Int64("jobID", jobID))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Success(),
+			JobId:  jobID,
 		}, nil
 	}
 
@@ -2531,8 +2608,90 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("export snapshot request is nil")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	mlog.Info(ctx, "receive ExportSnapshot request",
+		mlog.String("snapshot", req.GetName()),
+		mlog.Int64("collectionID", req.GetCollectionId()),
+		mlog.String("targetS3Path", snapshotstorage.RedactSnapshotObjectPath(req.GetTargetS3Path())),
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""))
+
+	if req.GetName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetCollectionId() == 0 {
+		err := merr.WrapErrParameterInvalidMsg("collection_id is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetTargetS3Path() == "" {
+		err := merr.WrapErrParameterInvalidMsg("target_s3_path is required")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+
+	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		mlog.Warn(ctx, "ExportSnapshot failed to resolve collection", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	if coll == nil {
+		mlog.Warn(ctx, "ExportSnapshot: collection not found")
+		return &datapb.ExportSnapshotResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())),
+		}, nil
+	}
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
+	locker, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
+		message.NewSharedSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
+	)
+	if err != nil {
+		mlog.Warn(ctx, "ExportSnapshot failed to acquire resource key lock", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	defer locker.Close()
+
+	jobID, err := s.snapshotManager.ExportSnapshot(
+		ctx,
+		req.GetCollectionId(),
+		req.GetName(),
+		dbName,
+		collectionName,
+		req.GetTargetS3Path(),
+		req.GetExternalSpec(),
+	)
+	if err != nil {
+		mlog.Warn(ctx, "export snapshot failed", mlog.Err(err))
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 	return &datapb.ExportSnapshotResponse{
-		Status: merr.Status(merr.WrapErrServiceUnimplemented(errors.New("ExportSnapshot is not implemented"))),
+		Status: merr.Success(),
+		JobId:  jobID,
+	}, nil
+}
+
+func (s *Server) GetExportSnapshotState(
+	ctx context.Context,
+	req *datapb.GetExportSnapshotStateRequest,
+) (*datapb.GetExportSnapshotStateResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	if req == nil || req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("valid snapshot export job_id is required")
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	info, err := s.snapshotManager.GetExportSnapshotState(req.GetJobId())
+	if err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info:   info,
 	}, nil
 }
 
@@ -3081,7 +3240,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 // the given import job that are assigned to the given vchannel.
 // This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
 func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
-	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	var segIDs []int64
 	for _, task := range tasks {
 		it, ok := task.(*importTask)

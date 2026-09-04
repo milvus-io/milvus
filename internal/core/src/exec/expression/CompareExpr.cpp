@@ -276,9 +276,9 @@ void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyCompareFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
-    span.GetSpan()->SetAttribute("left_indexed", is_left_indexed_);
-    span.GetSpan()->SetAttribute("right_indexed", is_right_indexed_);
+    span.SetAttribute("op_type", static_cast<int>(expr_->op_type_));
+    span.SetAttribute("left_indexed", is_left_indexed_);
+    span.SetAttribute("right_indexed", is_right_indexed_);
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -339,6 +339,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
         case DataType::INT32:
             return ExecCompareLeftType<int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareLeftType<int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareLeftType<float>(context);
@@ -365,6 +366,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::INT32:
             return ExecCompareRightType<T, int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareRightType<T, int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareRightType<T, float>(context);

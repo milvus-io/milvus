@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1883,6 +1884,38 @@ func (s *RootCoordSuite) TestRestore() {
 	core.restore(context.Background())
 }
 
+func TestRootCoord_ServerExist(t *testing.T) {
+	const serverID int64 = 1001
+
+	t.Run("found", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(map[string]*sessionutil.Session{
+			"proxy-1001": {SessionRaw: sessionutil.SessionRaw{ServerID: serverID}},
+		}, int64(1), nil)
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.True(t, core.ServerExist(serverID))
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(map[string]*sessionutil.Session{
+			"proxy-1002": {SessionRaw: sessionutil.SessionRaw{ServerID: 1002}},
+		}, int64(1), nil)
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.False(t, core.ServerExist(serverID))
+	})
+
+	t.Run("get sessions error", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(nil, int64(0), errors.New("mock error"))
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.False(t, core.ServerExist(serverID))
+	})
+}
+
 func TestRootCoord_AddFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -1927,6 +1960,167 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size limit disabled", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "0")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size at limit", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(100), nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size exceeds limit", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterTooLarge)
+		assert.Equal(t, "true", resp.GetExtraInfo()[merr.InputErrorFlagKey])
+		assert.False(t, resp.GetRetriable())
+	})
+
+	t.Run("identical add skips size check", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		request := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		}
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+			Id:   99,
+			Name: request.GetName(),
+			Path: request.GetPath(),
+		}}, uint64(1))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), request)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("same name with different path skips size check and fails", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		request := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/new-file",
+		}
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+			Id:   99,
+			Name: request.GetName(),
+			Path: "/path/to/old-file",
+		}}, uint64(1))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), request)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
+	})
+
+	t.Run("file size check error", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		sizeErr := merr.WrapErrIoFailedReason("size error")
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrIoFailed)
+	})
+
+	t.Run("negative file size", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrIoFailed)
 	})
 
 	t.Run("tso allocator error", func(t *testing.T) {
@@ -2069,6 +2263,54 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	})
 }
 
+func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
+	t.Run("add proxy", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		clientAdded := false
+		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
+			clientAdded = true
+		})
+		observer.EXPECT().Notify().Run(func() {
+			assert.True(t, clientAdded)
+		})
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
+		c.addProxyClient(session)
+	})
+
+	t.Run("set proxies", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		sessions := []*sessionutil.Session{{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}}
+		clientsSet := false
+		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
+			clientsSet = true
+		})
+		observer.EXPECT().Notify().Run(func() {
+			assert.True(t, clientsSet)
+		})
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
+		c.setProxyClients(sessions)
+	})
+
+	t.Run("nil observer", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.addProxyClient(session)
+	})
+}
+
 func TestRootCoord_ListFileResources(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -2092,6 +2334,26 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetResources())
+	})
+}
+
+func TestRootCoord_GetFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := []*internalpb.FileResourceInfo{{Id: 1, Name: "test", Path: "test_path"}}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(expected, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
 	})
 }
 

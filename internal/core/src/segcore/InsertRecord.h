@@ -1527,10 +1527,16 @@ class InsertRecordGrowing {
         pk2offset_->find_range(pk, op, bitset, condition);
     }
 
+    // `start_offset` is the logical offset PreInsert reserved for this batch.
+    // pk2offset_ maps a pk to the row offset every other growing structure
+    // addresses that row by, so a batch that starts anywhere but 0 has to say
+    // so -- indexing from 0 would silently point queries and deletes at the
+    // wrong rows.
     void
-    insert_pks(const std::vector<FieldDataPtr>& field_datas) {
+    insert_pks(int64_t start_offset,
+               const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
-        int64_t offset = 0;
+        int64_t offset = start_offset;
         for (auto& data : field_datas) {
             int64_t row_count = data->get_num_rows();
             auto data_type = data->get_data_type();
@@ -1564,13 +1570,6 @@ class InsertRecordGrowing {
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
         return pk2offset_->empty();
-    }
-
-    void
-    seal_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_
-            ->seal();  // will throw for growing map, consistent with previous behavior
     }
 
     const ConcurrentVector<Timestamp>&
@@ -1739,8 +1738,13 @@ class InsertRecordGrowing {
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(
-                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                if (field_meta.is_nested_array()) {
+                    this->append_data<ArrayValue>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                } else {
+                    this->append_data<Array>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                }
                 return;
             }
             case DataType::GEOMETRY: {

@@ -44,12 +44,21 @@ namespace exec {
 // (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
 // path (PhyGISRefineConjunctExpr) stay in lockstep instead of drifting as new
 // GISOps are added.
+//
+// `ctx` MUST be the calling thread's GEOS context (GetThreadLocalGEOSContext).
+// The unprepared fallbacks (Equals, DWithin) would otherwise drive GEOS through
+// `left`'s own stored context, and `left` is frequently a cache-owned Geometry
+// whose context is shared by every concurrent query on that segment+field — a
+// GEOS context is not thread-safe, so that is a data race. The prepared
+// predicates are unaffected: they run on `prepared`'s context, which the caller
+// already built on its own thread.
 inline bool
 EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
                       const PreparedGeometry& prepared,
                       const Geometry& query_geom,
                       const Geometry& left,
-                      double distance) {
+                      double distance,
+                      GEOSContextHandle_t ctx) {
     switch (op) {
         case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
             // Symmetric: prepared.intersects(left) == left.intersects(query)
@@ -67,15 +76,49 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
             // left.within(query) == query.contains(left)
             return prepared.contains(left);
         case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-            // No prepared version - fall back to regular geometry.
-            return left.equals(query_geom);
+            // No prepared version - fall back to regular geometry, on the
+            // caller's per-thread context (see the note on `ctx` above).
+            return left.equals(query_geom, ctx);
         case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
-            // Distance-based operation - no prepared version.
-            return left.dwithin(query_geom, distance);
+            // Distance-based operation - no prepared version; same per-thread
+            // context requirement as Equals above.
+            return left.dwithin(query_geom, distance, ctx);
         default:
             ThrowInfo(
                 NotImplemented, "unknown GIS op : {}", static_cast<int>(op));
     }
+}
+
+// Promote a SHORT R-Tree coarse bitmap to the full active row space.
+//
+// The R-Tree Query() bitmap is sized by the index row count (Count()), while
+// callers combine it in the segment's active row space. When Count() <
+// active_count, the index predates placeholder-MBR indexing of
+// empty/unparseable geometries: those old builders advanced absolute_offset
+// even when they dropped a row, so the missing entries are INTERIOR holes, not
+// a trailing suffix. Count() reveals how many entries are missing, not where.
+// Once the index is short, therefore, no `false` bit in it is trustworthy as a
+// negative -- padding only the tail with 1s (resize(active_count, true)) would
+// leave interior holes false and silently drop matching rows. The only safe
+// coarse for such an index is the full row space; exact refinement settles it.
+//
+// Both consumers of an R-Tree coarse bitmap -- the per-predicate path
+// (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
+// path (PhyGISCoarseConjunctExpr::RunRTreeQuery) -- MUST route through this
+// helper so the short-index rule cannot drift between them again.
+//
+// Returns true when `coarse` was short and has been promoted; false when it
+// already spanned (at least) `active_count` rows and was left untouched.
+// Validity is deliberately NOT handled here: the per-predicate path needs
+// IsNotNull(active_count) (absolute null offsets survive independently of the
+// short entry count) while the fusion path derives nullness in Refine.
+inline bool
+PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
+    if (static_cast<int64_t>(coarse.size()) >= active_count) {
+        return false;
+    }
+    coarse = TargetBitmap(active_count, true);
+    return true;
 }
 
 class PhyGISFunctionFilterExpr : public SegmentExpr {

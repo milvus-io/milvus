@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -33,6 +34,30 @@ func TestMain(m *testing.M) {
 	streamingutil.SetStreamingServiceEnabled()
 	paramtable.Init()
 	m.Run()
+}
+
+func TestResolvePChannelInfo(t *testing.T) {
+	previous := streaming.WAL()
+	t.Cleanup(func() { streaming.SetWALForTest(previous) })
+
+	t.Run("supported", func(t *testing.T) {
+		streaming.SetupNoopWALForTest()
+		info, err := streaming.ResolvePChannelInfo(context.Background(), vChannels[0])
+		if err != nil {
+			t.Fatalf("resolve pchannel info: %v", err)
+		}
+		if info.Name != funcutil.ToPhysicalChannel(vChannels[0]) || info.Term != 1 {
+			t.Fatalf("unexpected pchannel info: %+v", info)
+		}
+	})
+
+	t.Run("unsupported", func(t *testing.T) {
+		streaming.SetWALForTest(&struct{ streaming.WALAccesser }{})
+		_, err := streaming.ResolvePChannelInfo(context.Background(), vChannels[0])
+		if err == nil {
+			t.Fatal("expected unsupported resolver error")
+		}
+	})
 }
 
 func TestReplicate(t *testing.T) {

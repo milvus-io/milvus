@@ -82,41 +82,46 @@ func (s *importInspector) Close() {
 }
 
 func (s *importInspector) reloadFromMeta() {
-	jobs := s.importMeta.GetJobBy(s.ctx)
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].GetJobID() < jobs[j].GetJobID()
-	})
-	for _, job := range jobs {
-		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
-		for _, task := range tasks {
-			if task.GetState() == datapb.ImportTaskStateV2_InProgress {
-				s.scheduler.Enqueue(task)
-			}
+	tasks := s.importMeta.GetTaskBy(s.ctx, WithStates(datapb.ImportTaskStateV2_InProgress))
+	sortImportTasks(tasks)
+	for _, task := range tasks {
+		if s.importMeta.GetJob(s.ctx, task.GetJobID()) != nil {
+			s.scheduler.Enqueue(task)
 		}
 	}
 }
 
 func (s *importInspector) inspect() {
-	jobs := s.importMeta.GetJobBy(s.ctx)
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].GetJobID() < jobs[j].GetJobID()
-	})
-	for _, job := range jobs {
-		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
-		for _, task := range tasks {
-			switch task.GetState() {
-			case datapb.ImportTaskStateV2_Pending:
-				switch task.GetType() {
-				case PreImportTaskType:
-					s.processPendingPreImport(task)
-				case ImportTaskType:
-					s.processPendingImport(task)
-				}
-			case datapb.ImportTaskStateV2_Failed:
-				s.processFailed(task)
+	tasks := s.importMeta.GetTaskBy(s.ctx, WithStates(
+		datapb.ImportTaskStateV2_Pending,
+		datapb.ImportTaskStateV2_Failed,
+	))
+	sortImportTasks(tasks)
+	for _, task := range tasks {
+		if s.importMeta.GetJob(s.ctx, task.GetJobID()) == nil {
+			continue
+		}
+		switch task.GetState() {
+		case datapb.ImportTaskStateV2_Pending:
+			switch task.GetType() {
+			case PreImportTaskType:
+				s.processPendingPreImport(task)
+			case ImportTaskType:
+				s.processPendingImport(task)
 			}
+		case datapb.ImportTaskStateV2_Failed:
+			s.processFailed(task)
 		}
 	}
+}
+
+func sortImportTasks(tasks []ImportTask) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].GetJobID() == tasks[j].GetJobID() {
+			return tasks[i].GetTaskID() < tasks[j].GetTaskID()
+		}
+		return tasks[i].GetJobID() < tasks[j].GetJobID()
+	})
 }
 
 func (s *importInspector) processPendingPreImport(task ImportTask) {

@@ -23,7 +23,9 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,13 +43,73 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	basekv "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type snapshotExportJobMetaKV struct {
+	basekv.MetaKv
+
+	mu        sync.Mutex
+	values    map[string]string
+	saveErr   error
+	walkErr   error
+	removeErr error
+}
+
+func newSnapshotExportJobMetaKV() *snapshotExportJobMetaKV {
+	return &snapshotExportJobMetaKV{values: make(map[string]string)}
+}
+
+func (m *snapshotExportJobMetaKV) Save(_ context.Context, key, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.values[key] = value
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) WalkWithPrefix(
+	_ context.Context,
+	prefix string,
+	_ int,
+	fn func([]byte, []byte) error,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.walkErr != nil {
+		return m.walkErr
+	}
+	keys := make([]string, 0, len(m.values))
+	for key := range m.values {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := fn([]byte(key), []byte(m.values[key])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) Remove(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	delete(m.values, key)
+	return nil
+}
 
 var (
 	logID        = int64(99)
@@ -1362,17 +1424,25 @@ func TestCatalog_GcConfirm(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	kc.MetaKv = txn
 
-	txn.On("LoadWithPrefix",
+	txn.On("HasPrefix",
 		mock.Anything,
 		mock.AnythingOfType("string")).
-		Return(nil, nil, errors.New("error mock LoadWithPrefix")).
+		Return(false, errors.New("error mock HasPrefix")).
 		Once()
 	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
 
-	txn.On("LoadWithPrefix",
+	txn.On("HasPrefix",
 		mock.Anything,
 		mock.AnythingOfType("string")).
-		Return(nil, nil, nil)
+		Return(true, nil).
+		Once()
+	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
+
+	txn.On("HasPrefix",
+		mock.Anything,
+		mock.AnythingOfType("string")).
+		Return(false, nil).
+		Once()
 	assert.True(t, kc.GcConfirm(context.TODO(), 100, 10000))
 }
 
@@ -1913,6 +1983,72 @@ func TestCatalog_CopySegmentJob(t *testing.T) {
 	})
 }
 
+func TestCatalog_ExportSnapshotJob(t *testing.T) {
+	ctx := context.Background()
+	metaKV := newSnapshotExportJobMetaKV()
+	catalog := &Catalog{MetaKv: metaKV, paginationSize: 16}
+	job := &datapb.ExportSnapshotJob{
+		JobId:          9001,
+		SnapshotName:   "snapshot-1",
+		CollectionId:   100,
+		CollectionName: "collection-1",
+		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+	}
+
+	t.Run("empty catalog", func(t *testing.T) {
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("save overwrite list and drop", func(t *testing.T) {
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, job))
+		updated := proto.Clone(job).(*datapb.ExportSnapshotJob)
+		updated.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
+		updated.Progress = 35
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, updated))
+
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		require.Len(t, jobs, 1)
+		assert.True(t, proto.Equal(updated, jobs[0]))
+
+		require.NoError(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()))
+		jobs, err = catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("malformed record", func(t *testing.T) {
+		metaKV.mu.Lock()
+		metaKV.values[buildExportSnapshotJobKey(9002)] = "not-a-protobuf"
+		metaKV.mu.Unlock()
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.Error(t, err)
+		assert.Nil(t, jobs)
+		metaKV.mu.Lock()
+		delete(metaKV.values, buildExportSnapshotJobKey(9002))
+		metaKV.mu.Unlock()
+	})
+
+	t.Run("storage errors", func(t *testing.T) {
+		storageErr := errors.New("storage unavailable")
+		metaKV.saveErr = storageErr
+		require.ErrorIs(t, catalog.SaveExportSnapshotJob(ctx, job), storageErr)
+		metaKV.saveErr = nil
+
+		metaKV.walkErr = storageErr
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.ErrorIs(t, err, storageErr)
+		assert.Nil(t, jobs)
+		metaKV.walkErr = nil
+
+		metaKV.removeErr = storageErr
+		require.ErrorIs(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()), storageErr)
+		metaKV.removeErr = nil
+	})
+}
+
 func TestCatalog_CopySegmentTask(t *testing.T) {
 	kc := &Catalog{}
 	mockErr := errors.New("mock error")
@@ -2019,7 +2155,7 @@ func TestCatalog_CopySegmentTask(t *testing.T) {
 	})
 }
 
-func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
+func TestCatalog_ExternalCollectionRefresh(t *testing.T) {
 	kc := &Catalog{}
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2033,11 +2169,6 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		TaskId: 54321,
 		JobId:  12345,
 		State:  indexpb.JobState_JobStateInProgress,
-	}
-
-	resource := &internalpb.FileResourceInfo{
-		Id:   int64(12345),
-		Name: "test_resource",
 	}
 
 	t.Run("SaveExternalCollectionRefreshJob", func(t *testing.T) {
@@ -2090,47 +2221,5 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
-	})
-
-	t.Run("SaveFileResource", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.SaveFileResource(context.Background(), resource, uint64(1))
-		assert.NoError(t, err)
-	})
-
-	t.Run("RemoveFileResource", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.RemoveFileResource(context.Background(), resource.GetId(), uint64(1))
-		assert.NoError(t, err)
-	})
-
-	t.Run("ListFileResource", func(t *testing.T) {
-		value, err := proto.Marshal(resource)
-		assert.NoError(t, err)
-
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
-			[]string{"key1"}, []string{string(value)}, nil).Times(1)
-		txn.EXPECT().Has(mock.Anything, mock.Anything).Return(true, nil).Times(1)
-		txn.EXPECT().Load(mock.Anything, mock.Anything).Return("100", nil).Times(1)
-		kc.MetaKv = txn
-
-		resources, version, err := kc.ListFileResource(context.Background())
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(resources))
-		assert.Equal(t, int64(12345), resources[0].GetId())
-		assert.Equal(t, uint64(100), version)
-	})
-
-	t.Run("BuildFileResourceKey", func(t *testing.T) {
-		key := BuildFileResourceKey(int64(12345))
-		assert.NotEmpty(t, key)
-		assert.Contains(t, key, "12345")
 	})
 }

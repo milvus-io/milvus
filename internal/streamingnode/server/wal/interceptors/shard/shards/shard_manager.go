@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// latestCollectionSchemaVersion asks GetCollectionSchema to use the latest
-// schema snapshot. Zero is a valid schema version and must stay explicit.
+// latestCollectionSchemaVersion asks schema accessors to use the latest
+// snapshot. Zero is a valid schema version and must stay explicit.
 const latestCollectionSchemaVersion int32 = -1
 
 var (
@@ -46,7 +46,6 @@ var (
 	ErrWaitForNewSegment = errors.New("wait for new segment")
 	ErrNotGrowing        = errors.New("segment is not growing")
 	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
-	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.
@@ -98,7 +97,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		}
 	}
 	m := &shardManagerImpl{
-		mu:                sync.Mutex{},
+		mu:                sync.RWMutex{},
 		ctx:               ctx,
 		cancel:            cancel,
 		wal:               param.WAL,
@@ -188,11 +187,12 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
 			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
 		}
-		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
+		collectionInfo := &CollectionInfo{
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
-			Schema:       latestSchema,
 		}
+		collectionInfo.setSchema(latestSchema)
+		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
 	}
 	return collectionInfoMap
 }
@@ -203,7 +203,7 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 type shardManagerImpl struct {
 	mlog.Binder
 
-	mu                sync.Mutex
+	mu                sync.RWMutex
 	ctx               context.Context
 	cancel            context.CancelFunc
 	wal               *syncutil.Future[wal.WAL]
@@ -218,6 +218,37 @@ type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
+	primaryKey   *PrimaryKeyDescriptor
+}
+
+// PrimaryKeyDescriptor is the immutable PK information needed by WAL write
+// tracking without exposing or cloning a collection schema.
+type PrimaryKeyDescriptor struct {
+	FieldID  int64
+	DataType schemapb.DataType
+}
+
+func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
+	c.Schema = schema
+	c.primaryKey = nil
+	if schema == nil || schema.GetSchema() == nil {
+		return
+	}
+	descriptor, err := primaryKeyDescriptorFromSchema(schema.GetSchema())
+	if err == nil {
+		c.primaryKey = &descriptor
+	}
+}
+
+func primaryKeyDescriptorFromSchema(schema *schemapb.CollectionSchema) (PrimaryKeyDescriptor, error) {
+	primaryField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return PrimaryKeyDescriptor{}, err
+	}
+	return PrimaryKeyDescriptor{
+		FieldID:  primaryField.GetFieldID(),
+		DataType: primaryField.GetDataType(),
+	}, nil
 }
 
 // SchemaVersion returns the current collection schema version for the write path.

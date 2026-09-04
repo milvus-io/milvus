@@ -35,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -46,10 +47,12 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -62,6 +65,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -85,8 +89,8 @@ const moduleName = "Proxy"
 
 // checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
 // External collections do not support write operations (insert, delete, upsert, flush, etc).
-func checkExternalCollectionBlockedForWrite(ctx context.Context, dbName, collName, operation string) error {
-	collSchema, _ := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+func checkExternalCollectionBlockedForWrite(ctx context.Context, metaCache Cache, dbName, collName, operation string) error {
+	collSchema, _ := metaCache.GetCollectionSchema(ctx, dbName, collName)
 	if collSchema != nil && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
 		return merr.WrapErrParameterInvalidMsg(
 			"%s operation is not supported for external collection %s", operation, collName)
@@ -123,6 +127,24 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.Get
 	}, nil
 }
 
+func (node *Proxy) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources()); err != nil {
+		mlog.Warn(ctx, "sync file resource failed",
+			mlog.Uint64("version", req.GetVersion()),
+			mlog.Int("resourceCount", len(req.GetResources())),
+			mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	mlog.Info(ctx, "sync file resource completed",
+		mlog.Uint64("version", req.GetVersion()),
+		mlog.Int("resourceCount", len(req.GetResources())))
+	return merr.Success(), nil
+}
+
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -151,12 +173,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	if globalMetaCache != nil {
+	if node.GetMetaCache() != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
 			aliasOperation := msgType == commonpb.MsgType_CreateAlias ||
 				msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias
-			aliasName = globalMetaCache.InvalidateCollectionMeta(
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(
 				ctx, request.GetDbName(), collectionName, collectionID, aliasOperation)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			if aliasOperation && collectionName != "" {
@@ -175,14 +197,14 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					// resolution is race-free -- nothing re-points an alias
 					// concurrently with its drop), so scanning there would
 					// reintroduce a permanent O(N) stall on the normal path.
-					globalMetaCache.RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
+					node.GetMetaCache().RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
 				}
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
+				aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
 				deprecateShardCaches(aliasName...)
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
@@ -195,28 +217,26 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					mlog.FieldCollectionID(collectionID))
 				return merr.Status(err), nil
 			}
-			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
+			node.GetMetaCache().RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+			node.GetMetaCache().RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterDatabase:
-			globalMetaCache.RemoveDatabaseInfo(ctx, request.GetDbName())
+			node.GetMetaCache().RemoveDatabaseInfo(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			mlog.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
 
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
-		// no need to handle error, since this Proxy may not create dml stream for the collection.
-		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
@@ -263,18 +283,18 @@ func (node *Proxy) ClearReadTaskQueue(ctx context.Context, request *internalpb.C
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ClearReadTaskQueue")
 	defer sp.End()
 
-	result := node.sched.clearDQLQueue(request.GetTaskType(), request.GetReason())
-	resp.ProxyQueuedCleared = result.queuedCleared
+	result := node.sched.ClearDQLQueue(request.GetTaskType(), request.GetReason())
+	resp.ProxyQueuedCleared = result.QueuedCleared
 	resp.Results = append(resp.Results, &internalpb.ClearReadTaskQueueComponentResult{
 		Status:        merr.Success(),
 		Role:          typeutil.ProxyRole,
 		NodeID:        paramtable.GetNodeID(),
-		QueuedCleared: result.queuedCleared,
+		QueuedCleared: result.QueuedCleared,
 	})
 	mlog.Info(ctx, "cleared proxy read task queue",
 		mlog.String("taskType", request.GetTaskType()),
 		mlog.String("reason", request.GetReason()),
-		mlog.Int64("queuedCleared", result.queuedCleared))
+		mlog.Int64("queuedCleared", result.QueuedCleared))
 	return resp, nil
 }
 
@@ -297,7 +317,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 	}
 
 	mlog.Info(ctx, rpcReceived(method))
-	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 
 		return merr.Status(err), nil
@@ -332,6 +352,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &dropDatabaseTask{
+		baseTask:            baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
@@ -339,7 +360,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	}
 
 	mlog.Info(ctx, rpcReceived(method))
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -382,7 +403,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -424,7 +445,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -475,7 +496,7 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 
 		resp.Status = merr.Status(err)
@@ -526,7 +547,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cct); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -577,6 +598,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &dropCollectionTask{
+		baseTask:              baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
@@ -586,7 +608,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 
 	mlog.Info(context.TODO(), "DropCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(context.TODO(), "DropCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -635,6 +657,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 	tr := timerecord.NewTimeRecorder(method)
 
 	dct := &truncateCollectionTask{
+		baseTask:                  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		TruncateCollectionRequest: request,
@@ -644,7 +667,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 
 	mlog.Info(context.TODO(), "TruncateCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(context.TODO(), "TruncateCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -701,13 +724,14 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	mlog.Debug(context.TODO(), "HasCollection received")
 
 	hct := &hasCollectionTask{
+		baseTask:             baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
 		mixCoord:             node.mixCoord,
 	}
 
-	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(hct); err != nil {
 		mlog.Warn(context.TODO(), "HasCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -757,6 +781,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	tr := timerecord.NewTimeRecorder(method)
 
 	lct := &loadCollectionTask{
+		baseTask:              baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
@@ -765,7 +790,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 	mlog.Info(context.TODO(), "LoadCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lct); err != nil {
 		mlog.Warn(context.TODO(), "LoadCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -809,6 +834,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	rct := &releaseCollectionTask{
+		baseTask:                 baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
@@ -817,7 +843,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(rct); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -922,7 +948,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -986,7 +1012,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1055,7 +1081,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1103,6 +1129,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	g := &getStatisticsTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		request:   request,
 		Condition: NewTaskCondition(ctx),
 		ctx:       ctx,
@@ -1115,7 +1142,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		rpcReceived(method),
 		mlog.Strings("partitions", request.PartitionNames))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -1167,6 +1194,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	g := &getCollectionStatisticsTask{
+		baseTask:                       baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
@@ -1175,7 +1203,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1224,6 +1252,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 	tr := timerecord.NewTimeRecorder(method)
 
 	sct := &showCollectionsTask{
+		baseTask:               baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
@@ -1233,7 +1262,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 	mlog.Debug(context.TODO(), "ShowCollections received",
 		mlog.Any("CollectionNames", request.CollectionNames))
 
-	err := node.sched.ddQueue.Enqueue(sct)
+	err := node.sched.DdQueue.Enqueue(sct)
 	if err != nil {
 		mlog.Warn(context.TODO(), "ShowCollections failed to enqueue",
 			mlog.Err(err),
@@ -1278,6 +1307,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	tr := timerecord.NewTimeRecorder(method)
 
 	act := &alterCollectionTask{
+		baseTask:               baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
@@ -1287,7 +1317,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	mlog.Info(ctx,
 		rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1343,6 +1373,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	method := "AlterCollectionFunction"
 	tr := timerecord.NewTimeRecorder(method)
 	task := &alterCollectionFunctionTask{
+		baseTask:                       baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		AlterCollectionFunctionRequest: request,
@@ -1350,7 +1381,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	}
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1405,11 +1436,12 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	tr := timerecord.NewTimeRecorder(method)
 
 	// Check for external collection - alter field is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
 		return merr.Status(err), nil
 	}
 
 	act := &alterCollectionFieldTask{
+		baseTask:                    baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
 		AlterCollectionFieldRequest: request,
@@ -1418,7 +1450,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1458,7 +1490,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	// Check for external collection - create partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1468,6 +1500,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	tr := timerecord.NewTimeRecorder(method)
 
 	cpt := &createPartitionTask{
+		baseTask:               baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
@@ -1477,7 +1510,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1516,7 +1549,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	}
 
 	// Check for external collection - drop partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1526,6 +1559,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	tr := timerecord.NewTimeRecorder(method)
 
 	dpt := &dropPartitionTask{
+		baseTask:             baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
@@ -1535,7 +1569,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1590,7 +1624,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(hpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(hpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1639,6 +1673,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
 	lpt := &loadPartitionsTask{
+		baseTask:              baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
@@ -1647,7 +1682,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(lpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1689,6 +1724,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	defer sp.End()
 
 	rpt := &releasePartitionsTask{
+		baseTask:                 baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
@@ -1700,7 +1736,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(rpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(rpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1746,6 +1782,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	tr := timerecord.NewTimeRecorder(method)
 
 	g := &getPartitionStatisticsTask{
+		baseTask:                      baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                           ctx,
 		Condition:                     NewTaskCondition(ctx),
 		GetPartitionStatisticsRequest: request,
@@ -1754,7 +1791,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1802,6 +1839,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	defer sp.End()
 
 	spt := &showPartitionsTask{
+		baseTask:              baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
@@ -1816,7 +1854,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		rpcReceived(method),
 		mlog.Any("request", request))
 
-	if err := node.sched.ddQueue.Enqueue(spt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(spt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -1891,7 +1929,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err := validateCollectionName(request.CollectionName); err != nil {
 		return getErrResponse(err), nil
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		return getErrResponse(err), nil
 	}
@@ -1917,7 +1955,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 			return getErrResponse(err), nil
 		}
 	} else {
-		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.GetMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			return getErrResponse(err), nil
 		}
@@ -1975,7 +2013,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("dbName", request.GetDbName()),
@@ -2009,7 +2047,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			}, nil
 		}
 	} else {
-		if progress, _, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if progress, _, err = getPartitionProgress(ctx, node.GetMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			if errors.IsAny(err,
 				merr.ErrCollectionNotLoaded,
@@ -2040,6 +2078,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	defer sp.End()
 
 	cit := &createIndexTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       request,
@@ -2051,7 +2090,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2092,6 +2131,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 	defer sp.End()
 
 	task := &alterIndexTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       request,
@@ -2103,7 +2143,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2147,6 +2187,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	defer sp.End()
 
 	dit := &describeIndexTask{
+		baseTask:             baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
@@ -2159,7 +2200,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2207,6 +2248,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 	defer sp.End()
 
 	dit := &getIndexStatisticsTask{
+		baseTask:                  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		GetIndexStatisticsRequest: request,
@@ -2219,7 +2261,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2261,6 +2303,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	defer sp.End()
 
 	dit := &dropIndexTask{
+		baseTask:         baseTask{MetaCache: node.GetMetaCache()},
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
@@ -2272,7 +2315,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2318,6 +2361,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	defer sp.End()
 
 	gibpt := &getIndexBuildProgressTask{
+		baseTask:                     baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
@@ -2329,7 +2373,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(gibpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(gibpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2378,6 +2422,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	defer sp.End()
 
 	dipt := &getIndexStateTask{
+		baseTask:             baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
@@ -2389,7 +2434,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dipt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dipt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2437,7 +2482,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	// Check for external collection - insert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2452,6 +2497,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := &insertTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		insertMsg: &msgstream.InsertMsg{
@@ -2492,7 +2540,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	mlog.Debug(context.TODO(), "Enqueue insert request in Proxy")
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Warn(context.TODO(), "Failed to enqueue insert task: "+err.Error())
 		return constructFailedResponse(err), nil
 	}
@@ -2574,7 +2622,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 
 	// Check for external collection - delete is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2589,10 +2637,11 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := &deleteRunner{
 		req:             request,
+		metaCache:       node.GetMetaCache(),
 		idAllocator:     node.rowIDAllocator,
 		tsoAllocatorIns: node.tsoAllocator,
 		chMgr:           node.chMgr,
-		queue:           node.sched.dmQueue,
+		queue:           node.sched.DmQueue,
 		lb:              node.lbPolicy,
 		limiter:         limiter,
 	}
@@ -2670,7 +2719,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// Check for external collection - upsert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2691,6 +2740,9 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := &upsertTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		baseMsg: msgstream.BaseMsg{
 			HashValues: request.HashKeys,
 		},
@@ -2714,7 +2766,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
 		mlog.Int("len(HashKeys)", len(request.HashKeys)))
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Info(context.TODO(), "Failed to enqueue upsert task",
 			mlog.Err(err))
 		return &milvuspb.MutationResult{
@@ -2820,16 +2872,29 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		Status: merr.Success(),
 	}
 
+	// A search by primary keys is rewritten in place by handleIfSearchByPK:
+	// the IDs become a placeholder group of the non-null vectors, and the
+	// per-ID validity mask that re-expands the result lives only in that
+	// attempt. Hand every attempt its own copy so a later one still finds
+	// the IDs and produces the mask again, instead of treating the rewritten
+	// request as an ordinary search and dropping the null positions.
+	attemptRequest := func() *milvuspb.SearchRequest {
+		if request.GetIds() == nil {
+			return request
+		}
+		return proto.Clone(request).(*milvuspb.SearchRequest)
+	}
+
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2852,7 +2917,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true)
+			rspGT, _, _, _, err = node.search(ctx, attemptRequest(), false, true)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2877,7 +2942,22 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err != nil {
 		rsp.Status = merr.Status(err)
 	}
+	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, nil
+}
+
+func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
+	resultData := result.GetResults()
+	if resultData == nil {
+		return
+	}
+	for _, field := range resultData.GetFieldsData() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
+	for _, field := range resultData.GetGroupByFieldValues() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
+	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
@@ -2930,6 +3010,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := &searchTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
@@ -2964,7 +3047,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -2982,7 +3066,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3122,6 +3206,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, err
 }
 
@@ -3160,6 +3245,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	defer sp.End()
 	newSearchReq := convertHybridSearchToSearch(request)
 	qt := &searchTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
@@ -3196,7 +3284,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3214,7 +3303,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3376,7 +3465,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get collection schema for validation and plan building
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
+	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx,
 		request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
 		return nil, err
@@ -3385,7 +3474,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
 	if err != nil || annsFieldName == "" {
-		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.schema.CollectionSchema)
+		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
@@ -3397,7 +3486,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		annsFieldName = vecFields[0].Name
 	}
 
-	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
+	annField := typeutil.GetFieldByName(collectionInfo.Schema.CollectionSchema, annsFieldName)
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
@@ -3409,7 +3498,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Check if this is a BM25 function-based search
-	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.Functions)
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.Schema.Functions)
 
 	// For BM25 search, we need to fetch text field; for vector search, we need vector field
 	var fieldToFetch string
@@ -3428,7 +3517,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get primary key field
-	pkField, err := collectionInfo.schema.GetPkField()
+	pkField, err := collectionInfo.Schema.GetPkField()
 	if err != nil {
 		return nil, err
 	}
@@ -3458,6 +3547,9 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 	// Create queryTask to execute the retrieval
 	qt := &queryTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -3535,14 +3627,62 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
+	// The query pipeline merges per-segment results by primary key ascending
+	// (queryutil.NewSortAndCheckPKOperator), while search treats the Nq
+	// dimension positionally: result block N belongs to ids[N]. Reorder the
+	// rows into the requested ID order first, so both the vectors packed into
+	// the placeholder group and the validData returned below follow it.
+	pkOffset := make(map[any]int, returnedPKCount)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
+	for i := 0; i < returnedPKCount; i++ {
+		pkOffset[pkItr(i)] = i
+	}
+	orderedFieldsData, err := pickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
+		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract the field data from query result
 	// For BM25: extract text field; for vector search: extract vector field
-	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+	fieldData := lo.FindOrElse(orderedFieldsData, nil, func(f *schemapb.FieldData) bool {
 		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
 	if fieldData == nil {
 		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+	}
+
+	// validData is per requested ID: one entry per row, in request order.
+	validData := typeutil.GetFieldDataValidData(fieldData)
+
+	// The placeholder group must hold only the rows that can be searched, one
+	// per true entry of validData, since adjustSearchResultsForNullVectors
+	// re-expands the result blocks from that count. A nullable vector column
+	// already carries no payload for a null row, but a nullable scalar column
+	// keeps a zero-value slot for it, so the BM25 text has to be compacted here
+	// or a null row would be searched as an empty string and shift every
+	// following result block by one.
+	if isBM25Search && len(validData) > 0 {
+		strs := fieldData.GetScalars().GetStringData().GetData()
+		compact := make([]string, 0, len(strs))
+		for i, str := range strs {
+			if validData[i] {
+				compact = append(compact, str)
+			}
+		}
+		fieldData = &schemapb.FieldData{
+			FieldName: fieldData.GetFieldName(),
+			FieldId:   fieldData.GetFieldId(),
+			Type:      fieldData.GetType(),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: compact},
+					},
+				},
+			},
+		}
 	}
 
 	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
@@ -3560,7 +3700,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return fieldData.GetValidData(), nil
+	return validData, nil
 }
 
 // Flush notify data nodes to persist the data of collection.
@@ -3575,7 +3715,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	// Check for external collection - flush is not supported
 	for _, collName := range request.GetCollectionNames() {
-		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
+		if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), collName, "flush"); err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -3585,6 +3725,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	defer sp.End()
 
 	ft := &flushTask{
+		baseTask:     baseTask{MetaCache: node.GetMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		FlushRequest: request,
@@ -3596,7 +3737,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
-	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
+	if err := node.sched.DcQueue.Enqueue(ft); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3667,7 +3808,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				mlog.Strings("OutputFields", request.OutputFields),
 				mlog.Uint64("travel_timestamp", request.TravelTimestamp),
 				mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Duration("duration", span))
+				mlog.Duration("duration", span),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3685,7 +3827,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}
 	}()
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3738,6 +3880,9 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	qt := &queryTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -3783,6 +3928,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	method := "Query"
 
 	res, storageCost, err := node.query(ctx, qt, sp)
+	for _, field := range res.GetFieldsData() {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3837,6 +3985,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	defer sp.End()
 
 	cat := &CreateAliasTask{
+		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateAliasRequest: request,
@@ -3848,7 +3997,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3904,7 +4053,7 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3947,6 +4096,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 	defer sp.End()
 
 	lat := &ListAliasesTask{
+		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		nodeID:             node.session.ServerID,
@@ -3959,7 +4109,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(lat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4011,7 +4161,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4053,6 +4203,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	defer sp.End()
 
 	aat := &AlterAliasTask{
+		baseTask:          baseTask{MetaCache: node.GetMetaCache()},
 		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
 		AlterAliasRequest: request,
@@ -4064,7 +4215,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(aat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(aat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4130,7 +4281,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	logger.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
+	if err := node.sched.DcQueue.Enqueue(ft); err != nil {
 		logger.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4181,7 +4332,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	tr := timerecord.NewTimeRecorder(method)
 
 	// list segments
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4307,9 +4458,11 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 			State:        info.GetState(),
 			Level:        commonpb.SegmentLevel(info.GetLevel()),
 			IsSorted:     info.GetIsSorted(),
-			InsertLogs:   getLogIDs(info.GetBinlogs()),
-			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
-			StatsLogs:    getLogIDs(info.GetStatslogs()),
+			// V3 segments return empty: insert data is referenced via
+			// manifest, not per-field binlog KVs.
+			InsertLogs: getLogIDs(info.GetBinlogs()),
+			DeltaLogs:  getLogIDs(info.GetDeltalogs()),
+			StatsLogs:  getLogIDs(info.GetStatslogs()),
 		})
 	}
 
@@ -4338,7 +4491,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	method := "GetQuerySegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
+	collID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4404,30 +4557,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	}
 
 	if drt.RequestType == "query" {
-		drr, err := parseDummyQueryRequest(req.RequestType)
-		if err != nil {
-			mlog.Warn(context.TODO(), "Failed to parse dummy query request",
-				mlog.Err(err))
-			return failedResponse, nil
-		}
-
-		request := &milvuspb.QueryRequest{
-			DbName:         drr.DbName,
-			CollectionName: drr.CollectionName,
-			PartitionNames: drr.PartitionNames,
-			OutputFields:   drr.OutputFields,
-		}
-
-		_, err = node.Query(ctx, request)
-		if err != nil {
-			mlog.Warn(context.TODO(), "Failed to execute dummy query",
-				mlog.Err(err))
-			return failedResponse, err
-		}
-
-		return &milvuspb.DummyResponse{
-			Response: `{"status": "success"}`,
-		}, nil
+		mlog.Warn(ctx, "Dummy query request is disabled")
+		return failedResponse, nil
 	}
 
 	mlog.Debug(context.TODO(), "cannot find specify dummy request type")
@@ -4591,7 +4722,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	status := merr.Success()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("collectionName", req.GetCollectionName()),
@@ -4650,7 +4781,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4702,7 +4833,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4712,12 +4843,12 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// Check for external collection - manual compaction is not supported
 	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
 	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
-		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		collInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+		if typeutil.IsExternalCollection(collInfo.Schema.CollectionSchema) {
 			var collIdentifier string
 			if req.GetCollectionName() != "" {
 				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
@@ -4782,7 +4913,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 			failResp.Status = merr.Status(err)
 			return failResp, nil
 		}
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			failResp.Status = merr.Status(err)
 			return failResp, nil
@@ -5481,7 +5612,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	// Resolve alias to actual collection name so grants are stored under the real name
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.CollectionName != util.AnyWord && req.CollectionName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("collectionName", req.CollectionName), mlog.String("dbName", req.DbName), mlog.Err(resolveErr))
@@ -5553,7 +5684,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -5636,7 +5767,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for select grant",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -5680,7 +5811,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5854,7 +5985,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 
 	mlog.Info(context.TODO(), "CreateResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "CreateResourceGroup failed to enqueue",
 			mlog.Err(err))
 		return getErrResponse(err, method, "", ""), nil
@@ -5907,7 +6038,7 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 
 	mlog.Info(context.TODO(), "UpdateResourceGroups received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "UpdateResourceGroups failed to enqueue",
 			mlog.Err(err))
 		return getErrResponse(err, method, "", ""), nil
@@ -5955,7 +6086,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 
 	mlog.Info(context.TODO(), "DropResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DropResourceGroup failed to enqueue",
 			mlog.Err(err))
 
@@ -6014,7 +6145,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 
 	mlog.Info(context.TODO(), "TransferNode received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "TransferNode failed to enqueue",
 			mlog.Err(err))
 
@@ -6065,6 +6196,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
 	t := &TransferReplicaTask{
+		baseTask:               baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		TransferReplicaRequest: request,
@@ -6073,7 +6205,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 
 	mlog.Info(context.TODO(), "TransferReplica received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "TransferReplica failed to enqueue",
 			mlog.Err(err))
 
@@ -6120,7 +6252,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 
 	mlog.Debug(context.TODO(), "ListResourceGroups received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "ListResourceGroups failed to enqueue",
 			mlog.Err(err))
 
@@ -6169,6 +6301,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
 	t := &DescribeResourceGroupTask{
+		baseTask:                     baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		DescribeResourceGroupRequest: request,
@@ -6177,7 +6310,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 
 	mlog.Debug(context.TODO(), "DescribeResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DescribeResourceGroup failed to enqueue",
 			mlog.Err(err))
 
@@ -6331,7 +6464,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 
 	// Check for external collection - import is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -6345,6 +6478,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	nodeID := paramtable.GetStringNodeID()
 
 	it := &importTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       req,
@@ -6353,7 +6487,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		resp:      resp,
 	}
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -6420,7 +6554,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		collectionID UniqueID
 	)
 	if req.GetCollectionName() != "" {
-		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -6509,6 +6643,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.TelemetryClientsPath+"/:clientId", telemetryAuth, getTelemetryClientMetrics(node))
 	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
 	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
+	router.GET(http.TelemetryCommandsPath, telemetryAuth, listTelemetryCommands(node))
 	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
 	router.GET(http.TelemetryCommandReplyPath, telemetryAuth, getTelemetryCommandReply(node))
 	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
@@ -6643,6 +6778,14 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	var err error
+	ctx, err = authorizeRunAnalyzerCollection(ctx, req)
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// build and run analyzer at any streaming node/query node
 	// if collection and field not set
 	if req.GetCollectionName() == "" {
@@ -6664,13 +6807,14 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 
 	method := "RunAnalyzer"
 	task := &RunAnalyzerTask{
+		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                ctx,
 		lb:                 node.lbPolicy,
 		Condition:          NewTaskCondition(ctx),
 		RunAnalyzerRequest: req,
 	}
 
-	if err := node.sched.dqQueue.Enqueue(task); err != nil {
+	if err := node.sched.DqQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -6692,6 +6836,28 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 	return task.result, nil
+}
+
+func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {
+	if req.GetCollectionName() == "" {
+		return ctx, nil
+	}
+
+	nextCtx, err := PrivilegeInterceptor(ctx, &milvuspb.SearchRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+	})
+	if err == nil {
+		return nextCtx, nil
+	}
+	if grpcstatus.Code(err) == codes.PermissionDenied {
+		return ctx, merr.WrapErrPrivilegeNotPermitted(
+			"RunAnalyzer requires %s on collection %s",
+			commonpb.ObjectPrivilege_PrivilegeSearch.String(),
+			req.GetCollectionName(),
+		)
+	}
+	return ctx, err
 }
 
 func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
@@ -7217,6 +7383,20 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // Client Telemetry RPC Handlers
 // =============================================================================
 
+func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("telemetry %s requires authenticated root user", method)
+	}
+	if username != util.UserRoot {
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	return nil
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests.
 // Forwards the heartbeat to rootcoord for storage and command management.
 func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
@@ -7231,6 +7411,9 @@ func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHear
 // GetClientTelemetry retrieves client telemetry data from rootcoord.
 func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "GetClientTelemetry"); err != nil {
 		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -7248,14 +7431,29 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
 	}
+	if err := checkTelemetryAdmin(ctx, "PushClientCommand"); err != nil {
+		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
+	}
 
 	// Forward to rootcoord
 	return node.mixCoord.PushClientCommand(ctx, req)
 }
 
+// ListClientCommands lists the commands rootcoord is currently holding for clients.
+func (node *Proxy) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{Status: merr.Status(err)}, nil
+	}
+
+	return node.mixCoord.ListClientCommands(ctx, req)
+}
+
 // DeleteClientCommand deletes a client command at rootcoord.
 func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "DeleteClientCommand"); err != nil {
 		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
 	}
 	// Forward to rootcoord
@@ -7273,13 +7471,14 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 
 	bt := &batchUpdateManifestTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       req,
 		mixCoord:  node.mixCoord,
 	}
 
-	if err := node.sched.ddQueue.Enqueue(bt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(bt); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -7333,8 +7532,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 
@@ -7351,7 +7550,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Get collection info from cache (includes schema for validation)
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 		return &milvuspb.RefreshExternalCollectionResponse{
@@ -7360,7 +7559,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Validate it's an external collection
-	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+	if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 		mlog.Warn(context.TODO(), "collection is not an external collection")
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
@@ -7375,8 +7574,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// checked to defensively reassert the atomic-tuple invariant in case
 	// any legacy collection holds a half-initialized pair.
 	if !srcSet {
-		persistedSrc := collectionInfo.schema.GetExternalSource()
-		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		persistedSrc := collectionInfo.Schema.GetExternalSource()
+		persistedSpec := collectionInfo.Schema.GetExternalSpec()
 		if persistedSrc == "" || persistedSpec == "" {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
@@ -7386,7 +7585,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}
 	}
 
-	collectionID := collectionInfo.collID
+	collectionID := collectionInfo.CollID
 
 	// Call DataCoord to refresh the external collection
 	resp, err := node.mixCoord.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7485,7 +7684,7 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 		}
 
 		// Get collection info from cache and validate it's an external collection
-		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
@@ -7493,14 +7692,14 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 			}, nil
 		}
 
-		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+		if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 			mlog.Warn(context.TODO(), "collection is not an external collection")
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 			}, nil
 		}
 
-		collectionID = collectionInfo.collID
+		collectionID = collectionInfo.CollID
 	}
 
 	// Call DataCoord to list jobs

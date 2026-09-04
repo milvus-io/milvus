@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
@@ -76,4 +77,15 @@ func TestStreamingError(t *testing.T) {
 	assert.True(t, streamingErr.IsUnrecoverable())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, pbErr.Code)
+}
+
+func TestPartialUpdateCASErrors(t *testing.T) {
+	retryable := NewPartialUpdateRetryable("retry")
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE, retryable.Code)
+	require.True(t, retryable.IsPartialUpdateRetryableCAS())
+
+	unrecoverable := NewUnrecoverableError("bad metadata")
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, unrecoverable.Code)
+	require.False(t, unrecoverable.IsPartialUpdateRetryableCAS())
+	require.True(t, unrecoverable.IsUnrecoverable())
 }

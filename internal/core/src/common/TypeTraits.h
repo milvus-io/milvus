@@ -26,6 +26,9 @@
 
 namespace milvus {
 
+class ArrayValue;
+class ArrayValueView;
+
 using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
 
 template <typename T>
@@ -36,7 +39,8 @@ constexpr bool IsScalar =
     std::is_fundamental_v<T> || std::is_same_v<T, std::string> ||
     std::is_same_v<T, Json> || std::is_same_v<T, Geometry> ||
     std::is_same_v<T, std::string_view> || std::is_same_v<T, Array> ||
-    std::is_same_v<T, ArrayView> || std::is_same_v<T, proto::plan::Array>;
+    std::is_same_v<T, ArrayView> || std::is_same_v<T, ArrayValue> ||
+    std::is_same_v<T, ArrayValueView> || std::is_same_v<T, proto::plan::Array>;
 
 template <typename T>
 constexpr bool IsSparse =
@@ -47,6 +51,7 @@ template <typename T>
 constexpr bool IsVariableType =
     std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> ||
     std::is_same_v<T, Array> || std::is_same_v<T, ArrayView> ||
+    std::is_same_v<T, ArrayValue> || std::is_same_v<T, ArrayValueView> ||
     std::is_same_v<T, proto::plan::Array> || std::is_same_v<T, Json> ||
     IsSparse<T> || std::is_same_v<T, VectorArray> ||
     std::is_same_v<T, VectorArrayView>;
@@ -55,17 +60,20 @@ constexpr bool IsVariableType =
 template <typename T>
 constexpr bool IsVariableTypeSupportInChunk =
     std::is_same_v<T, std::string> || std::is_same_v<T, Array> ||
-    std::is_same_v<T, Json> ||
+    std::is_same_v<T, ArrayValue> || std::is_same_v<T, Json> ||
     std::is_same_v<T, knowhere::sparse::SparseRow<SparseValueType>>;
 
 template <typename T>
 using ChunkViewType = std::conditional_t<
     std::is_same_v<T, std::string>,
     std::string_view,
-    std::conditional_t<std::is_same_v<T, Array>,
-                       ArrayView,
-                       std::conditional_t<std::is_same_v<T, VectorArray>,
-                                          VectorArrayView,
-                                          T>>>;
+    std::conditional_t<
+        std::is_same_v<T, Array>,
+        ArrayView,
+        std::conditional_t<std::is_same_v<T, ArrayValue>,
+                           ArrayValueView,
+                           std::conditional_t<std::is_same_v<T, VectorArray>,
+                                              VectorArrayView,
+                                              T>>>>;
 
 }  // namespace milvus

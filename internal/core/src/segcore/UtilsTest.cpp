@@ -23,12 +23,10 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "common/GrowingOffsetMapping.h"
-#include "common/OffsetMapping.h"
 #include "common/OpContext.h"
-#include "common/SealedOffsetMapping.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -127,18 +125,20 @@ TEST(Util_Segcore, CreateEmptyVectorDataArrayForNullableVectors) {
 
     auto dense_result =
         CreateEmptyVectorDataArray(3, 0, valid_data.data(), (*schema)[vec]);
-    ASSERT_EQ(dense_result->valid_data().size(), 3);
-    ASSERT_FALSE(dense_result->valid_data(0));
-    ASSERT_FALSE(dense_result->valid_data(1));
-    ASSERT_FALSE(dense_result->valid_data(2));
+    const auto& dense_valid_data = GetFieldDataRowValidData(*dense_result);
+    ASSERT_EQ(dense_valid_data.size(), 3);
+    ASSERT_FALSE(dense_valid_data[0]);
+    ASSERT_FALSE(dense_valid_data[1]);
+    ASSERT_FALSE(dense_valid_data[2]);
     ASSERT_EQ(dense_result->vectors().float_vector().data_size(), 0);
 
     auto sparse_result = CreateEmptyVectorDataArray(
         3, 0, valid_data.data(), (*schema)[sparse_vec]);
-    ASSERT_EQ(sparse_result->valid_data().size(), 3);
-    ASSERT_FALSE(sparse_result->valid_data(0));
-    ASSERT_FALSE(sparse_result->valid_data(1));
-    ASSERT_FALSE(sparse_result->valid_data(2));
+    const auto& sparse_valid_data = GetFieldDataRowValidData(*sparse_result);
+    ASSERT_EQ(sparse_valid_data.size(), 3);
+    ASSERT_FALSE(sparse_valid_data[0]);
+    ASSERT_FALSE(sparse_valid_data[1]);
+    ASSERT_FALSE(sparse_valid_data[2]);
     ASSERT_EQ(sparse_result->vectors().data_case(),
               proto::schema::VectorField::kSparseFloatVector);
     ASSERT_EQ(sparse_result->vectors().sparse_float_vector().contents_size(),
@@ -175,8 +175,9 @@ TEST(Util_Segcore, CreateVectorDataArrayFromNullableVectors) {
     auto result = CreateVectorDataArrayFrom(
         data.data(), valid_flags.get(), total_count, valid_count, field_meta);
 
-    ASSERT_TRUE(result->valid_data().size() > 0);
-    ASSERT_EQ(result->valid_data().size(), total_count);
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_FALSE(result_valid_data.empty());
+    ASSERT_EQ(result_valid_data.size(), total_count);
     ASSERT_EQ(result->vectors().float_vector().data_size(), valid_count * dim);
 }
 
@@ -227,15 +228,16 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
 
     auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-    ASSERT_TRUE(merged_result->valid_data().size() > 0);
-    ASSERT_EQ(merged_result->valid_data().size(), 5);
+    const auto& merged_valid_data = GetFieldDataRowValidData(*merged_result);
+    ASSERT_FALSE(merged_valid_data.empty());
+    ASSERT_EQ(merged_valid_data.size(), 5);
     ASSERT_EQ(merged_result->vectors().float_vector().data_size(), 5 * dim);
 
-    ASSERT_TRUE(merged_result->valid_data(0));
-    ASSERT_TRUE(merged_result->valid_data(1));
-    ASSERT_TRUE(merged_result->valid_data(2));
-    ASSERT_TRUE(merged_result->valid_data(3));
-    ASSERT_TRUE(merged_result->valid_data(4));
+    ASSERT_TRUE(merged_valid_data[0]);
+    ASSERT_TRUE(merged_valid_data[1]);
+    ASSERT_TRUE(merged_valid_data[2]);
+    ASSERT_TRUE(merged_valid_data[3]);
+    ASSERT_TRUE(merged_valid_data[4]);
 }
 
 TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
@@ -297,11 +299,13 @@ TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
 
         auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-        ASSERT_EQ(merged_result->valid_data().size(), total_count);
-        EXPECT_TRUE(merged_result->valid_data(0));
-        EXPECT_FALSE(merged_result->valid_data(1));
-        EXPECT_TRUE(merged_result->valid_data(2));
-        EXPECT_TRUE(merged_result->valid_data(3));
+        const auto& merged_valid_data =
+            GetFieldDataRowValidData(*merged_result);
+        ASSERT_EQ(merged_valid_data.size(), total_count);
+        EXPECT_TRUE(merged_valid_data[0]);
+        EXPECT_FALSE(merged_valid_data[1]);
+        EXPECT_TRUE(merged_valid_data[2]);
+        EXPECT_TRUE(merged_valid_data[3]);
 
         std::string actual;
         switch (test_case.data_type) {
@@ -387,93 +391,6 @@ TEST(Util_Segcore, BitsetViewAllNone) {
     }
 }
 
-TEST(Util_Segcore, TransformBitsetAllFilteredAndNoFilterFastPaths) {
-    using namespace milvus;
-
-    constexpr size_t kRows = 130;  // not a multiple of 8 or 64
-    std::vector<bool> valid_flags(kRows, true);
-    std::unique_ptr<bool[]> valid_data(new bool[kRows]);
-    std::copy(valid_flags.begin(), valid_flags.end(), valid_data.get());
-
-    SealedOffsetMapping mapping;
-    mapping.Build(valid_data.get(), kRows);
-
-    const size_t n_bytes = (kRows + 7) / 8;
-    std::vector<uint8_t> ones(n_bytes, 0xFF);
-    ones.back() = static_cast<uint8_t>((1U << (kRows & 7)) - 1U);
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(BitsetView(ones.data(), kRows),
-                                          physical_bitset);
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::AllFiltered);
-
-    std::vector<uint8_t> zeros(n_bytes, 0x00);
-    status = mapping.TransformBitset(BitsetView(zeros.data(), kRows),
-                                     physical_bitset);
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
-}
-
-TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
-    using namespace milvus;
-
-    std::array<bool, 3> valid_data = {true, true, true};
-    GrowingOffsetMapping mapping;
-    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
-
-    // Growing search passes a logical bitset sized by the query timestamp's
-    // active row count. Rows beyond that logical view are not visible yet and
-    // must be masked in the transformed physical bitset.
-    BitsetType logical_bitset(2);
-    BitsetView logical_view(logical_bitset);
-
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(logical_view, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical_bitset.size(), 3);
-    EXPECT_FALSE(physical_bitset[0]);
-    EXPECT_FALSE(physical_bitset[1]);
-    EXPECT_TRUE(physical_bitset[2]);
-}
-
-TEST(Util_Segcore, GrowingTransformBitsetMaterializesNoFilterSnapshot) {
-    using namespace milvus;
-
-    std::array<bool, 5> valid_data = {true, true, false, true, true};
-    GrowingOffsetMapping mapping;
-    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
-
-    BitsetType logical_bitset(valid_data.size());
-    BitsetView logical_view(logical_bitset);
-
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(logical_view, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical_bitset.size(), 4);
-    EXPECT_TRUE(physical_bitset.none());
-
-    std::array<bool, 2> later_valid_data = {true, true};
-    mapping.Append(later_valid_data.data(), later_valid_data.size(), 5, 4);
-    EXPECT_EQ(mapping.GetValidCount(), 6);
-    EXPECT_EQ(physical_bitset.size(), 4);
-    EXPECT_TRUE(physical_bitset.none());
-}
-
-TEST(Util_Segcore, TransformBitsetKeepsEmptyViewAsAllVisibleFastPath) {
-    using namespace milvus;
-
-    std::array<bool, 3> valid_data = {true, true, true};
-    SealedOffsetMapping mapping;
-    mapping.Build(valid_data.data(), valid_data.size());
-
-    BitsetView all_visible;
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(all_visible, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
-    EXPECT_TRUE(physical_bitset.empty());
-}
-
 TEST(Util_Segcore, MergeDataArrayWithNullableVectorArrayUsesLogicalOffsets) {
     using namespace milvus;
     using namespace milvus::segcore;
@@ -515,10 +432,11 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectorArrayUsesLogicalOffsets) {
 
     auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-    ASSERT_EQ(merged_result->valid_data_size(), 3);
-    EXPECT_FALSE(merged_result->valid_data(0));
-    EXPECT_TRUE(merged_result->valid_data(1));
-    EXPECT_TRUE(merged_result->valid_data(2));
+    const auto& merged_valid_data = GetFieldDataRowValidData(*merged_result);
+    ASSERT_EQ(merged_valid_data.size(), 3);
+    EXPECT_FALSE(merged_valid_data[0]);
+    EXPECT_TRUE(merged_valid_data[1]);
+    EXPECT_TRUE(merged_valid_data[2]);
 
     const auto& result_rows = merged_result->vectors().vector_array().data();
     ASSERT_EQ(result_rows.size(), 3);

@@ -113,6 +113,7 @@ type catchupScanner struct {
 	deliverPolicy                  options.DeliverPolicy
 	exclusiveStartTimeTick         uint64 // scanner should filter out the message that less than or equal to this time tick.
 	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
+	chunkAssembler                 message.ChunkAssembler
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
@@ -127,6 +128,9 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 		}
 		switchedScanner, err := s.consumeWithScanner(ctx, scanner)
 		if err != nil {
+			if errors.Is(err, message.ErrCorruptedChunk) {
+				return nil, err
+			}
 			s.logger.Warn(ctx, "scanner consuming was interrpurted with error, start a backoff", mlog.Err(err))
 			continue
 		}
@@ -143,6 +147,21 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 		case msg, ok := <-scanner.Chan():
 			if !ok {
 				return nil, scanner.Error()
+			}
+
+			// The underlying durable WAL exposes physical records. Reassemble all
+			// chunk versions here so every later stage sees exactly one complete
+			// logical message. In particular, v0 conversion parses the body and
+			// must never observe an individual payload slice.
+			assembled, handled, err := s.chunkAssembler.Push(msg)
+			if err != nil {
+				return nil, err
+			}
+			if handled {
+				if assembled == nil {
+					continue
+				}
+				msg = assembled
 			}
 
 			if msg.Version() == message.VersionOld {
@@ -168,6 +187,11 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				}
 				if err != nil {
 					panic("unrechable: unexpected error found: " + err.Error())
+				}
+				if msg.MessageType() == message.MessageTypeTimeTick {
+					// A raw v0 TimeTick has no message-type property, so Push cannot
+					// recognize it as a cleanup barrier until conversion completes.
+					s.chunkAssembler.AdvanceTimeTick(msg.TimeTick())
 				}
 			}
 

@@ -995,6 +995,56 @@ func TestNormalizeExternalPathForStorage_UsesInjectedExtfsEndpoint(t *testing.T)
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/a/b/file.parquet?versionId=1", got)
 }
 
+func TestInjectExternalSpecProperties_AppliesExternalIops(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	initialKey := params.CommonCfg.StorageIopsInitialRate.Key
+	maxKey := params.CommonCfg.StorageIopsMaxRate.Key
+	t.Cleanup(func() {
+		params.Reset(initialKey)
+		params.Reset(maxKey)
+	})
+
+	require.NoError(t, params.Save(initialKey, "3000"))
+	require.NoError(t, params.Save(maxKey, "0"))
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  t.TempDir(),
+		RootPath:    t.TempDir(),
+	}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+
+	require.NoError(t, injectExternalSpecProperties(
+		props,
+		42,
+		"s3://my-bucket/key",
+		`{"format":"parquet","extfs":{"iops_initial_rate":"9000","iops_max_rate":"10000"}}`,
+	))
+	prefix := ExtfsPrefixForCollection(42)
+	assert.Equal(t, "3000", loonPropertyString(props, prefix+"iops_initial_rate"))
+	assert.Equal(t, "0", loonPropertyString(props, prefix+"iops_max_rate"))
+	assert.Empty(t, loonPropertyString(props, "fs.iops_initial_rate"))
+	assert.Empty(t, loonPropertyString(props, "fs.iops_max_rate"))
+}
+
+func TestInjectExternalSpecProperties_Boundaries(t *testing.T) {
+	require.Error(t, injectExternalSpecProperties(nil, 42, "s3://my-bucket/key", ""))
+
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  t.TempDir(),
+		RootPath:    t.TempDir(),
+	}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+
+	require.NoError(t, injectExternalSpecProperties(props, 42, "", ""))
+	require.Error(t, injectExternalSpecProperties(props, 42, "invalid", ""))
+}
+
 func TestNormalizeExternalPathForStorage_EndpointFormUnchanged(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
@@ -1643,6 +1693,22 @@ func TestMakePropertiesFromStorageConfig_MaxConnectionsUnsetOmitsKey(t *testing.
 	// The neighboring integer field is still emitted, so this is a targeted
 	// guard rather than the whole block going missing.
 	assert.Equal(t, "5000", loonPropertyString(props, PropertyFSRequestTimeoutMS))
+}
+
+func TestMakePropertiesFromStorageConfig_AzureRequestCredentials(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "AccountName=ambient;AccountKey=ambient-key")
+	config := &indexpb.StorageConfig{
+		StorageType:     "remote",
+		CloudProvider:   "azure",
+		AccessKeyID:     "request-account",
+		SecretAccessKey: "request-key",
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	assert.Equal(t, "request-account", loonPropertyString(props, PropertyFSAccessKeyID))
+	assert.Equal(t, "request-key", loonPropertyString(props, PropertyFSAccessKeyValue))
 }
 
 // ==================== FetchFragmentsFromExternalSourceWithRange Tests ====================

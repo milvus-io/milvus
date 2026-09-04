@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -55,6 +56,35 @@ using namespace milvus;
 
 namespace {
 
+void
+SetPackedValidity(std::vector<char>& data, int64_t offset) {
+    data[offset >> 3] |= static_cast<char>(1U << (offset & 0x07));
+}
+
+void
+WriteUint32(std::vector<char>& data, size_t offset, uint32_t value) {
+    memcpy(data.data() + offset, &value, sizeof(value));
+}
+
+class CountingVectorArrayChunk : public VectorArrayChunk {
+ public:
+    using VectorArrayChunk::VectorArrayChunk;
+
+    bool
+    isValid(int offset) const override {
+        ++validity_checks_;
+        return Chunk::isValid(offset);
+    }
+
+    int64_t
+    validity_checks() const {
+        return validity_checks_;
+    }
+
+ private:
+    mutable int64_t validity_checks_{0};
+};
+
 std::shared_ptr<arrow::BinaryArray>
 BuildBinaryArray(const std::vector<std::optional<std::string>>& values) {
     arrow::BinaryBuilder builder;
@@ -76,6 +106,191 @@ BuildBinaryArray(const std::vector<std::optional<std::string>>& values) {
 }
 
 }  // namespace
+
+TEST(chunk, nullable_fixed_width_span_keeps_validity_packed) {
+    constexpr int64_t row_count = 300;
+    const auto bitmap_bytes = (row_count + 7) / 8;
+    std::vector<char> data(bitmap_bytes + row_count * sizeof(int64_t), 0);
+    FixedVector<bool> expected_validity;
+    expected_validity.reserve(row_count);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        const bool valid = i % 5 != 1 && i % 7 != 3;
+        expected_validity.push_back(valid);
+        if (valid) {
+            SetPackedValidity(data, i);
+        }
+        const int64_t value = i * 10;
+        memcpy(data.data() + bitmap_bytes + i * sizeof(value),
+               &value,
+               sizeof(value));
+    }
+
+    FixedWidthChunk chunk(
+        row_count, 1, data.data(), data.size(), sizeof(int64_t), true, nullptr);
+
+    for (const auto offset : {0, 63, 64, 255, 256, 257, 299}) {
+        EXPECT_EQ(chunk.isValid(offset), expected_validity[offset]);
+    }
+
+    constexpr int64_t logical_offset = 299;
+    ASSERT_TRUE(expected_validity[logical_offset]);
+    const auto expected_physical_offset =
+        std::count(expected_validity.begin(),
+                   expected_validity.begin() + logical_offset,
+                   true);
+    EXPECT_EQ(chunk.PhysicalOffsetOf(logical_offset), expected_physical_offset);
+
+    const auto span = chunk.Span();
+    ASSERT_TRUE(span.validity());
+    EXPECT_TRUE(span.validity().is_packed());
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(span.is_valid(i), expected_validity[i]);
+    }
+
+    const auto second_span = chunk.Span();
+    EXPECT_TRUE(second_span.validity().is_packed());
+}
+
+TEST(chunk, nullable_chunk_bulk_masks_unaligned_range) {
+    constexpr int64_t row_count = 130;
+    constexpr int64_t chunk_offset = 3;
+    constexpr int64_t result_offset = 5;
+    constexpr int64_t count = row_count - chunk_offset;
+    const auto bitmap_bytes = (row_count + 7) / 8;
+    std::vector<char> data(bitmap_bytes + row_count * sizeof(int64_t), 0);
+    FixedVector<bool> expected_validity;
+    expected_validity.reserve(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        const bool valid = i % 5 != 1 && i % 7 != 3;
+        expected_validity.push_back(valid);
+        if (valid) {
+            SetPackedValidity(data, i);
+        }
+    }
+
+    FixedWidthChunk chunk(
+        row_count, 1, data.data(), data.size(), sizeof(int64_t), true, nullptr);
+    TargetBitmap result(count + result_offset + 3, true);
+    chunk.ApplyValidityMask(
+        chunk_offset, count, TargetBitmapView(result).view(result_offset));
+
+    for (int64_t i = 0; i < result_offset; ++i) {
+        EXPECT_TRUE(result[i]);
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        EXPECT_EQ(result[result_offset + i],
+                  expected_validity[chunk_offset + i]);
+    }
+    for (int64_t i = result_offset + count;
+         i < static_cast<int64_t>(result.size());
+         ++i) {
+        EXPECT_TRUE(result[i]);
+    }
+}
+
+TEST(chunk, nullable_string_views_reference_packed_validity) {
+    const std::vector<std::string> values = {"a", "bb", "ccc", "dddd", "eeeee"};
+    constexpr int64_t row_count = 5;
+    constexpr size_t bitmap_bytes = 1;
+    const auto offsets_bytes = (row_count + 1) * sizeof(uint32_t);
+    const auto payload_bytes = std::accumulate(
+        values.begin(),
+        values.end(),
+        size_t{0},
+        [](size_t total, const auto& value) { return total + value.size(); });
+    std::vector<char> data(bitmap_bytes + offsets_bytes + payload_bytes, 0);
+    data[0] = 0x15;
+
+    uint32_t data_offset = bitmap_bytes + offsets_bytes;
+    for (int64_t i = 0; i < row_count; ++i) {
+        WriteUint32(data, bitmap_bytes + i * sizeof(uint32_t), data_offset);
+        memcpy(data.data() + data_offset, values[i].data(), values[i].size());
+        data_offset += values[i].size();
+    }
+    WriteUint32(data, bitmap_bytes + row_count * sizeof(uint32_t), data_offset);
+
+    StringChunk chunk(row_count, data.data(), data.size(), true, nullptr);
+
+    auto [views, validity] = chunk.StringViews(std::make_pair(1, 3));
+    ASSERT_EQ(views.size(), 3);
+    EXPECT_EQ(views[0], values[1]);
+    EXPECT_EQ(views[1], values[2]);
+    EXPECT_EQ(views[2], values[3]);
+    EXPECT_EQ(validity.packed_data(),
+              reinterpret_cast<const uint8_t*>(data.data()));
+    EXPECT_EQ(validity.bit_offset(), 1);
+    EXPECT_FALSE(validity[0]);
+    EXPECT_TRUE(validity[1]);
+    EXPECT_FALSE(validity[2]);
+}
+
+TEST(chunk, nullable_array_views_reference_packed_validity) {
+    constexpr int64_t row_count = 5;
+    constexpr size_t bitmap_bytes = 1;
+    const auto offsets_bytes = (2 * row_count + 1) * sizeof(uint32_t);
+    std::vector<char> data(bitmap_bytes + offsets_bytes, 0);
+    data[0] = 0x15;
+    const auto payload_offset = static_cast<uint32_t>(data.size());
+    for (int64_t i = 0; i <= row_count; ++i) {
+        WriteUint32(
+            data, bitmap_bytes + 2 * i * sizeof(uint32_t), payload_offset);
+        if (i < row_count) {
+            WriteUint32(data, bitmap_bytes + (2 * i + 1) * sizeof(uint32_t), 0);
+        }
+    }
+
+    ArrayChunk chunk(
+        row_count, data.data(), data.size(), DataType::INT32, true, nullptr);
+
+    auto [views, validity] = chunk.Views(std::make_pair(1, 3));
+    ASSERT_EQ(views.size(), 3);
+    EXPECT_EQ(validity.packed_data(),
+              reinterpret_cast<const uint8_t*>(data.data()));
+    EXPECT_EQ(validity.bit_offset(), 1);
+    EXPECT_FALSE(validity[0]);
+    EXPECT_TRUE(validity[1]);
+    EXPECT_FALSE(validity[2]);
+}
+
+TEST(chunk, nullable_vector_array_views_reference_packed_validity) {
+    constexpr int64_t row_count = 5;
+    constexpr size_t bitmap_bytes = 1;
+    const auto offsets_bytes = (2 * row_count + 1) * sizeof(uint32_t);
+    std::vector<char> data(bitmap_bytes + offsets_bytes, 0);
+    data[0] = 0x15;
+    const auto payload_offset = static_cast<uint32_t>(data.size());
+    for (int64_t i = 0; i <= row_count; ++i) {
+        WriteUint32(
+            data, bitmap_bytes + 2 * i * sizeof(uint32_t), payload_offset);
+        if (i < row_count) {
+            WriteUint32(data, bitmap_bytes + (2 * i + 1) * sizeof(uint32_t), 0);
+        }
+    }
+
+    CountingVectorArrayChunk chunk(4,
+                                   row_count,
+                                   data.data(),
+                                   data.size(),
+                                   DataType::VECTOR_FLOAT,
+                                   nullptr,
+                                   true);
+
+    auto [views, validity] = chunk.Views(std::make_pair(1, 3));
+    ASSERT_EQ(views.size(), 3);
+    EXPECT_EQ(chunk.validity_checks(), 0);
+    EXPECT_EQ(validity.packed_data(),
+              reinterpret_cast<const uint8_t*>(data.data()));
+    EXPECT_EQ(validity.bit_offset(), 1);
+    EXPECT_FALSE(validity[0]);
+    EXPECT_TRUE(validity[1]);
+    EXPECT_FALSE(validity[2]);
+
+    EXPECT_EQ(chunk.View(2).length(), 0);
+    EXPECT_EQ(chunk.validity_checks(), 1);
+    EXPECT_ANY_THROW(chunk.View(1));
+    EXPECT_EQ(chunk.validity_checks(), 2);
+}
 
 TEST(chunk, test_int64_field) {
     FixedVector<int64_t> data = {1, 2, 3, 4, 5};
@@ -284,7 +499,6 @@ TEST(chunk, test_variable_field_sliced_binary_batches) {
         std::string_view("delta"),
     };
     ASSERT_EQ(views.size(), expected.size());
-    ASSERT_EQ(valid.size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         EXPECT_EQ(valid[i], expected[i].has_value());
         if (expected[i].has_value()) {
@@ -445,7 +659,6 @@ TEST(chunk, test_json_field_sliced_binary_batches) {
         std::string_view(R"({"k":"d"})"),
     };
     ASSERT_EQ(views.size(), expected.size());
-    ASSERT_EQ(valid.size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         EXPECT_EQ(valid[i], expected[i].has_value());
         if (expected[i].has_value()) {
@@ -489,7 +702,6 @@ TEST(chunk, test_geometry_field_sliced_binary_batches) {
         std::string_view("wkb-d"),
     };
     ASSERT_EQ(views.size(), expected.size());
-    ASSERT_EQ(valid.size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         EXPECT_EQ(valid[i], expected[i].has_value());
         if (expected[i].has_value()) {
@@ -663,7 +875,6 @@ TEST(chunk, test_null_array) {
     auto [views, valid] = array_chunk->Views(std::nullopt);
 
     EXPECT_EQ(views.size(), array_count);
-    EXPECT_EQ(valid.size(), array_count);
 
     // Check validity based on our bitmap pattern (10101)
     EXPECT_TRUE(valid[0]);

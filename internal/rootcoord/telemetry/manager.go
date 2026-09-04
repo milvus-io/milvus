@@ -37,9 +37,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// TelemetryConfig holds configurable time values for the telemetry manager
+// TelemetryConfig holds configurable time values for the telemetry manager.
+//
+// Defaults come from DefaultTelemetryConfig and are exported as rootCoord.clientTelemetry.*;
+// the numbers named below are those defaults, so keep the two in step.
 type TelemetryConfig struct {
-	// CleanupInterval is how often the cleanup loop runs (default: 5 minutes)
+	// CleanupInterval is how often the cleanup loop runs (default: 1 minute)
 	CleanupInterval time.Duration
 	// InactiveClientThreshold is how long since last heartbeat before a client is removed (default: 10 minutes)
 	InactiveClientThreshold time.Duration
@@ -47,13 +50,110 @@ type TelemetryConfig struct {
 	ClientStatusThreshold time.Duration
 	// CommandCleanupTimeout is the context timeout for command cleanup operations (default: 10 seconds)
 	CommandCleanupTimeout time.Duration
-	// MaxMetricsPerClient is the maximum size of metrics payload per client (default: 1MB)
+	// MaxMetricsPerClient is the maximum size of metrics payload per client (default: 1MB).
+	// Zero disables the cap; see normalize.
 	MaxMetricsPerClient int
 	// MaxOperationTypesPerClient is the maximum number of operation types per client (default: 100)
 	MaxOperationTypesPerClient int
 	// MaxClientsInMemory is the maximum number of clients to track in memory (default: 100,000)
 	// This prevents unbounded memory growth from malicious or misconfigured clients
 	MaxClientsInMemory int
+	// RetainedWindows is how many heartbeat windows to keep per client (default: 2).
+	//
+	// A telemetry query is answered from the oldest retained window, so this is also how
+	// far the answer lags the client and how many consecutive idle intervals it survives:
+	// at 2, one quiet interval cannot blank the view; at 3, two cannot. Each extra window
+	// is another full copy of every operation and per-collection breakdown for every
+	// connected client, and a client silent for several intervals is better described by
+	// its status than by metrics from minutes ago -- so raise it for deployments whose
+	// clients heartbeat frequently, not as a way to remember long-gone traffic.
+	RetainedWindows int
+}
+
+// defaultRetainedWindows is the smallest retention that survives one idle interval: one
+// window to serve and one to absorb the quiet one.
+const defaultRetainedWindows = 2
+
+// The heartbeat response has no authoritative config hash, so an empty command list is
+// ambiguous to existing clients: it can mean either "your non-empty hash still matches" or
+// "the effective config set is now empty". When the latter follows deletion of the last
+// matching config, send this stable no-op persistent command once. All telemetry SDKs accept
+// an empty push_config object without changing runtime settings and compute the same hash from
+// command ID, type, and payload.
+//
+// Empty-string and sentinel hashes are both accepted as the empty state. That keeps fresh
+// clients on the original empty hash while allowing a client with a stale non-empty hash to
+// converge without a protobuf change. The sentinel is synthesized at response time; it must
+// never be stored or exposed through the command APIs.
+const (
+	emptyConfigSentinelCommandID = "00000000-0000-0000-0000-000000000000"
+	emptyConfigSentinelHash      = "d34aea1518ff0217"
+)
+
+func newEmptyConfigSentinelCommand() *commonpb.ClientCommand {
+	return &commonpb.ClientCommand{
+		CommandId:   emptyConfigSentinelCommandID,
+		CommandType: "push_config",
+		Payload:     []byte("{}"),
+		CreateTime:  0,
+		TargetScope: "global",
+		Persistent:  true,
+	}
+}
+
+// normalize replaces values that cannot mean what they say with their defaults.
+//
+// It exists because a caller may build a TelemetryConfig field by field and leave zeroes
+// behind, and for most of these fields a zero is not a weaker setting but a broken one:
+//
+//   - CleanupInterval reaches time.NewTicker, which panics on a non-positive interval, so
+//     a zero takes down the coordinator rather than merely misbehaving.
+//   - InactiveClientThreshold and MaxClientsInMemory become "evict everyone on every
+//     sweep", and ClientStatusThreshold becomes "every client is inactive".
+//   - CommandCleanupTimeout becomes an already-expired context, so expired commands are
+//     never actually removed.
+//   - MaxOperationTypesPerClient truncates every heartbeat to no operations at all, which
+//     is the whole payload gone.
+//   - RetainedWindows leaves no window to answer a query from, so every client reports
+//     nothing forever.
+//
+// Silently behaving that way is far worse than ignoring the value, and no caller can have
+// meant any of it.
+//
+// MaxMetricsPerClient is deliberately not normalized. validateAndTruncateMetrics enforces
+// it only when positive, so zero already means "no cap" -- an operator who removed the
+// limit on purpose would get the default back if this touched it.
+//
+// Every path that installs a config runs this, so the invariant has one owner rather than
+// a check at each use.
+func (c *TelemetryConfig) normalize() {
+	defaults := DefaultTelemetryConfig()
+	if c.CleanupInterval <= 0 {
+		c.CleanupInterval = defaults.CleanupInterval
+	}
+	if c.InactiveClientThreshold <= 0 {
+		c.InactiveClientThreshold = defaults.InactiveClientThreshold
+	}
+	if c.ClientStatusThreshold <= 0 {
+		c.ClientStatusThreshold = defaults.ClientStatusThreshold
+	}
+	if c.CommandCleanupTimeout <= 0 {
+		c.CommandCleanupTimeout = defaults.CommandCleanupTimeout
+	}
+	if c.MaxOperationTypesPerClient < 1 {
+		c.MaxOperationTypesPerClient = defaults.MaxOperationTypesPerClient
+	}
+	if c.MaxClientsInMemory < 1 {
+		c.MaxClientsInMemory = defaults.MaxClientsInMemory
+	}
+	if c.MaxMetricsPerClient < 0 {
+		// Negative is not the documented "no cap" spelling, and the enforcement branch
+		// would skip it just the same, so treat it as the mistake it is.
+		c.MaxMetricsPerClient = defaults.MaxMetricsPerClient
+	}
+	if c.RetainedWindows < 1 {
+		c.RetainedWindows = defaultRetainedWindows
+	}
 }
 
 // DefaultTelemetryConfig returns the default configuration
@@ -66,6 +166,7 @@ func DefaultTelemetryConfig() *TelemetryConfig {
 		MaxMetricsPerClient:        1 * 1024 * 1024, // 1MB max per client
 		MaxOperationTypesPerClient: 100,             // Maximum 100 operation types
 		MaxClientsInMemory:         100000,          // Maximum 100k clients in memory
+		RetainedWindows:            defaultRetainedWindows,
 	}
 }
 
@@ -98,12 +199,21 @@ type ClientMetricsCache struct {
 	//
 	// Readers copy under RLock and do the expensive work -- proto cloning, JSON encoding --
 	// after releasing it. That is safe because these values are never mutated in place: a
-	// heartbeat replaces LatestMetrics wholesale, and CommandReplies is only ever appended
+	// heartbeat appends one window wholesale, and CommandReplies is only ever appended
 	// to or resliced, never written through. Holding the lock across a JSON encode of up to
 	// fifty replies would stall the heartbeat that is trying to record the next one.
-	mu             sync.RWMutex
-	ClientInfo     *commonpb.ClientInfo
-	LatestMetrics  []*commonpb.OperationMetrics
+	mu         sync.RWMutex
+	ClientInfo *commonpb.ClientInfo
+	// windows holds the TelemetryConfig.RetainedWindows most recent heartbeat windows, oldest first.
+	//
+	// Each heartbeat carries the operations since the previous one, and the counters behind
+	// it are reset as the client takes the snapshot, so a window is the whole record of an
+	// interval and there is nothing to accumulate across them. A heartbeat that carried no
+	// traffic is still a window and still takes a slot: an idle interval is data, not a gap.
+	//
+	// Retaining more than one exists so that a single idle interval does not blank the view
+	// of a client that is plainly still there -- see the note on servedMetricsLocked.
+	windows        [][]*commonpb.OperationMetrics
 	ConfigHash     string
 	LastCommandTS  int64
 	CommandReplies []*StoredCommandReply // Last N command replies from this client
@@ -122,22 +232,69 @@ type ClientMetricsCache struct {
 	ClientIDStable atomic.Bool
 }
 
+// servedMetricsLocked returns the window a telemetry query should report: last, or current
+// while last does not exist yet.
+//
+// A client's two retained windows are current -- the interval its most recent heartbeat
+// closed -- and last, the one before it. Reporting current would mean a client that idles
+// for a single interval reports nothing, even though it is connected and was busy moments
+// earlier: current truthfully says "no traffic since the last heartbeat", which reads as
+// "this client does nothing" to anyone looking at the API. Reporting last instead trades one
+// heartbeat interval of freshness for a view that a single quiet interval cannot blank.
+//
+// Until a second heartbeat arrives there is no last, and current is served rather than
+// nothing, so a client is visible from its first heartbeat instead of one interval later.
+//
+// Which window is served is positional, never conditional on what is in it: an empty window
+// is served like any other, and an idle client reports nothing once both windows are empty.
+// Reaching further back for the last window that happened to carry traffic would report
+// activity from an unbounded and unstated time ago as if it were current.
+//
+// Caller must hold c.mu.
+func (c *ClientMetricsCache) servedMetricsLocked() []*commonpb.OperationMetrics {
+	if len(c.windows) == 0 {
+		return nil
+	}
+	return c.windows[0]
+}
+
 // snapshot copies the guarded fields so a caller can clone, encode and aggregate without
 // holding mu. See the note on mu for why sharing these pointers past the unlock is safe.
 func (c *ClientMetricsCache) snapshot() (*commonpb.ClientInfo, []*commonpb.OperationMetrics, []*StoredCommandReply) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.ClientInfo, c.LatestMetrics, c.CommandReplies
+	return c.ClientInfo, c.servedMetricsLocked(), c.CommandReplies
+}
+
+// LatestWindow returns the metrics from this client's most recent heartbeat, which is what
+// it reported for the interval that just ended rather than what a telemetry query serves.
+func (c *ClientMetricsCache) LatestWindow() []*commonpb.OperationMetrics {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.windows) == 0 {
+		return nil
+	}
+	return c.windows[len(c.windows)-1]
 }
 
 // storeHeartbeat records everything a heartbeat carries in one critical section, so a
 // concurrent reader never sees the metrics of one heartbeat beside the config hash of
 // another.
-func (c *ClientMetricsCache) storeHeartbeat(info *commonpb.ClientInfo, metrics []*commonpb.OperationMetrics, configHash string, lastCommandTS int64) {
+// retain is TelemetryConfig.RetainedWindows, passed in because the cache is per client
+// while the setting belongs to the manager. It is already normalized to at least 1, so a
+// lowered setting takes effect on the next heartbeat by dropping the surplus windows.
+func (c *ClientMetricsCache) storeHeartbeat(info *commonpb.ClientInfo, metrics []*commonpb.OperationMetrics, configHash string, lastCommandTS int64, retain int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.ClientInfo = info
-	c.LatestMetrics = metrics
+	c.windows = append(c.windows, metrics)
+	if len(c.windows) > retain {
+		// Shift the survivors down rather than resliced off the front, so the dropped
+		// windows' slots are overwritten and stop keeping their metrics alive. Reslicing
+		// would leave those pointers in the backing array for as long as the client stays
+		// connected.
+		c.windows = append(c.windows[:0], c.windows[len(c.windows)-retain:]...)
+	}
 	c.ConfigHash = configHash
 	c.LastCommandTS = lastCommandTS
 }
@@ -195,6 +352,7 @@ func NewTelemetryManagerWithConfig(etcdClient *clientv3.Client, config *Telemetr
 	if config == nil {
 		config = DefaultTelemetryConfig()
 	}
+	config.normalize()
 
 	tm := &TelemetryManager{
 		commandStore: store,
@@ -216,6 +374,10 @@ func (m *TelemetryManager) SetCommandStore(store CommandStoreInterface) {
 
 // SetConfig updates the telemetry configuration
 func (m *TelemetryManager) SetConfig(config *TelemetryConfig) {
+	if config == nil {
+		config = DefaultTelemetryConfig()
+	}
+	config.normalize()
 	m.config = config
 }
 
@@ -460,6 +622,7 @@ func (m *TelemetryManager) HandleHeartbeat(req *milvuspb.ClientHeartbeatRequest)
 		m.validateAndTruncateMetrics(req.Metrics), // Validate and truncate metrics
 		req.ConfigHash,
 		req.LastCommandTimestamp,
+		m.config.RetainedWindows,
 	)
 	cache.ClientIDStable.Store(declaresStableClientID(req.GetClientInfo()))
 	cache.LastHeartbeat.Store(time.Now().UnixNano())
@@ -507,6 +670,12 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 	stored := make([]*StoredCommandReply, 0, len(replies))
 	for _, reply := range replies {
 		if reply == nil {
+			continue
+		}
+		// The empty-config sentinel is synthesized and has no command-store entry. Its ACK
+		// only confirms that the client adopted the sentinel hash; retaining it would expose
+		// a phantom command in reply history and make cleanup probe a reserved ID.
+		if reply.CommandId == emptyConfigSentinelCommandID {
 			continue
 		}
 
@@ -655,7 +824,19 @@ func (m *TelemetryManager) getCommandsForClientWithID(clientID string, req *milv
 		}
 	}
 
-	// Compute hash only over configs this client will receive
+	// The wire response has no authoritative hash. If the last matching config was deleted,
+	// an existing client still reports its old non-empty hash but an ordinary empty response
+	// cannot tell it to clear that hash. Transition only that stale state through a stable
+	// no-op persistent command. Fresh clients keep using the original empty hash, while both
+	// empty representations suppress future sentinel delivery.
+	if len(filteredConfigs) == 0 {
+		if req.ConfigHash != "" && req.ConfigHash != emptyConfigSentinelHash {
+			result = append(result, newEmptyConfigSentinelCommand())
+		}
+		return result
+	}
+
+	// Compute hash only over configs this client will receive.
 	filteredConfigHash := computeClientConfigHash(filteredConfigs)
 
 	// Only send configs if client's hash differs from filtered hash

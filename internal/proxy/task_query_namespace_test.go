@@ -53,10 +53,9 @@ func expectedNamespacePartitionID(namespace string, partitionNames []string, par
 
 func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestQueryTask_PlanNamespace_AfterPreExecute", t, func() {
-		// Setup global meta cache and common mocks
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock(validatePartitionTag).Return(nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
@@ -85,6 +84,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		}).Build()
 
 		task := &queryTask{
+			baseTask:        baseTask{MetaCache: cache},
 			Condition:       NewTaskCondition(context.Background()),
 			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 			ctx:             context.Background(),
@@ -115,7 +115,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 	mockey.PatchConvey("TestQueryTask_NamespaceSetsPartitionIDs", t, func() {
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 
 		partitionNames := []string{"_default_0", "_default_1"}
 		partitionIDs := map[string]int64{"_default_0": 101, "_default_1": 102}
@@ -126,7 +126,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		)
 
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(schema), nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionsIndex).Return(partitionNames, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
@@ -149,6 +149,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		for _, ns := range namespaces {
 			namespace := ns
 			task := &queryTask{
+				baseTask:        baseTask{MetaCache: cache},
 				Condition:       NewTaskCondition(context.Background()),
 				RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 				ctx:             context.Background(),

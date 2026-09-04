@@ -66,7 +66,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -202,7 +201,6 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
-	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -226,6 +224,37 @@ func (c *Core) GetMetaTable() IMetaTable {
 
 func (c *Core) GetQuotaCenter() *QuotaCenter {
 	return c.quotaCenter
+}
+
+func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
+	return c.proxyClientManager
+}
+
+func (c *Core) ServerExist(serverID int64) bool {
+	sessions, _, err := c.session.GetSessions(c.ctx, typeutil.ProxyRole)
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to get sessions", mlog.Err(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
+func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
+	c.proxyClientManager.SetProxyClients(sessions)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
+}
+
+func (c *Core) addProxyClient(session *sessionutil.Session) {
+	c.proxyClientManager.AddProxyClient(session)
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
 }
 
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
@@ -497,16 +526,16 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.SetProxyClients,
+		c.setProxyClients,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.addProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	// Initialize telemetry manager for client telemetry collection
-	c.telemetryMgr = telemetry.NewTelemetryManager(c.etcdCli)
+	c.telemetryMgr = telemetry.NewTelemetryManagerWithConfig(c.etcdCli, telemetryConfigFromParams())
 	mlog.Debug(context.TODO(), "init telemetry manager done")
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
@@ -3080,22 +3109,53 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
 
-	id, err := c.tsoAllocator.GenerateTSO(1)
-	if err != nil {
-		return merr.Status(err), nil
+	alreadyExists := false
+	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
+		resources, _ := c.meta.ListFileResource(ctx)
+		for _, resource := range resources {
+			if resource.GetName() != req.GetName() {
+				continue
+			}
+			if resource.GetPath() != req.GetPath() {
+				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
+			}
+			alreadyExists = true
+			break
+		}
+
+		if !alreadyExists {
+			size, err := c.storage.Size(ctx, req.GetPath())
+			if err != nil {
+				return merr.Status(err), nil
+			}
+			if size < 0 {
+				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
+			}
+			if size > maxFileSize {
+				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
+					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
+			}
+		}
 	}
-	resource := &internalpb.FileResourceInfo{
-		Id:   int64(id),
-		Name: req.GetName(),
-		Path: req.GetPath(),
-	}
-	err = c.meta.AddFileResource(ctx, resource)
-	if err != nil {
-		return merr.Status(err), nil
+
+	if !alreadyExists {
+		id, err := c.tsoAllocator.GenerateTSO(1)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		resource := &internalpb.FileResourceInfo{
+			Id:   int64(id),
+			Name: req.GetName(),
+			Path: req.GetPath(),
+		}
+		err = c.meta.AddFileResource(ctx, resource)
+		if err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	if c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
+		err := c.fileResourceObserver.Sync()
 		if err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil
@@ -3167,6 +3227,14 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 			}
 		}),
 	}, nil
+}
+
+// GetFileResources resolves file resources for other coordinators inside MixCoord.
+func (c *Core) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetFileResources(ctx, resourceIDs...)
 }
 
 func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {
@@ -3499,4 +3567,49 @@ func (c *Core) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClie
 	}
 
 	return c.telemetryMgr.DeleteCommand(ctx, req)
+}
+
+// ListClientCommands returns the commands the coordinator is currently holding for clients.
+//
+// The manager has been able to produce this list since the feature landed, but nothing
+// could reach it: there was no RPC, so the telemetry UI's command panel called an endpoint
+// that did not exist and showed an empty list no matter what was pending.
+func (c *Core) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("telemetry manager not initialized")),
+		}, nil
+	}
+
+	infos, err := c.telemetryMgr.ListAllCommands(ctx)
+	if err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	commands := make([]*commonpb.ClientCommand, 0, len(infos))
+	for _, info := range infos {
+		// Payload is deliberately left empty: the list is for showing what is outstanding,
+		// and a persistent config's payload can be large and hold whatever an operator put
+		// in it. Callers that need it can fetch the command itself.
+		commands = append(commands, &commonpb.ClientCommand{
+			CommandId:   info.CommandID,
+			CommandType: info.CommandType,
+			CreateTime:  info.CreateTime,
+			Persistent:  info.Persistent,
+			TargetScope: info.TargetScope,
+		})
+	}
+
+	return &rootcoordpb.ListClientCommandsResponse{
+		Status:   merr.Success(),
+		Commands: commands,
+	}, nil
 }
