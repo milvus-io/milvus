@@ -325,7 +325,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 }
 
 func TestUpsertTask(t *testing.T) {
-	t.Run("test getChannels", func(t *testing.T) {
+	t.Run("test GetChannels", func(t *testing.T) {
 		collectionID := UniqueID(0)
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
@@ -339,16 +339,16 @@ func TestUpsertTask(t *testing.T) {
 		chMgr := channelmgr.NewMockChannelsMgr(t)
 		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
-			baseTask: baseTask{metaCache: cache},
+			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
 			req: &milvuspb.UpsertRequest{
 				CollectionName: collectionName,
 			},
 			chMgr: chMgr,
 		}
-		err := ut.setChannels()
+		err := ut.SetChannels()
 		assert.NoError(t, err)
-		resChannels := ut.getChannels()
+		resChannels := ut.GetChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, ut.pChannels)
 	})
@@ -457,7 +457,7 @@ func TestUpsertTask_Function(t *testing.T) {
 	defer idAllocator.Close()
 	assert.NoError(t, err)
 	task := upsertTask{
-		baseTask: baseTask{metaCache: &MetaCache{}},
+		baseTask: baseTask{MetaCache: &MetaCache{}},
 		ctx:      context.Background(),
 		req: &milvuspb.UpsertRequest{
 			CollectionName: collectionName,
@@ -502,7 +502,7 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
 		ut := upsertTask{
-			baseTask: baseTask{metaCache: mockCache},
+			baseTask: baseTask{MetaCache: mockCache},
 			ctx:      ctx,
 			req: &milvuspb.UpsertRequest{
 				CollectionName: "col-0",
@@ -531,7 +531,7 @@ func createTestUpdateTask() *upsertTask {
 	mcClient := &grpcmixcoordclient.Client{}
 
 	upsertTask := &upsertTask{
-		baseTask:  baseTask{metaCache: &MetaCache{}},
+		baseTask:  baseTask{MetaCache: &MetaCache{}},
 		Condition: NewTaskCondition(context.Background()),
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -1516,7 +1516,7 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
 
 			task := &insertTask{
-				baseTask: baseTask{metaCache: &MetaCache{}},
+				baseTask: baseTask{MetaCache: &MetaCache{}},
 				ctx:      context.Background(),
 				insertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
@@ -4186,7 +4186,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				baseTask: baseTask{metaCache: &MetaCache{}},
+				baseTask: baseTask{MetaCache: &MetaCache{}},
 				ctx:      ctx,
 				schema:   schema,
 				req: &milvuspb.UpsertRequest{
@@ -4303,7 +4303,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				baseTask: baseTask{metaCache: &MetaCache{}},
+				baseTask: baseTask{MetaCache: &MetaCache{}},
 				ctx:      ctx,
 				schema:   schema,
 				req: &milvuspb.UpsertRequest{

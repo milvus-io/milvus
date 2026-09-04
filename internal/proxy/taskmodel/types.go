@@ -14,15 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package taskmodel
 
-// vChan shortcuts for virtual channel.
-type vChan = string
+import (
+	"context"
 
-// pChan shortcuts for physical channel.
-type pChan = string
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
 
-type pChanStatistics struct {
-	minTs Timestamp
-	maxTs Timestamp
+// UniqueID is an alias of typeutil.UniqueID.
+type UniqueID = typeutil.UniqueID
+
+// Timestamp is an alias of typeutil.Timestamp.
+type Timestamp = typeutil.Timestamp
+
+// VChan shortcuts for virtual channel.
+type VChan = string
+
+// PChan shortcuts for physical channel.
+type PChan = string
+
+// PChanStatistics holds the min/max timestamp of a physical channel's DML.
+type PChanStatistics struct {
+	MinTs Timestamp
+	MaxTs Timestamp
+}
+
+// TsoAllocator allocates timestamps. It is the interface implemented by the
+// proxy's timestamp allocator and consumed by the task scheduler.
+type TsoAllocator interface {
+	AllocOne(ctx context.Context) (Timestamp, error)
 }

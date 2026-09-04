@@ -46,7 +46,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -431,7 +433,7 @@ func TestProxyRenameCollection(t *testing.T) {
 
 func TestProxyFunctionEdit(t *testing.T) {
 	mockey.PatchConvey("TestProxy_AddFunction", t, func() {
-		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+		m1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 			return nil
 		}).Build()
 		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -458,7 +460,7 @@ func TestProxyFunctionEdit(t *testing.T) {
 	})
 
 	mockey.PatchConvey("TestProxy_DropFunction", t, func() {
-		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+		m1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 			return nil
 		}).Build()
 		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -479,7 +481,7 @@ func TestProxyFunctionEdit(t *testing.T) {
 	})
 
 	mockey.PatchConvey("TestProxy_AlterFunction", t, func() {
-		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+		m1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 			return nil
 		}).Build()
 		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -524,7 +526,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns)
+	node.sched, err = scheduler.NewTaskScheduler(node.ctx, tsoAllocatorIns)
 	assert.NoError(t, err)
 	node.sched.Start()
 	defer node.sched.Close()
@@ -608,7 +610,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 	tsoAllocatorIns := newMockTsoAllocator()
-	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns)
+	node.sched, err = scheduler.NewTaskScheduler(node.ctx, tsoAllocatorIns)
 	assert.NoError(t, err)
 	node.sched.Start()
 	defer node.sched.Close()
@@ -667,7 +669,7 @@ func createTestProxy() *Proxy {
 		tso: newMockTimestampAllocatorInterface(),
 	}
 
-	node.sched, _ = newTaskScheduler(ctx, node.tsoAllocator)
+	node.sched, _ = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
 	node.sched.Start()
 
 	return node
@@ -1102,8 +1104,8 @@ func TestProxyCreateDatabase(t *testing.T) {
 	}
 	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
-	node.sched.ddQueue.setMaxTaskNum(10)
+	node.sched, err = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
+	node.sched.DdQueue.SetMaxTaskNum(10)
 	assert.NoError(t, err)
 	err = node.sched.Start()
 	assert.NoError(t, err)
@@ -1157,8 +1159,8 @@ func TestProxyDropDatabase(t *testing.T) {
 	}
 	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
-	node.sched.ddQueue.setMaxTaskNum(10)
+	node.sched, err = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
+	node.sched.DdQueue.SetMaxTaskNum(10)
 	assert.NoError(t, err)
 	err = node.sched.Start()
 	assert.NoError(t, err)
@@ -1219,8 +1221,8 @@ func TestProxyListDatabase(t *testing.T) {
 	}
 	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
-	node.sched.ddQueue.setMaxTaskNum(10)
+	node.sched, err = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
+	node.sched.DdQueue.SetMaxTaskNum(10)
 	assert.NoError(t, err)
 	err = node.sched.Start()
 	assert.NoError(t, err)
@@ -1275,8 +1277,8 @@ func TestProxyAlterDatabase(t *testing.T) {
 	}
 	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
-	node.sched.ddQueue.setMaxTaskNum(10)
+	node.sched, err = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
+	node.sched.DdQueue.SetMaxTaskNum(10)
 	assert.NoError(t, err)
 	err = node.sched.Start()
 	assert.NoError(t, err)
@@ -1328,8 +1330,8 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	}
 	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
-	node.sched.ddQueue.setMaxTaskNum(10)
+	node.sched, err = scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
+	node.sched.DdQueue.SetMaxTaskNum(10)
 	assert.NoError(t, err)
 	err = node.sched.Start()
 	assert.NoError(t, err)
@@ -1581,7 +1583,7 @@ func TestProxy_Delete(t *testing.T) {
 		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
 		assert.NoError(t, err)
 
-		queue, err := newTaskScheduler(ctx, tsoAllocator)
+		queue, err := scheduler.NewTaskScheduler(ctx, tsoAllocator)
 		assert.NoError(t, err)
 
 		node := &Proxy{metaCache: cache, chMgr: chMgr, rowIDAllocator: idAllocator, sched: queue}
@@ -1612,7 +1614,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}
-		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
+		scheduler, err := scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
 		assert.NoError(t, err)
 		node.sched = scheduler
 		err = node.sched.Start()
@@ -1900,7 +1902,7 @@ func TestRunAnalyzer(t *testing.T) {
 	p := &Proxy{}
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	sched, err := newTaskScheduler(ctx, tsoAllocatorIns)
+	sched, err := scheduler.NewTaskScheduler(ctx, tsoAllocatorIns)
 	require.NoError(t, err)
 	sched.Start()
 	defer sched.Close()
@@ -3090,7 +3092,7 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	}, nil).Build()
 	defer mockDescribe.UnPatch()
 
-	mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+	mockEnqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, queued taskmodel.Task) error {
 		_ = queued.OnEnqueue()
 		addTask := queued.(*addCollectionFieldTask)
 		assert.Equal(t, externalSchema, addTask.oldSchema)
@@ -3193,7 +3195,7 @@ func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
 			}, nil).Build()
 			defer mockDescribe.UnPatch()
 
-			mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+			mockEnqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, queued taskmodel.Task) error {
 				require.NoError(t, queued.OnEnqueue())
 				addTask := queued.(*addCollectionFieldTask)
 				err := addTask.PreExecute(context.Background())
@@ -3240,7 +3242,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 					require.FailNow(t, "AddCollectionField should not query collection statistics")
 					return nil, errors.New("unexpected GetCollectionStatistics call")
 				}).Build()
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
 				addTask.result = merr.Success()
@@ -3269,7 +3271,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
 				Status: merr.Success(),
 			}, nil).Build()
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
 				addTask.result = merr.Success()
@@ -3591,7 +3593,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 					require.FailNow(t, "AlterCollectionSchema should not query collection statistics")
 					return nil, errors.New("unexpected GetCollectionStatistics call")
 				}).Build()
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				alterTask := t.(*alterCollectionSchemaTask)
 				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
@@ -3620,7 +3622,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
 				Status: merr.Success(),
 			}, nil).Build()
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				alterTask := t.(*alterCollectionSchemaTask)
 				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
@@ -3672,7 +3674,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
 
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, _ task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, _ taskmodel.Task) error {
 				return errors.New("queue full")
 			}).Build()
 
@@ -3695,7 +3697,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			}, nil).Build()
 
 			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				return nil
 			}).Build()
@@ -3721,7 +3723,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			}, nil).Build()
 
 			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
-			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				return nil
 			}).Build()

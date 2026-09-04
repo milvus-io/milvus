@@ -201,7 +201,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	defer tr.Elapse("insert execute done when insertExecute")
 
 	collectionName := ut.upsertMsg.InsertMsg.CollectionName
-	collID, err := ut.getMetaCache().GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
+	collID, err := ut.GetMetaCache().GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -231,9 +231,9 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
