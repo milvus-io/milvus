@@ -35,6 +35,33 @@ func Test_GetPrivilegeExtObjAlterRole(t *testing.T) {
 	assert.True(t, proto.Equal(&createRolePrivilege, &alterRolePrivilege))
 }
 
+func TestRLSManagementPrivilegeAnnotations(t *testing.T) {
+	tests := []struct {
+		name      string
+		request   any
+		privilege commonpb.ObjectPrivilege
+	}{
+		{name: "create policy", request: &milvuspb.CreateRowPolicyRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeManageRLS},
+		{name: "update policy", request: &milvuspb.UpdateRowPolicyRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeManageRLS},
+		{name: "drop policy", request: &milvuspb.DropRowPolicyRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeManageRLS},
+		{name: "set principal tags", request: &milvuspb.SetRLSPrincipalTagsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeManageRLS},
+		{name: "delete principal tags", request: &milvuspb.DeleteRLSPrincipalTagsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeManageRLS},
+		{name: "list policies", request: &milvuspb.ListRowPoliciesRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
+		{name: "get principal tags", request: &milvuspb.GetRLSPrincipalTagsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
+		{name: "list principals", request: &milvuspb.ListRLSPrincipalsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			privilegeExt, err := GetPrivilegeExtObj(test.request)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ObjectType_Collection, privilegeExt.ObjectType)
+			assert.Equal(t, test.privilege, privilegeExt.ObjectPrivilege)
+			assert.Equal(t, int32(3), privilegeExt.ObjectNameIndex)
+		})
+	}
+}
+
 func Test_GetResourceName(t *testing.T) {
 	{
 		request := &milvuspb.HasCollectionRequest{

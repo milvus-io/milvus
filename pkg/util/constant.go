@@ -92,6 +92,9 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeInsert.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDelete.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpsert.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSkipRLS.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeViewRLS.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageRLS.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
@@ -282,6 +285,9 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeInsert.String(),
 		commonpb.ObjectPrivilege_PrivilegeDelete.String(),
 		commonpb.ObjectPrivilege_PrivilegeUpsert.String(),
+		commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(),
+		commonpb.ObjectPrivilege_PrivilegeViewRLS.String(),
+		commonpb.ObjectPrivilege_PrivilegeManageRLS.String(),
 		commonpb.ObjectPrivilege_PrivilegeImport.String(),
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
 		commonpb.ObjectPrivilege_PrivilegeCompaction.String(),
@@ -371,6 +377,9 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(),
+			commonpb.ObjectPrivilege_PrivilegeViewRLS.String(),
+			commonpb.ObjectPrivilege_PrivilegeManageRLS.String(),
 		})...,
 	)
 

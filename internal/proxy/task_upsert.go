@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -62,6 +65,8 @@ type upsertTask struct {
 	idAllocator      *allocator.IDAllocator
 	collectionID     UniqueID
 	chMgr            channelmgr.ChannelsMgr
+	rlsEnabled       bool
+	rlsForce         bool
 	vChannels        []vChan
 	pChannels        []pChan
 	schema           *schemaInfo
@@ -193,7 +198,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		CollectionName:        t.req.GetCollectionName(),
 		ConsistencyLevel:      commonpb.ConsistencyLevel_Customized,
 		NotReturnAllMeta:      false,
-		OutputFields:          []string{"*"},
+		OutputFields:          outputFields,
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    readTS,
 		Namespace:             t.req.Namespace,
@@ -251,6 +256,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		shardclientMgr:         t.node.(*Proxy).shardMgr,
 		chMgr:                  t.node.(*Proxy).chMgr,
 		fixedSnapshotTimestamp: readTS,
+		skipRuntimeRLS:         true,
 	}
 	// Pin the query snapshot to the read timestamp carried by the CAS write.
 	qt.MvccTimestamp = readTS
@@ -266,7 +272,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	return queryResult, storageCost, err
 }
 
-func (it *upsertTask) queryPreExecute(ctx context.Context) error {
+func (it *upsertTask) queryPreExecute(ctx context.Context, mergePartialData bool) error {
 	log := mlog.With(mlog.String("collectionName", it.req.CollectionName))
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
@@ -295,9 +301,28 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return nil
 	}
 
+	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert")
+	if err != nil {
+		return err
+	}
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: it.schema.SchemaHelper.GetTimezone()}
+	var (
+		usingExpr     *planpb.Expr
+		usingErr      error
+		usingResolved bool
+	)
+	if !mergePartialData {
+		usingExpr, usingErr = rls.DefaultManager().GetRLSUsingPredicate(ctx, it.collectionID, principalName, rlsutil.PolicyActionUpsert, enforceRLS, it.schema.SchemaHelper, visitorArgs)
+		usingResolved = true
+	}
+	outputFields, err := upsertRetrieveOutputFields(it.schema.SchemaHelper, primaryFieldSchema, usingExpr, mergePartialData)
+	if err != nil {
+		return err
+	}
+
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
 	// retrieve by primary key to get original field data
-	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
+	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, outputFields)
 	if err != nil {
 		log.Info(ctx, "retrieve by primary key failed", mlog.Err(err))
 		return err
@@ -305,6 +330,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
 	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
 	if len(resp.GetFieldsData()) == 0 {
+		if !mergePartialData {
+			return nil
+		}
 		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
 	}
 
@@ -319,9 +347,26 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		log.Info(ctx, "parse primary field data to ids failed", mlog.Err(err))
 		return err
 	}
+	existRowNum := typeutil.GetSizeOfIDs(existIDs)
+	if existRowNum > 0 {
+		if !usingResolved {
+			usingExpr, usingErr = rls.DefaultManager().GetRLSUsingPredicate(ctx, it.collectionID, principalName, rlsutil.PolicyActionUpsert, enforceRLS, it.schema.SchemaHelper, visitorArgs)
+		}
+		if usingErr != nil {
+			return usingErr
+		}
+		if err := rls.ValidateUsingPredicateForExistingRows(ctx, existFieldData, existRowNum, "upsert", usingExpr); err != nil {
+			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
+			return err
+		}
+	}
 	log.Info(ctx, "retrieveByPKs cost",
-		mlog.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
+		mlog.Int("resultNum", existRowNum),
 		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()))
+
+	if !mergePartialData {
+		return nil
+	}
 
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
@@ -672,6 +717,29 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryField *schemapb.FieldSchema, usingExpr *planpb.Expr, mergePartialData bool) ([]string, error) {
+	if mergePartialData {
+		return []string{"*"}, nil
+	}
+	if schemaHelper == nil || primaryField == nil {
+		return nil, merr.WrapErrServiceInternalMsg("failed to resolve upsert retrieve fields without schema metadata")
+	}
+	outputFields := []string{primaryField.GetName()}
+	seen := map[int64]struct{}{primaryField.GetFieldID(): {}}
+	for _, fieldID := range rls.ReferencedFieldIDs(usingExpr) {
+		if _, ok := seen[fieldID]; ok {
+			continue
+		}
+		field, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to resolve RLS upsert field %d", fieldID)
+		}
+		seen[fieldID] = struct{}{}
+		outputFields = append(outputFields, field.GetName())
+	}
+	return outputFields, nil
 }
 
 // ToCompressedFormatNullable converts nullable field data from full format to compressed format.
@@ -1519,6 +1587,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert")
+	if err != nil {
+		return err
+	}
+	if err := rls.ValidateCheckForWrite(ctx, it.collectionID, principalName,
+		rlsutil.PolicyActionUpsert, enforceRLS, it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, int(it.upsertMsg.InsertMsg.NRows()), "upsert"); err != nil {
+		log.Warn(ctx, "RLS check expression validation failed for upsert", mlog.Err(err))
+		return err
+	}
+
 	log.Debug(ctx, "Proxy Upsert insertPreExecute done")
 
 	return nil
@@ -1602,6 +1680,8 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
+	it.rlsEnabled = colInfo.RlsEnabled
+	it.rlsForce = colInfo.RlsForce
 
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.UpdateTimestamp {
@@ -1737,15 +1817,26 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			log.Warn(ctx, "Fail to prepare partial update CAS metadata", mlog.Err(err))
 			return err
 		}
-		err = it.queryPreExecute(ctx)
+	}
+
+	it.rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), it.rlsEnabled, it.rlsForce, it.req.GetSkipRls(),
+		it.req.GetDbName(), collectionName, "upsert")
+	if err != nil {
+		return err
+	}
+
+	if it.req.GetPartialUpdate() || it.rlsEnabled {
+		err = it.queryPreExecute(ctx, it.req.GetPartialUpdate())
 		if err != nil {
 			log.Warn(ctx, "Fail to queryPreExecute", mlog.Err(err))
 			return err
 		}
-		// reconstruct upsert msg after queryPreExecute
-		it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
-		it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
-		it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
+		if it.req.GetPartialUpdate() {
+			// reconstruct upsert msg after queryPreExecute
+			it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
+			it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
+			it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
+		}
 	}
 
 	err = it.insertPreExecute(ctx)

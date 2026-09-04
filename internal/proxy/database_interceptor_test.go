@@ -216,6 +216,14 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.ExportSnapshotRequest{},
 			&milvuspb.RefreshExternalCollectionRequest{},
 			&milvuspb.ListRefreshExternalCollectionJobsRequest{},
+			&milvuspb.CreateRowPolicyRequest{},
+			&milvuspb.UpdateRowPolicyRequest{},
+			&milvuspb.DropRowPolicyRequest{},
+			&milvuspb.ListRowPoliciesRequest{},
+			&milvuspb.SetRLSPrincipalTagsRequest{},
+			&milvuspb.GetRLSPrincipalTagsRequest{},
+			&milvuspb.ListRLSPrincipalsRequest{},
+			&milvuspb.DeleteRLSPrincipalTagsRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")
