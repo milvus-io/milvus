@@ -2419,7 +2419,9 @@ type proxyConfig struct {
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
-	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
+	SearchPlaceholderLogEnabled   ParamItem `refreshable:"true"`
+	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -3074,6 +3076,24 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
+
+	p.SearchPlaceholderLogRateLimit = ParamItem{
+		Key:          "proxy.searchPlaceholderLogRateLimit",
+		Version:      "2.6.23",
+		Doc:          "The maximum number of search placeholder (query vector/text) info log entries emitted per second. Set to 0 to disable.",
+		DefaultValue: "50",
+		Export:       false,
+	}
+	p.SearchPlaceholderLogRateLimit.Init(base.mgr)
+
+	p.SearchPlaceholderLogEnabled = ParamItem{
+		Key:          "proxy.searchPlaceholderLogEnabled",
+		Version:      "2.6.23",
+		Doc:          "Whether to emit search placeholder (query vector/text) info log entries. Controlled rate is configured by proxy.searchPlaceholderLogRateLimit.",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.SearchPlaceholderLogEnabled.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
