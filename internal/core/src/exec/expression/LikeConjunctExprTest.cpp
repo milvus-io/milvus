@@ -91,6 +91,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto title_fid = schema->AddDebugField("title", DataType::VARCHAR);
+    auto try_fid = schema->AddDebugField("try", DataType::VARCHAR);
     auto content_fid = schema->AddDebugField("content", DataType::VARCHAR);
     schema->set_primary_field_id(pk_fid);
 
@@ -169,7 +170,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
         [&](FieldId field_id,
             const boost::container::vector<std::string>& data,
             int64_t index_id,
-            int64_t field_index_build_id) {
+            int64_t field_index_build_id,
+            bool with_warmup = false) {
             auto field_meta = gen_field_meta(collection_id,
                                              partition_id,
                                              segment_id,
@@ -252,6 +254,9 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             load_index_info.index_files = index_files;
             load_index_info.schema = field_meta.field_schema;
             load_index_info.index_size = 1024 * 1024;
+            if (with_warmup) {
+                load_index_info.warmup_policy = "sync";
+            }
 
             uint8_t trace_id[16] = {0};
             uint8_t span_id[8] = {0};
@@ -263,7 +268,9 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             auto cload_index_info =
                 static_cast<CLoadIndexInfo>(&load_index_info);
             AppendIndexV2(trace, cload_index_info);
-            segment->LoadIndex(load_index_info);
+            if (!with_warmup) {
+                segment->LoadIndex(load_index_info);
+            }
         };
 
     // Load pk field
@@ -358,6 +365,6 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     }
 
     EXPECT_EQ(actual_pks, expected_pks);
-
+    load_varchar_field_with_ngram(try_fid, title_data, 5001, 4001, true);
     EXEC_EVAL_EXPR_BATCH_SIZE.store(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 }
