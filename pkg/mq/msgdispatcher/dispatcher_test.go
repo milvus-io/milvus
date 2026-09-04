@@ -184,3 +184,17 @@ func TestGroupMessage(t *testing.T) {
 	}), nil)
 	assert.Len(t, packs, 2)
 }
+
+func TestSeekablePosition(t *testing.T) {
+	// The predicate a caller must agree with, because a dispatcher that skips
+	// the seek leaves the stream half-built and the delegator adaptor panics on
+	// the first read.
+	assert.False(t, SeekablePosition(nil))
+	assert.False(t, SeekablePosition(&Pos{}),
+		"no message ID and no WAL name: the seek is skipped")
+	assert.False(t, SeekablePosition(&Pos{Timestamp: 42}),
+		"a timestamp alone is not enough to seek from")
+	assert.True(t, SeekablePosition(&Pos{MsgID: []byte{1}}))
+	assert.True(t, SeekablePosition(&Pos{WALName: commonpb.WALName_WoodPecker}),
+		"only WoodPecker may legitimately seek from an empty message ID")
+}

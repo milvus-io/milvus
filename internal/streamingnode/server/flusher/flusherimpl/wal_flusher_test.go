@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -774,4 +775,123 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 		read.Maybe()
 	}
 	return w
+}
+
+func newFlusherCreateVChannelMessage(t *testing.T, vchannel string, collectionID int64) message.ImmutableCreateVChannelMessageV2 {
+	t.Helper()
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:         collectionID,
+			PartitionIds:         []int64{2},
+			SplitTaskId:          100,
+			SplitSourceVchannels: []string{"v1"},
+			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
+			RoutingModulus:       2,
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+	return message.MustAsImmutableCreateVChannelMessageV2(msg)
+}
+
+func TestFlusherWhenCreateVChannelAlreadyBuilt(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	// a data sync service already exists for the target vchannel: skip the spawn.
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherCreateVChannelMessage(t, "v2", 7))
+	assert.Len(t, flusher.flusherComponents.dataServices, 1)
+}
+
+func TestFlusherWhenCreateVChannelOlderThanCheckpoint(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.recoveryCheckPointTimeTick = 1000
+	// the genesis is older than the recovery checkpoint: skip the spawn.
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherCreateVChannelMessage(t, "v2", 7))
+	assert.Empty(t, flusher.flusherComponents.dataServices)
+}
+
+// dispatch must NOT forward a CreateVChannel message to the data sync service
+// after spawning its genesis DSS. CreateVChannel is a V2 message and the msgpack
+// adaptor (fromMessageToTsMsgV2) has no case for it, so forwarding it would panic
+// ("unsupported message type"). The CreateCollection branch survives the same
+// fall-through only because it is a V1 message handled by the unmarshaler path.
+// Pre-populating dataServices makes spawnGenesisDataSyncService short-circuit (so
+// no real pipeline is built) while preserving the forward path that, without the
+// dispatch's `return nil`, would reach the panic.
+func TestWALFlusher_DispatchCreateVChannelDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel("v2").
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:         7,
+			PartitionIds:         []int64{2},
+			SplitTaskId:          100,
+			SplitSourceVchannels: []string{"v1"},
+			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
+			RoutingModulus:       2,
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+}
+
+// TestWALFlusher_DispatchDropVChannelDoesNotForward is the mirror of the
+// CreateVChannel case, and it exists for the same reason.
+//
+// DropVChannel is a V2 message and the msgpack adaptor (fromMessageToTsMsgV2)
+// has no case for it, so forwarding it to the data sync service would panic the
+// process with "unsupported message type". DropCollection survives the same
+// fall-through only because it is V1 and goes through the unmarshaler path.
+// Closing the data sync service and returning is the whole handling.
+func TestWALFlusher_DispatchDropVChannelDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+
+	closed := 0
+	mockClose := mockey.Mock((*dataSyncServiceWrapper).Close).To(func(ds *dataSyncServiceWrapper) {
+		closed++
+	}).Build()
+	defer mockClose.UnPatch()
+
+	msg := message.NewDropVChannelMessageBuilderV2().
+		WithVChannel("v2").
+		WithHeader(&message.DropVChannelMessageHeader{
+			CollectionId: 7,
+			SplitTaskId:  100,
+		}).
+		WithBody(&message.DropVChannelMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	// The retired vchannel must stop holding a flusher.
+	assert.Equal(t, 1, closed)
+	assert.Empty(t, flusher.flusherComponents.dataServices)
 }

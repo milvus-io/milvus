@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/binary"
+	"math"
 	"math/bits"
 	"strconv"
 	"strings"
@@ -283,7 +284,34 @@ const (
 	CollectionExternalSource    = "collection.external_source"
 	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
-	MaxTTLSeconds               = 3155760000 // 100 years
+	// CollectionShardNum is the DESIRED shard count of a collection.
+	// Setting it through AlterCollection asks for a rehash; it is declarative, so
+	// the property records the target and datacoord reconciles the collection
+	// toward it. The achieved count is DescribeCollection's shards_num, which
+	// only reaches this value once the rehash completes.
+	CollectionShardNum = "collection.shardNum"
+
+	// CollectionShardSplitMode selects who owns a collection's shard count.
+	//
+	// The two modes are exclusive (design decision 10) and the choice is per
+	// COLLECTION, not per cluster: one collection can be sized automatically
+	// while another next to it is sized by hand. Absent means automatic, so a
+	// collection that never says anything is managed for the user.
+	//
+	//   "auto"   the size trigger splits over-loaded shards; CollectionShardNum
+	//            is refused, because the trigger owns the count.
+	//   "manual" the trigger skips the collection entirely and the count is the
+	//            user's to set through CollectionShardNum.
+	//
+	// dataCoord.shardSplit.autoTriggerEnable stays a cluster-wide kill switch
+	// over the trigger. With it off, every collection is effectively manual --
+	// otherwise an "auto" collection would be managed by nobody AND unsettable
+	// by hand, which is the one combination that helps no one.
+	CollectionShardSplitMode = "collection.shardSplitMode"
+
+	ShardSplitModeAuto   = "auto"
+	ShardSplitModeManual = "manual"
+	MaxTTLSeconds        = 3155760000 // 100 years
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -960,6 +988,57 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 		return "", false
 	}
 	return kv.GetValue(), true
+}
+
+// ParseShardSplitMode reads CollectionShardSplitMode out of a property list,
+// returning the canonical value.
+//
+// An unrecognized value is an error rather than a fall back to the default: a
+// typo that silently meant "auto" would hand the size trigger a collection the
+// operator believes they control by hand.
+func ParseShardSplitMode(kvs []*commonpb.KeyValuePair) (mode string, exist bool, parseErr error) {
+	for _, kv := range kvs {
+		if kv.GetKey() != CollectionShardSplitMode {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(kv.GetValue())) {
+		case ShardSplitModeAuto:
+			return ShardSplitModeAuto, true, nil
+		case ShardSplitModeManual:
+			return ShardSplitModeManual, true, nil
+		default:
+			return "", true, merr.WrapErrParameterInvalidMsg("%s must be %q or %q, got %q",
+				CollectionShardSplitMode, ShardSplitModeAuto, ShardSplitModeManual, kv.GetValue())
+		}
+	}
+	return ShardSplitModeAuto, false, nil
+}
+
+// ShardSplitModeOf reads the mode out of a collection's property map, defaulting
+// to automatic. An unparseable stored value reads as the default rather than
+// failing a scan: it was refused when it was set.
+func ShardSplitModeOf(properties map[string]string) string {
+	switch strings.ToLower(strings.TrimSpace(properties[CollectionShardSplitMode])) {
+	case ShardSplitModeManual:
+		return ShardSplitModeManual
+	default:
+		return ShardSplitModeAuto
+	}
+}
+
+// GetDesiredShardNum reads the requested shard count from a collection's
+// properties. Returns exist=false when the collection has never been asked to
+// change it.
+func GetDesiredShardNum(kvs []*commonpb.KeyValuePair) (num int32, parseErr error, exist bool) {
+	value, err, ok := GetInt64Value(kvs, CollectionShardNum)
+	if !ok || err != nil {
+		return 0, err, ok
+	}
+	if value <= 0 || value > math.MaxInt32 {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"%s must be a positive int32, got %d", CollectionShardNum, value), true
+	}
+	return int32(value), nil, true
 }
 
 func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {

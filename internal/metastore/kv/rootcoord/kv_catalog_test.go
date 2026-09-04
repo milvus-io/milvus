@@ -1084,6 +1084,64 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		assert.Equal(t, newSpec, got.ExternalSpec)
 	})
 
+	// A shard-split routing commit reaches etcd through this path and no other.
+	// The whole topology has to survive it: the residues are read against the
+	// collection's modulus, so a record that keeps the shard infos but loses the
+	// modulus reads back as split-with-no-arithmetic and no routing table can be
+	// derived from it.
+	t.Run("modify shard split routing", func(t *testing.T) {
+		snapshot := mocks.NewTxnKV(t)
+		kvs := map[string]string{}
+		snapshot.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saveKvs map[string]string) error {
+			for k, v := range saveKvs {
+				kvs[k] = v
+			}
+			return nil
+		})
+		kc := NewCatalog(snapshot).(*Catalog)
+		ctx := context.Background()
+		var collectionID int64 = 1
+		oldC := &model.Collection{
+			CollectionID:         collectionID,
+			State:                pb.CollectionState_CollectionCreated,
+			ShardsNum:            1,
+			VirtualChannelNames:  []string{"v0"},
+			PhysicalChannelNames: []string{"p0"},
+			ShardInfos: map[string]*model.ShardInfo{
+				"v0": {VChannelName: "v0", PChannelName: "p0"},
+			},
+		}
+		newC := &model.Collection{
+			CollectionID:         collectionID,
+			State:                pb.CollectionState_CollectionCreated,
+			UpdateTimestamp:      rand.Uint64(),
+			ShardsNum:            2,
+			VirtualChannelNames:  []string{"v0", "v1", "v2"},
+			PhysicalChannelNames: []string{"p0", "p1", "p2"},
+			RoutingModulus:       2,
+			ShardBy:              "hash(pk)",
+			ShardInfos: map[string]*model.ShardInfo{
+				"v0": {VChannelName: "v0", PChannelName: "p0", State: schemapb.ShardState_ShardSplitting},
+				"v1": {VChannelName: "v1", PChannelName: "p1", State: schemapb.ShardState_ShardCreating, Buckets: []uint64{0}},
+				"v2": {VChannelName: "v2", PChannelName: "p2", State: schemapb.ShardState_ShardCreating, Buckets: []uint64{1}},
+			},
+		}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, false)
+		assert.NoError(t, err)
+		value, ok := kvs[BuildCollectionKey(0, collectionID)]
+		assert.True(t, ok)
+		var collPb pb.CollectionInfo
+		assert.NoError(t, proto.Unmarshal([]byte(value), &collPb))
+		got := model.UnmarshalCollectionModel(&collPb)
+		assert.EqualValues(t, 2, got.RoutingModulus)
+		assert.Equal(t, "hash(pk)", got.ShardBy)
+		assert.EqualValues(t, 2, got.ShardsNum)
+		assert.Equal(t, []string{"v0", "v1", "v2"}, got.VirtualChannelNames)
+		assert.Equal(t, schemapb.ShardState_ShardSplitting, got.ShardInfos["v0"].State)
+		assert.Equal(t, []uint64{0}, got.ShardInfos["v1"].Buckets)
+		assert.Equal(t, []uint64{1}, got.ShardInfos["v2"].Buckets)
+	})
+
 	t.Run("modify EnableDynamicField and SchemaVersion", func(t *testing.T) {
 		snapshot := mocks.NewTxnKV(t)
 		kvs := map[string]string{}

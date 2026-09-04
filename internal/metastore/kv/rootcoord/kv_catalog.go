@@ -769,6 +769,13 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.EnableDynamicField = newColl.EnableDynamicField
 	oldCollClone.SchemaVersion = newColl.SchemaVersion
 	oldCollClone.ShardInfos = newColl.ShardInfos
+	// RoutingModulus and ShardBy travel WITH ShardInfos, never apart from it: the
+	// residues in a shard info are meaningless without the modulus they are taken
+	// against, so persisting one and dropping the other leaves a record that reads
+	// back as "split, but with no arithmetic to route by" -- which no consumer can
+	// derive a table from.
+	oldCollClone.RoutingModulus = newColl.RoutingModulus
+	oldCollClone.ShardBy = newColl.ShardBy
 	oldCollClone.ExternalSource = newColl.ExternalSource
 	oldCollClone.ExternalSpec = newColl.ExternalSpec
 

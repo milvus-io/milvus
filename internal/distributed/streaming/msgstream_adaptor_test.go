@@ -4,8 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 )
 
 func TestDelegatorMsgstreamFactory(t *testing.T) {
@@ -160,5 +164,36 @@ func TestDelegatorMsgstreamAdaptor(t *testing.T) {
 			}
 		}()
 		_ = adaptor.CheckTopicValid("channel1")
+	})
+}
+
+// TestDelegatorMessageTypesCarryTheSplitFence pins the whitelist that decides
+// what a query delegator's msgstream ever sees.
+//
+// Filtering is silent by construction: a type left out is dropped at the WAL
+// scanner, so it never reaches the dispatcher, the flow graph, or any log —
+// which makes a missing entry impossible to notice from a running system. The
+// shard-split fence has to be in the set for the read path to ever act on it;
+// the delegator-side handling itself lands in a later PR.
+func TestDelegatorMessageTypesCarryTheSplitFence(t *testing.T) {
+	required := []message.MessageType{
+		message.MessageTypeInsert,
+		message.MessageTypeDelete,
+		message.MessageTypeSchemaChange,
+		message.MessageTypeAlterCollection,
+		message.MessageTypeManualFlush,
+		// A delegator that never learns its vchannel was split cannot front the
+		// split's targets; without this entry the message never even reaches it.
+		message.MessageTypeSplitShard,
+	}
+	for _, mt := range required {
+		assert.Contains(t, delegatorMessageTypes, mt,
+			"a delegator must observe %s; leaving it out drops the message silently", mt)
+	}
+
+	// Every entry must be filterable at all: DeliverFilterMessageType panics on
+	// a system message type, which would take the delegator down at seek.
+	assert.NotPanics(t, func() {
+		options.DeliverFilterMessageType(delegatorMessageTypes...)
 	})
 }

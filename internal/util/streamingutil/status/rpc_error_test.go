@@ -82,3 +82,68 @@ func TestPartialUpdateCASErrorsGRPCMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestShardFencedSurvivesTheWire pins the property the split coordinator's crash
+// recovery rests on.
+//
+// A re-fence is rejected with SHARD_FENCED carrying T_switch, and the
+// coordinator reads T_switch back off that error. In-process the error IS the
+// *StreamingError, so every field survives no matter what the conversion does --
+// which is exactly why this has to be tested through a real grpc round trip:
+// rebuilding the error from (code, cause) alone loses T_switch and the loss is
+// invisible until the coordinator and the streamingnode sit in different
+// processes, i.e. in every cluster deployment.
+func TestShardFencedSurvivesTheWire(t *testing.T) {
+	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913, 0)
+
+	st := NewGRPCStatusFromStreamingError(original)
+	// A terminal condition must not look like an unknown transport failure.
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+
+	roundTrip := AsStreamingError(ConvertStreamingError("test", st.Err()))
+	require.NotNil(t, roundTrip)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, roundTrip.Code)
+	assert.True(t, roundTrip.IsShardFenced())
+	assert.True(t, roundTrip.IsUnrecoverable())
+	assert.Contains(t, roundTrip.Cause, "by-dev-rootcoord-dml_0_100v0")
+	assert.Equal(t, uint64(447856455348518913), roundTrip.FencedTimeTick,
+		"T_switch must survive the wire; without it a coordinator that crashed after fencing cannot recover it")
+}
+
+func TestRoutingStaleGRPCMapping(t *testing.T) {
+	st := NewGRPCStatusFromStreamingError(NewRoutingStale("stale"))
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	roundTrip := AsStreamingError(ConvertStreamingError("test", st.Err()))
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE, roundTrip.Code)
+}
+
+// TestCauseWithFormatVerbSurvivesTheWire guards the conversion against causes
+// that contain printf verbs: the cause is data, never a format string.
+func TestCauseWithFormatVerbSurvivesTheWire(t *testing.T) {
+	original := NewUnrecoverableError("%s")
+	st := NewGRPCStatusFromStreamingError(original)
+	roundTrip := AsStreamingError(ConvertStreamingError("test", st.Err()))
+	assert.Contains(t, roundTrip.Cause, "%s")
+	assert.NotContains(t, roundTrip.Cause, "%!s(MISSING)")
+}
+
+// TestNewFromPBErrorCarriesTheWholeMessage guards the helper both conversion
+// paths now share: the streaming response body and the gRPC status details.
+func TestNewFromPBErrorCarriesTheWholeMessage(t *testing.T) {
+	// Never nil: the caller dereferences the result through pointer receivers.
+	empty := NewFromPBError(nil)
+	require.NotNil(t, empty)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, empty.Code)
+
+	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913, 0)
+	pb := original.AsPBError()
+	converted := NewFromPBError(pb)
+	require.NotNil(t, converted)
+	assert.Equal(t, original.Code, converted.Code)
+	assert.Equal(t, original.Cause, converted.Cause)
+	assert.Equal(t, original.FencedTimeTick, converted.FencedTimeTick)
+
+	// Cloned, not aliased: the transport may reuse the response message.
+	pb.FencedTimeTick = 0
+	assert.Equal(t, uint64(447856455348518913), converted.FencedTimeTick)
+}

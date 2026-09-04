@@ -1224,6 +1224,10 @@ func (coord *MixCoordMock) AlterCollection(ctx context.Context, request *milvusp
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }

@@ -33,7 +33,11 @@ type describeCollectionTask struct {
 }
 
 func (t *describeCollectionTask) Prepare(ctx context.Context) error {
-	if err := CheckMsgType(t.Req.Base.MsgType, commonpb.MsgType_DescribeCollection); err != nil {
+	// GetBase(), not .Base: a request without one is a caller's bug, but reading
+	// through the nil turns that bug into a coordinator-wide crash — this runs on
+	// the shared task scheduler goroutine, so the panic takes the process down
+	// rather than failing the one request. Reject it instead.
+	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_DescribeCollection); err != nil {
 		return err
 	}
 	return nil

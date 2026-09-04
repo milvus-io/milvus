@@ -282,6 +282,36 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				mlog.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
 			)
 			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
+		case commonpb.MsgType_SplitShard:
+			// The shard-split fence. It carries the ids of the growing segments
+			// the source streamingnode sealed at T_switch, and it is the ONLY
+			// record of them: the split appends no ManualFlush, and
+			// FlushAndFenceSegmentUntil only updates the WAL-side assignment
+			// state, it emits no Flush message. Drop this case and the source
+			// shard's last rows are never sealed, never flushed, never reported
+			// to DataCoord, and are lost when the retired vchannel's data sync
+			// service is closed.
+			splitShardMsg := msg.(*adaptor.SplitShardMessageBody)
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", splitShardMsg.SplitShardMessage.TimeTick()),
+				mlog.Int64("splitTaskID", splitShardMsg.SplitShardMessage.Header().GetSplitTaskId()),
+				mlog.Int64s("segmentIDs", splitShardMsg.SplitShardMessage.Header().GetFlushedSegmentIds()),
+			)
+			logger.Info(msgCtx, "receive split shard message")
+			if err := ddn.msgHandler.HandleSplitShard(msgCtx, splitShardMsg.SplitShardMessage); err != nil {
+				// Louder than the neighboring flush branches on purpose. A
+				// failed seal also skips the channel flush that follows it, so
+				// the source channel checkpoint never passes T_switch and the
+				// split's redistribution drain waits on it forever -- with this
+				// line as the only evidence. There is no retry here; the split
+				// task stalls until an operator notices.
+				logger.Error(msgCtx, "handle split shard message failed; the source channel checkpoint will not pass T_switch "+
+					"and the shard split drain will not complete", mlog.Err(err))
+			} else {
+				logger.Info(msgCtx, "handle split shard message success")
+			}
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 			logger := mlog.With(
