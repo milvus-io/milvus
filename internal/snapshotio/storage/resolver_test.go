@@ -549,3 +549,183 @@ func TestS3EndpointCompatibilityRejectsNonObjectStorageAWSHost(t *testing.T) {
 		"us-west-2",
 	))
 }
+
+func azureInstanceCfg() *objectstorage.Config {
+	return &objectstorage.Config{
+		Address:           "core.windows.net",
+		BucketName:        "instance-container",
+		RootPath:          "by-dev",
+		AccessKeyID:       "instance-account",
+		SecretAccessKeyID: "instance-key",
+		CloudProvider:     objectstorage.CloudProviderAzure,
+	}
+}
+
+func TestResolveForeignStorageAzureCrossAccountExportWithSourceSAS(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	resolved, err := ResolveForeignStorage(
+		context.Background(),
+		azureInstanceCfg(),
+		DirectionExport,
+		"azure://backup-account.blob.core.windows.net/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key","source_sas_token":"?sv=2024-08-04&sig=abc"}}`,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "backup-container", resolved.ForeignBucket)
+
+	// Export builds one client: the foreign-account copier, whose cross-account
+	// source URLs must address the instance account under the read SAS.
+	require.Len(t, captured, 1)
+	assert.Equal(t, "backup-account", captured[0].AccessKeyID)
+	assert.Equal(t, "instance-account.blob.core.windows.net", captured[0].AzureSourceEndpoint)
+	assert.Equal(t, "sv=2024-08-04&sig=abc", captured[0].AzureSourceSAS)
+	// The destination (foreign) transport is forced to TLS for canonical Azure
+	// endpoints, but the source URL scheme must follow the source — here the
+	// instance account, which has UseSSL=false.
+	assert.True(t, captured[0].UseSSL)
+	assert.False(t, captured[0].AzureSourceUseSSL)
+}
+
+func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		azureInstanceCfg(),
+		DirectionRestore,
+		"azure://backup-account.blob.core.windows.net/backup-container/root/snapshots/1/metadata/1.json",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key","source_sas_token":"sv=2024-08-04&sig=abc"}}`,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, captured, 2)
+	foreignCM, copier := captured[0], captured[1]
+	// Metadata still reads from the foreign account with its own credential,
+	// and the metadata client config must not carry the source-copy fields.
+	assert.Equal(t, "backup-account", foreignCM.AccessKeyID)
+	assert.Empty(t, foreignCM.AzureSourceEndpoint)
+	assert.Empty(t, foreignCM.AzureSourceSAS)
+	// The copy request writes the instance bucket, so the instance credential
+	// authorizes it and the source side is the foreign account under the SAS.
+	assert.Equal(t, "instance-account", copier.AccessKeyID)
+	assert.Equal(t, "instance-container", copier.BucketName)
+	assert.Equal(t, "backup-account.blob.core.windows.net", copier.AzureSourceEndpoint)
+	assert.Equal(t, "sv=2024-08-04&sig=abc", copier.AzureSourceSAS)
+	// The destination is the instance account (UseSSL=false), but the source
+	// URL scheme must follow the source — the foreign canonical Azure account,
+	// whose transport is TLS.
+	assert.False(t, copier.UseSSL)
+	assert.True(t, copier.AzureSourceUseSSL)
+}
+
+func TestResolveForeignStorageAzureCrossAccountRestoreConstructsRealClients(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	// Regression test: a restore/copy-source request carrying a source SAS used
+	// to fail before doing any work, because the foreign metadata client was
+	// constructed from a config that had AzureSourceSAS but no
+	// AzureSourceEndpoint, a combination the Azure client constructor rejects.
+	// Exercise the real NewRemoteChunkManager constructor (client construction
+	// is offline) instead of mocking it. The fixture keys are base64
+	// ("instance-key"/"backup-key") because the Azure SDK decodes the account
+	// key eagerly at construction; nothing is ever signed here.
+	// #nosec G101 -- offline fixture credentials, see above.
+	instanceCfg := &objectstorage.Config{
+		Address:           "core.windows.net",
+		BucketName:        "instance-container",
+		RootPath:          "by-dev",
+		AccessKeyID:       "instance-account",
+		SecretAccessKeyID: "aW5zdGFuY2Uta2V5",
+		CloudProvider:     objectstorage.CloudProviderAzure,
+	}
+	externalSpec := `{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"YmFja3VwLWtleQ==","source_sas_token":"sv=2024-08-04&sig=abc"}}`
+
+	t.Run("restore", func(t *testing.T) {
+		resolved, err := ResolveForeignStorage(
+			context.Background(),
+			instanceCfg,
+			DirectionRestore,
+			"azure://backup-account.blob.core.windows.net/backup-container/root/snapshots/1/metadata/1.json",
+			externalSpec,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "backup-container", resolved.ForeignBucket)
+		assert.NotNil(t, resolved.ForeignCM)
+		assert.NotNil(t, resolved.Copier)
+	})
+
+	t.Run("copy source", func(t *testing.T) {
+		resolved, err := ResolveForeignStorage(
+			context.Background(),
+			instanceCfg,
+			DirectionCopySource,
+			"azure://backup-account.blob.core.windows.net/backup-container/root",
+			externalSpec,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "backup-container", resolved.ForeignBucket)
+		assert.NotNil(t, resolved.ForeignCM)
+		assert.NotNil(t, resolved.Copier)
+	})
+}
+
+func TestResolveForeignStorageAzureCrossAccountWithoutSASRejected(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		azureInstanceCfg(),
+		DirectionExport,
+		"azure://backup-account.blob.core.windows.net/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key"}}`,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), unsupportedServerSideCopyMessage)
+	assert.Empty(t, captured)
+}
+
+func TestResolveForeignStorageAzureSameAccountWithSASRejected(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		azureInstanceCfg(),
+		DirectionExport,
+		"azure://instance-account.blob.core.windows.net/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"instance-account","access_key_value":"backup-key","source_sas_token":"sv=2024-08-04&sig=abc"}}`,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source_sas_token applies only when the copy crosses Azure storage accounts")
+	assert.Empty(t, captured)
+}
+
+func TestResolveForeignStorageAzureCrossCloudSASRejected(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		azureInstanceCfg(),
+		DirectionExport,
+		"azure://backup-account.blob.core.chinacloudapi.cn/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key","source_sas_token":"sv=2024-08-04&sig=abc"}}`,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must stay within one Azure cloud")
+	assert.Empty(t, captured)
+}
