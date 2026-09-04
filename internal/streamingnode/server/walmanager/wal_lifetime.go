@@ -3,8 +3,6 @@ package walmanager
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -72,10 +70,17 @@ func (w *walLifetime) Remove(ctx context.Context, term int64) error {
 
 	// Wait until the WAL state is ready or term expired or error occurs.
 	err := w.statePair.WaitCurrentStateReachExpected(ctx, expected)
-	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+	if err != nil && ctx.Err() != nil {
+		// The remove operation itself is canceled or timed out,
+		// so the current state may not have reached the expected state yet.
 		return err
 	}
 	if err != nil {
+		// The error is the previous open operation's failure kept in current state.
+		// It may itself wrap context.Canceled if the open was interrupted by the
+		// assign rpc's deadline (see issue #51078), so it must not be confused with
+		// a cancellation of this remove call: the wal is not open at this term,
+		// hence the remove is a success.
 		w.logger.Info(ctx, "remove wal success because that previous open operation is failure", mlog.NamedError("previousOpenError", err))
 	}
 	return nil
