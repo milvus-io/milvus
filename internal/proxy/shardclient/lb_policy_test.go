@@ -29,6 +29,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -53,6 +54,70 @@ type LBPolicySuite struct {
 	collectionName string
 	collectionID   int64
 }
+
+type staticQueryTrafficConfig struct {
+	enabled bool
+	rules   string
+}
+
+func (c staticQueryTrafficConfig) Enabled() bool {
+	return c.enabled
+}
+
+func (c staticQueryTrafficConfig) Rules() string {
+	return c.rules
+}
+
+type staticQueryTrafficLabelProvider struct {
+	source querytraffic.Labels
+	nodes  map[int64]querytraffic.Labels
+}
+
+func (p staticQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
+	return p.source, nil
+}
+
+func (p staticQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
+	return p.nodes, nil
+}
+
+// errorQueryTrafficLabelProvider fails label resolution to exercise the
+// __error metric branch of query traffic routing.
+type errorQueryTrafficLabelProvider struct{}
+
+func (errorQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
+	return nil, errors.New("fake label resolution error")
+}
+
+func (errorQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
+	return nil, errors.New("fake label resolution error")
+}
+
+type captureWeightedBalancer struct {
+	weightedNodes []WeightedNode
+}
+
+func (b *captureWeightedBalancer) RegisterNodeInfo(nodeInfos []NodeInfo) {}
+
+func (b *captureWeightedBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+	if len(availableNodes) == 0 {
+		return 0, merr.ErrNodeNotAvailable
+	}
+	return availableNodes[0], nil
+}
+
+func (b *captureWeightedBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error) {
+	b.weightedNodes = append([]WeightedNode(nil), availableNodes...)
+	return availableNodes[0].NodeID, nil
+}
+
+func (b *captureWeightedBalancer) CancelWorkload(node int64, nq int64) {}
+
+func (b *captureWeightedBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}
+
+func (b *captureWeightedBalancer) Start(ctx context.Context) {}
+
+func (b *captureWeightedBalancer) Close() {}
 
 func (s *LBPolicySuite) SetupSuite() {
 	paramtable.Init()
@@ -227,6 +292,225 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 	s.NoError(err)
 	s.Equal(int64(1), targetNode.NodeID)
 	s.True(selectedByBalancer)
+}
+
+func (s *LBPolicySuite) TestSelectNodeAppliesQueryTrafficRoutingBeforeBalancer() {
+	ctx := context.Background()
+	weightedBalancer := &captureWeightedBalancer{}
+	ruleName := "local-az-test-metric"
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+		{NodeID: 3, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"local-az-test-metric","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{"AZ": "az1"},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(ruleName))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, weightedBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 3}, targetNode.NodeID)
+	s.ElementsMatch([]WeightedNode{
+		{NodeID: 1, Weight: 100},
+		{NodeID: 3, Weight: 100},
+	}, weightedBalancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(ruleName))
+	s.Equal(before+1, after)
+}
+
+func (s *LBPolicySuite) TestSelectNodeRecordsQueryTrafficRoutingNoCandidateMetric() {
+	ctx := context.Background()
+	balancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"empty-local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"missing"}}}]}]`,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{"AZ": "az1"},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoCandidate))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2}, targetNode.NodeID)
+	s.Empty(balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoCandidate))
+	s.Equal(before+1, after)
+}
+
+func (s *LBPolicySuite) TestSelectNodeRecordsQueryTrafficRoutingDisabledMetric() {
+	ctx := context.Background()
+	balancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true},
+		{NodeID: 2, Address: "localhost", Serviceable: true},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: false,
+			rules:   `[{"name":"local"}]`,
+		},
+		staticQueryTrafficLabelProvider{},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameDisabled))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2}, targetNode.NodeID)
+	s.Empty(balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameDisabled))
+	s.Equal(before+1, after)
+}
+
+func (s *LBPolicySuite) TestSelectNodeRecordsQueryTrafficRoutingErrorMetric() {
+	ctx := context.Background()
+	balancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`,
+		},
+		errorQueryTrafficLabelProvider{},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameError))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2}, targetNode.NodeID)
+	s.Empty(balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameError))
+	s.Equal(before+1, after)
+}
+
+func (s *LBPolicySuite) TestSelectNodeRecordsQueryTrafficRoutingNoPolicyMetric() {
+	ctx := context.Background()
+	balancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+	}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   ``,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{"AZ": "az1"},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoPolicy))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2}, targetNode.NodeID)
+	s.Empty(balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoPolicy))
+	s.Equal(before+1, after)
+}
+
+func (s *LBPolicySuite) TestSelectNodeRecordsQueryTrafficRoutingNoMatchingRuleMetric() {
+	ctx := context.Background()
+	balancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+	}
+	// the only rule requires source labels to exist, but the proxy has none,
+	// so no rule matches and routing falls back to the original candidates
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"local","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	before := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoMatchingRule))
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, balancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 2}, targetNode.NodeID)
+	s.Empty(balancer.weightedNodes)
+	after := testutil.ToFloat64(metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameNoMatchingRule))
+	s.Equal(before+1, after)
 }
 
 func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {

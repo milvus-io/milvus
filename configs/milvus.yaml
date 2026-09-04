@@ -418,6 +418,9 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  queryTrafficRouting:
+    enabled: false # switch for whether proxy applies query traffic routing before replica load balancing. Disabled by default; when disabled, query routing behavior is unchanged.
+    rules: '' # JSON string of ordered query traffic routing rules. Each rule has a name, an optional source-label matcher, and ordered routes with a per-node weight and destination-label matcher. See the query traffic routing design doc for the full schema and examples.
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   # maximum number of result entries, typically Nq * TopK * GroupSize. 

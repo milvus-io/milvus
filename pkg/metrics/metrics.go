@@ -135,6 +135,7 @@ const (
 	functionLabelName              = "function_name"
 	queryTypeLabelName             = "query_type"
 	chainLevelLabelName            = "chain_level"
+	ruleNameLabelName              = "rule_name"
 	collectionName                 = "collection_name"
 	databaseLabelName              = "db_name"
 	ResourceGroupLabelName         = "rg"

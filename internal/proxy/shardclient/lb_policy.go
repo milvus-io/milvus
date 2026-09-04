@@ -117,9 +117,19 @@ type LBPolicyImpl struct {
 	balancerMap    map[string]LBBalancer
 	retryOnReplica int
 	blacklist      *ChannelBlacklist
+
+	queryTrafficRouter *queryTrafficRouter
 }
 
-func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
+type LBPolicyOption func(*LBPolicyImpl)
+
+func WithQueryTrafficRouting(labelProvider QueryTrafficLabelProvider) LBPolicyOption {
+	return func(lb *LBPolicyImpl) {
+		lb.queryTrafficRouter = newQueryTrafficRouter(paramtableQueryTrafficConfig{}, labelProvider)
+	}
+}
+
+func NewLBPolicyImpl(clientMgr ShardClientMgr, options ...LBPolicyOption) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
@@ -134,13 +144,17 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 
 	retryOnReplica := paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt()
 
-	return &LBPolicyImpl{
+	lb := &LBPolicyImpl{
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
 		retryOnReplica: retryOnReplica,
 		blacklist:      NewChannelBlacklist(),
 	}
+	for _, option := range options {
+		option(lb)
+	}
+	return lb
 }
 
 func (lb *LBPolicyImpl) Start(ctx context.Context) {
@@ -199,6 +213,38 @@ func recordPreferredNodeSelection(status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
 		status,
 	).Inc()
+}
+
+const (
+	queryTrafficRoutingRuleNameDisabled       = "__disabled"
+	queryTrafficRoutingRuleNameError          = "__error"
+	queryTrafficRoutingRuleNameNoPolicy       = "__no_policy"
+	queryTrafficRoutingRuleNameNoMatchingRule = "__no_matching_rule"
+	queryTrafficRoutingRuleNameNoCandidate    = "__no_candidate"
+)
+
+func recordQueryTrafficRoutingDecision(routeResult queryTrafficRouteResult, routeErr error) {
+	if routeErr != nil {
+		metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameError).Inc()
+		return
+	}
+	if !routeResult.enabled {
+		metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameDisabled).Inc()
+		return
+	}
+
+	ruleName := routeResult.ruleName
+	if ruleName == "" {
+		switch routeResult.fallbackReason {
+		case "no_policy":
+			ruleName = queryTrafficRoutingRuleNameNoPolicy
+		case "no_candidate":
+			ruleName = queryTrafficRoutingRuleNameNoCandidate
+		default:
+			ruleName = queryTrafficRoutingRuleNameNoMatchingRule
+		}
+	}
+	metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(ruleName).Inc()
 }
 
 func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
@@ -299,6 +345,13 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			return NodeInfo{}, false, err
 		}
 
+		// Preferred node hint takes precedence over query traffic routing.
+		// The hint comes from the meta cache (e.g. shard leader pinned by the
+		// request path) and is a stronger, per-request constraint: routing
+		// policies express cross-node affinity for the candidate set, while
+		// the preferred node already identifies a specific serving node.
+		// When the hint is set and serviceable, it wins; query traffic
+		// routing only applies to requests without a usable hint.
 		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
 			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
 			return preferredNode, false, nil
@@ -310,13 +363,33 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 		// prefer serviceable nodes
 		var targetNodeID int64
+		selectableNodes := candidateNodes
 		if len(serviceableNodes) > 0 {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
+			selectableNodes = serviceableNodes
+		}
+		availableNodeIDs := lo.Keys(selectableNodes)
+		routeResult, routeErr := lb.queryTrafficRouter.route(ctx, lo.Values(selectableNodes))
+		if routeErr != nil {
+			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
+				mlog.Err(routeErr))
+		}
+		recordQueryTrafficRoutingDecision(routeResult, routeErr)
+		if routeResult.routed {
+			targetNodeID, err = selectWeightedNode(ctx, balancer, routeResult.weightedNodes, workload.Nq)
 		} else {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
+			targetNodeID, err = balancer.SelectNode(ctx, availableNodeIDs, workload.Nq)
 		}
 		if err != nil {
 			return NodeInfo{}, false, err
+		}
+		if routeResult.enabled && mlog.LevelEnabled(mlog.DebugLevel) {
+			log.Debug(ctx, "query traffic routing decision",
+				mlog.Bool("routed", routeResult.routed),
+				mlog.String("ruleName", routeResult.ruleName),
+				mlog.String("fallbackReason", routeResult.fallbackReason),
+				mlog.Int("inputCandidateCount", routeResult.inputCandidateCount),
+				mlog.Int("selectedCandidateCount", len(routeResult.weightedNodes)),
+				mlog.Int64("selectedNodeID", targetNodeID))
 		}
 
 		if _, ok := candidateNodes[targetNodeID]; !ok {

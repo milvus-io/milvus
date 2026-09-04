@@ -449,6 +449,14 @@ var (
 			Help:      "",
 		}, []string{nodeIDLabelName, queueTypeLabelName, TaskStateLabel})
 
+	ProxyQueryTrafficRoutingDecisionCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "query_traffic_routing_decision_count",
+			Help:      "counter of query traffic routing decisions by selected rule name",
+		}, []string{ruleNameLabelName})
+
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -546,6 +554,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
 	registry.MustRegister(ProxyQueueTaskNum)
+	registry.MustRegister(ProxyQueryTrafficRoutingDecisionCount)
 
 	registry.MustRegister(ProxyParseExpressionLatency)
 

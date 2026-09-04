@@ -2386,6 +2386,8 @@ type proxyConfig struct {
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	QueryTrafficRoutingEnabled        ParamItem `refreshable:"true"`
+	QueryTrafficRoutingRules          ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -2841,6 +2843,24 @@ please adjust in embedded Milvus: false`,
 		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.QueryTrafficRoutingEnabled = ParamItem{
+		Key:          "proxy.queryTrafficRouting.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy applies query traffic routing before replica load balancing",
+		Export:       true,
+	}
+	p.QueryTrafficRoutingEnabled.Init(base.mgr)
+
+	p.QueryTrafficRoutingRules = ParamItem{
+		Key:          "proxy.queryTrafficRouting.rules",
+		Version:      "3.0.0",
+		DefaultValue: "",
+		Doc:          "JSON string of ordered query traffic routing rules",
+		Export:       true,
+	}
+	p.QueryTrafficRoutingRules.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
