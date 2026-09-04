@@ -7326,7 +7326,6 @@ timed out during the index wait carries a non-zero index_wait_started_time and s
 is applied and serving, index building continues on its own, and re-running the refresh waits again without
 re-ingesting. A job that timed out before applying carries 0 and left the collection untouched.`,
 		DefaultValue: "false",
-		Export:       true,
 		PanicIfEmpty: false,
 	}
 	p.RefreshWaitForIndex.Init(base.mgr)
