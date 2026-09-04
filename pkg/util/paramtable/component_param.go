@@ -4075,6 +4075,7 @@ type queryNodeConfig struct {
 	ExprResCacheAdmissionThreshold    ParamItem `refreshable:"true"`
 	ExprResCacheMemMaxBytes           ParamItem `refreshable:"true"`
 	ExprResCacheMemCompressionEnabled ParamItem `refreshable:"true"`
+	ExprResCacheMemEnableGrowing      ParamItem `refreshable:"true"`
 	ExprResCacheDiskMaxBytes          ParamItem `refreshable:"true"`
 	ExprResCacheDiskMaxFileSizeBytes  ParamItem `refreshable:"true"`
 
@@ -5405,7 +5406,7 @@ user-task-polling:
 		Key:          "queryNode.exprCache.mode",
 		Version:      "3.0.0",
 		DefaultValue: "disk",
-		Doc:          "cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)",
+		Doc:          "cache mode: 'disk' (sealed only) or 'memory' (sealed and optionally growing)",
 		Export:       true,
 	}
 	p.ExprResCacheMode.Init(base.mgr)
@@ -5439,6 +5440,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.ExprResCacheMemCompressionEnabled.Init(base.mgr)
+
+	p.ExprResCacheMemEnableGrowing = ParamItem{
+		Key:          "queryNode.exprCache.memory.enableGrowing",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "cache growing-segment snapshots in expression cache memory mode",
+		Export:       true,
+	}
+	p.ExprResCacheMemEnableGrowing.Init(base.mgr)
 
 	p.ExprResCacheAdmissionThreshold = ParamItem{
 		Key:          "queryNode.exprCache.admissionThreshold",

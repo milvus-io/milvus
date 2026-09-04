@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -214,7 +215,7 @@ struct ColumnInfo {
             std::to_string(field_id_.get()),
             data_type_,
             element_type_,
-            milvus::Join<std::string>(nested_path_, ","),
+            milvus::Json::pointer(nested_path_),
             element_level_);
     }
 };

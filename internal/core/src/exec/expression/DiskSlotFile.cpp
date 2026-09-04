@@ -400,12 +400,6 @@ DiskSlotFile::GetUsedCount() const {
     return static_cast<uint32_t>(slot_index_.size());
 }
 
-bool
-DiskSlotFile::HasSignature(const std::string& signature) const {
-    std::shared_lock lock(mutex_);
-    return slot_index_.find(signature) != slot_index_.end();
-}
-
 uint64_t
 DiskSlotFile::GetUsedBytes() const {
     std::shared_lock lock(mutex_);

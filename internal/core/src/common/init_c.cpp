@@ -136,6 +136,7 @@ SetExprResCacheConfig(const char* mode,
                       const char* disk_base_path,
                       int64_t mem_max_bytes,
                       bool compression_enabled,
+                      bool mem_enable_growing,
                       int32_t admission_threshold,
                       int64_t mem_min_eval_duration_us,
                       int64_t disk_max_bytes,
@@ -167,6 +168,7 @@ SetExprResCacheConfig(const char* mode,
         disk_base_path == nullptr ? std::string() : std::string(disk_base_path);
     config.mem_max_bytes = static_cast<size_t>(mem_max_bytes);
     config.compression_enabled = compression_enabled;
+    config.mem_enable_growing = mem_enable_growing;
     if (admission_threshold < 1) {
         admission_threshold = 1;
     } else if (admission_threshold > 255) {

@@ -825,6 +825,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.ExprResCacheAdmissionThreshold.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheMemMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheMemCompressionEnabled.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemEnableGrowing.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.RegisterCallback(updateExprResCacheConfigCallback)
 
