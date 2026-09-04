@@ -153,6 +153,7 @@ type IMetaTable interface {
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
+	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
@@ -2479,6 +2480,13 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+func (mt *MetaTable) HasFileResource(ctx context.Context) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	return len(mt.fileResourceID2Meta) > 0
 }
 
 // IncFileResourceRefCnt increments refCnt for file resources, reserving them for

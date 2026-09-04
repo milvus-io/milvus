@@ -95,6 +95,51 @@ func (_c *MockFileResourceObserver_InitMeta_Call) RunAndReturn(run func(IMetaTab
 	return _c
 }
 
+// IsEmpty provides a mock function with no fields
+func (_m *MockFileResourceObserver) IsEmpty() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsEmpty")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockFileResourceObserver_IsEmpty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsEmpty'
+type MockFileResourceObserver_IsEmpty_Call struct {
+	*mock.Call
+}
+
+// IsEmpty is a helper method to define mock.On call
+func (_e *MockFileResourceObserver_Expecter) IsEmpty() *MockFileResourceObserver_IsEmpty_Call {
+	return &MockFileResourceObserver_IsEmpty_Call{Call: _e.mock.On("IsEmpty")}
+}
+
+func (_c *MockFileResourceObserver_IsEmpty_Call) Run(run func()) *MockFileResourceObserver_IsEmpty_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFileResourceObserver_IsEmpty_Call) Return(_a0 bool) *MockFileResourceObserver_IsEmpty_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockFileResourceObserver_IsEmpty_Call) RunAndReturn(run func() bool) *MockFileResourceObserver_IsEmpty_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Notify provides a mock function with no fields
 func (_m *MockFileResourceObserver) Notify() {
 	_m.Called()
