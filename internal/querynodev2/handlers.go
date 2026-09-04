@@ -231,15 +231,10 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 	// aggregate cost
 	requestCosts := lo.FilterMap(results, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
+		// delegator node won't be used to load sealed segment if stream node is enabled
+		// and if growing segment doesn't exists, delegator won't produce any cost metrics
+		// so all workers' costs are collected (the enableWorkerSQCostMetrics toggle was removed)
+		return result.GetCostAggregation(), true
 	})
 	resp.CostAggregation = segmentutil.MergeRequestCost(requestCosts)
 	if resp.CostAggregation == nil {

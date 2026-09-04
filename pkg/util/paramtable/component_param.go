@@ -29,6 +29,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -3997,6 +3998,7 @@ type queryNodeConfig struct {
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	RequeryUnsolvedQueueSize     ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
@@ -4057,8 +4059,6 @@ type queryNodeConfig struct {
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
 	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
-
-	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
 
@@ -4985,9 +4985,35 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.unsolvedQueueSize",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
-		Export:       true,
+		Doc: "Maximum number of regular read tasks waiting in the scheduler. " +
+			"When the dedicated requery lane is enabled under fifo, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.",
+		Export: true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	const defaultRequeryUnsolvedQueueSize = "1024"
+	p.RequeryUnsolvedQueueSize = ParamItem{
+		Key:          "queryNode.scheduler.requeryUnsolvedQueueSize",
+		Version:      "3.0.0",
+		DefaultValue: defaultRequeryUnsolvedQueueSize,
+		Formatter: func(v string) string {
+			if _, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return v
+			}
+			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+				"invalid requery queue capacity, falling back to default capacity",
+				mlog.String("key", p.RequeryUnsolvedQueueSize.Key),
+				mlog.String("value", v),
+				mlog.Int64("fallbackCapacity", 1024))
+			return defaultRequeryUnsolvedQueueSize
+		},
+		Doc: "Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane when scheduleReadPolicy is fifo, including a task staged for execution handoff. " +
+			"It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. " +
+			"A positive integer sets the lane capacity, a value <= 0 disables the lane, and an invalid value emits a warning and falls back to 1024. " +
+			"The lane is disabled when scheduleReadPolicy is user-task-polling.",
+		Export: true,
+	}
+	p.RequeryUnsolvedQueueSize.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
@@ -5355,14 +5381,6 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
-
-	p.EnableWorkerSQCostMetrics = ParamItem{
-		Key:          "queryNode.enableWorkerSQCostMetrics",
-		Version:      "2.3.0",
-		DefaultValue: "false",
-		Doc:          "whether use worker's cost to measure delegator's workload",
-	}
-	p.EnableWorkerSQCostMetrics.Init(base.mgr)
 
 	p.ExprEvalBatchSize = ParamItem{
 		Key:          "queryNode.segcore.exprEvalBatchSize",
