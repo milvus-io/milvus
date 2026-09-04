@@ -35,6 +35,7 @@ const (
 	AliasCategory                 = "/aliases/"
 	ImportJobCategory             = "/jobs/import/"
 	SnapshotJobCategory           = "/jobs/snapshot/"
+	SnapshotCategory              = "/snapshots/"
 	ExternalCollectionJobCategory = "/jobs/external_collection/"
 	PrivilegeGroupCategory        = "/privilege_groups/"
 	CollectionFieldCategory       = "/collections/fields/"
@@ -88,6 +89,9 @@ const (
 	TruncateAction                  = "truncate"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	RestoreExternalAction           = "restore_external"
+	RestoreAction                   = "restore"
+	PinAction                       = "pin"
+	UnpinAction                     = "unpin"
 	ExportAction                    = "export"
 	DescribeExportAction            = "export/describe"
 	RefreshAction                   = "refresh"

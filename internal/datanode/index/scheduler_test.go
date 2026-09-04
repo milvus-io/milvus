@@ -33,8 +33,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestGetStateFromError(t *testing.T) {
+	t.Run("data format broken is terminal", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(merr.SegcoreError(2024, "malformed vector data")))
+	})
+
+	t.Run("generic segcore error still retries", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(merr.SegcoreError(2001, "unexpected")))
+	})
+
+	t.Run("transient segcore error still retries", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(merr.SegcoreError(2045, "transient storage error")))
+	})
+}
 
 type fakeTaskState int
 

@@ -49,8 +49,11 @@ import (
 	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -1202,7 +1205,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: "alias",
 		})
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, "alias")
+		_, err = proxy.GetMetaCache().GetCollectionID(ctx, dbName, "alias")
 		assert.Error(t, err)
 	})
 
@@ -1230,7 +1233,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
@@ -1414,7 +1417,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -1982,7 +1985,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("get replicas", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
@@ -2231,7 +2234,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("release collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
@@ -2259,7 +2262,7 @@ func TestProxy(t *testing.T) {
 
 	pLoaded := true
 	t.Run("load partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
@@ -2309,7 +2312,7 @@ func TestProxy(t *testing.T) {
 	assert.True(t, pLoaded)
 
 	t.Run("show in-memory partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2556,7 +2559,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show in-memory partitions after release partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2606,7 +2609,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
+		_, err = proxy.GetMetaCache().GetPartitionID(ctx, dbName, collectionName, partitionName)
 		assert.Error(t, err)
 
 		// drop non-exist partition -> fail
@@ -2645,7 +2648,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions after drop partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2686,7 +2689,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
@@ -2709,7 +2712,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -2731,7 +2734,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err = proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.Error(t, err)
 
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
@@ -2743,7 +2746,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		hasDatabase := globalMetaCache.HasDatabase(ctx, dbName)
+		hasDatabase := proxy.GetMetaCache().HasDatabase(ctx, dbName)
 		assert.False(t, hasDatabase)
 	})
 
@@ -3217,8 +3220,8 @@ func TestProxy(t *testing.T) {
 
 	// queue full
 
-	ddParallel := proxy.sched.ddQueue.getMaxTaskNum()
-	proxy.sched.ddQueue.setMaxTaskNum(0)
+	ddParallel := proxy.sched.DdQueue.GetMaxTaskNum()
+	proxy.sched.DdQueue.SetMaxTaskNum(0)
 
 	t.Run("CreateCollection fail, dd queue full", func(t *testing.T) {
 		resp, err := proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{})
@@ -3363,7 +3366,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("Flush fail, dc queue full", func(t *testing.T) {
-		proxy.sched.dcQueue.setMaxTaskNum(0)
+		proxy.sched.DcQueue.SetMaxTaskNum(0)
 		resp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -3399,10 +3402,10 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	proxy.sched.ddQueue.setMaxTaskNum(ddParallel)
+	proxy.sched.DdQueue.SetMaxTaskNum(ddParallel)
 
-	dmParallelism := proxy.sched.dmQueue.getMaxTaskNum()
-	proxy.sched.dmQueue.setMaxTaskNum(0)
+	dmParallelism := proxy.sched.DmQueue.GetMaxTaskNum()
+	proxy.sched.DmQueue.SetMaxTaskNum(0)
 
 	t.Run("Insert fail, dm queue full", func(t *testing.T) {
 		resp, err := proxy.Insert(ctx, &milvuspb.InsertRequest{})
@@ -3422,10 +3425,10 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	proxy.sched.dmQueue.setMaxTaskNum(dmParallelism)
+	proxy.sched.DmQueue.SetMaxTaskNum(dmParallelism)
 
-	dqParallelism := proxy.sched.dqQueue.getMaxTaskNum()
-	proxy.sched.dqQueue.setMaxTaskNum(0)
+	dqParallelism := proxy.sched.DqQueue.GetMaxTaskNum()
+	proxy.sched.DqQueue.SetMaxTaskNum(0)
 
 	t.Run("Search fail, dq queue full", func(t *testing.T) {
 		resp, err := proxy.Search(ctx, &milvuspb.SearchRequest{})
@@ -3439,7 +3442,7 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	proxy.sched.dqQueue.setMaxTaskNum(dqParallelism)
+	proxy.sched.DqQueue.SetMaxTaskNum(dqParallelism)
 
 	// timeout
 
@@ -4417,20 +4420,15 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 
 func Test_GetFlushState(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
-		originCache := globalMetaCache
 		m := NewMockCache(t)
 		m.On("GetCollectionID",
 			mock.Anything,
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(1), nil)
-		globalMetaCache = m
-		defer func() {
-			globalMetaCache = originCache
-		}()
 
 		mixCoord := &MixCoordMock{}
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
 			CollectionName: "coll",
@@ -4484,9 +4482,6 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
@@ -4513,10 +4508,10 @@ func TestProxy_Import(t *testing.T) {
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
 			DBID: 1,
 		}, nil)
-		globalMetaCache = mc
+		proxy.metaCache = mc
 
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
 		mixCoord := mocks.NewMockMixCoordClient(t)
@@ -4529,7 +4524,7 @@ func TestProxy_Import(t *testing.T) {
 		proxy.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}
-		scheduler, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+		scheduler, err := scheduler.NewTaskScheduler(ctx, proxy.tsoAllocator)
 		assert.NoError(t, err)
 		proxy.sched = scheduler
 		err = proxy.sched.Start()
@@ -4605,18 +4600,12 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 	}
 	ctx := GetContext(context.Background(), "root:123456")
 
-	// OperatePrivilege resolves the collection alias before granting (default
-	// ResolveAliasForPrivilege on); pin globalMetaCache to a mock that resolves
-	// "col1" as-is, so the test does not depend on leftover global cache state.
-	originCache := globalMetaCache
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().ResolveCollectionAlias(mock.Anything, mock.Anything, "col1").Return("col1", nil).Maybe()
-	globalMetaCache = metaCache
-	defer func() { globalMetaCache = originCache }()
 
 	t.Run("related privilege grpc error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4634,7 +4623,7 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 
 	t.Run("related privilege status error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4656,7 +4645,6 @@ func TestProxy_GetStatistics(t *testing.T) {
 }
 
 func TestProxy_GetLoadState(t *testing.T) {
-	originCache := globalMetaCache
 	m := NewMockCache(t)
 	m.On("GetCollectionID",
 		mock.Anything, // context.Context
@@ -4669,11 +4657,6 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(UniqueID(2), nil)
-	globalMetaCache = m
-	defer func() {
-		globalMetaCache = originCache
-	}()
-
 	{
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -4681,7 +4664,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4696,7 +4679,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotLoaded("foo"))
 		mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrPartitionNotLoaded("p1"))
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4737,7 +4720,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{100},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
@@ -4772,7 +4755,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{50},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4806,7 +4789,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: merr.Status(mockErr),
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4849,4 +4832,77 @@ type CheckExtension struct {
 func (c CheckExtension) Report(info any) int {
 	c.reportChecker(info)
 	return 0
+}
+
+type dqlFullMockTask struct {
+	taskmodel.BaseTask
+	*taskmodel.TaskCondition
+	id   taskmodel.UniqueID
+	ts   taskmodel.Timestamp
+	name string
+}
+
+func (t *dqlFullMockTask) TraceCtx() context.Context {
+	return context.Background()
+}
+
+func (t *dqlFullMockTask) ID() taskmodel.UniqueID {
+	return t.id
+}
+
+func (t *dqlFullMockTask) SetID(uid taskmodel.UniqueID) {
+	t.id = uid
+}
+
+func (t *dqlFullMockTask) Name() string {
+	return t.name
+}
+
+func (t *dqlFullMockTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_Retrieve
+}
+
+func (t *dqlFullMockTask) BeginTs() taskmodel.Timestamp {
+	return t.ts
+}
+
+func (t *dqlFullMockTask) EndTs() taskmodel.Timestamp {
+	return t.ts
+}
+
+func (t *dqlFullMockTask) SetTs(ts taskmodel.Timestamp) {
+	t.ts = ts
+}
+
+func (t *dqlFullMockTask) OnEnqueue() error {
+	return nil
+}
+
+func (t *dqlFullMockTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (t *dqlFullMockTask) Execute(ctx context.Context) error {
+	return nil
+}
+
+func (t *dqlFullMockTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+func TestProxy_IsDQLQueueFull(t *testing.T) {
+	node := &Proxy{}
+	assert.False(t, node.IsDQLQueueFull())
+
+	sched, err := scheduler.NewTaskScheduler(context.Background(), newMockTsoAllocator())
+	assert.NoError(t, err)
+	node.sched = sched
+	sched.DqQueue.SetMaxTaskNum(1)
+	assert.False(t, node.IsDQLQueueFull())
+	assert.NoError(t, sched.DqQueue.Enqueue(&dqlFullMockTask{
+		BaseTask:      taskmodel.BaseTask{},
+		TaskCondition: taskmodel.NewTaskCondition(context.Background()),
+		name:          "query",
+	}))
+	assert.True(t, node.IsDQLQueueFull())
 }

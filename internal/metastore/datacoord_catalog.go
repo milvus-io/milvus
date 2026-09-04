@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -149,10 +148,6 @@ type DataCoordCatalog interface {
 	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
 
-	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
-	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
-	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error

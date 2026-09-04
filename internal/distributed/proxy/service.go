@@ -290,24 +290,47 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
+	// The meta cache is initialized in Proxy.Init(), which runs after this interceptor
+	// chain is constructed. Resolve it per request so rate limiting / privilege checks
+	// observe the live cache instead of a construction-time nil snapshot.
+	var metaCacheProvider interface{ GetMetaCache() proxy.Cache }
+	if provider, ok := s.proxy.(interface{ GetMetaCache() proxy.Cache }); ok {
+		metaCacheProvider = provider
+	}
+	getMetaCache := func() proxy.Cache {
+		if metaCacheProvider == nil {
+			return nil
+		}
+		return metaCacheProvider.GetMetaCache()
+	}
+
 	var unaryServerOption grpc.ServerOption
+	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
+			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
+			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
 			proxy.UnaryServerHookInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptor(limiter),
+			proxy.RateLimitInterceptorWithMetaCache(getMetaCache, limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,
 		))
+		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
+		// unary chain, so they must be authenticated and authorized through a
+		// dedicated stream interceptor chain. Without this the external server
+		// would accept unauthenticated/unauthorized streaming calls on the
+		// client port. The order mirrors the unary chain: first authenticate
+		// (resolve the user into ctx), then enforce authorization on that user.
+		streamServerOption = newStreamInterceptorOption(getMetaCache)
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
+		streamServerOption = grpc.EmptyServerOption{}
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -316,6 +339,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound
@@ -392,6 +416,23 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
+}
+
+// newStreamInterceptorOption builds the security-critical stream interceptor
+// chain for the external gRPC server: authentication, then RBAC (fail-closed).
+// It mirrors the unary chain's auth-before-RBAC ordering; streaming RPCs carry
+// no request object at the interceptor layer, so the required authorization is
+// resolved per full-method name by StreamPrivilegeInterceptor and unregistered
+// stream methods are denied by default. It is extracted so the wiring is
+// testable independently of the full Server lifecycle — a regression here would
+// silently reopen the stream auth bypass (#52387), so the chain is covered by a
+// dedicated test.
+func newStreamInterceptorOption(getMetaCache func() proxy.Cache) grpc.ServerOption {
+	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
+		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
+		mlog.StreamServerInterceptor(typeutil.ProxyRole),
+	))
 }
 
 func (s *Server) startInternalGrpc(errChan chan error) {

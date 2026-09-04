@@ -82,7 +82,7 @@ func TestQueryTask_all(t *testing.T) {
 	mgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
 	lb := shardclient.NewLBPolicyImpl(mgr)
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -116,7 +116,7 @@ func TestQueryTask_all(t *testing.T) {
 	require.NoError(t, createColT.PreExecute(ctx))
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
@@ -131,6 +131,7 @@ func TestQueryTask_all(t *testing.T) {
 
 	t.Run("test query task parameters", func(t *testing.T) {
 		task := &queryTask{
+			baseTask:  baseTask{MetaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -278,6 +279,7 @@ func TestQueryTask_all(t *testing.T) {
 
 	t.Run("test query for iterator", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask:  baseTask{MetaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -330,6 +332,7 @@ func TestQueryTask_all(t *testing.T) {
 
 		// next page query task
 		qt = &queryTask{
+			baseTask:  baseTask{MetaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
@@ -398,6 +401,7 @@ func TestQueryTask_all(t *testing.T) {
 				})
 			}
 			task := &queryTask{
+				baseTask:  baseTask{MetaCache: cache},
 				Condition: NewTaskCondition(ctx),
 				RetrieveRequest: &internalpb.RetrieveRequest{
 					QueryLabel: "query",
@@ -497,6 +501,7 @@ func TestQueryTask_all(t *testing.T) {
 	t.Run("test order by without limit", func(t *testing.T) {
 		// ORDER BY without explicit limit should fail with an error
 		task := &queryTask{
+			baseTask:  baseTask{MetaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{
@@ -539,6 +544,7 @@ func TestQueryTask_all(t *testing.T) {
 	t.Run("test order by with limit succeeds", func(t *testing.T) {
 		// ORDER BY with explicit limit should pass the validation
 		task := &queryTask{
+			baseTask:  baseTask{MetaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{
@@ -1772,10 +1778,10 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
 
 	t.Run("default consistency level", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{MetaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1818,6 +1824,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 			}, nil).Times(3)
 
 		qt := &queryTask{
+			baseTask: baseTask{MetaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1841,6 +1848,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("legacy_guarantee_ts", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{MetaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1869,6 +1877,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 			nil, errors.New("mock error")).Once()
 
 		qt := &queryTask{
+			baseTask: baseTask{MetaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1893,6 +1902,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		qt2 := &queryTask{
+			baseTask: baseTask{MetaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,

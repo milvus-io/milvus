@@ -28,10 +28,10 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
         "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
-        "milvus-common/1.0.0-b589c5a@milvus/dev#d431af735c8acb829feb7a94f05daf42",
+        "milvus-common/1.0.0-7d67e14@milvus/dev#dc4c1c257103c92e01c0c1bd83541623",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
+        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -39,7 +39,7 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
-        "libavrocpp/1.12.1.1@milvus/dev#cde7bb587a29f6f233bae7e18b71815d",
+        "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 
     default_options = {

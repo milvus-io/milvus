@@ -42,6 +42,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/LoadInfo.h"
 #include "common/PrometheusClient.h"
@@ -1327,6 +1328,56 @@ TEST(Sealed, LoadScalarIndex) {
                               100000);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
+}
+
+TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
+    size_t N = ROW_COUNT;
+    auto schema = std::make_shared<Schema>();
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+    auto double_col = dataset.get_col<double>(double_id);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Load a scalar index whose metadata reports no raw data (as INVERTED
+    // does). TestIndexTranslator records the OpContext when the index is
+    // actually materialized, so we can assert bulk_subscript never pins it.
+    auto index = GenScalarIndexing<double>(N, double_col.data());
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = double_id.get();
+    load_info.field_type = DataType::DOUBLE;
+    load_info.index_params = GenIndexParams(index.get());
+    load_info.load_resource_request.emplace();
+    load_info.load_resource_request->has_raw_data = false;
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(index), &observed_ctx);
+    segment->LoadIndex(load_info);
+    ASSERT_TRUE(segment->HasIndex(double_id));
+
+    std::vector<int64_t> seg_offsets(N);
+    for (int64_t i = 0; i < static_cast<int64_t>(N); i++) {
+        seg_offsets[i] = i;
+    }
+
+    milvus::OpContext op_ctx;
+    auto field_data =
+        segment->bulk_subscript(&op_ctx, double_id, seg_offsets.data(), N);
+
+    // Values must be read from the raw column, unchanged.
+    ASSERT_TRUE(field_data->has_scalars());
+    ASSERT_TRUE(field_data->scalars().has_double_data());
+    ASSERT_EQ(field_data->scalars().double_data().data_size(),
+              static_cast<int>(N));
+    for (size_t i = 0; i < N; i++) {
+        ASSERT_EQ(field_data->scalars().double_data().data(i), double_col[i]);
+    }
+    // The index carries no raw data: bulk_subscript must fall back to the raw
+    // column without pinning (and thus materializing) the index.
+    ASSERT_EQ(observed_ctx, nullptr);
 }
 
 TEST(Sealed, Delete) {
@@ -2947,6 +2998,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     query_vec_offsets.push_back(10);
     query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                        const_cast<const size_t*>(query_vec_offsets.data()));
+    query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                       static_cast<int64_t>(query_vec_offsets.size() - 1));
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
@@ -5767,6 +5820,37 @@ TEST(SealedSegmentCowState, ExternalSynthesizeRequiresRuntime) {
     SegmentLoadInfo staged_load_info(published_proto, schema);
     EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(
         staged_load_info, schema, nullptr));
+}
+
+// FreezeRuntimeResourceState copies the runtime state field by field, so every
+// member added to the struct has to be added to that copy by hand. Nothing in
+// the type system catches an omission, and the consequence is silent: every
+// geometry predicate on a segment published through the freeze path would fall
+// back to bulk_subscript + WKB re-parse forever, because the caches are built
+// once at column load and never rebuilt. Pin the copy for the one member whose
+// loss is invisible.
+TEST(SealedSegmentCowState, FreezePreservesGeometryCaches) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto cache = std::make_shared<milvus::exec::SimpleGeometryCache>();
+    const auto geo_field = FieldId(101);
+    runtime->geometry_caches[geo_field] = cache;
+
+    auto frozen =
+        ChunkedSegmentSealedImpl::TestFreezeRuntimeResourceStateCopy(*runtime);
+    ASSERT_NE(frozen, nullptr);
+    auto it = frozen->geometry_caches.find(geo_field);
+    ASSERT_TRUE(it != frozen->geometry_caches.end());
+    // Same cache, not a fresh empty one: the frozen state must keep the
+    // populated instance the caller already filled.
+    EXPECT_EQ(it->second, cache);
 }
 
 TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {

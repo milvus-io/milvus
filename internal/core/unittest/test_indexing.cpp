@@ -15,6 +15,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <string.h>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -65,7 +66,6 @@
 #include "query/SearchBruteForce.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -843,6 +843,63 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     }
 }
 
+TEST(Indexing, HnswEmbListEmptyNullableUsesLogicalIds) {
+    constexpr int64_t dim = DIM;
+    auto metric_type = knowhere::metric::MAX_SIM;
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data_meta = milvus::segcore::gen_field_meta(
+        1, 2, 3, 100, DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true);
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    index_meta.field_type = DataType::VECTOR_ARRAY;
+    index_meta.dim = dim;
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    ASSERT_NE(vec_index, nullptr);
+
+    std::array<bool, 3> valid_data{{true, false, true}};
+    auto dataset = knowhere::GenDataSet(0, dim, nullptr);
+    dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        valid_data.data(), valid_data.size()));
+
+    Config build_conf;
+    build_conf[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    build_conf[knowhere::meta::METRIC_TYPE] = metric_type;
+    build_conf[knowhere::indexparam::M] = "16";
+    build_conf[knowhere::indexparam::EF] = "10";
+    build_conf[DIM_KEY] = dim;
+
+    ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), 2);
+    EXPECT_EQ(vec_index->GetIdMap().OutCount(), 3);
+    EXPECT_EQ(vec_index->Count(), 0);
+
+    std::vector<int64_t> logical_ids = {0, 2};
+    auto ids_ds = GenIdsDataset(logical_ids.size(), logical_ids.data());
+    auto [raw_data, emb_offsets] =
+        vec_index->GetEmbListByIds(ids_ds, metric_type);
+    EXPECT_TRUE(raw_data.empty());
+    EXPECT_EQ(emb_offsets, std::vector<size_t>({0, 0, 0}));
+
+    std::vector<int64_t> null_ids = {1};
+    auto null_ids_ds = GenIdsDataset(null_ids.size(), null_ids.data());
+    EXPECT_ANY_THROW(vec_index->GetEmbListByIds(null_ids_ds, metric_type));
+}
+
 TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     constexpr int64_t row_count = 8;
     constexpr int64_t dim = DIM;
@@ -950,6 +1007,9 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     emb_list_iterator_dataset->Set(
         knowhere::meta::EMB_LIST_OFFSET,
         const_cast<const size_t*>(emb_list_iterator_offsets.data()));
+    emb_list_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_COUNT,
+        static_cast<int64_t>(emb_list_iterator_offsets.size() - 1));
     emb_list_iterator_dataset->Set(knowhere::meta::NQ, int64_t{4});
     auto emb_list_iterators = loaded_vec_index->VectorIterators(
         emb_list_iterator_dataset, iterator_conf, nullptr);
@@ -987,6 +1047,9 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     cached_iterator_dataset->Set(
         knowhere::meta::EMB_LIST_OFFSET,
         const_cast<const size_t*>(cached_iterator_offsets.data()));
+    cached_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_COUNT,
+        static_cast<int64_t>(cached_iterator_offsets.size() - 1));
     cached_iterator_dataset->Set(knowhere::meta::NQ, int64_t{1});
     milvus::query::CachedSearchIterator cached_iter(*loaded_vec_index,
                                                     cached_iterator_dataset,
@@ -1007,6 +1070,8 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     std::vector<size_t> query_offsets = {0, 1};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
     xq_dataset->Set(knowhere::meta::NQ, int64_t{1});
     milvus::SearchInfo search_info;
     search_info.topk_ = 3;
@@ -1135,6 +1200,9 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     emb_list_iterator_dataset->Set(
         knowhere::meta::EMB_LIST_OFFSET,
         const_cast<const size_t*>(emb_list_iterator_offsets.data()));
+    emb_list_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_COUNT,
+        static_cast<int64_t>(emb_list_iterator_offsets.size() - 1));
     emb_list_iterator_dataset->Set(knowhere::meta::NQ, int64_t{4});
     auto emb_list_iterator_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, metric_type},
@@ -1154,6 +1222,8 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     std::vector<size_t> query_offsets = {0, 1};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
     xq_dataset->Set(knowhere::meta::NQ, int64_t{1});
     milvus::SearchInfo search_info;
     search_info.topk_ = 3;
@@ -1176,6 +1246,9 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     trailing_query_dataset->Set(
         knowhere::meta::EMB_LIST_OFFSET,
         const_cast<const size_t*>(trailing_query_offsets.data()));
+    trailing_query_dataset->Set(
+        knowhere::meta::EMB_LIST_COUNT,
+        static_cast<int64_t>(trailing_query_offsets.size() - 1));
     trailing_query_dataset->Set(knowhere::meta::NQ, int64_t{4});
     SearchResult trailing_result;
     loaded_vec_index->Query(
@@ -1478,6 +1551,7 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
         knowhere::GenDataSet(total_vectors, DIM, xb_data.data());
     xb_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(offsets.data()));
+    xb_dataset->Set(knowhere::meta::EMB_LIST_COUNT, num_emb_lists);
     xb_dataset->Set(knowhere::meta::NQ, num_emb_lists);
 
     // Setup file manager context
@@ -1560,6 +1634,8 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     std::vector<size_t> query_offsets = {0, 3, 5};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
     xq_dataset->Set(knowhere::meta::NQ, int64_t{2});
 
     milvus::SearchInfo search_info;
@@ -1707,6 +1783,8 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     std::vector<size_t> query_offsets = {0, 3, 5};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
@@ -1827,6 +1905,8 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     std::vector<size_t> iterator_offsets = {0, 1, 2};
     iterator_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                           const_cast<const size_t*>(iterator_offsets.data()));
+    iterator_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                          static_cast<int64_t>(iterator_offsets.size() - 1));
     iterator_dataset->Set(knowhere::meta::NQ, int64_t{2});
     auto iterator_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, metric_type},

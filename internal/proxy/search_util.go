@@ -716,14 +716,14 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 	return req.GetNq(), nil
 }
 
-func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
+func getPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
 	for _, tag := range partitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
 	}
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	partitionsMap, err := metaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}

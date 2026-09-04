@@ -34,6 +34,7 @@
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/HybridScalarIndex.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -51,6 +52,8 @@
 #include "storage/ChunkManager.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/PluginLoader.h"
@@ -1551,4 +1554,330 @@ TEST(ArrayOffsetsSealedTest, BuildAllZerosEmptyArraysAndBalancedResource) {
         ASSERT_EQ(tmp->GetRowCount(), 500);
         ASSERT_EQ(tmp->GetTotalElementCount(), 0);
     }
+}
+
+// ============================================================================
+// Regression for struct-array sub-field HYBRID scalar index load failure
+// (segcoreCode=2001, "Meta key not found: index_type").
+//
+// In 3.0.0, IndexFactory::CreateNestedIndex routed HYBRID through the default
+// STLSORT factory, so a HYBRID collection index on a struct-array sub-field
+// (e.g. items[items[category]], element VarChar) produced a standalone
+// milvus_packed_stlsort_index.v3 whose meta lacks the hybrid index_type key.
+// The load path trusted metadata HYBRID, built a HybridScalarIndex, and its
+// LoadEntries unconditionally read the index_type meta -> assert -> 2001.
+//
+// The fix makes HybridScalarIndex::LoadEntries tolerant: when index_type is
+// absent it infers the physical index type from the file's meta keys and
+// dispatches to the existing internal index loader.
+// ============================================================================
+
+TEST(BitmapIndexArrayNestedTest,
+     LegacyStandaloneStlsortLoadsUnderHybridMetadata) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("struct_field[sub]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+    field_schema.set_nullable(false);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3130, 3130};
+
+    auto root_path =
+        fmt::format("{}/legacy_stlsort_under_hybrid", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    // Build a standalone STLSORT (StringIndexSort) through the nested index
+    // factory exactly as 3.0.0 did for struct-array sub-fields: the default
+    // (non-BITMAP/INVERTED/HYBRID) routing in CreateNestedIndex produces a
+    // StringIndexSort whose packed file carries no hybrid index_type meta.
+    index::CreateIndexInfo build_info{};
+    build_info.index_type = milvus::index::ASCENDING_SORT;
+    build_info.field_type = DataType::ARRAY;
+    build_info.field_name = "struct_field[sub]";
+
+    auto stlsort =
+        index::IndexFactory::GetInstance().CreateIndex(build_info, ctx);
+    ASSERT_TRUE(stlsort->IsNestedIndex());
+    ASSERT_NE(dynamic_cast<index::StringIndexSort*>(stlsort.get()), nullptr);
+
+    // Element-indexed data: row0 {alpha,beta}, row1 {}, row2 {}, row3
+    // {beta,gamma} -> flattened elements alpha,beta,beta,gamma (4 elements).
+    std::vector<ScalarFieldProto> scalar_arrays(4);
+    scalar_arrays[0].mutable_string_data()->add_data("alpha");
+    scalar_arrays[0].mutable_string_data()->add_data("beta");
+    scalar_arrays[3].mutable_string_data()->add_data("beta");
+    scalar_arrays[3].mutable_string_data()->add_data("gamma");
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field_data->FillFieldData(array_data.data(), array_data.size());
+
+    auto stlsort_index = dynamic_cast<index::StringIndexSort*>(stlsort.get());
+    stlsort_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_EQ(stlsort_index->Count(), 4);
+
+    // Upload produces the legacy milvus_packed_stlsort_index.v3 file; the
+    // physical type is recovered from the filename, not from meta keys.
+    auto create_index_result = stlsort_index->UploadUnified({});
+    ASSERT_EQ(create_index_result->GetIndexFiles().size(), 1);
+    auto index_files = create_index_result->GetIndexFiles();
+    EXPECT_EQ(index_files[0].substr(index_files[0].find_last_of('/') + 1),
+              "milvus_packed_stlsort_index.v3");
+
+    // The file meta must genuinely lack the hybrid index_type key so this test
+    // exercises the inference branch (not the HasMeta branch).
+    {
+        storage::MemFileManagerImpl fm(ctx);
+        auto input = fm.OpenInputStream(index_files[0]);
+        ASSERT_NE(input, nullptr);
+        auto reader = storage::IndexEntryReader::Open(input, input->Size());
+        ASSERT_NE(reader, nullptr);
+        EXPECT_FALSE(reader->HasMeta(INDEX_TYPE));
+        EXPECT_TRUE(reader->HasMeta("version"));
+        EXPECT_TRUE(reader->HasMeta("num_rows"));
+    }
+
+    // Now load that STLSORT file through the HYBRID (nested) index path.
+    index::CreateIndexInfo load_info{};
+    load_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    load_info.field_type = DataType::ARRAY;
+    load_info.field_name = "struct_field[sub]";
+    load_info.tantivy_index_version = 7;
+
+    Config config;
+    config["index_files"] = index_files;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+
+    ctx.set_for_loading_index(true);
+    auto hybrid =
+        index::IndexFactory::GetInstance().CreateIndex(load_info, ctx);
+    ASSERT_TRUE(hybrid->IsNestedIndex());
+    ASSERT_EQ(hybrid->Type(), milvus::index::HYBRID_INDEX_TYPE);
+
+    auto hybrid_index =
+        dynamic_cast<index::HybridScalarIndex<std::string>*>(hybrid.get());
+    ASSERT_NE(hybrid_index, nullptr);
+
+    // Before the fix this threw "Meta key not found: index_type"; now the
+    // physical type is inferred from the file meta and the load succeeds.
+    hybrid->LoadUnified(config);
+    EXPECT_EQ(hybrid_index->internal_index_type_, ScalarIndexType::STLSORT);
+    EXPECT_EQ(hybrid->Count(), 4);
+
+    // Element-indexed queries delegate to the inferred STLSORT internal index.
+    // Flattened valid elements: e0=alpha, e1=beta, e2=beta, e3=gamma.
+    std::string beta = "beta";
+    auto in_result = hybrid_index->In(1, &beta);
+    ASSERT_EQ(in_result.size(), 4);
+    EXPECT_FALSE(in_result[0]);
+    EXPECT_TRUE(in_result[1]);
+    EXPECT_TRUE(in_result[2]);
+    EXPECT_FALSE(in_result[3]);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     HybridFileWithIndexTypeMetaStillLoadsViaMetaBranch) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("struct_field[sub]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+    field_schema.set_nullable(false);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3131, 3131};
+
+    auto root_path =
+        fmt::format("{}/hybrid_with_index_type_meta", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    // Build a proper STLSORT-backed hybrid packed file exactly as
+    // HybridScalarIndex::WriteEntries does (internal entries + index_type meta).
+    auto stlsort = std::make_unique<index::StringIndexSort>(ctx, true);
+
+    std::vector<ScalarFieldProto> scalar_arrays(3);
+    scalar_arrays[0].mutable_string_data()->add_data("x");
+    scalar_arrays[1].mutable_string_data()->add_data("y");
+    scalar_arrays[2].mutable_string_data()->add_data("x");
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field_data->FillFieldData(array_data.data(), array_data.size());
+    stlsort->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_EQ(stlsort->Count(), 3);
+
+    auto file_manager = std::make_shared<storage::MemFileManagerImpl>(ctx);
+    auto writer = file_manager->CreateIndexEntryWriterUnified(
+        "milvus_packed_hybrid_index.v3");
+    stlsort->WriteEntries(writer.get());
+    writer->PutMeta(INDEX_TYPE, static_cast<uint8_t>(ScalarIndexType::STLSORT));
+    writer->Finish();
+
+    std::vector<std::string> index_files{
+        file_manager->GetRemoteIndexObjectPrefix() +
+        "/milvus_packed_hybrid_index.v3"};
+
+    index::CreateIndexInfo load_info{};
+    load_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    load_info.field_type = DataType::ARRAY;
+    load_info.field_name = "struct_field[sub]";
+    load_info.tantivy_index_version = 7;
+
+    Config config;
+    config["index_files"] = index_files;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+
+    ctx.set_for_loading_index(true);
+    auto hybrid =
+        index::IndexFactory::GetInstance().CreateIndex(load_info, ctx);
+    auto hybrid_index =
+        dynamic_cast<index::HybridScalarIndex<std::string>*>(hybrid.get());
+    ASSERT_NE(hybrid_index, nullptr);
+
+    hybrid->LoadUnified(config);
+    // The index_type meta exists, so the HasMeta branch decides the physical
+    // type (STLSORT), not the inference fallback.
+    EXPECT_EQ(hybrid_index->internal_index_type_, ScalarIndexType::STLSORT);
+    EXPECT_EQ(hybrid->Count(), 3);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+
+// Exposes the protected array-type selection dispatcher so the
+// nested-vs-regular choice can be asserted directly.
+class TestHybridScalarIndexString
+    : public index::HybridScalarIndex<std::string> {
+ public:
+    using index::HybridScalarIndex<std::string>::HybridScalarIndex;
+    ScalarIndexType
+    SelectIndexBuildTypePublic(const std::vector<FieldDataPtr>& field_datas) {
+        return SelectIndexBuildType(field_datas);
+    }
+};
+
+std::vector<ScalarFieldProto>
+MakeStringScalarArrays(int rows, int distinct) {
+    std::vector<ScalarFieldProto> scalar_arrays(rows);
+    for (int i = 0; i < rows; ++i) {
+        scalar_arrays[i].mutable_string_data()->add_data(
+            fmt::format("value_{:04d}", i % distinct));
+    }
+    return scalar_arrays;
+}
+
+FieldDataPtr
+MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field_data->FillFieldData(array_data.data(), array_data.size());
+    return field_data;
+}
+
+}  // namespace
+
+// Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
+// sort index can serve high-cardinality data: STL_SORT must replace INVERTED
+// once distinct values reach the bitmap cardinality limit (default 100) AND
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
+// fields keep INVERTED regardless of version because the sort index cannot
+// handle array values.
+TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
+    auto root_path =
+        fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3140);
+
+    // 120 distinct elements spread over 240 rows -> high cardinality.
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+
+    TestHybridScalarIndexString nested(7, ctx, true);
+    nested.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{high_card_field_data}),
+              ScalarIndexType::STLSORT);
+
+    // Regular (non-nested) array fields must stay on INVERTED at high
+    // cardinality, even at/above the nested STL_SORT version threshold.
+    TestHybridScalarIndexString regular(7, ctx, false);
+    regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(regular.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{high_card_field_data}),
+              ScalarIndexType::INVERTED);
+
+    // Low cardinality keeps BITMAP for both nested and regular arrays.
+    auto low_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(10, 1));
+    TestHybridScalarIndexString nested_low(7, ctx, true);
+    nested_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(nested_low.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{low_card_field_data}),
+              ScalarIndexType::BITMAP);
+    TestHybridScalarIndexString regular_low(7, ctx, false);
+    regular_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(regular_low.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{low_card_field_data}),
+              ScalarIndexType::BITMAP);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Below kNestedHybridStlSortMinVersion (e.g. the default v3 used by 3.0.x),
+// nested high-cardinality HYBRID indexes must keep selecting INVERTED so
+// that an older reader (e.g. 2.6, whose ScalarIndexSort predates nested-index
+// support) can still load the index after a rollback. Regression test for
+// https://github.com/milvus-io/milvus/issues/52893.
+TEST(BitmapIndexArrayNestedTest,
+     HybridNestedHighCardinalityBelowVersionKeepsInverted) {
+    auto root_path =
+        fmt::format("{}/hybrid_nested_high_card_legacy_version", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3141);
+
+    // 120 distinct elements spread over 240 rows -> high cardinality.
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+
+    for (int32_t version :
+         {0, kHybridIndexConfigVersion, kNestedHybridStlSortMinVersion - 1}) {
+        TestHybridScalarIndexString nested(7, ctx, true);
+        nested.scalar_index_version_ = version;
+        EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  ScalarIndexType::INVERTED)
+            << "scalar_index_version_=" << version;
+    }
+
+    boost::filesystem::remove_all(root_path);
 }

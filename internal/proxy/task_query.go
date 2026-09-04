@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -46,7 +48,6 @@ const (
 
 const (
 	RetrieveTaskName = "RetrieveTask"
-	QueryTaskName    = "QueryTask"
 )
 
 type queryTask struct {
@@ -88,7 +89,7 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
-	chMgr                channelsMgr
+	chMgr                channelmgr.ChannelsMgr
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -641,14 +642,14 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
-		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		collID, err := t.GetMetaCache().GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			mlog.Warn(t.ctx, "query task get collectionID failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
-		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		collectionInfo, err2 := t.GetMetaCache().GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "query task get collection info failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
@@ -676,14 +677,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	t.CollectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	colInfo, err := t.GetMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection info.", mlog.String("collectionName", collectionName),
 			mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
@@ -695,7 +696,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
+	schema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
@@ -712,7 +713,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.PartitionNames = partitionNames
 	}
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.GetMetaCache(), t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 		return err
@@ -807,7 +808,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
 		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -819,14 +820,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionKeys)
 			if err != nil {
 				return err
 			}
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionNames)
 		if err != nil {
 			return err
 		}
@@ -849,7 +850,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	collectionInfo, err2 := t.GetMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn(ctx, "Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID),
@@ -928,8 +929,20 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	// Built once, ahead of the namespace fast path below, so that the fast
+	// path derives its single-channel workload from the same value Execute
+	// would fan out -- every collection-level field, the resource-group scope
+	// included, reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             1,
+		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
+	}
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
@@ -939,15 +952,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if ok {
-			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-				Db:              t.request.GetDbName(),
-				CollectionName:  t.collectionName,
-				CollectionID:    t.CollectionID,
-				Channel:         channelName,
-				Nq:              1,
-				Exec:            t.queryShard,
-				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
-			}); err != nil {
+			if err := t.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, preferredNodeForChannel(t.preferredNodes, channelName))); err != nil {
 				log.Warn(ctx, "fail to execute query", mlog.Err(err))
 				return errors.Wrap(err, "failed to query")
 			}
@@ -956,14 +961,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			return nil
 		}
 	}
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             1,
-		Exec:           t.queryShard,
-		PreferredNodes: t.preferredNodes,
-	})
+	err := t.lb.Execute(ctx, workload)
 	if err != nil {
 		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")
@@ -1051,7 +1049,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	// Only geometry WKB→WKT conversion still needs to happen here.
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
-			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
 				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}

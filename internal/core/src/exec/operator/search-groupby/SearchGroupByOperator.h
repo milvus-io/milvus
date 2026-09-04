@@ -394,16 +394,6 @@ struct CompositeGroupByMap {
         }
         return true;
     }
-
-    int
-    GetGroupCount() const {
-        return group_map_.size();
-    }
-
-    int
-    GetEnoughGroupCount() const {
-        return enough_group_count_;
-    }
 };
 
 // Multi-field DataGetter that reads multiple fields and builds CompositeGroupKey
@@ -416,9 +406,6 @@ class MultiFieldDataGetter {
         const std::optional<std::string>& json_path = std::nullopt,
         const std::optional<DataType>& json_type = std::nullopt,
         bool strict_cast = false);
-
-    CompositeGroupKey
-    Get(int64_t idx) const;
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;

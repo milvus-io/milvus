@@ -44,6 +44,18 @@ func TestReranker(t *testing.T) {
 		params = rr.GetParams()
 		assert.True(t, checkParam(params, rerankType, rrfRerankType))
 		assert.True(t, checkParam(params, rerankParams, `{"k":50}`))
+
+		rr.WithWeights([]float64{0.8, 0.2})
+		params = rr.GetParams()
+		assert.True(t, checkParam(params, rerankParams, `{"k":50,"weights":[0.8,0.2]}`))
+
+		emptyWeights := NewRRFReranker().WithWeights([]float64{})
+		params = emptyWeights.GetParams()
+		assert.True(t, checkParam(params, rerankParams, `{"k":60,"weights":[]}`))
+
+		nullWeights := NewRRFReranker().WithWeights(nil)
+		params = nullWeights.GetParams()
+		assert.True(t, checkParam(params, rerankParams, `{"k":60,"weights":null}`))
 	})
 
 	t.Run("weightedReranker", func(t *testing.T) {

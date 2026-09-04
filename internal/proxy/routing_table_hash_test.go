@@ -18,14 +18,18 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	pkgtypeutil "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -134,6 +138,91 @@ func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
 	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)
 	assert.Nil(t, got)
 	assert.Zero(t, rows)
+}
+
+func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
+	paramtable.Init()
+	primaryKeys := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		},
+	}
+	repack := func() (map[uint32][]*msgstream.DeleteMsg, int64, error) {
+		return repackDeleteMsgByHash(
+			context.Background(),
+			primaryKeys,
+			[]string{"vchan-0"},
+			allocator.NewLocalAllocator(100, 200),
+			1000,
+			1,
+			"collection",
+			2,
+			"partition",
+			"default",
+			nil,
+			nil,
+		)
+	}
+
+	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, "-1"))
+	t.Cleanup(func() {
+		Params.Reset(Params.QuotaConfig.MaxDeleteSize.Key)
+	})
+	result, rows, err := repack()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), rows)
+	require.Len(t, result, 1)
+	var materializedSize int
+	for _, msgs := range result {
+		require.Len(t, msgs, 1)
+		materializedSize = msgs[0].Size()
+	}
+	require.Positive(t, materializedSize)
+
+	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize)))
+	_, _, err = repack()
+	require.NoError(t, err, "the exact maxDeleteSize boundary must be accepted")
+
+	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize-1)))
+	result, rows, err = repack()
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	assert.Nil(t, result)
+	assert.Zero(t, rows)
+}
+
+func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
+	paramtable.Init()
+	oldMaxMessageSize := Params.PulsarCfg.MaxMessageSize.SwapTempValue("512")
+	oldMaxDeleteSize := Params.QuotaConfig.MaxDeleteSize.SwapTempValue("-1")
+	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
+	t.Cleanup(func() {
+		Params.PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize)
+		Params.QuotaConfig.MaxDeleteSize.SwapTempValue(oldMaxDeleteSize)
+		Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy)
+	})
+
+	primaryKeys := &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{Data: []string{strings.Repeat("a", 300), strings.Repeat("b", 300)}},
+		},
+	}
+	repack := func() map[uint32][]*msgstream.DeleteMsg {
+		result, rows, err := repackDeleteMsgByHash(
+			context.Background(), primaryKeys, []string{"vchan-0"}, allocator.NewLocalAllocator(100, 200),
+			1000, 1, "collection", 2, "partition", "default", nil, nil,
+		)
+		require.NoError(t, err)
+		require.Equal(t, int64(2), rows)
+		return result
+	}
+
+	result := repack()
+	require.Len(t, result[0], 2)
+
+	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	result = repack()
+	require.Len(t, result[0], 1)
 }
 
 func expectedInt64ModuloHashes(t *testing.T, keys []int64, targetCount int) []uint32 {

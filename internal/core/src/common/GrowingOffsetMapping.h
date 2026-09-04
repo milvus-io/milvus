@@ -16,12 +16,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <limits>
 #include <mutex>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 
 namespace milvus {
@@ -55,13 +57,14 @@ namespace milvus {
 // payload). The logical -> physical direction is a binary search over that
 // array -- it is strictly increasing -- so point lookups cost
 // O(log valid_count). Those sit on result-bounded paths (fetching the rows a
-// query returns); the loops a search actually scans with (TransformBitset,
-// ValidCountBelow, TransformOffsets) read physical -> logical directly and
-// never search. An all-valid mapping (no nulls yet) short-circuits point
-// lookups to the identity, and batch conversions gallop from a cursor on
-// ascending inputs, so a full-range pass (flush, chunk views) costs O(N)
-// rather than N binary searches. The old per-lookup shared_lock RMW -- a
-// contention point across reader threads -- is gone either way.
+// query returns). Search scan paths use ValidCountBelow for the visible
+// physical bound and GetPhysicalToLogicalIds for contiguous p2l windows; they
+// read physical -> logical directly and never search. An all-valid mapping
+// (no nulls yet) short-circuits point lookups to the identity, and batch
+// conversions gallop from a cursor on ascending inputs, so a full-range pass
+// (flush, chunk views) costs O(N) rather than N binary searches. The old
+// per-lookup shared_lock RMW -- a contention point across reader threads -- is
+// gone either way.
 class GrowingOffsetMapping final : public OffsetMapping {
  public:
     // Append `count` rows. start_logical / start_physical default to the
@@ -104,15 +107,9 @@ class GrowingOffsetMapping final : public OffsetMapping {
     int64_t
     GetTotalCount() const override;
 
-    BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset,
-                    TargetBitmap& result) const override;
-
-    void
-    TransformOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const override;
+    OffsetMappingIdView
+    GetPhysicalToLogicalIds(int64_t physical_offset,
+                            int64_t count) const override;
 
     void
     FilterValidLogicalOffsets(
@@ -191,6 +188,23 @@ class GrowingOffsetMapping final : public OffsetMapping {
             const int chunk = ChunkOf(index);
             return chunks_[chunk].load(
                 std::memory_order_relaxed)[PosOf(index, chunk)];
+        }
+
+        OffsetMappingIdView
+        View(int64_t index, int64_t count) const {
+            if (count <= 0) {
+                return {};
+            }
+            AssertInfo(
+                index >= 0, "offset mapping index {} is negative", index);
+            const int chunk = ChunkOf(index);
+            auto* data = chunks_[chunk].load(std::memory_order_relaxed);
+            AssertInfo(data != nullptr,
+                       "growing offset mapping chunk {} is not allocated",
+                       chunk);
+            const auto pos = PosOf(index, chunk);
+            const auto chunk_size = kFirstChunk << chunk;
+            return {data + pos, std::min<int64_t>(count, chunk_size - pos)};
         }
 
      private:

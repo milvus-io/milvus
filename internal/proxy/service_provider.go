@@ -278,7 +278,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		// discarded the returned collectionInfo and forced a second describe on a
 		// rolling-upgrade old RootCoord response that omitted DbName (such entries
 		// are deliberately returned uncached because their database is unknown).
-		c, err = globalMetaCache.GetCollectionInfo(ctx, request.DbName, "", collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, "", collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
@@ -295,12 +295,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	// Resolve the id and complete entry from the name only when the caller did
 	// not provide an id. The id-only path already has the complete entry above.
 	if !resolvedNameByID {
-		collectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, collectionName)
+		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, request.DbName, collectionName)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
-		c, err = globalMetaCache.GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
@@ -372,7 +372,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	log.Debug(ctx, "DescribeCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		log.Warn(ctx, "DescribeCollection failed to enqueue",
 			mlog.Err(err))
 

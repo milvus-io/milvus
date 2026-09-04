@@ -4393,19 +4393,13 @@ func TestSnapshotExportManager_Observability(t *testing.T) {
 	})
 
 	t.Run("failure log uses context and redacts reason", func(t *testing.T) {
-		var logs syncBuffer
-		oldLogger := mlog.L()
-		oldLevel := mlog.GetAtomicLevel()
-		logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		logs := mlog.CaptureGlobalLogs(t, &mlog.Config{
 			Level:             "warn",
 			Format:            "text",
 			DisableCaller:     true,
 			DisableTimestamp:  true,
 			DisableStacktrace: true,
-		}, &logs)
-		require.NoError(t, err)
-		mlog.ReplaceGlobals(logger, props)
-		defer mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+		})
 
 		const secret = "SNAPSHOT_EXPORT_SECRET"
 		externalSpec := `{"extfs":{"access_key_value":"` + secret + `"}}`
@@ -4431,13 +4425,16 @@ func TestSnapshotExportManager_Observability(t *testing.T) {
 
 func TestSanitizeSnapshotExportReason(t *testing.T) {
 	secret := "SUPERSECRET"
-	externalSpec := `{"extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"` + secret + `"}}`
-	err := errors.New("copy failed for AKIAEXAMPLE using " + secret + strings.Repeat("x", snapshotExportFailureReasonLimit))
+	sas := "sv=2024-08-04&sig=SECRETSAS&sp=r"
+	externalSpec := `{"extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"` + secret + `","source_sas_token":"` + sas + `"}}`
+	err := errors.New("copy failed for AKIAEXAMPLE using " + secret +
+		" from https://src.blob.core.windows.net/c/o?" + sas + strings.Repeat("x", snapshotExportFailureReasonLimit))
 
 	reason := sanitizeSnapshotExportReason(err, externalSpec)
 
 	assert.NotContains(t, reason, "AKIAEXAMPLE")
 	assert.NotContains(t, reason, secret)
+	assert.NotContains(t, reason, "SECRETSAS")
 	assert.LessOrEqual(t, len(reason), snapshotExportFailureReasonLimit)
 
 	truncated := sanitizeSnapshotExportReason(

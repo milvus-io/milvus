@@ -20,8 +20,7 @@ import (
 
 func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestSearchTask_PlanNamespace_AfterPreExecute", t, func() {
-		// Setup global meta cache and common mocks
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
@@ -45,7 +44,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Capture plan to verify namespace by mocking tryGeneratePlan
 		var capturedPlan *planpb.PlanNode
-		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue, _ *planparserv2.MembershipPreflightBudget) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 			capturedPlan = &planpb.PlanNode{}
 			qi := &planpb.QueryInfo{Topk: 10, MetricType: "L2", QueryFieldId: 101, GroupByFieldId: -1}
 			return capturedPlan, qi, 0, false, nil, internalpb.SearchType_DEFAULT, nil
@@ -53,6 +52,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Build task
 		task := &searchTask{
+			baseTask:      baseTask{MetaCache: cache},
 			Condition:     NewTaskCondition(context.Background()),
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			ctx:           context.Background(),
@@ -72,7 +72,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 	mockey.PatchConvey("TestSearchTask_NamespaceSetsPartitionIDs", t, func() {
-		globalMetaCache = &MetaCache{}
+		cache := &MetaCache{}
 
 		partitionNames := []string{"_default_0", "_default_1"}
 		partitionIDs := map[string]int64{"_default_0": 101, "_default_1": 102}
@@ -90,7 +90,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
 		mockey.Mock((*searchTask).checkNq).Return(int64(1), nil).Build()
-		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue, _ *planparserv2.MembershipPreflightBudget) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 			plan := &planpb.PlanNode{
 				Node: &planpb.PlanNode_VectorAnns{
 					VectorAnns: &planpb.VectorANNS{
@@ -105,6 +105,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		for _, ns := range namespaces {
 			namespace := ns
 			task := &searchTask{
+				baseTask:      baseTask{MetaCache: cache},
 				Condition:     NewTaskCondition(context.Background()),
 				SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 				ctx:           context.Background(),

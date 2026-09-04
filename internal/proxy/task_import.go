@@ -91,12 +91,12 @@ func (it *importTask) OnEnqueue() error {
 func (it *importTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
 	it.collectionID = collectionID
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
+	schema, err := it.GetMetaCache().GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 
-	channels, err := node.chMgr.getVChannels(collectionID)
+	channels, err := node.chMgr.GetVChannels(collectionID)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
+		partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		if req.GetPartitionName() == "" {
 			partitionIDs = []UniqueID{common.AllPartitionsID}
 		} else {
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
 			if err != nil {
 				return err
 			}
@@ -156,7 +156,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			if req.GetPartitionName() != "" {
 				return merr.WrapErrImportFailed("not allow to set partition name for collection with partition key")
 			}
-			partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+			partitions, err := it.GetMetaCache().GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			if req.GetPartitionName() == "" {
 				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 			}
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
 			if err != nil {
 				return err
 			}
@@ -199,13 +199,13 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *importTask) setChannels() error {
+func (it *importTask) SetChannels() error {
 	// import task only send message by broadcast, which didn't affect the time tick rule at proxy.
 	// so we don't need to set channels here.
 	return nil
 }
 
-func (it *importTask) getChannels() []pChan {
+func (it *importTask) GetChannels() []pChan {
 	return nil
 }
 
@@ -214,7 +214,7 @@ func (it *importTask) Execute(ctx context.Context) error {
 	// DataCoord will handle validation, broadcasting, and job creation
 
 	// Get database ID from database name
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, it.req.GetDbName())
+	dbInfo, err := it.GetMetaCache().GetDatabaseInfo(ctx, it.req.GetDbName())
 	if err != nil {
 		mlog.Warn(ctx, "failed to get database info", mlog.FieldDbName(it.req.GetDbName()), mlog.Err(err))
 		return err

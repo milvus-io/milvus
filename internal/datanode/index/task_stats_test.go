@@ -17,7 +17,6 @@
 package index
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -48,33 +48,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type statsTaskLogBuffer struct {
-	bytes.Buffer
-}
-
-func (*statsTaskLogBuffer) Sync() error {
-	return nil
-}
-
-func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
+func captureStatsTaskLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &statsTaskLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 func statsLogSentinel(parts ...string) string {
@@ -394,6 +377,145 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	s.Require().NoError(err)
 	s.Require().NotNil(captured)
 	s.Equal(pluginContext, captured.GetStoragePluginContext())
+}
+
+// TestStandaloneJSONKeyJobSkipsManifestBake verifies the worker side of the
+// structured-delta migration: a standalone JsonKeyIndexJob ships raw stats and
+// leaves the manifest pointer at its base (DataCoord runs the manifest
+// transaction), while the Sort sub-job still bakes stats into the target-segment
+// manifest inline.
+func TestStandaloneJSONKeyJobSkipsManifestBake(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(500)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:              clusterID,
+			TaskID:                 taskID,
+			CollectionID:           1,
+			PartitionID:            2,
+			SegmentID:              103,
+			TargetSegmentID:        103,
+			TaskVersion:            1,
+			NumRows:                10,
+			StorageVersion:         storage.StorageV3,
+			SubJobType:             sub,
+			ManifestPath:           baseManifest,
+			EnableJsonKeyStats:     true,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			StorageConfig:          &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		// Execute() seeds manifestPath from the request; call the sub-job directly here.
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+				return &indexcgowrapper.JSONKeyStatsResult{MemSize: 10, Files: map[string]int64{"json-stats": 10}}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
+			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
+		require.NoError(t, err)
+		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+	}
+
+	baked, storedManifest := run(indexpb.StatsSubJob_JsonKeyIndexJob)
+	require.False(t, baked, "standalone JsonKeyIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+
+	baked, _ = run(indexpb.StatsSubJob_Sort)
+	require.True(t, baked, "Sort sub-job must bake stats into the target-segment manifest inline")
+}
+
+// TestStandaloneTextIndexJobSkipsManifestBake is the text-index analog of
+// TestStandaloneJSONKeyJobSkipsManifestBake: a standalone TextIndexJob ships raw
+// stats without baking, while Sort bakes inline.
+func TestStandaloneTextIndexJobSkipsManifestBake(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(101)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       clusterID,
+			TaskID:          taskID,
+			CollectionID:    1,
+			PartitionID:     2,
+			SegmentID:       103,
+			TargetSegmentID: 103,
+			TaskVersion:     1,
+			NumRows:         10,
+			StorageVersion:  storage.StorageV3,
+			SubJobType:      sub,
+			ManifestPath:    baseManifest,
+			StorageConfig:   &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    fieldID,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}},
+				},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+				return statsFakeTextIndex{}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createTextIndex(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID, st.req.GetInsertLogs())
+		require.NoError(t, err)
+		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+	}
+
+	baked, storedManifest := run(indexpb.StatsSubJob_TextIndexJob)
+	require.False(t, baked, "standalone TextIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+
+	baked, _ = run(indexpb.StatsSubJob_Sort)
+	require.True(t, baked, "Sort sub-job must bake text stats into the target-segment manifest inline")
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {

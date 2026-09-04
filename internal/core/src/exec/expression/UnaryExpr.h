@@ -985,6 +985,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       plan_options),
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+        if (expr_->op_type_ == proto::plan::OpType::Match) {
+            EnsureLikeMatcherCache();
+        }
         auto val_type = FromValCase(expr_->val_.val_case());
         if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
             (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
@@ -1034,6 +1037,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
+    bool
     IsSource() const override {
         return true;
     }
@@ -1043,21 +1051,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return expr_;
     }
 
-    proto::plan::OpType
-    GetOpType() {
-        return expr_->op_type_;
-    }
-
-    FieldId
-    GetFieldId() {
-        return expr_->column_.field_id_;
-    }
-
-    DataType
-    GetFieldType() {
-        return expr_->column_.data_type_;
-    }
-
     int64_t
     GetActiveCount() const {
         return active_count_;
@@ -1065,10 +1058,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     // The concrete string literal to hand to a scalar index's ShouldUseOp cost
     // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
-    // whose index cost depends on the literal. Empty for every other op
-    // (including the equality family, which FMINDEX declines outright), so the
-    // guard is judged on the op alone. Lets FMINDEX decline degenerate high-hit
-    // LIKE literals to the raw-data scan on the VARCHAR path.
+    // and general LIKE (Match) whose index cost depends on the literal. Empty
+    // for every other op (including the equality family, which FMINDEX declines
+    // outright), so the guard is judged on the op alone. Lets FMINDEX decline
+    // degenerate high-hit LIKE literals to the raw-data scan on the VARCHAR path.
     std::string
     StringLiteralForCostGuard() const;
 
@@ -1136,7 +1129,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(OffsetVector* input = nullptr);
+    PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
 
     template <typename T>
     bool
@@ -1145,14 +1138,17 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTextMatch();
 
-    // Check if ngram index exists
-    bool
-    HasNgramIndex() const {
-        return pinned_ngram_index_.get() != nullptr;
-    }
-
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
+
+    bool
+    CanUseFMMatch();
+
+    bool
+    PinnedIndexIsFMIndex() const;
+
+    std::optional<VectorPtr>
+    ExecFMMatch(EvalCtx& context);
 
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);

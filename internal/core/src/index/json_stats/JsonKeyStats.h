@@ -24,7 +24,6 @@
 #include <functional>
 #include <initializer_list>
 #include <istream>
-#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -168,6 +167,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         ThrowInfo(ErrorCode::NotImplemented,
                   "IsNull not supported for JsonKeyStats");
     }
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override {
@@ -423,7 +427,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  private:
     void
-    CollectSingleJsonStatsInfo(const char* json_str,
+    CollectSingleJsonStatsInfo(std::string_view json_str,
                                std::map<JsonKey, KeyStatsInfo>& infos);
 
     std::string
@@ -472,7 +476,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
 
     void
-    BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
+    BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id);
 
     void
     BuildKeyStatsForNullRow();
@@ -508,39 +512,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsBoolean(const std::string& str) {
         return str == "true" || str == "false";
-    }
-
-    bool
-    IsInt8(const std::string& str) {
-        std::istringstream iss(str);
-        int8_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int8_t>::min() &&
-               num <= std::numeric_limits<int8_t>::max();
-    }
-
-    bool
-    IsInt16(const std::string& str) {
-        std::istringstream iss(str);
-        int16_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int16_t>::min() &&
-               num <= std::numeric_limits<int16_t>::max();
-    }
-
-    bool
-    IsInt32(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int32_t>::min() &&
-               num <= std::numeric_limits<int32_t>::max();
     }
 
     bool

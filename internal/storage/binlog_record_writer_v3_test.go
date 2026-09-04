@@ -233,6 +233,42 @@ func TestPackedManifestRecordWriter_TextRefsUseBinarySchema(t *testing.T) {
 	require.Equal(t, arrow.BINARY, gotSchema.Field(2).Type.ID())
 }
 
+func TestPartialPackedRecordBatchWriter_TextRefsUseBinarySchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, DataType: schemapb.DataType_Text, Name: "doc", Nullable: true},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 101, Columns: []int{0}, Fields: []int64{101}},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotSchema *arrow.Schema
+	patch := mockey.Mock(packed.NewFFIPackedWriter).To(
+		func(_ string, schema *arrow.Schema, _ []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext,
+			_ ...map[string]string,
+		) (*packed.FFIPackedWriter, error) {
+			gotSchema = schema
+			return &packed.FFIPackedWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	_, err := NewPartialPackedRecordBatchWriter(
+		t.TempDir(), schema, 0, 0, columnGroups, cfg, nil, "vortex", nil,
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires TEXT-aware writer")
+	require.Nil(t, gotSchema)
+
+	w, err := NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
+		t.TempDir(), schema, 0, 0, columnGroups, cfg, nil, "vortex", nil,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, w)
+	require.NotNil(t, gotSchema)
+	require.Equal(t, arrow.BINARY, gotSchema.Field(0).Type.ID())
+}
+
 func TestPackedManifestRecordWriter_UsesExplicitWriterFormat(t *testing.T) {
 	params := paramtable.Get()
 	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))

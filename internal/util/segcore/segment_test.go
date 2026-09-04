@@ -160,7 +160,8 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 		PartitionID:     2,
 		CommitTimestamp: 9999,
 	}
-	result := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(42), result.GetSegmentID(),
 		"SegmentID must be preserved through conversion")
@@ -176,7 +177,8 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 		PartitionID:  2,
 		// CommitTimestamp = 0
 	}
-	result2 := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	result2, err := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	assert.NoError(t, err)
 	assert.NotNil(t, result2)
 	assert.Equal(t, int64(43), result2.GetSegmentID(),
 		"SegmentID must be preserved through conversion when CommitTimestamp is zero")
@@ -184,13 +186,15 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 
 func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 	t.Run("nil input", func(t *testing.T) {
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
+		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("empty input", func(t *testing.T) {
 		src := &querypb.SegmentLoadInfo{}
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, int64(0), result.SegmentID)
 		assert.Equal(t, int64(0), result.PartitionID)
@@ -319,7 +323,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		}
 
 		// Convert to segcorepb.SegmentLoadInfo
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 
 		// Validate basic fields
 		assert.NotNil(t, result)
@@ -425,7 +430,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 			},
 		}
 
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 
 		assert.NotNil(t, result)
 		assert.Equal(t, 1, len(result.BinlogPaths))
@@ -458,8 +464,27 @@ func TestConvertToSegcoreSegmentLoadInfo_IndexStorePathVersion(t *testing.T) {
 		},
 	}
 
-	result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Len(t, result.GetIndexInfos(), 1)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, result.GetIndexInfos()[0].GetIndexStorePathVersion())
+}
+
+func TestConvertToSegcoreSegmentLoadInfo_V3ManifestErrorReturnsError(t *testing.T) {
+	src := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "not-a-valid-manifest-path",
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {FieldID: 100, BuildID: 200, Version: 1, Files: []string{"text.index"}},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, BuildID: 201, Version: 1, Files: []string{"json.stats"}},
+		},
+	}
+
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
 }

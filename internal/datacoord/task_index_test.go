@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -645,6 +646,68 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.NoError(err)
 	s.True(estimate.manifestBacked)
 	s.False(estimate.emptyOnStaleSchema)
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
+	const dim = 128
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	mt := &meta{
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+
+	childField := &schemapb.FieldSchema{
+		Name:        "events[embedding]",
+		FieldID:     s.fieldID,
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "events",
+				FieldID:  100,
+				Nullable: true,
+				Fields:   []*schemapb.FieldSchema{childField},
+			},
+		},
+	}
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID:         s.collID,
+		Schema:     schema,
+		Partitions: []int64{s.partID},
+	}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root")
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+	req, err := it.prepareJobRequest(
+		context.Background(),
+		&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           s.segID,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			NumOfRows:    4,
+		}},
+		segIndex,
+		[]*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
+		},
+		"HNSW",
+	)
+
+	s.NoError(err)
+	s.True(req.GetField().GetNullable())
+	s.False(childField.GetNullable())
+	s.NotSame(childField, req.GetField())
 }
 
 func (s *indexTaskSuite) TestQueryTaskOnWorker() {

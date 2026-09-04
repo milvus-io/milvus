@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -39,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -324,7 +324,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 }
 
 func TestUpsertTask(t *testing.T) {
-	t.Run("test getChannels", func(t *testing.T) {
+	t.Run("test GetChannels", func(t *testing.T) {
 		collectionID := UniqueID(0)
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
@@ -334,20 +334,20 @@ func TestUpsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		globalMetaCache = cache
 
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{MetaCache: cache},
+			ctx:      context.Background(),
 			req: &milvuspb.UpsertRequest{
 				CollectionName: collectionName,
 			},
 			chMgr: chMgr,
 		}
-		err := ut.setChannels()
+		err := ut.SetChannels()
 		assert.NoError(t, err)
-		resChannels := ut.getChannels()
+		resChannels := ut.GetChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, ut.pChannels)
 	})
@@ -442,8 +442,6 @@ func TestUpsertTask_Function(t *testing.T) {
 
 	info := mustNewSchemaInfo(schema)
 	collectionID := UniqueID(0)
-	cache := NewMockCache(t)
-	globalMetaCache = cache
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -458,7 +456,8 @@ func TestUpsertTask_Function(t *testing.T) {
 	defer idAllocator.Close()
 	assert.NoError(t, err)
 	task := upsertTask{
-		ctx: context.Background(),
+		baseTask: baseTask{MetaCache: &MetaCache{}},
+		ctx:      context.Background(),
 		req: &milvuspb.UpsertRequest{
 			CollectionName: collectionName,
 		},
@@ -497,15 +496,13 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
 		ut := upsertTask{
-			ctx: ctx,
+			baseTask: baseTask{MetaCache: mockCache},
+			ctx:      ctx,
 			req: &milvuspb.UpsertRequest{
 				CollectionName: "col-0",
 				NumRows:        10,
@@ -533,7 +530,7 @@ func createTestUpdateTask() *upsertTask {
 	mcClient := &grpcmixcoordclient.Client{}
 
 	upsertTask := &upsertTask{
-		baseTask:  baseTask{},
+		baseTask:  baseTask{MetaCache: &MetaCache{}},
 		Condition: NewTaskCondition(context.Background()),
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -788,15 +785,15 @@ var partialUpdateCASTestVChannels = []string{
 }
 
 func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
-	task.chMgr = newChannelsMgrImpl(func(collectionID UniqueID) (channelInfos, error) {
-		vchans := make([]vChan, 0, len(vchannels))
-		pchans := make([]pChan, 0, len(vchannels))
+	task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+		vchans := make([]string, 0, len(vchannels))
+		pchans := make([]string, 0, len(vchannels))
 		for _, vchannel := range vchannels {
 			vchans = append(vchans, vchannel)
 			pchans = append(pchans, funcutil.ToPhysicalChannel(vchannel))
 		}
-		return newChannels(vchans, pchans)
-	}, nil)
+		return channelmgr.ChannelInfo{VChans: vchans, PChans: pchans}, nil
+	})
 	proxy := task.node.(*Proxy)
 	if proxy.tsoAllocator == nil {
 		proxy.tsoAllocator = &timestampAllocator{
@@ -1062,9 +1059,7 @@ func partialUpdateCASRealPackTestTask(
 }
 
 func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
+	mockCache := &MetaCache{}
 	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
 
@@ -1082,6 +1077,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, groups := newInput()
 	msgs, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1096,6 +1092,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1108,6 +1105,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1121,6 +1119,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	groups[vchannel].ReadTs = 0
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1131,10 +1130,10 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
-func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
+func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
+	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	mockCache := &MetaCache{}
 	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
 
@@ -1148,8 +1147,48 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 		},
 	}
 
+	msgs, err := repackInsertDataForStreamingService(
+		context.Background(),
+		mockCache,
+		[]string{vchannel},
+		task.upsertMsg.InsertMsg,
+		task.result,
+		nil,
+		1,
+		groups,
+	)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
+	meta, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
+	require.NoError(t, err)
+	require.True(t, proto.Equal(groups[vchannel], meta))
+
+	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
+	require.Equal(t, uint64(len(pks)), insert.Header().GetPartitions()[0].GetRows())
+	require.Equal(t, []int64{101, 102}, insert.MustBody().GetRowIDs())
+}
+
+func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) {
+	mockCache := &MetaCache{}
+	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+	defer partitionPatch.UnPatch()
+
+	pks := []int64{10, 20}
+	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
+	vchannel := partialUpdateCASTestVChannels[0]
+	groups := map[string]*messagespb.PartialUpdateCAS{
+		vchannel: {
+			ReadTs:               100,
+			ObservedPchannelTerm: 1,
+		},
+	}
+
+	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	unsplit, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1159,12 +1198,14 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 	)
 	require.NoError(t, err)
 	require.Len(t, unsplit, 1)
-	maxMessageSize := unsplit[0].EstimateSize() - 1
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	msgs, err := repackInsertDataForStreamingService(
+	oldMaxMessageSize := Params.PulsarCfg.MaxMessageSize.SwapTempValue(strconv.Itoa(unsplit[0].EstimateSize() - 1))
+	t.Cleanup(func() { Params.PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
+
+	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
+	proxySplit, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1173,39 +1214,16 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 		groups,
 	)
 	require.NoError(t, err)
-	require.Len(t, msgs, 2)
-
-	rowIDs := make([]int64, 0, len(pks))
-	for _, msg := range msgs {
-		require.LessOrEqual(t, msg.EstimateSize(), maxMessageSize)
+	require.Len(t, proxySplit, 2)
+	for _, msg := range proxySplit {
+		require.LessOrEqual(t, msg.EstimateSize(), unsplit[0].EstimateSize()-1)
 		require.True(t, streamingmessage.HasPartialUpdateCAS(msg))
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
-		require.True(t, proto.Equal(groups[vchannel], meta))
-		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-		rowIDs = append(rowIDs, body.GetRowIDs()...)
-	}
-	require.Equal(t, []int64{101, 102}, rowIDs)
-}
-
-func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
-	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
-
-	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-	vchannel := partialUpdateCASTestVChannels[0]
-	groups := map[string]*messagespb.PartialUpdateCAS{
-		vchannel: {
-			ReadTs:               100,
-			ObservedPchannelTerm: 1,
-		},
 	}
 
-	baseline, err := repackInsertDataForStreamingService(
+	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	snSplit, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1214,24 +1232,15 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 		groups,
 	)
 	require.NoError(t, err)
-	require.Len(t, baseline, 1)
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(baseline[0].EstimateSize()-1)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
-
-	_, err = repackInsertDataForStreamingService(
-		context.Background(),
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-	)
-	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.Len(t, snSplit, 1)
 }
 
-func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t *testing.T) {
+func TestRepackInsertDataByPartitionForStreamingServiceRejectsMisalignedSource(t *testing.T) {
+	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+	// A source column shorter than NumRows is a proxy-internal contract
+	// violation and must fail before materialization.
 	task.upsertMsg.InsertMsg.FieldsData = []*schemapb.FieldData{
 		{
 			Type: schemapb.DataType_VarChar,
@@ -1255,101 +1264,20 @@ func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t 
 		nil,
 		1,
 		nil,
-		streamingmessage.WALNamePulsar,
 	)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-}
-
-func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrder(t *testing.T) {
-	pks := []int64{10, 20}
-	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
-	task.upsertMsg.InsertMsg.HashValues = []uint32{0, 0}
-	task.upsertMsg.InsertMsg.FieldsData = []*schemapb.FieldData{
-		{
-			FieldId: 100,
-			Type:    schemapb.DataType_VarChar,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{Data: []string{
-							strings.Repeat("a", 4096),
-							strings.Repeat("b", 4096),
-						}},
-					},
-				},
-			},
-		},
-	}
-	meta := &messagespb.PartialUpdateCAS{
-		ReadTs:               100,
-		ObservedPchannelTerm: 1,
-	}
-
-	baseline, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
-		200,
-		"_default",
-		[]int{0},
-		partialUpdateCASTestVChannels[0],
-		task.upsertMsg.InsertMsg,
-		nil,
-		1,
-		meta,
-		streamingmessage.WALNamePulsar,
-	)
-	require.NoError(t, err)
-	require.Len(t, baseline, 1)
-	maxMessageSize := baseline[0].EstimateSize()
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
-
-	entityPacked, err := genInsertMsgsByPartition(
-		context.Background(),
-		0,
-		200,
-		"_default",
-		[]int{0, 1},
-		partialUpdateCASTestVChannels[0],
-		task.upsertMsg.InsertMsg,
-		streamingmessage.WALNamePulsar,
-	)
-	require.NoError(t, err)
-	require.Len(t, entityPacked, 2)
-
-	msgs, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
-		200,
-		"_default",
-		[]int{0, 1},
-		partialUpdateCASTestVChannels[0],
-		task.upsertMsg.InsertMsg,
-		nil,
-		1,
-		meta,
-		streamingmessage.WALNamePulsar,
-	)
-	require.NoError(t, err)
-	require.Len(t, msgs, 2)
-
-	rowIDs := make([]int64, 0, len(pks))
-	for _, msg := range msgs {
-		require.LessOrEqual(t, msg.EstimateSize(), maxMessageSize)
-		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-		rowIDs = append(rowIDs, body.GetRowIDs()...)
-	}
-	require.Equal(t, []int64{101, 102}, rowIDs)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
-	partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().
+		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"_default_0": 200}, nil).
-		Build()
-	defer partitionsPatch.UnPatch()
-	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
+		Maybe()
+	mockCache.EXPECT().
+		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
+		Return(int64(200), nil).
+		Maybe()
 
 	newInput := func() (*upsertTask, string, map[string]*messagespb.PartialUpdateCAS) {
 		task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
@@ -1366,6 +1294,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, groups := newInput()
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1382,6 +1311,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1396,6 +1326,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	task, vchannel, _ = newInput()
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1411,6 +1342,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	groups[vchannel].ReadTs = 0
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1423,16 +1355,18 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
-func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMessage(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
-	partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).
+func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
+	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().
+		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"_default_0": 200}, nil).
-		Build()
-	defer partitionsPatch.UnPatch()
-	partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
+		Maybe()
+	mockCache.EXPECT().
+		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
+		Return(int64(200), nil).
+		Maybe()
 
 	pks := []int64{10, 20}
 	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
@@ -1445,25 +1379,9 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		},
 	}
 
-	unsplit, err := repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		groups,
-	)
-	require.NoError(t, err)
-	require.Len(t, unsplit, 1)
-	maxMessageSize := unsplit[0].EstimateSize() - 1
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
-
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockCache,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1474,27 +1392,20 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		groups,
 	)
 	require.NoError(t, err)
-	require.Len(t, msgs, 2)
+	require.Len(t, msgs, 1)
+	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
+	meta, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
+	require.NoError(t, err)
+	require.True(t, proto.Equal(groups[vchannel], meta))
 
-	rowIDs := make([]int64, 0, len(pks))
-	for _, msg := range msgs {
-		require.LessOrEqual(t, msg.EstimateSize(), maxMessageSize)
-		require.True(t, streamingmessage.HasPartialUpdateCAS(msg))
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
-		require.True(t, proto.Equal(groups[vchannel], meta))
-		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-		rowIDs = append(rowIDs, body.GetRowIDs()...)
-	}
-	require.Equal(t, []int64{101, 102}, rowIDs)
+	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
+	require.Equal(t, uint64(len(pks)), insert.Header().GetPartitions()[0].GetRows())
+	require.Equal(t, []int64{101, 102}, insert.MustBody().GetRowIDs())
 }
 
 func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 	for _, partitionKey := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
-			oldMetaCache := globalMetaCache
-			globalMetaCache = &MetaCache{}
-			t.Cleanup(func() { globalMetaCache = oldMetaCache })
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
 
@@ -1513,16 +1424,20 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
 
 			task := &insertTask{
-				ctx: context.Background(),
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      context.Background(),
 				insertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
 					DbName:         "test_db",
 					CollectionName: "test_collection",
 				}},
 				result: &milvuspb.MutationResult{},
-				chMgr: newChannelsMgrImpl(func(UniqueID) (channelInfos, error) {
-					return newChannels([]vChan{partialUpdateCASTestVChannels[0]}, []pChan{funcutil.ToPhysicalChannel(partialUpdateCASTestVChannels[0])})
-				}, nil),
+				chMgr: channelmgr.NewChannelsMgr(func(typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+					return channelmgr.ChannelInfo{
+						VChans: []string{partialUpdateCASTestVChannels[0]},
+						PChans: []string{funcutil.ToPhysicalChannel(partialUpdateCASTestVChannels[0])},
+					}, nil
+				}),
 				schema: &schemapb.CollectionSchema{},
 			}
 			if partitionKey {
@@ -1538,9 +1453,6 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
 	task.partitionKeys = partialUpdateCASPKFieldData([]int64{10})
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() { globalMetaCache = oldMetaCache })
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
 	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
@@ -1651,11 +1563,8 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
-	oldMetaCache := globalMetaCache
 	streaming.SetWALForTest(fakeWAL)
-	globalMetaCache = &MetaCache{}
 	defer streaming.SetWALForTest(oldWAL)
-	defer func() { globalMetaCache = oldMetaCache }()
 	preparePartialUpdateCASTestGroups(t, task)
 
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
@@ -2304,23 +2213,6 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 	}
 }
 
-func TestAttachPartialUpdateCASRejectsOversizedInvariant(t *testing.T) {
-	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
-	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
-	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
-	oldWAL := streaming.WAL()
-	streaming.SetWALForTest(fakeWAL)
-	defer streaming.SetWALForTest(oldWAL)
-	preparePartialUpdateCASTestGroups(t, task)
-	insertMsgs, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels[:1], []int64{10}, nil, task.partialUpdateCASGroups)
-
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(insertMsgs[0].EstimateSize()-1)))
-	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
-
-	err := task.attachPartialUpdateCAS(insertMsgs)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-}
-
 func TestRetrieveByPKs_Success(t *testing.T) {
 	mockey.PatchConvey("TestRetrieveByPKs_Success", t, func() {
 		// Setup mocks
@@ -2354,9 +2246,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 				},
 			},
 		}, segcore.StorageCost{}, nil).Build()
-
-		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetPartitionID).Return(int64(1002), nil).Build()
 
 		// Execute test
 		task := createTestUpdateTask()
@@ -2421,12 +2310,6 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 		},
 	).Build()
 	defer m.UnPatch()
-
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	defer func() {
-		globalMetaCache = oldMetaCache
-	}()
 
 	task := createTestUpdateTask()
 	task.SetTs(beginTS)
@@ -2739,9 +2622,6 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 
 func TestUpdateTask_PreExecute_Success(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_Success", t, func() {
-		// Setup mocks
-		globalMetaCache = &MetaCache{}
-
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 
 		schema := createTestSchema()
@@ -2798,12 +2678,6 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testing.T) {
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	defer func() {
-		globalMetaCache = oldMetaCache
-	}()
-
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
@@ -2847,8 +2721,6 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 
 func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_GetCollectionIDError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		expectedErr := merr.WrapErrCollectionNotFound("test_collection")
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedErr).Build()
 
@@ -2862,8 +2734,6 @@ func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2886,8 +2756,6 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2913,8 +2781,6 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 
 func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_QueryPreExecuteError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -3502,6 +3368,78 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "partial struct update is not supported")
 	})
+}
+
+func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
+	typeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+					},
+				},
+			},
+		},
+	}
+	collectionSchema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 200,
+				Name:    "profile",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     201,
+						Name:        "profile[values]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+						TypeSchema:  typeSchema,
+					},
+				},
+			},
+		},
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collectionSchema)
+	require.NoError(t, err)
+	nestedRow := &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32},
+		},
+	}
+	subFieldData := &schemapb.FieldData{
+		FieldName: "values",
+		FieldId:   201,
+		Type:      schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Array,
+						Data:        []*schemapb.ScalarField{nestedRow},
+					},
+				},
+			},
+		},
+	}
+	fieldData := &schemapb.FieldData{
+		FieldName: "profile",
+		FieldId:   200,
+		Type:      schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{subFieldData},
+			},
+		},
+	}
+
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(
+		schemaHelper,
+		collectionSchema.GetStructArrayFields()[0],
+		fieldData,
+		1,
+	))
 }
 
 func TestCheckDynamicFieldDataForPartialUpdate(t *testing.T) {
@@ -4196,8 +4134,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4212,8 +4148,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array",
 					FieldsData:     upsertData,
@@ -4314,8 +4251,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4330,8 +4265,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array_non_nullable",
 					FieldsData:     upsertData,

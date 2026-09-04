@@ -912,6 +912,10 @@ func (s *mixCoordImpl) GetDataCoordTopology(ctx context.Context, req *milvuspb.G
 	return s.datacoordServer.GetDataCoordTopology(ctx, req)
 }
 
+func (s *mixCoordImpl) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	return s.datacoordServer.GetConnectedDataNodeMetrics(ctx, req)
+}
+
 func (s *mixCoordImpl) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
 	return s.queryCoordServer.GetQueryCoordTopology(ctx, req)
 }
@@ -1327,6 +1331,11 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 	return s.rootcoordServer.ListFileResources(ctx, req)
 }
 
+// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+func (s *mixCoordImpl) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	return s.rootcoordServer.GetFileResources(ctx, resourceIDs...)
+}
+
 // TruncateCollection truncate collection
 func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.rootcoordServer.TruncateCollection(ctx, req)
@@ -1410,6 +1419,10 @@ func (s *mixCoordImpl) PushClientCommand(ctx context.Context, req *milvuspb.Push
 
 func (s *mixCoordImpl) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.rootcoordServer.DeleteClientCommand(ctx, req)
+}
+
+func (s *mixCoordImpl) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return s.rootcoordServer.ListClientCommands(ctx, req)
 }
 
 func (s *mixCoordImpl) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {

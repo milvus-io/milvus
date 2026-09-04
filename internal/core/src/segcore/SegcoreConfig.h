@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <stdint.h>
 #include <string>
 #include <unordered_set>
 
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 
 namespace milvus::segcore {
 
@@ -28,9 +30,6 @@ class SegcoreConfig {
         static SegcoreConfig config;
         return config;
     }
-
-    void
-    parse_from(const std::string& string_path);
 
     int64_t
     get_chunk_rows() const {
@@ -70,6 +69,23 @@ class SegcoreConfig {
     bool
     get_enable_interim_segment_index() const {
         return enable_interim_segment_index_;
+    }
+
+    int32_t
+    get_interim_index_target_version() const {
+        return interim_index_target_version_;
+    }
+
+    int32_t
+    get_interim_index_version() const {
+        return interim_index_target_version_ == -1
+                   ? knowhere::Version::GetCurrentVersion().VersionNumber()
+                   : interim_index_target_version_;
+    }
+
+    void
+    set_interim_index_target_version(int32_t target_version) {
+        interim_index_target_version_ = target_version;
     }
 
     void
@@ -115,6 +131,21 @@ class SegcoreConfig {
     float
     get_build_ratio() const {
         return build_ratio_;
+    }
+
+    // Fraction of the knowhere build thread pool that a single growing
+    // segment interim index build may use
+    // (queryNode.segcore.interimIndex.growingBuildThreadRate). 0 keeps the
+    // build single threaded, which is the legacy behavior. Resolved against
+    // the live pool size in VectorFieldIndexing::get_build_params.
+    void
+    set_growing_index_build_thread_rate(float rate) {
+        growing_index_build_thread_rate_.store(rate);
+    }
+
+    float
+    get_growing_index_build_thread_rate() const {
+        return growing_index_build_thread_rate_.load();
     }
 
     // FM-index count-first guard threshold (queryNode.fmindexCostRatio):
@@ -214,7 +245,20 @@ class SegcoreConfig {
         return reject_remote_vector_output_;
     }
 
+    void
+    set_take_for_output_result_count_limit(int64_t value) {
+        take_for_output_result_count_limit_.store(value,
+                                                  std::memory_order_relaxed);
+    }
+
+    int64_t
+    get_take_for_output_result_count_limit() const {
+        return take_for_output_result_count_limit_.load(
+            std::memory_order_relaxed);
+    }
+
     static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
+    static constexpr int64_t kDefaultTakeForOutputResultCountLimit = 10000;
 
     int64_t
     get_max_group_by_groups() const {
@@ -254,6 +298,7 @@ class SegcoreConfig {
     };
     inline static bool storage_v3_enabled_ = false;
     inline static bool enable_interim_segment_index_ = false;
+    inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
@@ -261,6 +306,7 @@ class SegcoreConfig {
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
     inline static float build_ratio_ = 0.1;
+    inline static std::atomic<float> growing_index_build_thread_rate_{0.0f};
     // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
     inline static float fmindex_cost_ratio_ = 0.001f;
     inline static std::string dense_index_type_ =
@@ -272,6 +318,8 @@ class SegcoreConfig {
     inline static bool enable_gis_split_fusion_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;
+    inline static std::atomic<int64_t> take_for_output_result_count_limit_{
+        kDefaultTakeForOutputResultCountLimit};
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };

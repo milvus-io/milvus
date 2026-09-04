@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -549,6 +550,13 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
 		return merr.Wrap(err, "align milvus-table function field IDs")
 	}
+	// Newly aligned milvus-table schemas set preserveFieldID below and would
+	// bypass the direct-path ValidateFunction in prepareSchema, so run the
+	// non-runtime function validation here; DDL replay never reaches this
+	// point (it returns early above) and keeps its historical schema unjudged.
+	if err := validator.ValidateFunction(schema, "", true); err != nil {
+		return err
+	}
 	t.preserveFieldID = true
 	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")
 
@@ -696,6 +704,18 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		}
 	} else {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
+			return err
+		}
+		// Function schema validation for requests entering RootCoord directly —
+		// the proxy validates before forwarding, but nothing else on this path
+		// does. Runs only for newly created schemas: preserveFieldID restores an
+		// existing collection (snapshot/replication), whose historical schema
+		// must not be re-judged by current-version rules. External collections
+		// are validated too — the one resolution-sensitive rule (nullable
+		// input) exempts externally-mapped fields at the rule level, so the
+		// structural checks (e.g. the MinHash dim/num_hashes relation) stay
+		// authoritative on this path for the RESOLVED schema as well.
+		if err := validator.ValidateFunction(t.body.CollectionSchema, "", true); err != nil {
 			return err
 		}
 	}

@@ -26,13 +26,11 @@
 
 #include "Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/id_map.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
-#include "common/OffsetMapping.h"
-#include "common/GrowingOffsetMapping.h"
-#include "common/SealedOffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -49,9 +47,7 @@ class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type),
-          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
-          metric_type_(metric_type) {
+        : IndexBase(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -91,6 +87,17 @@ class VectorIndex : public IndexBase {
 
     virtual bool
     IsIndexRefineEnabled() const = 0;
+
+    virtual knowhere::IdMap&
+    GetIdMap() = 0;
+
+    virtual const knowhere::IdMap&
+    GetIdMap() const = 0;
+
+    virtual void
+    SetIdMapType(knowhere::IdMap::Type type) {
+        GetIdMap().SetType(type);
+    }
 
     virtual knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
@@ -189,58 +196,56 @@ class VectorIndex : public IndexBase {
         return search_cfg;
     }
 
-    void
-    UpdateValidData(const bool* valid_data, int64_t count) {
-        auto* growing_mapping =
-            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
-        AssertInfo(growing_mapping != nullptr,
-                   "cannot update growing valid data from sealed mapping");
-        growing_mapping->Append(valid_data, count);
-    }
-
-    void
-    BuildValidData(const bool* valid_data,
-                   int64_t total_count,
-                   const milvus::OffsetMappingBuildOptions& options = {}) {
-        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count, options);
-        offset_mapping_ = std::move(sealed_mapping);
-    }
-
+    // Indexed nullable mapping is owned by Knowhere IdMap. Milvus only exposes
+    // logical-row helpers here; raw column physical mapping stays in OffsetMapping.
     bool
     IsRowValid(int64_t logical_offset) const {
-        if (!offset_mapping_->IsEnabled()) {
+        const auto& id_map = GetIdMap();
+        if (id_map.ValidBitmap().empty()) {
             return true;
         }
-        return offset_mapping_->IsValid(logical_offset);
+        return id_map.IsValidOutId(logical_offset);
     }
 
     bool
     HasValidData() const {
-        return offset_mapping_->IsEnabled();
+        return !GetIdMap().ValidBitmap().empty();
     }
 
     int64_t
     GetValidCount() const {
-        return offset_mapping_->GetValidCount();
-    }
-
-    int64_t
-    GetPhysicalOffset(int64_t logical_offset) const {
-        return offset_mapping_->GetPhysicalOffset(logical_offset);
-    }
-
-    int64_t
-    GetLogicalOffset(int64_t physical_offset) const {
-        return offset_mapping_->GetLogicalOffset(physical_offset);
-    }
-
-    const milvus::OffsetMapping&
-    GetOffsetMapping() const {
-        return *offset_mapping_;
+        return static_cast<int64_t>(GetIdMap().InCount());
     }
 
  protected:
+    void
+    CheckEmptyEmbListIds(const int64_t* ids,
+                         int64_t rows,
+                         int64_t fallback_list_count) const {
+        AssertInfo(rows >= 0, "emb list ids row count is negative");
+        if (rows == 0) {
+            return;
+        }
+        AssertInfo(ids != nullptr, "emb list ids are null");
+
+        const auto& id_map = GetIdMap();
+        const bool has_valid_data = !id_map.ValidBitmap().empty();
+        const auto logical_count = has_valid_data
+                                       ? static_cast<int64_t>(id_map.OutCount())
+                                       : fallback_list_count;
+        for (int64_t i = 0; i < rows; ++i) {
+            const auto id = ids[i];
+            AssertInfo(id >= 0 && id < logical_count,
+                       "emb list id {} out of range {}",
+                       id,
+                       logical_count);
+            if (has_valid_data) {
+                AssertInfo(
+                    id_map.IsValidOutId(id), "emb list id {} is null", id);
+            }
+        }
+    }
+
     template <typename T>
     static std::vector<uint8_t>
     DecodeVectorByIdsResult(const knowhere::DataSetPtr& result) {
@@ -274,8 +279,6 @@ class VectorIndex : public IndexBase {
         std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
         return {std::move(raw_data), std::move(offsets)};
     }
-
-    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
 
  private:
     MetricType metric_type_;

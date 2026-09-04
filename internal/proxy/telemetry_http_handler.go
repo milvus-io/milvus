@@ -25,10 +25,13 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -95,6 +98,11 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Store username in context for potential use by handlers
 		c.Set("username", username)
+		authCtx := metadata.NewIncomingContext(c.Request.Context(), metadata.Pairs(
+			util.HeaderAuthorize,
+			crypto.Base64Encode(username+util.CredentialSeparator+password),
+		))
+		c.Request = c.Request.WithContext(authCtx)
 		c.Next()
 	}
 }
@@ -300,6 +308,42 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 // command that never goes away and keeps being handed to every new client.
 //
 // Persistent configs ignore ttl_seconds entirely.
+// listTelemetryCommands returns the commands the coordinator is currently holding: one-time
+// commands that have neither expired nor been answered, and persistent configs.
+//
+// The UI's command panel has always called this endpoint; until it existed the panel showed
+// an empty list whatever was actually pending, which is worse than showing nothing.
+func listTelemetryCommands(node *Proxy) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		if node == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "proxy node not initialized",
+			})
+			return
+		}
+
+		resp, err := node.ListClientCommands(ctx, &rootcoordpb.ListClientCommandsRequest{})
+		if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+			mlog.Warn(ctx, "listTelemetryCommands: failed to list commands", mlog.Err(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		commands := make([]*CommandResponse, 0, len(resp.GetCommands()))
+		for _, cmd := range resp.GetCommands() {
+			commands = append(commands, ConvertCommandResponse(cmd, cmd.GetPersistent()))
+		}
+
+		// Always an array, never null: the page branches on length, and a null would read
+		// as a broken response rather than as "nothing outstanding".
+		c.JSON(http.StatusOK, gin.H{"commands": commands})
+	}
+}
+
 func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()

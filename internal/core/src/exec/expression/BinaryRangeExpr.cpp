@@ -55,8 +55,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -106,8 +105,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            span.GetSpan()->SetAttribute("json_filter_expr_type",
-                                         "binary_range");
+            span.SetAttribute("json_filter_expr_type", "binary_range");
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -352,6 +350,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                            HighPrecisionType& val2,
                                            bool& lower_inclusive,
                                            bool& upper_inclusive,
+                                           int64_t batch_size,
                                            OffsetVector* input) {
     lower_inclusive = expr_->lower_inclusive_;
     upper_inclusive = expr_->upper_inclusive_;
@@ -364,15 +363,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val1 = lower_arg_.GetValue<HighPrecisionType>();
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
-        [this](OffsetVector* input) -> ColumnVectorPtr {
+        [this, batch_size](OffsetVector* input) -> ColumnVectorPtr {
         TargetBitmap valid_res;
         if (expr_->column_.element_level_) {
-            // Element batches are derived from the row cursor so
-            // MoveCursor()-based short-circuiting stays aligned.
-            // Individual elements cannot be null; their containing row's
-            // validity is applied by the element consumer.
-            auto batch_size =
-                GetNextRealBatchSize(input, /*element_level=*/true);
             valid_res = TargetBitmap(batch_size, true);
             if (input == nullptr) {
                 MoveCursor();
@@ -383,8 +376,6 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         } else {
             valid_res = ProcessChunksForValid<T>(UseIndexCursor());
         }
-
-        auto batch_size = valid_res.size();
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
         return res_vec;
@@ -425,15 +416,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     HighPrecisionType val2;
     bool lower_inclusive = false;
     bool upper_inclusive = false;
-    if (auto res = PreCheckOverflow<T>(
-            val1, val2, lower_inclusive, upper_inclusive, input)) {
+    auto next_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
         return res;
     }
-
-    auto real_batch_size =
-        GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
-        return nullptr;
+    if (auto res = PreCheckOverflow<T>(val1,
+                                       val2,
+                                       lower_inclusive,
+                                       upper_inclusive,
+                                       real_batch_size,
+                                       input)) {
+        return res;
     }
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
@@ -493,15 +492,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     HighPrecisionType val2;
     bool lower_inclusive = false;
     bool upper_inclusive = false;
-    if (auto res = PreCheckOverflow<T>(
-            val1, val2, lower_inclusive, upper_inclusive, input)) {
+    auto next_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
         return res;
     }
-
-    auto real_batch_size =
-        GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
-        return nullptr;
+    if (auto res = PreCheckOverflow<T>(val1,
+                                       val2,
+                                       lower_inclusive,
+                                       upper_inclusive,
+                                       real_batch_size,
+                                       input)) {
+        return res;
     }
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -1333,7 +1340,7 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
     auto skip_index = segment_->GetSkipIndex();
 
     std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
         auto skip = skip_index->CanSkipBinaryRange(field_id_,
                                                    i,
                                                    lower_val,

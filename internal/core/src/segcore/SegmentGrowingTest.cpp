@@ -35,6 +35,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -62,6 +63,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -310,6 +312,67 @@ TEST(Growing, InsertSkipsMissingFunctionOutputField) {
                                     dataset.timestamps_.data(),
                                     dataset.raw_));
     EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 2;
+    std::array<int64_t, row_count> row_ids = {10, 11};
+    std::array<Timestamp, row_count> timestamps = {100, 101};
+    std::array<int64_t, row_count> pks = {1, 2};
+    std::array<bool, row_count> valid = {true, true};
+
+    auto geos_ctx = GEOS_init_r();
+    std::array<std::string, row_count> geometries = {
+        Geometry(geos_ctx, "POINT (1 1)").to_wkb_string(),
+        Geometry(geos_ctx, "POINT (2 2)").to_wkb_string()};
+    GEOS_finish_r(geos_ctx);
+
+    auto make_record = [&]() {
+        auto record = std::make_unique<InsertRecordProto>();
+        record->set_num_rows(row_count);
+        record->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
+                .release());
+        record->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(
+                geometries.data(), valid.data(), row_count, (*schema)[geometry])
+                .release());
+        return record;
+    };
+
+    auto expect_rejected_without_ack = [&](auto mutate) {
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto record = make_record();
+        mutate(record->mutable_fields_data(1));
+        auto offset = segment->PreInsert(row_count);
+
+        try {
+            segment->Insert(offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            record.get());
+            FAIL() << "expected malformed geometry insert to be rejected";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
+        EXPECT_EQ(segment->get_row_count(), 0);
+    };
+
+    expect_rejected_without_ack([](DataArray* field_data) {
+        MutableFieldDataRowValidData(field_data)->RemoveLast();
+    });
+    expect_rejected_without_ack([](DataArray* field_data) {
+        field_data->mutable_scalars()
+            ->mutable_geometry_data()
+            ->mutable_data()
+            ->RemoveLast();
+    });
 }
 
 TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
@@ -585,6 +648,144 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(), 0);
     }
+}
+
+// load_field_data_common addresses column data, the interim index, timestamps
+// and row ids by the offset PreInsert reserved. Validity has to use the same
+// offset: ConcurrentVectorImpl::set_data_raw reads the range back through
+// bulk_is_valid_range(element_offset, ...) to lay out a compact nullable
+// column, so the two schemes disagreeing puts the null flags on the wrong rows.
+//
+// Appending at the bitmap's current length happens to agree with the reserved
+// offset whenever the two coincide, which is every production caller today
+// (Load runs one PreInsert against an empty bitmap). These two cases are the
+// ones where they do not.
+TEST(Growing, LoadFieldDataAddressesValidityByReservedOffset) {
+    constexpr int64_t row_count = 4;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto nullable = schema->AddDebugField("nullable", DataType::INT64, true);
+    const auto& field_meta = (*schema)[nullable];
+
+    const std::array<int64_t, row_count> values = {10, 11, 12, 13};
+    auto make_batch = [&](const std::array<bool, row_count>& valid) {
+        auto array = CreateDataArrayFrom(
+            values.data(), valid.data(), row_count, field_meta);
+        return CreateFieldDataFromDataArray(row_count, array.get(), field_meta);
+    };
+    const std::array<bool, row_count> first = {true, false, true, false};
+    const std::array<bool, row_count> second = {false, true, false, true};
+
+    auto bits_of = [](const SegmentGrowingImpl& segment, FieldId field_id) {
+        auto bits =
+            segment.get_insert_record().get_valid_data(field_id)->get_data();
+        return std::vector<bool>(bits.begin(), bits.end());
+    };
+
+    // A reload of a range already written rewrites it in place. Appending would
+    // put the second batch at [row_count, 2 * row_count) instead, doubling the
+    // bitmap and leaving the rows themselves flagged by the stale batch.
+    {
+        auto owned = CreateGrowingSegment(schema, empty_index_meta);
+        auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+        ASSERT_NE(segment, nullptr);
+
+        ASSERT_EQ(segment->PreInsert(row_count), 0);
+        segment->load_field_data_common(
+            nullable, 0, {make_batch(first)}, pk, row_count);
+        EXPECT_EQ(bits_of(*segment, nullable),
+                  (std::vector<bool>{true, false, true, false}));
+
+        segment->load_field_data_common(
+            nullable, 0, {make_batch(second)}, pk, row_count);
+        EXPECT_EQ(bits_of(*segment, nullable),
+                  (std::vector<bool>{false, true, false, true}));
+    }
+
+    // A batch whose reserved offset runs past the bitmap fails where the
+    // misalignment happens. Appending would silently write this batch's flags
+    // over the earlier rows and shift every row after them.
+    {
+        auto owned = CreateGrowingSegment(schema, empty_index_meta);
+        auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+        ASSERT_NE(segment, nullptr);
+
+        // Reserve a range and never write it, so the bitmap falls behind.
+        ASSERT_EQ(segment->PreInsert(row_count), 0);
+        ASSERT_EQ(segment->PreInsert(row_count), row_count);
+        EXPECT_THROW(
+            segment->load_field_data_common(
+                nullable, row_count, {make_batch(first)}, pk, row_count),
+            SegcoreError);
+        EXPECT_TRUE(
+            segment->get_insert_record().get_valid_data(nullable)->empty());
+    }
+}
+
+// pk2offset_ maps a primary key to the row offset every other growing
+// structure addresses that row by. A batch loaded at a reserved offset has to
+// register its rows there. Indexing from 0 instead would point queries and
+// deletes at rows belonging to an earlier batch -- silently, with no assert to
+// catch it, which is why this one is worth a test of its own.
+TEST(Growing, LoadFieldDataAddressesPkOffsetsByReservedOffset) {
+    constexpr int64_t batch_rows = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto owned = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto make_int64_batch = [](const std::vector<int64_t>& values) {
+        auto field_data = milvus::storage::CreateFieldData(
+            DataType::INT64,
+            DataType::NONE,
+            false,
+            1,
+            static_cast<int64_t>(values.size()));
+        field_data->FillFieldData(values.data(),
+                                  static_cast<ssize_t>(values.size()));
+        return field_data;
+    };
+
+    // Two loads, each reserving its own logical range. Timestamps go through
+    // the same entry point so search_pk has something to compare against.
+    const std::vector<std::vector<int64_t>> pk_batches = {{100, 101},
+                                                          {200, 201}};
+    for (int64_t batch = 0; batch < 2; ++batch) {
+        auto reserved = segment->PreInsert(batch_rows);
+        ASSERT_EQ(reserved, batch * batch_rows);
+        segment->load_field_data_common(TimestampFieldID,
+                                        reserved,
+                                        {make_int64_batch({1, 1})},
+                                        pk,
+                                        batch_rows);
+        segment->load_field_data_common(pk,
+                                        reserved,
+                                        {make_int64_batch(pk_batches[batch])},
+                                        pk,
+                                        batch_rows);
+    }
+
+    auto offsets_for = [&](int64_t pk_value) {
+        std::vector<int64_t> out;
+        for (auto offset : segment->get_insert_record().search_pk(
+                 PkType(pk_value), Timestamp(100))) {
+            out.push_back(offset.get());
+        }
+        return out;
+    };
+
+    // The second batch owns rows 2 and 3. Appending from 0 would hand it rows
+    // 0 and 1, which the first batch already owns.
+    EXPECT_EQ(offsets_for(100), (std::vector<int64_t>{0}));
+    EXPECT_EQ(offsets_for(101), (std::vector<int64_t>{1}));
+    EXPECT_EQ(offsets_for(200), (std::vector<int64_t>{2}));
+    EXPECT_EQ(offsets_for(201), (std::vector<int64_t>{3}));
 }
 
 TEST(Growing, FillNullableData) {
@@ -2325,4 +2526,115 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(float) + N * sizeof(double) +
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
+}
+
+// Regression for PR #50951 review (round Dd91dab7a02): fill_empty_field()
+// backfills a newly added field's validity bits and can then throw (the
+// geometry cache build raises a retriable MemAllocateFailed on OOM). A throw
+// leaves the schema unpublished, so the next query re-enters
+// LazyCheckSchema -> Reopen -> fill_empty_field for the same field. With the
+// appending set_data_raw() that retry added a SECOND block of N bits: the
+// validity vector reached 2N while the record still held N rows, so every
+// later inserted row stored its geometry at N+i but its validity bit at
+// 2N+i and read back the all-false backfill -- rows silently dropped by ST_*
+// predicates, returned as null, and matched by IS NULL, permanently.
+//
+// The offset-addressed set_data_raw() overload writes the backfill at [0, N),
+// so re-running it is a no-op. This pins that directly rather than through a
+// fault-injected Reopen, which segcore has no hook for. (The appending
+// overload has since been removed outright, so the shape above is no longer
+// reachable at all.)
+TEST(Growing, BackfillValidDataIsIdempotentAcrossRetries) {
+    constexpr int64_t kRows = 100;
+    constexpr int64_t kSizePerChunk = 32;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id =
+        schema->AddDebugField("nullable_geo", DataType::GEOMETRY, true);
+
+    // The backfill payload fill_empty_field() would produce: kRows entries,
+    // every row marked valid (the shape a non-null default value yields).
+    auto data = std::make_unique<milvus::DataArray>();
+    data->set_field_id(field_id.get());
+    data->set_type(
+        static_cast<milvus::proto::schema::DataType>(DataType::GEOMETRY));
+    auto* geo = data->mutable_scalars()->mutable_geometry_data();
+    for (int64_t i = 0; i < kRows; ++i) {
+        *(geo->mutable_data()->Add()) = std::string();
+        MutableFieldDataRowValidData(data.get())->Add(true);
+    }
+
+    milvus::segcore::ThreadSafeValidData valid_data(kSizePerChunk);
+    const auto& field_meta = schema->operator[](field_id);
+
+    valid_data.set_data_raw(0, kRows, data.get(), field_meta);
+    ASSERT_EQ(valid_data.get_data().size(), static_cast<size_t>(kRows));
+
+    // The retry after a failed reopen re-runs the same backfill. Length must
+    // not grow, or every subsequent row's validity bit lands past its data.
+    valid_data.set_data_raw(0, kRows, data.get(), field_meta);
+    EXPECT_EQ(valid_data.get_data().size(), static_cast<size_t>(kRows));
+    for (int64_t i = 0; i < kRows; ++i) {
+        EXPECT_TRUE(valid_data.is_valid(i)) << "row " << i;
+    }
+
+    // Rows inserted after the backfill still line up: their validity bits
+    // continue from kRows, not from 2 * kRows.
+    auto tail = std::make_unique<milvus::DataArray>();
+    tail->set_field_id(field_id.get());
+    tail->set_type(
+        static_cast<milvus::proto::schema::DataType>(DataType::GEOMETRY));
+    auto* tail_geo = tail->mutable_scalars()->mutable_geometry_data();
+    *(tail_geo->mutable_data()->Add()) = std::string();
+    MutableFieldDataRowValidData(tail.get())->Add(false);
+
+    valid_data.set_data_raw(kRows, 1, tail.get(), field_meta);
+    ASSERT_EQ(valid_data.get_data().size(), static_cast<size_t>(kRows + 1));
+    EXPECT_FALSE(valid_data.is_valid(kRows));
+}
+
+// Regression for PR #50951 review (round Dc417b11277): the valid_data shape
+// guard used to sit only on the appending set_data_raw() overload, which no
+// production path called and which has since been removed. Every nullable
+// field on the ingest path goes through the offset-addressed overload
+// (SegmentGrowingImpl::Insert), so a producer
+// payload with fewer validity entries than rows made write_from() read past
+// the end of the protobuf RepeatedField and publish adjacent heap bytes as
+// validity bits. GEOMETRY is separately covered by
+// ValidateGeometryInsertDataShape; this pins the guard for every other
+// nullable type.
+TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto text = schema->AddDebugField("text", DataType::VARCHAR, true);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 2;
+    std::array<int64_t, row_count> row_ids = {10, 11};
+    std::array<Timestamp, row_count> timestamps = {100, 101};
+    std::array<int64_t, row_count> pks = {1, 2};
+    std::array<bool, row_count> valid = {true, true};
+    std::array<std::string, row_count> texts = {"a", "b"};
+
+    auto record = std::make_unique<InsertRecordProto>();
+    record->set_num_rows(row_count);
+    record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
+            .release());
+    record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            texts.data(), valid.data(), row_count, (*schema)[text])
+            .release());
+    // One validity entry short of the row count.
+    MutableFieldDataRowValidData(record->mutable_fields_data(1))->RemoveLast();
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = segment->PreInsert(row_count);
+    try {
+        segment->Insert(
+            offset, row_count, row_ids.data(), timestamps.data(), record.get());
+        FAIL() << "expected short valid_data to be rejected";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
 }

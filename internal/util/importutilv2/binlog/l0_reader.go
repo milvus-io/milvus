@@ -109,7 +109,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	readInternal := func(path string, opts []storage.RwOption) (*storage.DeleteData, error) {
 		tempData := storage.NewDeleteData(nil, nil)
-		reader, err := storage.NewDeltalogReader(r.pkField.DataType, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(r.ctx, r.pkField.DataType, []string{path}, opts...)
 		if err != nil {
 			return nil, err
 		}

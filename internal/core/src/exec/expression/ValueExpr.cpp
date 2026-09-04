@@ -32,7 +32,7 @@ namespace exec {
 void
 PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyValueExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type", static_cast<int>(expr_->type()));
+    span.SetAttribute("data_type", static_cast<int>(expr_->type()));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));

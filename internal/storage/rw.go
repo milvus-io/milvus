@@ -24,6 +24,7 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -77,6 +78,7 @@ type rwOptions struct {
 	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	externalReader      packed.ExternalReaderContext
 	writerFormat        string
+	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 }
 
 func (o *rwOptions) validate() error {
@@ -182,6 +184,15 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 func WithExternalReaderContext(externalReader packed.ExternalReaderContext) RwOption {
 	return func(options *rwOptions) {
 		options.externalReader = externalReader
+	}
+}
+
+// WithPresentFields lets a caller that already knows a segment's physically-present
+// field IDs hand them to NewManifestRecordReader, so it skips re-deriving them via
+// packed.GetManifestFieldIDs (a redundant manifest open on the compaction path).
+func WithPresentFields(present map[FieldID]struct{}) RwOption {
+	return func(options *rwOptions) {
+		options.presentFields = present
 	}
 }
 
@@ -349,8 +360,24 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+		// StorageV2/V3 binlog: present declared defaults for absent fields like V1,
+		// sourcing physical presence from FieldBinlog.ChildFields (set by the
+		// flush/compaction writers, reliable for those segments). Import-reconstructed
+		// binlogs carry no ChildFields (FieldID is a column-group ID), so presence is
+		// not derivable there; pass the full schema through unchanged (the engine
+		// null-fills absent columns). Default-fill for the import path is a documented
+		// follow-up (issue #52771).
+		present, reliable := binlogFieldIDSet(binlogs)
+		if reliable {
+			readSchema, ferr := filterSchemaToPresentFields(schema, present)
+			if ferr != nil {
+				return nil, ferr
+			}
+			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
+		} else {
+			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -360,7 +387,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	return rr, nil
 }
 
-func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
+func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSchema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
 	rwOptions := DefaultReaderOptions()
 	for _, opt := range option {
 		opt(rwOptions)
@@ -375,7 +402,7 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 		if rwOptions.pluginContext != nil {
 			pluginContext = rwOptions.pluginContext
 		} else {
-			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+			ez := hookutil.GetEzByCollProperties(neededSchema.GetProperties(), rwOptions.collectionID)
 			if ez != nil {
 				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 				if len(unsafe) > 0 {
@@ -388,8 +415,91 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 			}
 		}
 	}
-	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize,
-		rwOptions.storageConfig, pluginContext, option...)
+	// External-source reads (e.g. parquet) are not milvus manifests carrying
+	// default-aware internal field IDs and are out of scope for #52771; keep the
+	// original pass-through. An internal manifest reads only its physically-present
+	// columns, then fills every absent read-schema field with its schema default
+	// (or null) so declared defaults are not presented as NULL, matching V1.
+	if rwOptions.externalReader.Source != "" {
+		return NewRecordReaderFromManifest(manifestPath, neededSchema, rwOptions.bufferSize,
+			rwOptions.storageConfig, pluginContext, option...)
+	}
+	present := rwOptions.presentFields
+	if present == nil {
+		present, err = packed.GetManifestFieldIDs(manifestPath, rwOptions.storageConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	presentSchema, err := filterSchemaToPresentFields(neededSchema, present)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := NewRecordReaderFromManifest(manifestPath, presentSchema,
+		rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, option...)
+	if err != nil {
+		return nil, err
+	}
+	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
+}
+
+// filterSchemaToPresentFields returns a copy of schema keeping only the fields
+// (and struct sub-fields) whose FieldID is physically present, so the packed
+// reader is asked to read only stored columns; absent fields are then filled by
+// NewAbsentFieldFillRecordReader rather than null-synthesized by the engine.
+// A struct array field is physically all-or-nothing (add/drop/update act on the
+// whole struct), so it is kept whole or dropped whole; a partially-present struct
+// is a data-integrity violation that must never occur and is surfaced as an error.
+func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[FieldID]struct{}) (*schemapb.CollectionSchema, error) {
+	out := proto.Clone(schema).(*schemapb.CollectionSchema)
+	fields := out.Fields[:0]
+	for _, f := range out.Fields {
+		if _, ok := present[f.GetFieldID()]; ok {
+			fields = append(fields, f)
+		}
+	}
+	out.Fields = fields
+	structs := out.StructArrayFields[:0]
+	for _, st := range out.StructArrayFields {
+		presentChildren := 0
+		for _, f := range st.GetFields() {
+			if _, ok := present[f.GetFieldID()]; ok {
+				presentChildren++
+			}
+		}
+		switch presentChildren {
+		case 0:
+			// whole struct absent: drop it here, the wrapper fills its children.
+		case len(st.GetFields()):
+			structs = append(structs, st)
+		default:
+			return nil, merr.WrapErrServiceInternalMsg(
+				"struct array field %q partially present (%d of %d children): a struct array is physically all-or-nothing",
+				st.GetName(), presentChildren, len(st.GetFields()))
+		}
+	}
+	out.StructArrayFields = structs
+	return out, nil
+}
+
+// binlogFieldIDSet returns the physically-present field IDs of a StorageV2/V3
+// binlog segment, taken from each FieldBinlog's ChildFields (the column group's
+// member field IDs, written by the flush/compaction writers). Presence is reliable
+// ONLY when every FieldBinlog carries ChildFields; import-reconstructed binlogs key
+// FieldID by column-group ID and set no ChildFields, so presence is not derivable —
+// the second return value is then false and the caller must read unfiltered.
+func binlogFieldIDSet(binlogs []*datapb.FieldBinlog) (map[FieldID]struct{}, bool) {
+	present := make(map[FieldID]struct{}, len(binlogs))
+	for _, fb := range binlogs {
+		children := fb.GetChildFields()
+		if len(children) == 0 {
+			return nil, false
+		}
+		for _, child := range children {
+			present[child] = struct{}{}
+		}
+	}
+	return present, true
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
@@ -519,6 +629,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
@@ -539,7 +650,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -554,6 +665,11 @@ func NewDeltalogReader(
 		}
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
+				// The per-file FFI read below cannot be interrupted; honor
+				// cancellation at the file boundary at least.
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if pathPos >= len(paths) {
 					return nil, io.EOF
 				}
@@ -571,6 +687,7 @@ func NewDeltalogReader(
 // each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
 // build column groups with stable start/end row offsets.
 func NewDeltalogReaderFromBinlogs(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	binlogs []*datapb.Binlog,
 	option ...RwOption,
@@ -598,8 +715,12 @@ func NewDeltalogReaderFromBinlogs(
 			}
 			paths = append(paths, binlog.GetLogPath())
 		}
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
+		// Unlike NewDeltalogReader, this path builds the FFI reader from all
+		// fragments up front rather than iterating file-by-file, so there is
+		// no per-file boundary to check ctx at; ctx is accepted for signature
+		// symmetry with the V1 branch above but does not bound this call.
 		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
 		if err != nil {
 			return nil, err

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strconv"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -44,8 +47,7 @@ type deleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelsMgr
-	chTicker  channelsTimeTicker
+	chMgr     channelmgr.ChannelsMgr
 	pChannels []pChan
 	vChannels []vChan
 
@@ -110,12 +112,12 @@ func (dt *deleteTask) OnEnqueue() error {
 	return nil
 }
 
-func (dt *deleteTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+func (dt *deleteTask) SetChannels() error {
+	collID, err := dt.GetMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
-	channels, err := dt.chMgr.getChannels(collID)
+	channels, err := dt.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -123,7 +125,7 @@ func (dt *deleteTask) setChannels() error {
 	return nil
 }
 
-func (dt *deleteTask) getChannels() []pChan {
+func (dt *deleteTask) GetChannels() []pChan {
 	return dt.pChannels
 }
 
@@ -131,7 +133,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if dt.req.Namespace == nil {
 		return nil
 	}
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	schema, err := dt.GetMetaCache().GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -145,6 +147,20 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 		dt.req.GetCollectionName(),
 	).Add(float64(dt.count))
 	return nil
+}
+
+// checkMaxDeleteSize rejects a materialized per-vchannel delete message whose
+// protobuf body exceeds quotaAndLimits.limits.maxDeleteSize.
+func checkMaxDeleteSize(ctx context.Context, size int) error {
+	maxDeleteSize := Params.QuotaConfig.MaxDeleteSize.GetAsInt()
+	if maxDeleteSize == -1 || size <= maxDeleteSize {
+		return nil
+	}
+	mlog.Warn(ctx, "materialized delete message exceeds maxDeleteSize",
+		mlog.Int("message size", size),
+		mlog.Int("maxDeleteSize", maxDeleteSize))
+	return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+		fmt.Sprintf("delete materialized message size %d exceeds maxDeleteSize %d", size, maxDeleteSize)))
 }
 
 func repackDeleteMsgByHash(
@@ -161,7 +177,8 @@ func repackDeleteMsgByHash(
 	namespace *string,
 	schema *schemapb.CollectionSchema,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
-	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	splitChunkProxy := Params.ProxyCfg.SplitChunkProxy.GetAsBool()
+	maxWALMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	var hashValues []uint32
 	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
 	// but it is not part of the tombstone identity; PKs must stay unique across
@@ -182,9 +199,11 @@ func repackDeleteMsgByHash(
 			return nil, 0, err
 		}
 	}
-	// repack delete msg by dmChannel
+	// Repack delete messages by dmChannel. Proxy keeps the legacy size packing
+	// while splitChunkProxy is enabled; once disabled, one logical tombstone
+	// body is built per hashed channel so StreamingNode can own physical chunking.
 	result := make(map[uint32][]*msgstream.DeleteMsg)
-	lastMessageSize := map[uint32]int{}
+	lastMessageSize := make(map[uint32]int)
 
 	numRows := int64(0)
 	numMessage := 0
@@ -225,16 +244,23 @@ func repackDeleteMsgByHash(
 		}
 		curMsg := msgs[len(msgs)-1]
 		size, id := typeutil.GetId(primaryKeys, index)
-		if lastMessageSize[key]+16+size > maxSize {
-			curMsg = createMessage(key, vchannel)
-			result[key] = append(result[key], curMsg)
+		rowSize := 16 + size
+		if splitChunkProxy {
+			if maxWALMessageSize > 0 && rowSize >= maxWALMessageSize {
+				return nil, 0, merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+					fmt.Sprintf("single delete primary key at offset %d is too large to fit in one WAL message", index)))
+			}
+			if maxWALMessageSize > 0 && curMsg.NumRows > 0 && lastMessageSize[key]+rowSize > maxWALMessageSize {
+				curMsg = createMessage(key, vchannel)
+				result[key] = append(result[key], curMsg)
+			}
 		}
 		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
 		curMsg.Timestamps = append(curMsg.Timestamps, ts)
 
 		typeutil.AppendID(curMsg.PrimaryKeys, id)
-		lastMessageSize[key] += 16 + size
 		curMsg.NumRows++
+		lastMessageSize[key] += rowSize
 		numRows++
 	}
 
@@ -245,21 +271,27 @@ func repackDeleteMsgByHash(
 	}
 
 	cnt := int64(0)
+	maxMessageSize := 0
 	for _, msgs := range result {
 		for _, msg := range msgs {
 			msg.Base.MsgID = start + cnt
+			maxMessageSize = max(maxMessageSize, msg.Size())
 			cnt++
 		}
+	}
+	if err := checkMaxDeleteSize(ctx, maxMessageSize); err != nil {
+		return nil, 0, err
 	}
 	return result, numRows, nil
 }
 
 type deleteRunner struct {
-	req    *milvuspb.DeleteRequest
-	result *milvuspb.MutationResult
+	req       *milvuspb.DeleteRequest
+	result    *milvuspb.MutationResult
+	metaCache Cache
 
 	// channel
-	chMgr     channelsMgr
+	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -280,13 +312,17 @@ type deleteRunner struct {
 	count atomic.Int64
 
 	// task queue
-	queue *dmTaskQueue
+	queue *scheduler.DmTaskQueue
 
 	allQueryCnt atomic.Int64
 	sessionTS   atomic.Uint64
 
 	scannedRemoteBytes atomic.Int64
 	scannedTotalBytes  atomic.Int64
+}
+
+func (dr *deleteRunner) GetMetaCache() Cache {
+	return dr.metaCache
 }
 
 func (dr *deleteRunner) Init(ctx context.Context) error {
@@ -301,18 +337,18 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
 
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
+	db, err := dr.GetMetaCache().GetDatabaseInfo(ctx, dr.req.GetDbName())
 	if err != nil {
 		return err
 	}
 	dr.dbID = db.DBID
 
-	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
+	dr.collectionID, err = dr.GetMetaCache().GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", err)
 	}
 
-	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
+	dr.schema, err = dr.GetMetaCache().GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
@@ -327,7 +363,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		dr.req.PartitionName = partitionName
 	}
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
+	colInfo, err := dr.GetMetaCache().GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
@@ -346,10 +382,14 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
-	// bloom_match has false positives; a delete driven by it would remove rows
-	// outside the user's set (see design doc 20260707-bloom-filter-expression).
-	if planparserv2.PlanContainsBloomFilter(dr.plan) {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bloom_match is approximate and cannot be used in delete expressions"))
+	// Approximate membership_match filters carrying an MBF1 blob must not drive
+	// deletes: a false positive would
+	// remove rows outside the user's set (design doc
+	// 20260707-bloom-filter-expression). Exact Roaring/MRB1 kinds are
+	// allowed; anything whose kind cannot be proven exact is rejected.
+	if planparserv2.PlanContainsMembershipFilterUnsafeForDelete(dr.plan) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"membership_match with an approximate bloom filter blob cannot be used in delete expressions"))
 	}
 
 	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
@@ -359,11 +399,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if namespace is used")
 		}
-		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -376,11 +416,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -391,7 +431,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		}
 
 		// dynamic validation
-		partID, err := globalMetaCache.GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
+		partID, err := dr.GetMetaCache().GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
 		if err != nil {
 			return ErrWithLog(log, "Failed to get partition id", err)
 		}
@@ -399,7 +439,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	}
 
 	// set vchannels
-	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
+	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get vchannels from collection", err)
 	}
@@ -436,6 +476,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 
 func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
 	dt := &deleteTask{
+		baseTask:     baseTask{MetaCache: dr.GetMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,
@@ -616,23 +657,20 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	if err != nil {
 		return err
 	}
+	// One workload for both paths: the namespace fast path derives its
+	// single-channel workload from it, so every collection-level field -- the
+	// resource-group scope included -- reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             dr.req.GetDbName(),
+		CollectionName: dr.req.GetCollectionName(),
+		CollectionID:   dr.collectionID,
+		Nq:             1,
+		Exec:           exec,
+	}
 	if useNamespaceChannel {
-		err = dr.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-			Db:             dr.req.GetDbName(),
-			CollectionName: dr.req.GetCollectionName(),
-			CollectionID:   dr.collectionID,
-			Channel:        channelName,
-			Nq:             1,
-			Exec:           exec,
-		})
+		err = dr.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, 0))
 	} else {
-		err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-			Db:             dr.req.GetDbName(),
-			CollectionName: dr.req.GetCollectionName(),
-			CollectionID:   dr.collectionID,
-			Nq:             1,
-			Exec:           exec,
-		})
+		err = dr.lb.Execute(ctx, workload)
 	}
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()
