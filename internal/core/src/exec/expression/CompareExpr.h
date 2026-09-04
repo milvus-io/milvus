@@ -359,9 +359,9 @@ class PhyCompareFilterExpr : public Expr {
             std::optional<PinWrapper<Span<T>>> pw_left;
             std::optional<PinWrapper<Span<U>>> pw_right;
             const T* left_base = nullptr;
-            const bool* left_valid_base = nullptr;
+            ValidityView left_validity;
             const U* right_base = nullptr;
-            const bool* right_valid_base = nullptr;
+            ValidityView right_validity;
             for (auto i = 0; i < size; ++i) {
                 auto offset = (*input)[i];
                 auto [left_chunk_id, left_chunk_offset] =
@@ -375,7 +375,7 @@ class PhyCompareFilterExpr : public Expr {
                             op_ctx_, left_field_, left_chunk_id));
                     auto left_chunk = pw_left->get();
                     left_base = left_chunk.data();
-                    left_valid_base = left_chunk.valid_data();
+                    left_validity = left_chunk.validity();
                     cached_left_chunk_id = left_chunk_id;
                 }
                 if (right_chunk_id != cached_right_chunk_id) {
@@ -384,16 +384,16 @@ class PhyCompareFilterExpr : public Expr {
                             op_ctx_, right_field_, right_chunk_id));
                     auto right_chunk = pw_right->get();
                     right_base = right_chunk.data();
-                    right_valid_base = right_chunk.valid_data();
+                    right_validity = right_chunk.validity();
                     cached_right_chunk_id = right_chunk_id;
                 }
-                if (left_valid_base && !left_valid_base[left_chunk_offset]) {
+                if (left_validity && !left_validity[left_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                     processed_size++;
                     continue;
                 }
-                if (right_valid_base && !right_valid_base[right_chunk_offset]) {
+                if (right_validity && !right_validity[right_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                     processed_size++;
@@ -420,17 +420,17 @@ class PhyCompareFilterExpr : public Expr {
             auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            if (left_valid_data || right_valid_data) {
+            const auto left_validity = left_chunk.validity();
+            const auto right_validity = right_chunk.validity();
+            if (left_validity || right_validity) {
                 for (int i = 0; i < size; ++i) {
                     auto offset = (*input)[i];
-                    if (left_valid_data && !left_valid_data[offset]) {
+                    if (left_validity && !left_validity[offset]) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
-                    if (right_valid_data && !right_valid_data[offset]) {
+                    if (right_validity && !right_validity[offset]) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
@@ -497,20 +497,14 @@ class PhyCompareFilterExpr : public Expr {
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                }
-            }
+            ApplyValidMask(left_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
+            ApplyValidMask(right_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
             processed_size += size;
 
             if (processed_size >= batch_size_) {
@@ -572,20 +566,14 @@ class PhyCompareFilterExpr : public Expr {
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                }
-            }
+            ApplyValidMask(left_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
+            ApplyValidMask(right_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
             processed_size += size;
 
             if (processed_size >= batch_size_) {

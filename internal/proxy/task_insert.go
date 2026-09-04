@@ -10,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -29,7 +31,7 @@ type insertTask struct {
 
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
-	chMgr           channelsMgr
+	chMgr           channelmgr.ChannelsMgr
 	vChannels       []vChan
 	pChannels       []pChan
 	schema          *schemapb.CollectionSchema
@@ -74,11 +76,11 @@ func (it *insertTask) EndTs() Timestamp {
 }
 
 func (it *insertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -125,14 +127,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
@@ -150,7 +152,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
+	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -254,7 +256,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, it.getMetaCache(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -271,7 +273,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.insertMsg.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
+			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
@@ -286,7 +288,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
+	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
 		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
 	}

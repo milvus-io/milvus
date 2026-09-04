@@ -107,11 +107,7 @@ type meta struct {
 	compactionTaskMeta            *compactionTaskMeta
 	statsTaskMeta                 *statsTaskMeta
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
-
-	// File Resource Meta
-	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
-	resourceVersion uint64
-	resourceLock    lock.RWMutex
+	broker                        broker.Broker
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
 }
@@ -268,15 +264,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:             ctx,
-		catalog:         catalog,
-		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:        NewSegmentsInfo(),
-		channelCPs:      newChannelCps(),
-		chunkManager:    chunkManager,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
+		ctx:          ctx,
+		catalog:      catalog,
+		collections:  typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:     NewSegmentsInfo(),
+		channelCPs:   newChannelCps(),
+		chunkManager: chunkManager,
+		broker:       broker,
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -1659,7 +1653,23 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 
 		// update segments num rows
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if count > 0 {
+		// V3 segments carry the authoritative cumulative row count on the
+		// checkpoint (FlushedRows + batchRows maintained on the writer). Their
+		// in-memory binlog arrays are a pass-through cache that may be empty
+		// (V3 recovery) or delta-only (growing source flush), so the
+		// array-derived count must never override the checkpoint.
+		if segment.GetStorageVersion() == storage.StorageV3 {
+			if cpNumRows > 0 {
+				if cpNumRows != count && count > 0 {
+					mlog.Info(modPack.meta.ctx, "check point reported row count inconsistent with binlog row count",
+						mlog.Int64("segmentID", segmentID),
+						mlog.Int64("binlog reported (wrong)", cpNumRows),
+						mlog.Int64("segment binlog row count (correct)", count))
+				}
+				segment.NumOfRows = cpNumRows
+			}
+			// no valid checkpoint: keep the current NumOfRows
+		} else if count > 0 {
 			if cpNumRows != count {
 				mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
 					mlog.Int64("segmentID", segmentID),
@@ -1667,9 +1677,6 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 					mlog.Int64("segment binlog row count (correct)", count))
 			}
 			segment.NumOfRows = count
-		} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
-			// V3 storage: binlogs are empty, use checkpoint's NumOfRows
-			segment.NumOfRows = cpNumRows
 		}
 
 		return true
@@ -2815,18 +2822,24 @@ func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition
 	return minPos
 }
 
-// collectionHasTextFields returns true if the collection has any TEXT type fields.
-func (m *meta) collectionHasTextFields(collectionID int64) bool {
+// collectionTextFieldIDs returns the field IDs of all TEXT type fields in the collection schema.
+func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	coll := m.GetCollection(collectionID)
 	if coll == nil || coll.Schema == nil {
-		return false
+		return nil
 	}
+	var ids []int64
 	for _, field := range coll.Schema.GetFields() {
 		if field.GetDataType() == schemapb.DataType_Text {
-			return true
+			ids = append(ids, field.GetFieldID())
 		}
 	}
-	return false
+	return ids
+}
+
+// collectionHasTextFields returns true if the collection has any TEXT type fields.
+func (m *meta) collectionHasTextFields(collectionID int64) bool {
+	return len(m.collectionTextFieldIDs(collectionID)) > 0
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
@@ -3433,10 +3446,9 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
-	// SegmentInfo.Binlogs is the input to the index-eligibility gate:
-	// indexInspector.getSegmentBinlogFields derives the set of fields that have
-	// data from this array's ChildFields, and canCreateIndexForSegment refuses
-	// to build an index on a function-output field missing from that set.
+	// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
+	// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
+	// function-output field with no data here has nothing to index.
 	// Materialization exists precisely to make such a field indexable, and
 	// compaction_task_bump_schema_version enqueues the segment for index
 	// building right after this mutation — so the column groups this run wrote
@@ -3659,37 +3671,11 @@ func contains(arr []int64, target int64) bool {
 	return false
 }
 
-func (m *meta) UpdateFileResources(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-	m.resourceIDMap = make(map[int64]*internalpb.FileResourceInfo)
-	for _, resource := range resources {
-		m.resourceIDMap[resource.Id] = resource
-	}
-	m.resourceVersion = version
-
-	return nil
-}
-
-func (m *meta) ListFileResources(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-	return lo.Values(m.resourceIDMap), m.resourceVersion
-}
-
 func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-
-	resources := make([]*internalpb.FileResourceInfo, 0)
-	for _, id := range resourceIDs {
-		if resource, ok := m.resourceIDMap[id]; ok {
-			resources = append(resources, resource)
-		} else {
-			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", id)
-		}
+	if m.broker == nil {
+		return nil, merr.WrapErrServiceInternalMsg("file resource broker is not initialized")
 	}
-	return resources, nil
+	return m.broker.GetFileResources(ctx, resourceIDs...)
 }
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp

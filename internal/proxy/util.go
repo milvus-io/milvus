@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -659,7 +660,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 
 	// TODO should remove the index params in the field schema
 	indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
-	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+	if err = fieldvalidator.ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
 
@@ -1497,11 +1498,10 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
-	hoo := hookutil.GetHook()
-	user, err := hoo.VerifyAPIKey(rawToken)
+	user, err := hookutil.GetHook().VerifyAPIKey(rawToken)
 	if err != nil {
-		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.String("api_key", rawToken), mlog.Err(err))
-		return "", merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+		mlog.Warn(context.TODO(), "fail to verify apikey with hook", mlog.Err(err))
+		return "", merr.WrapErrParameterInvalidMsg("invalid API key")
 	}
 	return user, nil
 }
@@ -1530,7 +1530,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	mlog.Debug(context.TODO(), "get credential miss cache, update cache with", mlog.Any("credential", credInfo))
+	mlog.Debug(ctx, "credential cache populated")
 	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
@@ -1548,18 +1548,22 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 }
 
 func recallCal[T string | int64](results []T, gts []T) float32 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	gtSet := make(map[T]struct{}, len(gts))
+	for _, gt := range gts {
+		gtSet[gt] = struct{}{}
+	}
+
 	hit := 0
-	total := 0
 	for _, r := range results {
-		total++
-		for _, gt := range gts {
-			if r == gt {
-				hit++
-				break
-			}
+		if _, ok := gtSet[r]; ok {
+			hit++
 		}
 	}
-	return float32(hit) / float32(total)
+	return float32(hit) / float32(len(results))
 }
 
 func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
@@ -2251,7 +2255,7 @@ func checkPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchem
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2403,7 +2407,7 @@ func checkUpsertPrimaryFieldData(
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2506,6 +2510,7 @@ func getCollectionProgress(
 
 func getPartitionProgress(
 	ctx context.Context,
+	metaCache Cache,
 	queryCoord types.QueryCoordClient,
 	msgBase *commonpb.MsgBase,
 	partitionNames []string,
@@ -2517,7 +2522,7 @@ func getPartitionProgress(
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
 		var partitionID int64
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
+		partitionID, err = metaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
 		if err != nil {
 			return
 		}
@@ -2564,8 +2569,8 @@ func getPartitionProgress(
 	return
 }
 
-func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (bool, error) {
-	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
+func isPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, colName string) (bool, error) {
+	colSchema, err := metaCache.GetCollectionSchema(ctx, dbName, colName)
 	if err != nil {
 		return false, err
 	}
@@ -2589,8 +2594,8 @@ func hasPartitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 }
 
 // getDefaultPartitionsInPartitionKeyMode only used in partition key mode
-func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, collectionName string) ([]string, error) {
+	partitions, err := metaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -2662,13 +2667,13 @@ func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg 
 	return channel2RowOffsets
 }
 
-func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
+func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+	partitionNames, err := metaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+	schema, err := metaCache.GetCollectionSchema(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
@@ -2682,12 +2687,12 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 	return hashedPartitionNames, err
 }
 
-func assignNamespacePartitionKey(ctx context.Context, dbName string, collName string, namespace *string) ([]string, error) {
+func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
 	}
 
-	return assignPartitionKeys(ctx, dbName, collName, []*planpb.GenericValue{
+	return assignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
 		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
 	})
 }
@@ -2941,16 +2946,16 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	return nil
 }
 
-func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
-	if globalMetaCache != nil {
-		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
+func GetCachedCollectionSchema(ctx context.Context, metaCache Cache, dbName string, colName string) (*schemaInfo, error) {
+	if metaCache != nil {
+		return metaCache.GetCollectionSchema(ctx, dbName, colName)
 	}
 	return nil, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")
 }
 
-func CheckDatabase(ctx context.Context, dbName string) bool {
-	if globalMetaCache != nil {
-		return globalMetaCache.HasDatabase(ctx, dbName)
+func CheckDatabase(ctx context.Context, metaCache Cache, dbName string) bool {
+	if metaCache != nil {
+		return metaCache.HasDatabase(ctx, dbName)
 	}
 	return false
 }
@@ -3042,80 +3047,94 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
-func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+	if metaCache == nil {
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "meta cache initialization")
+	}
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.UpsertRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
 	case *milvuspb.ImportRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
 	case *milvuspb.SearchRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
 	case *milvuspb.HybridSearchRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		nq := 0
 		for _, subReq := range r.GetRequests() {
 			nq += int(subReq.GetNq())
 		}
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, nq, err
 	case *milvuspb.QueryRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
 	case *milvuspb.CreateCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest, *milvuspb.PinSnapshotDataRequest:
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RestoreSnapshotRequest:
+		targetDBName := r.GetTargetDbName()
+		if targetDBName == "" {
+			targetDBName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return getDatabaseID(metaCache, targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.UnpinSnapshotDataRequest:
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RestoreExternalSnapshotRequest:
-		return getDatabaseID(r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+		return getDatabaseID(metaCache, r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.ExportSnapshotRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.LoadCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.ReleaseCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreatePartitionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.DropPartitionRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.LoadPartitionsRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.ReleasePartitionsRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.CreateIndexRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.DropIndexRequest:
-		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
-		db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+		db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
 
 		collToPartIDs := make(map[int64][]int64, 0)
 		for _, collectionName := range r.GetCollectionNames() {
-			collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), collectionName)
+			collectionID, err := metaCache.GetCollectionID(ctx, r.GetDbName(), collectionName)
 			if err != nil {
 				return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 			}
@@ -3126,7 +3145,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		// Use the db the request actually targets (normalized by
 		// DatabaseInterceptor), consistent with the sibling cases, so quota is
 		// accounted against the correct database. See milvus-io/milvus#50678.
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+		dbInfo, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
@@ -3183,8 +3202,18 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest,
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
 		*milvuspb.AlterDatabaseRequest,
-		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest:
+		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest,
+		*milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
+		*milvuspb.UnpinSnapshotDataRequest:
 		return merr.Status(err)
+	case *milvuspb.RestoreSnapshotRequest:
+		return &milvuspb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.PinSnapshotDataRequest:
+		return &milvuspb.PinSnapshotDataResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		return &milvuspb.RestoreExternalSnapshotResponse{
 			Status: merr.Status(err),

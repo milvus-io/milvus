@@ -31,7 +31,10 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeSort, NewSortOpFromRepr)
+	MustRegisterOperator(
+		types.OpTypeSort,
+		statelessOperatorFactory(NewSortOpFromRepr),
+	)
 }
 
 // SortOp sorts the DataFrame by a column.

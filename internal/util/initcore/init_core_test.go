@@ -70,6 +70,13 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+
+	defer func() {
+		assert.NoError(t, pt.Reset(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key))
+		SyncTakeForOutputResultCountLimit(pt)
+	}()
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key, "2048"))
+	assert.Equal(t, int64(2048), getTakeForOutputResultCountLimit())
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
@@ -151,6 +158,29 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 	assert.NoError(t, InitArrowReaderConfig(pt))
+}
+
+func TestInitExternalVectorNullPolicy(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key)
+	defer func() {
+		_ = pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "error")
+		assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	}()
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "error"))
+	assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	assert.False(t, externalVectorPartialNullAsRowNullEnabled())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, " NULL "))
+	assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	assert.True(t, externalVectorPartialNullAsRowNullEnabled())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "zero"))
+	err := InitExternalVectorNullPolicy(pt)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {

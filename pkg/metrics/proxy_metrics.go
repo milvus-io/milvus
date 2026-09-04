@@ -139,15 +139,6 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
-	// ProxyMsgStreamObjectsForPChan record the number of MsgStream objects per PChannel on each collection_id on Proxy.
-	ProxyMsgStreamObjectsForPChan = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "msgstream_obj_num",
-			Help:      "number of MsgStream objects per physical channel",
-		}, []string{nodeIDLabelName, channelNameLabelName})
-
 	// ProxySendMutationReqLatency record the latency that Proxy send insert request to MsgStream.
 	ProxySendMutationReqLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -509,8 +500,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
 	registry.MustRegister(ProxyReduceResultLatency)
 	registry.MustRegister(ProxyDecodeResultLatency)
-
-	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
 
 	registry.MustRegister(ProxySendMutationReqLatency)
 

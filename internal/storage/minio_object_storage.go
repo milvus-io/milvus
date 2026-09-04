@@ -33,6 +33,8 @@ const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
 
 type MinioObjectStorage struct {
 	*minio.Client
+
+	cloudProvider string
 }
 
 type ObjectReader struct {
@@ -52,7 +54,7 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 	if err != nil {
 		return nil, err
 	}
-	return &MinioObjectStorage{minIOClient}, nil
+	return &MinioObjectStorage{Client: minIOClient, cloudProvider: c.CloudProvider}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
@@ -136,7 +138,10 @@ func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.
 	if err != nil {
 		return mapObjectStorageError(srcObjectName, err)
 	}
-	if srcInfo.Size <= minioSingleCopyObjectMaxSize {
+	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
+	// ComposeObject) has no x-goog-* equivalent. Its whole-object copy has no
+	// 5GiB cap though, so GCP always takes the single-copy path.
+	if srcInfo.Size <= minioSingleCopyObjectMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
 		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
 		return mapObjectStorageError(srcObjectName, err)
 	}

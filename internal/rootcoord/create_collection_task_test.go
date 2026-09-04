@@ -1934,7 +1934,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		schema.ExternalSource = "file:///tmp/snapshot.json"
 		err := baseTask(schema).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "external_source scheme")
+		assert.Contains(t, err.Error(), "external_source is invalid")
 	})
 
 	t.Run("empty source is noop", func(t *testing.T) {

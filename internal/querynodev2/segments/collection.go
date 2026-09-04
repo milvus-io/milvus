@@ -135,9 +135,9 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	}
 	defer m.mut.Unlock()
 
-	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema))
+	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema), mlog.Err(err))
+	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema), mlog.Err(err))
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Col
 			mlog.Uint64("schemaVersion", plan.logicalSchemaVersion),
 			mlog.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
 			mlog.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
-			mlog.Any("schema", schema),
+			mlog.FieldSchema(schema),
 		)
 	}
 	return nil

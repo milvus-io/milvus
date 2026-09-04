@@ -145,7 +145,10 @@ func waitForAllIndexesBuilt(ctx context.Context, mc *base.MilvusClient, collName
 
 // TestCreateSnapshot tests creating a snapshot for a collection
 func TestCreateSnapshot(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -195,7 +198,10 @@ func TestCreateSnapshot(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiSegment tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -498,7 +504,10 @@ func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -648,7 +657,10 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiFields tests snapshot restore with all supported field types
 func TestSnapshotRestoreWithMultiFields(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -855,7 +867,10 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 // TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection.
 // It verifies that collection metadata, schema, and indexes are preserved without any data.
 func TestSnapshotRestoreEmptyCollection(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1139,7 +1154,10 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 // This test verifies that JSON stats (both legacy json_key_index_log and new json_stats formats)
 // are correctly preserved and restored during snapshot operations
 func TestSnapshotRestoreWithJSONStats(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1352,7 +1370,10 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 // TestSnapshotRestoreAfterDropPartitionAndCollection tests snapshot restore functionality
 // after dropping partitions and the entire collection
 func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1544,7 +1565,10 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 // Verifies that ListSnapshots with db-level filtering returns only snapshots
 // belonging to collections in the specified database.
 func TestSnapshotCrossDatabase(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1618,7 +1642,10 @@ func TestSnapshotCrossDatabase(t *testing.T) {
 // 3. Drop collection B, restore A1 again to collection C
 // 4. Verify both A and C can load and query/search
 func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1775,7 +1802,10 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 // This covers the bug where CopySegmentResult.index_infos used fieldID as map key,
 // causing only the last index per field to survive (overwriting earlier ones).
 func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

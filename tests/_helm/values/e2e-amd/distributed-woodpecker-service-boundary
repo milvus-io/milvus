@@ -19,7 +19,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: v0.1.37
+    tag: v0.1.38
     pullPolicy: Always
 streaming:
   enabled: true
@@ -91,9 +91,9 @@ extraConfigFiles:
       segment:
         insertBufSize: 1048576
     dataCoord:
-      targetVecIndexVersion: 10
+      targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 3
+      targetScalarIndexVersion: 4
       enableCompaction: true
       compaction:
         enableAutoCompaction: false

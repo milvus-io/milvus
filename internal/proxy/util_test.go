@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -55,6 +57,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type proxyLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*proxyLogBuffer) Sync() error {
+	return nil
+}
+
+func captureProxyLogs(t *testing.T) *proxyLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &proxyLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
 
 func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	info := &SearchInfo{
@@ -1102,6 +1133,75 @@ func TestGetRole(t *testing.T) {
 	roles, err = GetRole("foo")
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(roles))
+}
+
+func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
+	logs := captureProxyLogs(t)
+	rawToken := "API_KEY_SENTINEL_DO_NOT_LOG"
+	encodedToken := crypto.Base64Encode(rawToken)
+	// initHook() installs the default hook, so consume it before installing the
+	// mock, otherwise the mock is clobbered on the first GetHook() call.
+	hookutil.InitOnceHook()
+	hookutil.SetMockAPIHook("", errors.New("API key provider unavailable"))
+	t.Cleanup(func() {
+		hookutil.SetTestHook(hookutil.DefaultHook{})
+	})
+
+	_, err := VerifyAPIKey(rawToken)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), rawToken)
+
+	metaCache := InitEmptyMetaCacheForTest()
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	})
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		util.HeaderAuthorize,
+		encodedToken,
+	))
+	_, err = AuthenticationInterceptorWithMetaCache(func() Cache { return metaCache })(ctx)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), rawToken)
+	assert.NotContains(t, err.Error(), encodedToken)
+	output := logs.String()
+	assert.Contains(t, output, "fail to verify apikey")
+	assert.Contains(t, output, "API key provider unavailable")
+	assert.NotContains(t, output, rawToken)
+	assert.NotContains(t, output, encodedToken)
+}
+
+func TestPasswordVerifyDoesNotLogCredential(t *testing.T) {
+	ctx := context.Background()
+	username := "USERNAME_SENTINEL_DO_NOT_LOG"
+	password := "PASSWORD_SENTINEL_DO_NOT_LOG"
+	encryptedPassword, err := crypto.PasswordEncrypt(password)
+	require.NoError(t, err)
+	sha256Password := crypto.SHA256(password, username)
+
+	privilege.ResetPrivilegeCacheForTest()
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	mockedRootCoord := NewMixCoordMock()
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: encryptedPassword,
+		}, nil
+	}
+	privilege.InitPrivilegeCache(ctx, mockedRootCoord)
+
+	logs := captureProxyLogs(t)
+	assert.True(t, passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()))
+
+	output := logs.String()
+	assert.Contains(t, output, "credential cache populated")
+	assert.NotContains(t, output, username)
+	assert.NotContains(t, output, password)
+	assert.NotContains(t, output, encryptedPassword)
+	assert.NotContains(t, output, sha256Password)
+	assert.NotContains(t, output, "encrypted_password")
+	assert.NotContains(t, output, "sha256_password")
 }
 
 func TestPasswordVerify(t *testing.T) {
@@ -2449,7 +2549,8 @@ func Test_GetPartitionProgressFailed(t *testing.T) {
 			Reason:    "Unexpected error",
 		},
 	}, nil)
-	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
+	metaCache := NewMockCache(t)
+	_, _, err := getPartitionProgress(context.TODO(), metaCache, qc, &commonpb.MsgBase{}, []string{}, "", 1, "")
 	assert.Error(t, err)
 }
 

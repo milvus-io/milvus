@@ -1327,6 +1327,11 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 	return s.rootcoordServer.ListFileResources(ctx, req)
 }
 
+// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+func (s *mixCoordImpl) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	return s.rootcoordServer.GetFileResources(ctx, resourceIDs...)
+}
+
 // TruncateCollection truncate collection
 func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.rootcoordServer.TruncateCollection(ctx, req)

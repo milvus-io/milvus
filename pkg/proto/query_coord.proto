@@ -417,6 +417,8 @@ message SegmentLoadInfo {
     // child_manifest_paths carries compact-to child manifests whose delta logs
     // must be loaded together with the fallback parent segment.
     repeated string child_manifest_paths = 29;
+    // stats carries the durable segment aggregates used for resource estimation.
+    data.Statistics stats = 30;
 }
 
 message FieldIndexInfo {

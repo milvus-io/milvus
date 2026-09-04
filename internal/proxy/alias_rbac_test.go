@@ -44,10 +44,6 @@ func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.
 
 	cache := mustNewMetaCacheForTest(mockCoord)
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	// Wildcard "*" should not trigger resolution
 	for _, sentinel := range []string{"*", ""} {
 		// These sentinel values should be caught by the interceptor guard
@@ -67,7 +63,7 @@ func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.
 		Aliases:      []string{"some_alias"},
 	}, nil)
 
-	result, err := resolveCollectionAlias(ctx, "default", "some_alias")
+	result, err := resolveCollectionAlias(ctx, cache, "default", "some_alias")
 	assert.NoError(t, err)
 	assert.Equal(t, "real_col", result)
 	mockCoord.AssertCalled(t, "DescribeCollection", mock.Anything, mock.Anything)
@@ -158,11 +154,8 @@ func TestResolveCollectionAlias_InternalServerError(t *testing.T) {
 
 func TestResolveCollectionAlias_NilGlobalMetaCache(t *testing.T) {
 	ctx := context.Background()
-	oldCache := globalMetaCache
-	globalMetaCache = nil
-	defer func() { globalMetaCache = oldCache }()
 
-	result, err := resolveCollectionAlias(ctx, "default", "test")
+	result, err := resolveCollectionAlias(ctx, nil, "default", "test")
 	assert.Error(t, err)
 	assert.Equal(t, "test", result)
 }
@@ -348,13 +341,12 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
 	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	paramtable.Init()
 
 	task := &CreateAliasTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -383,13 +375,12 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
 	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	paramtable.Init()
 
 	task := &AlterAliasTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		AlterAliasRequest: &milvuspb.AlterAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -419,15 +410,14 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
 	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	paramtable.Init()
 	paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
 	defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
 
 	task := &CreateAliasTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
 			Base:           &commonpb.MsgBase{},
@@ -456,13 +446,12 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 	seedCollection(cache, "default", "real_collection", 1).Aliases = []string{"existing_alias"}
 	cache.SetAliasLockedForTest("default", "existing_alias", "real_collection")
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	paramtable.Init()
 
 	task := &ListAliasesTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{
 			Base:           &commonpb.MsgBase{},
@@ -485,13 +474,12 @@ func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
 
 	cache := mustNewMetaCacheForTest(mockCoord)
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	paramtable.Init()
 
 	task := &ListAliasesTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{
 			Base:   &commonpb.MsgBase{},

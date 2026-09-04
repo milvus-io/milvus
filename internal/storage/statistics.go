@@ -63,6 +63,7 @@ type StatisticsCollector struct {
 	nullCounts         map[int64]int64
 	quantileEntries    []quantileEntry
 	formats            map[string]struct{}
+	columnGroups       map[int64]*datapb.ColumnGroupStatistics
 }
 
 // NewStatisticsCollector returns an empty collector.
@@ -95,6 +96,12 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 	c.deltaTimestampTo = stats.GetDeltaTimestampTo()
 	c.timestampFrom = stats.GetTimestampFrom()
 	c.timestampTo = stats.GetTimestampTo()
+	if loadResource := stats.GetLoadResource(); loadResource != nil {
+		c.columnGroups = make(map[int64]*datapb.ColumnGroupStatistics, len(loadResource.GetColumnGroups()))
+		for _, group := range loadResource.GetColumnGroups() {
+			c.columnGroups[group.GetGroupId()] = cloneColumnGroup(group)
+		}
+	}
 	if nc := stats.GetNullCounts(); len(nc) > 0 {
 		c.nullCounts = make(map[int64]int64, len(nc))
 		for f, n := range nc {
@@ -127,6 +134,81 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 		}
 	}
 	return c
+}
+
+// mergeColumnGroups folds one sync's insert metadata into the current map in
+// place. Packed formats use ChildFields to describe a physical column group;
+// legacy field binlogs naturally form one group per field.
+func mergeColumnGroups(current map[int64]*datapb.ColumnGroupStatistics, inserts map[int64]*datapb.FieldBinlog) map[int64]*datapb.ColumnGroupStatistics {
+	if current == nil {
+		current = make(map[int64]*datapb.ColumnGroupStatistics)
+	}
+	for _, fieldBinlog := range inserts {
+		mergeColumnGroup(current, fieldBinlog)
+	}
+	return current
+}
+
+func mergeColumnGroup(groups map[int64]*datapb.ColumnGroupStatistics, fieldBinlog *datapb.FieldBinlog) {
+	if fieldBinlog == nil {
+		return
+	}
+	groupID := fieldBinlog.GetFieldID()
+	group, ok := groups[groupID]
+	if !ok {
+		group = &datapb.ColumnGroupStatistics{GroupId: groupID}
+		groups[groupID] = group
+	}
+	fieldIDs := fieldBinlog.GetChildFields()
+	if len(fieldIDs) == 0 {
+		fieldIDs = []int64{groupID}
+	}
+	for _, fieldID := range fieldIDs {
+		if !slices.Contains(group.FieldIds, fieldID) {
+			group.FieldIds = append(group.FieldIds, fieldID)
+		}
+	}
+	for _, binlog := range fieldBinlog.GetBinlogs() {
+		group.MemorySize += binlog.GetMemorySize()
+	}
+}
+
+// BuildLoadResourceStatistics builds deterministic load-estimation metadata
+// from final or incremental insert groups. It has no file paths and excludes
+// PK Bloom, BM25, and every other stats blob.
+func BuildLoadResourceStatistics(inserts []*datapb.FieldBinlog) *datapb.LoadResourceStatistics {
+	groupByID := make(map[int64]*datapb.ColumnGroupStatistics, len(inserts))
+	for _, fieldBinlog := range inserts {
+		mergeColumnGroup(groupByID, fieldBinlog)
+	}
+	groups := make([]*datapb.ColumnGroupStatistics, 0, len(groupByID))
+	for _, group := range groupByID {
+		slices.Sort(group.FieldIds)
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].GetGroupId() < groups[j].GetGroupId() })
+	return &datapb.LoadResourceStatistics{
+		ColumnGroups: groups,
+	}
+}
+
+func cloneColumnGroup(group *datapb.ColumnGroupStatistics) *datapb.ColumnGroupStatistics {
+	return &datapb.ColumnGroupStatistics{
+		GroupId:    group.GetGroupId(),
+		FieldIds:   slices.Clone(group.GetFieldIds()),
+		MemorySize: group.GetMemorySize(),
+	}
+}
+
+func cloneColumnGroups(groups map[int64]*datapb.ColumnGroupStatistics) map[int64]*datapb.ColumnGroupStatistics {
+	if groups == nil {
+		return nil
+	}
+	cloned := make(map[int64]*datapb.ColumnGroupStatistics, len(groups))
+	for groupID, group := range groups {
+		cloned[groupID] = cloneColumnGroup(group)
+	}
+	return cloned
 }
 
 // Digest folds one sync task's writes into the cumulative state. inserts are
@@ -173,6 +255,9 @@ func (c *StatisticsCollector) Digest(
 			c.formats[fmt] = struct{}{}
 		}
 	}
+	if len(inserts) > 0 {
+		c.columnGroups = mergeColumnGroups(c.columnGroups, inserts)
+	}
 	c.statsBinlogSize += statsBlobSize
 	if delta != nil {
 		for _, l := range delta.GetBinlogs() {
@@ -202,7 +287,7 @@ func (c *StatisticsCollector) Digest(
 // has been digested. No scaling — the value reflects exactly what the collector
 // has seen.
 func (c *StatisticsCollector) Publish() *datapb.Statistics {
-	if c.numRows == 0 && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 {
+	if c.numRows == 0 && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 && c.columnGroups == nil {
 		return nil
 	}
 	var nullCounts map[int64]int64
@@ -220,7 +305,7 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 		}
 		slices.Sort(formats)
 	}
-	return &datapb.Statistics{
+	stats := &datapb.Statistics{
 		InsertBinlogSize:   c.insertBinlogSize,
 		InsertBinlogCount:  c.insertBinlogCount,
 		StatsBinlogSize:    c.statsBinlogSize,
@@ -235,6 +320,19 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 		TimestampQuantiles: c.quantiles(),
 		Formats:            formats,
 	}
+	if c.columnGroups != nil {
+		groups := make([]*datapb.ColumnGroupStatistics, 0, len(c.columnGroups))
+		for _, group := range c.columnGroups {
+			cloned := cloneColumnGroup(group)
+			slices.Sort(cloned.FieldIds)
+			groups = append(groups, cloned)
+		}
+		sort.Slice(groups, func(i, j int) bool {
+			return groups[i].GetGroupId() < groups[j].GetGroupId()
+		})
+		stats.LoadResource = &datapb.LoadResourceStatistics{ColumnGroups: groups}
+	}
+	return stats
 }
 
 // quantiles picks the 20/40/60/80/100% TimestampTo marks over the digested
@@ -280,12 +378,13 @@ func (c *StatisticsCollector) Clone() *StatisticsCollector {
 			cp.formats[f] = struct{}{}
 		}
 	}
+	cp.columnGroups = cloneColumnGroups(c.columnGroups)
 	return &cp
 }
 
 // BuildStatsFromFieldBinlogs reconstructs a datapb.Statistics from the
-// cumulative FieldBinlog arrays. Used by the DataCoord side as the V2 /
-// legacy fallback when the writer didn't ship Statistics directly.
+// cumulative FieldBinlog arrays. Used by the DataCoord side as the legacy or
+// nil-stats fallback when the writer didn't ship Statistics directly.
 //
 // TimestampQuantiles is approximated from binlog-level TimestampTo
 // weighted by EntriesNum: walk the (first field's) binlogs sorted by
@@ -391,6 +490,9 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 		s.DeltaTimestampFrom = deltaFrom
 	}
 	s.DeltaTimestampTo = deltaTo
+	if len(binlogs) > 0 {
+		s.LoadResource = BuildLoadResourceStatistics(binlogs)
+	}
 
 	if len(binlogs) > 0 {
 		type tsEntry struct {

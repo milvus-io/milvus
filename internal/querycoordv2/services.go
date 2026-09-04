@@ -197,7 +197,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	)
 
 	logger.Info(ctx, "load collection request received",
-		mlog.Any("schema", req.Schema),
+		mlog.FieldSchema(req.Schema),
 		mlog.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
@@ -271,7 +271,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	)
 
 	logger.Info(ctx, "received load partitions request",
-		mlog.Any("schema", req.Schema))
+		mlog.FieldSchema(req.Schema))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if err := merr.CheckHealthy(s.State()); err != nil {

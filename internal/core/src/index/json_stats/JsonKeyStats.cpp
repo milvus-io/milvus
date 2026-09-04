@@ -330,7 +330,7 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
 
 void
 JsonKeyStats::CollectSingleJsonStatsInfo(
-    const char* json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
+    std::string_view json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
     jsmn_parser parser;
     jsmn_init(&parser);
 
@@ -339,8 +339,11 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
                 // Reallocate tokens array if not enough space
@@ -364,7 +367,7 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
 
     int index = 0;
     std::vector<std::string> paths;
-    TraverseJsonForStats(json_str, tokens.data(), index, paths, infos);
+    TraverseJsonForStats(json_str.data(), tokens.data(), index, paths, infos);
 }
 
 std::map<JsonKey, KeyStatsInfo>
@@ -378,9 +381,8 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
-            auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
-                                ->data()
-                                .data();
+            auto json_str =
+                static_cast<const milvus::Json*>(data->RawValue(i))->data();
             CollectSingleJsonStatsInfo(json_str, infos);
         }
         num_rows += n;
@@ -612,7 +614,7 @@ JsonKeyStats::BuildKeyStatsForNullRow() {
 }
 
 void
-JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
+JsonKeyStats::BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id) {
     LOG_TRACE("build key stats for row {} with json {} for segment {}",
               row_id,
               json_str,
@@ -625,8 +627,11 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
                 // Reallocate tokens array if not enough space
@@ -651,7 +656,8 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
     int index = 0;
     std::vector<std::string> paths;
     std::map<JsonKey, std::string> values;
-    TraverseJsonForBuildStats(json_str, tokens.data(), index, paths, values);
+    TraverseJsonForBuildStats(
+        json_str.data(), tokens.data(), index, paths, values);
     DomNode root;
     std::set<JsonKey> hit_keys;
     for (const auto& [key, value] : values) {
@@ -716,13 +722,11 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 BuildKeyStatsForNullRow();
             } else {
                 auto json_str =
-                    static_cast<const milvus::Json*>(data->RawValue(i))
-                        ->data()
-                        .data();
+                    static_cast<const milvus::Json*>(data->RawValue(i))->data();
 
                 // some situations, such as empty json string,
                 // should be handled as null row
-                if (strlen(json_str) == 0) {
+                if (json_str.empty()) {
                     BuildKeyStatsForNullRow();
                 } else {
                     BuildKeyStatsForRow(json_str, row_id);

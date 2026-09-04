@@ -74,12 +74,50 @@ func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	}
 }
 
+func TestComponentParam_StorageIopsParams(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+
+	initialRate := &params.CommonCfg.StorageIopsInitialRate
+	maxRate := &params.CommonCfg.StorageIopsMaxRate
+	assert.Equal(t, "3.0.1", initialRate.Version)
+	assert.Equal(t, "3.0.1", maxRate.Version)
+	assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+	assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+
+	assert.NoError(t, params.Save(initialRate.Key, "3000"))
+	assert.NoError(t, params.Save(maxRate.Key, "0"))
+	assert.Equal(t, uint32(3000), initialRate.GetAsUint32())
+	assert.Equal(t, uint32(0), maxRate.GetAsUint32())
+
+	for _, invalid := range []string{"", "-1", "invalid", "4294967296"} {
+		assert.NoError(t, params.Save(initialRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+		assert.NoError(t, params.Save(maxRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
 
 	t.Run("query node zero copy config key", func(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
+	})
+
+	t.Run("query node mmap writeback config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.MmapWriteback
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.mmap.writeback", item.Key)
+		assert.False(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
 	})
 
 	t.Run("test commonConfig", func(t *testing.T) {
@@ -117,6 +155,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
 		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
+
+		defer params.Reset(Params.ExternalVectorPartialNullPolicy.Key)
+		assert.Equal(t, "error", Params.ExternalVectorPartialNullPolicy.GetValue())
+		params.Save(Params.ExternalVectorPartialNullPolicy.Key, "null")
+		assert.Equal(t, "null", Params.ExternalVectorPartialNullPolicy.GetValue())
 
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
@@ -547,6 +590,14 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
+		assert.Equal(t, 0.5, Params.InterimIndexBuildParallelRate.GetAsFloat())
+		// growingBuildThreadRate defaults to 0, which keeps growing index build single threaded.
+		assert.Equal(t, 0.0, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+		params.Save(Params.InterimIndexGrowingBuildThreadRate.Key, "0.25")
+		assert.Equal(t, 0.25, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+		params.Reset(Params.InterimIndexGrowingBuildThreadRate.Key)
+		assert.Equal(t, 0.0, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+
 		// enableGISSplitFusion defaults to true: the GIS coarse/refine split and
 		// same-column fusion rewrite is on unless explicitly disabled.
 		assert.True(t, Params.EnableGISSplitFusion.GetAsBool())
@@ -656,6 +707,16 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
 		params.Save(Params.ExternalCollectionUseTakeForOutput.Key, "false")
 		assert.False(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
+		defer params.Reset(Params.TakeForOutputResultCountLimit.Key)
+		assert.Equal(t, int64(10000), Params.TakeForOutputResultCountLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputResultCountLimit.Key, "0")
+		assert.Equal(t, int64(0), Params.TakeForOutputResultCountLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputResultCountLimit.Key, "2048")
+		assert.Equal(t, int64(2048), Params.TakeForOutputResultCountLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputResultCountLimit.Key, "-1")
+		assert.Equal(t, int64(10000), Params.TakeForOutputResultCountLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputResultCountLimit.Key, "invalid")
+		assert.Equal(t, int64(10000), Params.TakeForOutputResultCountLimit.GetAsInt64())
 
 		// test CatchUpStreamingDataTsLag parameter
 		assert.Equal(t, 1*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
@@ -740,6 +801,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
 		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
+		// The stats admission limit is independent from the sort compaction trigger count.
+		assert.Equal(t, 100, Params.StatsTaskPendingLimit.GetAsInt())
+		params.Save("datacoord.statsTaskPendingLimit", "7")
+		assert.Equal(t, 7, Params.StatsTaskPendingLimit.GetAsInt())
 
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")

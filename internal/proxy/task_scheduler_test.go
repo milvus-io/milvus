@@ -32,11 +32,39 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestBaseTaskQueue_isFull(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+	queue.setMaxTaskNum(2)
+
+	assert.False(t, queue.isFull())
+	assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	assert.False(t, queue.isFull())
+	assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	assert.True(t, queue.isFull())
+
+	queue.PopUnissuedTask()
+	assert.False(t, queue.isFull())
+}
+
+func TestProxy_IsDQLQueueFull(t *testing.T) {
+	node := &Proxy{}
+	assert.False(t, node.IsDQLQueueFull())
+
+	sched, err := newTaskScheduler(context.Background(), newMockTsoAllocator())
+	assert.NoError(t, err)
+	node.sched = sched
+	sched.dqQueue.setMaxTaskNum(1)
+	assert.False(t, node.IsDQLQueueFull())
+	assert.NoError(t, sched.dqQueue.Enqueue(newDefaultMockDqlTask()))
+	assert.True(t, node.IsDQLQueueFull())
+}
 
 func TestBaseTaskQueue(t *testing.T) {
 	var err error
@@ -571,17 +599,17 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = cache
 	tsoAllocatorIns := newMockTsoAllocator()
 	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns)
 	assert.NoError(t, err)
 
 	run := func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		it := &insertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
@@ -594,7 +622,7 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		assert.NoError(t, err)
 		task := scheduler.scheduleDmTask()
 		scheduler.dmQueue.AddActiveTask(task)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(nil, errors.New("mock err"))
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(nil, errors.New("mock err"))
 		scheduler.dmQueue.PopActiveTask(task.ID()) // assert no panic
 	}
 
@@ -611,7 +639,6 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	queue := newBaseTaskQueue(tsoAllocatorIns)
@@ -630,6 +657,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
 				Base:       &commonpb.MsgBase{},
@@ -647,6 +675,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 	t.Run("search", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},
@@ -664,6 +693,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(0, errors.New("mock error")).Once()
 	t.Run("failed", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},

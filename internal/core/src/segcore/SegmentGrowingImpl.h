@@ -181,16 +181,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     FillAbsentFields();
 
  private:
-    // Build geometry cache for inserted data
+    // Build geometry cache for inserted data. reserved_offset is the batch's
+    // reserved absolute segment offset: cache rows are written at absolute
+    // offsets so a retried batch overwrites its own slots instead of
+    // re-appending (see SimpleGeometryCache::AppendDataAt).
     void
     BuildGeometryCacheForInsert(FieldId field_id,
                                 const DataArray* data_array,
+                                int64_t reserved_offset,
                                 int64_t num_rows);
 
-    // Build geometry cache for loaded field data
+    // Build geometry cache for loaded field data; reserved_offset as above.
     void
     BuildGeometryCacheForLoad(FieldId field_id,
-                              const std::vector<FieldDataPtr>& field_data);
+                              const std::vector<FieldDataPtr>& field_data,
+                              int64_t reserved_offset);
 
  public:
     const InsertRecord<false>&
@@ -290,19 +295,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     size_t
     GetMemoryUsageInBytes() const override {
         return stats_.mem_size.load() + deleted_record_.mem_size();
-    }
-
-    // Returns the total disk usage of TEXT LOB spillover files in bytes.
-    // Used by Go-side sync policies for back-pressure.
-    uint64_t
-    GetTextSpilloverDiskUsage() const {
-        uint64_t total = 0;
-        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-            if (spillover) {
-                total += spillover->GetDiskUsage();
-            }
-        }
-        return total;
     }
 
     int64_t
@@ -475,12 +467,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
         // Clean up geometry cache for all fields in this segment
         auto& cache_manager =
             milvus::exec::SimpleGeometryCacheManager::Instance();
-        cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
-        if (ctx_) {
-            GEOS_finish_r(ctx_);
-            ctx_ = nullptr;
-        }
+        cache_manager.RemoveSegmentCaches(segment_instance_uid(),
+                                          get_segment_id());
 
         // Original mmap cleanup logic
         if (mmap_descriptor_ != nullptr) {
@@ -736,21 +724,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
                     FieldId field_id,
                     int64_t chunk_id) const override;
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,

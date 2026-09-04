@@ -388,7 +388,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
         [ pointer, bound, op_type, &bitmap_input, &
           processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -403,7 +403,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
             if constexpr (filter_type == FilterType::random) {
                 offset = offsets ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -470,7 +470,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
         [ op_type, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -919,7 +919,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
         [ op_type, pointer, &processed_cursor, &
           bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -937,7 +937,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -959,7 +959,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -981,7 +981,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1003,7 +1003,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1025,7 +1025,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1053,7 +1053,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1083,7 +1083,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (filter_type == FilterType::random) {
                         offset = (offsets) ? offsets[i] : i;
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
+                    if (valid_data && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
@@ -1108,7 +1108,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         if constexpr (filter_type == FilterType::random) {
                             offset = (offsets) ? offsets[i] : i;
                         }
-                        if (valid_data != nullptr && !valid_data[offset]) {
+                        if (valid_data && !valid_data[offset]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -1132,7 +1132,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         if constexpr (filter_type == FilterType::random) {
                             offset = (offsets) ? offsets[i] : i;
                         }
-                        if (valid_data != nullptr && !valid_data[offset]) {
+                        if (valid_data && !valid_data[offset]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
@@ -1250,12 +1250,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if constexpr (kNumericColumn && kNumericValue) {
                     auto executor = [op_type, &numeric_bound](
                                         const ColType* src,
-                                        const bool* valid,
+                                        ValidityView valid,
                                         size_t size,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res) {
                         for (size_t i = 0; i < size; ++i) {
-                            if (valid != nullptr && !valid[i]) {
+                            if (valid && !valid[i]) {
                                 res[i] = valid_res[i] = false;
                                 continue;
                             }
@@ -1559,13 +1559,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
     }
-    if (auto res = PreCheckOverflow<T>()) {
-        return res;
-    }
-
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
+    }
+    if (auto res = PreCheckOverflow<T>(real_batch_size)) {
+        return res;
     }
 
     if (cached_index_chunk_id_ != 0) {
@@ -1600,14 +1599,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
     }
-    if (auto res = PreCheckOverflow<T>()) {
+    auto next_batch_size =
+        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            nullptr, expr_->column_.element_level_, real_batch_size)) {
         return res;
     }
-
-    auto real_batch_size =
-        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
-        return nullptr;
+    if (auto res = PreCheckOverflow<T>(real_batch_size)) {
+        return res;
     }
     auto op_type = expr_->op_type_;
     auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
@@ -1688,21 +1691,20 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
 
 template <typename T>
 ColumnVectorPtr
-PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::PreCheckOverflow(int64_t batch_size,
+                                          OffsetVector* input) {
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
             auto make_overflow_result =
-                [this, input](bool match_value) -> ColumnVectorPtr {
+                [this, input, batch_size](bool match_value) -> ColumnVectorPtr {
                 TargetBitmap valid;
                 if (expr_->column_.element_level_) {
                     // Element batches are derived from the row cursor so
                     // MoveCursor()-based short-circuiting stays aligned.
                     // Individual elements cannot be null; their containing
                     // row's validity is applied by the element consumer.
-                    auto batch_size =
-                        GetNextRealBatchSize(input, /*element_level=*/true);
                     valid = TargetBitmap(batch_size, true);
                     if (input == nullptr) {
                         MoveCursor();
@@ -1713,8 +1715,6 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                 } else {
                     valid = ProcessChunksForValid<T>(UseIndexCursor());
                 }
-
-                auto batch_size = valid.size();
                 TargetBitmap res(batch_size, match_value);
                 if (match_value) {
                     res &= valid;
@@ -1763,14 +1763,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    if (auto res = PreCheckOverflow<T>(input)) {
+    auto next_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
         return res;
     }
-
-    auto real_batch_size =
-        GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
-        return nullptr;
+    if (auto res = PreCheckOverflow<T>(real_batch_size, input)) {
+        return res;
     }
 
     if (!arg_inited_) {
@@ -1803,7 +1807,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             like_matcher_ptr
         ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1951,16 +1955,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         // there is a batch operation in BinaryRangeElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
-            bool has_bitmap_input = !bitmap_input.empty();
+        if constexpr (filter_type == FilterType::sequential) {
+            if (bitmap_input.empty()) {
+                ApplyValidMask(valid_data, res, valid_res, size);
+            } else if (valid_data) {
+                for (int i = 0; i < size; i++) {
+                    if (!bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
+                    if (!valid_data[i]) {
+                        res[i] = valid_res[i] = false;
+                    }
+                }
+            }
+        } else if (valid_data) {
             for (int i = 0; i < size; i++) {
-                if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
+                if (!bitmap_input.empty() &&
+                    !bitmap_input[i + processed_cursor]) {
                     continue;
                 }
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -2482,7 +2496,7 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
     U val = GetValueFromProto<U>(expr_->val_);
 
     std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; i++) {
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
         if (skip_index->CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
             continue;
         }
@@ -2494,3 +2508,5 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
 
 }  // namespace exec
 }  // namespace milvus
+
+#undef UnaryRangeJSONCompare

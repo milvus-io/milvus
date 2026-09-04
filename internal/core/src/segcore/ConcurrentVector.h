@@ -80,6 +80,7 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            check_source_span(num_rows, data, field_meta);
             reserve_to(length_ + num_rows);
             write_from(length_, num_rows, data->valid_data().data());
             length_ += num_rows;
@@ -97,6 +98,10 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            // This is the overload the ingest path uses (SegmentGrowingImpl's
+            // Insert and fill_empty_field backfill), so the source-span check
+            // has to live here too, not only on the appending overload above.
+            check_source_span(num_rows, data, field_meta);
             const auto end = element_offset + num_rows;
             // No gaps. length_ advances to `end`, and is_valid() admits every
             // offset below it, so a write that starts past the current length
@@ -194,6 +199,25 @@ class ThreadSafeValidData {
     }
 
  private:
+    // write_from reads exactly num_rows entries from the source, so a producer
+    // payload shorter than the row count is an out-of-bounds read. Reject it at
+    // the boundary rather than silently treating the missing tail as NULL
+    // further down the ingest path.
+    static void
+    check_source_span(size_t num_rows,
+                      const DataArray* data,
+                      const FieldMeta& field_meta) {
+        // Resolve validity the same way write_from's caller does
+        // (FieldData.valid_data on 3.0).
+        const auto valid_size = static_cast<size_t>(data->valid_data_size());
+        AssertInfo(valid_size == num_rows,
+                   "nullable field {} valid_data size {} must match "
+                   "num_rows {}",
+                   field_meta.get_id().get(),
+                   valid_size,
+                   num_rows);
+    }
+
     // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
     void
     reserve_to(size_t n) {
@@ -333,6 +357,11 @@ class VectorBase {
     virtual FixedVector<bool>
     get_valid_data() const {
         return FixedVector<bool>{};
+    }
+
+    virtual void
+    bulk_is_valid_range(int64_t start, int64_t count, bool* out) const {
+        std::fill_n(out, count, true);
     }
 
     // Non-nullable fields have no mapping at all; hand back the shared no-op
@@ -682,6 +711,17 @@ class ConcurrentVectorImpl : public VectorBase {
             return valid_data_ptr_->get_data();
         }
         return FixedVector<bool>{};
+    }
+
+    void
+    bulk_is_valid_range(int64_t start,
+                        int64_t count,
+                        bool* out) const override {
+        if (valid_data_ptr_ != nullptr) {
+            valid_data_ptr_->bulk_is_valid_range(start, count, out);
+            return;
+        }
+        std::fill_n(out, count, true);
     }
 
  private:

@@ -469,8 +469,10 @@ func TestExportSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
 		externalSpec = `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
 	)
 
+	metaCache := &MetaCache{}
 	proxy := &Proxy{
-		mixCoord: NewMixCoordMock(),
+		mixCoord:  NewMixCoordMock(),
+		metaCache: metaCache,
 	}
 	req := &milvuspb.ExportSnapshotRequest{
 		Name:           "test_snapshot",
@@ -479,10 +481,6 @@ func TestExportSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
 		TargetS3Path:   "s3://foreign-bucket/export-root",
 		ExternalSpec:   externalSpec,
 	}
-
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	defer func() { globalMetaCache = oldMetaCache }()
 
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()

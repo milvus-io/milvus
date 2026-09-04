@@ -78,9 +78,9 @@ extraConfigFiles:
       segment:
         insertBufSize: 1048576
     dataCoord:
-      targetVecIndexVersion: 10
+      targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 3
+      targetScalarIndexVersion: 4
       enableCompaction: true
       compaction:
         enableAutoCompaction: false

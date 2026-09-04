@@ -523,6 +523,7 @@ message Statistics {
   // the effective (non-null) row count for vector index build decisions
   // on nullable vector fields.
   map<int64, int64> null_counts = 13;
+  LoadResourceStatistics load_resource = 14;
   // Unique set of column-group storage formats observed across the
   // segment's insert binlogs (e.g. ["parquet"], ["lance"], or
   // ["parquet","lance"] for mixed).
@@ -1470,7 +1471,7 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
-  string version = 3; // Milvus build version reported by the worker
+  string version = 3; // Kept for wire compatibility; new schedulers do not use it
 }
 
 enum CompactionTaskState {
@@ -1595,6 +1596,23 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  // Timestamp (Unix ms) at which the job entered the index wait, written in the
+  // same transition that applies its segment results - ordered after the
+  // segment write under the job lock, not atomic with it. Only written when
+  // dataCoord.externalCollection.refreshWaitForIndex is on.
+  //
+  // It is both the sub-state marker ("applied, now waiting for indexes") and
+  // the apply-once guard: a job carrying it has already committed its segments
+  // and must not apply again. The converse does not hold - a crash between the
+  // two writes leaves committed segments with no marker, and the apply is
+  // replay-safe for exactly that reason. 0 when unset.
+  //
+  // Callers of DescribeRefresh / ListRefreshJobs can read it directly, and it
+  // is the field that resolves the one ambiguity this feature introduces: a
+  // FAILED job with a non-zero value did apply its data - the refreshed
+  // segments are the collection's contents and are being served, and only the
+  // index wait ran out of budget. A failed job with 0 applied nothing.
+  int64 index_wait_started_time = 13;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution

@@ -32,7 +32,9 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -148,6 +150,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
 	}
 	return InitRemoteArrowFileSystem(params)
+}
+
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
 }
 
 func InitLocalArrowFileSystem(path string) error {
@@ -297,6 +309,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
@@ -578,6 +591,29 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
 }
 
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
+}
+
 var coreParamCallbackInitOnce sync.Once
 
 func SetupCoreConfigChangelCallback() {
@@ -740,6 +776,26 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			SyncTakeForOutputResultCountLimit(paramtable.Get())
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -807,6 +863,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
+
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
 
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))

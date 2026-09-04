@@ -26,10 +26,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -84,7 +87,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, strings.ToLower(fmt.Sprint(f2.Interface)), "password")
 
-		externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+		externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 		f3 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.RestoreExternalSnapshotRequest{
 			DbName:               "db",
 			TargetCollectionName: "restored",
@@ -93,7 +96,9 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, fmt.Sprint(f3.Interface), "AKIAEXAMPLE")
 		assert.NotContains(t, fmt.Sprint(f3.Interface), "SUPERSECRET")
+		assert.NotContains(t, fmt.Sprint(f3.Interface), "FUTURE_SECRET_SENTINEL")
 		assert.Contains(t, fmt.Sprint(f3.Interface), "***")
+		assert.Contains(t, fmt.Sprint(f3.Interface), "parquet")
 
 		f4 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.ExportSnapshotRequest{
 			DbName:         "db",
@@ -104,7 +109,22 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, fmt.Sprint(f4.Interface), "AKIAEXAMPLE")
 		assert.NotContains(t, fmt.Sprint(f4.Interface), "SUPERSECRET")
+		assert.NotContains(t, fmt.Sprint(f4.Interface), "FUTURE_SECRET_SENTINEL")
 		assert.Contains(t, fmt.Sprint(f4.Interface), "***")
+		assert.Contains(t, fmt.Sprint(f4.Interface), "parquet")
+
+		hashSentinel := "$2a$10$RESTORE_RBAC_HASH_SENTINEL"
+		f5 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.RestoreRBACMetaRequest{
+			RBACMeta: &milvuspb.RBACMeta{
+				Users: []*milvuspb.UserInfo{{
+					User:     "restore-user",
+					Password: hashSentinel,
+				}},
+			},
+		})
+		assert.NotContains(t, fmt.Sprint(f5.Interface), hashSentinel)
+		assert.Contains(t, fmt.Sprint(f5.Interface), "restore-user")
+		assert.Contains(t, fmt.Sprint(f5.Interface), sensitiveMark)
 	}
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")
@@ -153,4 +173,51 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 	}
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "0")
+}
+
+func TestGetRequestFieldRedactsExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"SPEC_ACCESS_GRPC_SENTINEL","access_key_value":"SPEC_SECRET_GRPC_SENTINEL","future_password":"FUTURE_SPEC_GRPC_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_GRPC_SENTINEL:SOURCE_SECRET_GRPC_SENTINEL@bucket/path"
+	schema, err := proto.Marshal(&schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: externalSource,
+		ExternalSpec:   externalSpec,
+	})
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &milvuspb.CreateCollectionRequest{
+				DbName:         "db",
+				CollectionName: "external_collection",
+				Schema:         schema,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &milvuspb.RefreshExternalCollectionRequest{
+				DbName:         "db",
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := GetRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SPEC_ACCESS_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SPEC_SECRET_GRPC_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_GRPC_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
 }

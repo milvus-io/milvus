@@ -66,7 +66,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -202,7 +201,6 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
-	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -3229,6 +3227,14 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 			}
 		}),
 	}, nil
+}
+
+// GetFileResources resolves file resources for other coordinators inside MixCoord.
+func (c *Core) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetFileResources(ctx, resourceIDs...)
 }
 
 func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {

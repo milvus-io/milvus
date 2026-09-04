@@ -39,6 +39,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -59,7 +60,6 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
 #include "pb/plan.pb.h"
@@ -67,6 +67,14 @@
 #include "query/PlanImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+
+namespace milvus::exec {
+class SimpleGeometryCache;
+}
+
+namespace milvus::index {
+class JsonKeyStats;
+}
 
 namespace milvus::segcore {
 
@@ -77,6 +85,14 @@ struct SegmentStats {
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
 };
+
+// Monotonic source for SegmentInternalInterface::segment_instance_uid().
+// Starts at 1 so 0 can never collide with a live instance.
+inline uint64_t
+NextSegmentInstanceUid() {
+    static std::atomic<uint64_t> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
@@ -353,6 +369,28 @@ class SegmentInterface {
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Process-unique id for THIS segment OBJECT, distinct from
+    // get_segment_id() which identifies the logical segment.
+    //
+    // Two live objects can share a logical segment id: a growing and a sealed
+    // twin during handoff, and -- because segmentManager::Put installs the new
+    // instance and releases the replaced one asynchronously
+    // (querynodev2/segments/manager.go:409-441) -- two sealed instances of
+    // different versions. Anything whose lifetime is tied to the object rather
+    // than to the logical segment (the geometry cache) must key on this, or
+    // the departing instance's teardown will take the incoming instance's
+    // state with it.
+    uint64_t
+    segment_instance_uid() const {
+        return segment_instance_uid_;
+    }
+
+    // Growing segments use the process-level cache manager. Sealed segments
+    // override this to return the cache from their immutable published runtime
+    // snapshot, so a column replacement and its cache become visible together.
+    virtual std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const;
+
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -400,7 +438,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id,
@@ -424,16 +462,15 @@ class SegmentInternalInterface : public SegmentInterface {
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
-            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+            std::pair<std::vector<ViewType>, ValidityView> content{
                 std::move(res), std::move(valid_data)};
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+            return PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>(
                 std::move(pw), std::move(content));
         }
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     get_batch_views(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id,
@@ -761,23 +798,21 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -854,11 +889,6 @@ class SegmentInternalInterface : public SegmentInterface {
                     bool upper_inclusive,
                     BitsetTypeView& bitset) const = 0;
 
-    virtual GEOSContextHandle_t
-    get_ctx() const {
-        return ctx_;
-    };
-
  protected:
     // mutex protecting rw options on schema_
     mutable std::shared_mutex sch_mutex_;
@@ -883,7 +913,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
-    GEOSContextHandle_t ctx_ = GEOS_init_r();
+    // Assigned once per constructed object; never reused within a process.
+    const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
 
 }  // namespace milvus::segcore

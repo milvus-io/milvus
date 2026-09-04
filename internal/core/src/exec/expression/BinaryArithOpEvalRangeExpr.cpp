@@ -205,7 +205,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             if constexpr (filter_type == FilterType::random) {              \
                 offset = (offsets) ? offsets[i] : i;                        \
             }                                                               \
-            if (valid_data != nullptr && !valid_data[offset]) {             \
+            if (valid_data && !valid_data[offset]) {                        \
                 res[i] = false;                                             \
                 valid_res[i] = false;                                       \
                 continue;                                                   \
@@ -240,36 +240,36 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
         }                                                                   \
     } while (false)
 
-#define BinaryArithRangeJONCompareArrayLength(cmp)              \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            int array_length = 0;                               \
-            auto doc = data[offset].doc();                      \
-            auto array = doc.at_pointer(pointer).get_array();   \
-            if (array.error()) {                                \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            array_length = array.count_elements();              \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeJONCompareArrayLength(cmp)             \
+    do {                                                       \
+        for (size_t i = 0; i < size; ++i) {                    \
+            auto offset = i;                                   \
+            if constexpr (filter_type == FilterType::random) { \
+                offset = (offsets) ? offsets[i] : i;           \
+            }                                                  \
+            if (valid_data && !valid_data[offset]) {           \
+                res[i] = false;                                \
+                valid_res[i] = false;                          \
+                continue;                                      \
+            }                                                  \
+            int array_length = 0;                              \
+            auto doc = data[offset].doc();                     \
+            auto array = doc.at_pointer(pointer).get_array();  \
+            if (array.error()) {                               \
+                res[i] = false;                                \
+                valid_res[i] = false;                          \
+                continue;                                      \
+            }                                                  \
+            array_length = array.count_elements();             \
+            res[i] = (cmp);                                    \
+        }                                                      \
     } while (false)
 
     auto execute_sub_batch =
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -707,7 +707,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             if constexpr (filter_type == FilterType::random) {  \
                 offset = (offsets) ? offsets[i] : i;            \
             }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
+            if (valid_data && !valid_data[offset]) {            \
                 res[i] = false;                                 \
                 valid_res[i] = false;                           \
                 continue;                                       \
@@ -722,26 +722,26 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
         }                                                       \
     } while (false)
 
-#define BinaryArithRangeArrayLengthCompate(cmp)                 \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = valid_res[i] = false;                  \
-                continue;                                       \
-            }                                                   \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayLengthCompate(cmp)                \
+    do {                                                       \
+        for (size_t i = 0; i < size; ++i) {                    \
+            auto offset = i;                                   \
+            if constexpr (filter_type == FilterType::random) { \
+                offset = (offsets) ? offsets[i] : i;           \
+            }                                                  \
+            if (valid_data && !valid_data[offset]) {           \
+                res[i] = valid_res[i] = false;                 \
+                continue;                                      \
+            }                                                  \
+            res[i] = (cmp);                                    \
+        }                                                      \
     } while (false)
 
     auto execute_sub_batch =
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1188,7 +1188,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
     auto execute_sub_batch = [compare_length]<FilterType filter_type =
                                                   FilterType::sequential>(
         const VectorArrayView* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -1201,7 +1201,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -1246,10 +1246,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                int64_t,
                                T>
         HighPrecisionType;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
@@ -2002,10 +2007,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                T>
         HighPrecisionType;
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     auto res_vec =
@@ -2029,7 +2039,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -2552,7 +2562,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         if constexpr (filter_type == FilterType::sequential) {
             // contiguous rows: reuse the vectorized shared helper
             ApplyValidMask(valid_data, res, valid_res, size);
-        } else if (valid_data != nullptr) {
+        } else if (valid_data) {
             // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
                 auto offset = (offsets) ? offsets[i] : i;
@@ -2677,7 +2687,7 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
     auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
 
     std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
         auto skip =
             skip_index->CanSkipBinaryArithRange<T>(field_id_,
                                                    i,
@@ -2698,3 +2708,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
 
 }  //namespace exec
 }  // namespace milvus
+
+#undef BinaryArithRangeJSONCompare
+#undef BinaryArithRangeJONCompareArrayLength
+#undef BinaryArithRangeArrayCompare

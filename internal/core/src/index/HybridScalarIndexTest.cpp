@@ -107,6 +107,42 @@ TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::Equal));
 }
 
+TEST(ScalarIndexResourceEstimate, TantivyValidityBitmapIsWordAligned) {
+    constexpr int64_t kNumRows = 65;
+    constexpr uint64_t kIndexSize = 1024;
+    auto estimate = [=](const std::string& index_type, bool mmap_enable) {
+        std::map<std::string, std::string> index_params{
+            {"index_type", index_type},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+        return index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            DataType::VARCHAR,
+            0,
+            kIndexSize,
+            index_params,
+            mmap_enable,
+            kNumRows);
+    };
+
+    auto bitmap_bytes = TargetBitmap(kNumRows).size_in_bytes();
+    for (bool mmap_enable : {false, true}) {
+        auto rtree = estimate(milvus::index::RTREE_INDEX_TYPE, mmap_enable);
+        EXPECT_EQ(rtree.final_memory_cost, 0);
+        for (const auto& index_type : {milvus::index::INVERTED_INDEX_TYPE,
+                                       milvus::index::NGRAM_INDEX_TYPE}) {
+            auto request = estimate(index_type, mmap_enable);
+            EXPECT_EQ(request.final_memory_cost,
+                      mmap_enable ? bitmap_bytes : kIndexSize + bitmap_bytes);
+            EXPECT_EQ(request.final_disk_cost, mmap_enable ? kIndexSize : 0);
+            EXPECT_EQ(request.max_memory_cost,
+                      mmap_enable
+                          ? rtree.max_memory_cost + bitmap_bytes
+                          : std::max<uint64_t>(kIndexSize + bitmap_bytes,
+                                               rtree.max_memory_cost));
+            EXPECT_EQ(request.max_disk_cost, kIndexSize);
+        }
+    }
+}
+
 template <typename T>
 static std::vector<T>
 GenerateData(const size_t size, const size_t cardinality) {
@@ -947,9 +983,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
         this->index_files_,
         ctx);
 
-    EXPECT_EQ(request.final_memory_cost, 0);
-    EXPECT_EQ(request.final_disk_cost, index_size);
-    EXPECT_EQ(request.max_memory_cost, stream_overhead);
+    auto validity_bitmap_bytes = TargetBitmap(this->nb_).size_in_bytes();
+    auto resident_bytes = index_size + validity_bitmap_bytes;
+    EXPECT_EQ(request.final_memory_cost, resident_bytes);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_EQ(request.max_memory_cost,
+              std::max<uint64_t>(stream_overhead, resident_bytes));
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
     EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
@@ -1150,9 +1189,13 @@ TYPED_TEST_P(HybridIndexTestInverted,
                   stream_load_info->total_transient_bytes,
                   stream_load_info->max_task_transient_bytes),
               stream_load_info->total_transient_bytes);
-    EXPECT_EQ(request.final_memory_cost, 0);
-    EXPECT_EQ(request.final_disk_cost, index_size);
-    EXPECT_EQ(request.max_memory_cost, stream_load_info->total_transient_bytes);
+    auto validity_bitmap_bytes = TargetBitmap(this->nb_).size_in_bytes();
+    auto resident_bytes = index_size + validity_bitmap_bytes;
+    EXPECT_EQ(request.final_memory_cost, resident_bytes);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_EQ(request.max_memory_cost,
+              std::max<uint64_t>(stream_load_info->total_transient_bytes,
+                                 resident_bytes));
 }
 
 TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {

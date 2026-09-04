@@ -91,6 +91,22 @@ class PluginLoader {
         LOG_INFO("Loaded plugin: {}", pluginName);
     }
 
+    // Visible for testing: install a plugin instance directly, bypassing
+    // dlopen, so unit tests can exercise code paths that resolve the cipher
+    // plugin through this singleton.
+    void
+    registerPluginForTest(
+        std::shared_ptr<milvus::storage::plugin::IPlugin> plugin) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        plugins_[plugin->getPluginName()] = std::move(plugin);
+    }
+
+    void
+    unregisterPluginForTest(const std::string& plugin_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        plugins_.erase(plugin_name);
+    }
+
     void
     unloadAll() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -142,16 +158,6 @@ class PluginLoader {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = plugins_.find(name);
         return it != plugins_.end() ? it->second : nullptr;
-    }
-
-    std::vector<std::string>
-    listPlugins() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<std::string> names;
-        for (const auto& pair : plugins_) {
-            names.push_back(pair.first);
-        }
-        return names;
     }
 
 #ifdef MILVUS_UNIT_TEST

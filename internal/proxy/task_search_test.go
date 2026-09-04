@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -87,11 +88,6 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	})
 
-	oldCache := globalMetaCache
-	t.Cleanup(func() {
-		globalMetaCache = oldCache
-	})
-
 	const (
 		dbName         = "db"
 		collectionName = "text_collection"
@@ -101,9 +97,9 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	globalMetaCache = cache
 
 	task := &searchTask{
+		baseTask:      baseTask{metaCache: cache},
 		ctx:           context.Background(),
 		SearchRequest: &internalpb.SearchRequest{},
 		request: &milvuspb.SearchRequest{
@@ -121,8 +117,6 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 
 func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		const (
 			dbName         = "db"
 			collectionName = "timestamptz_collection"
@@ -159,6 +153,7 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 			Value: "Asia/Shanghai",
 		})
 		task := &searchTask{
+			baseTask:      baseTask{metaCache: &MetaCache{}},
 			Condition:     NewTaskCondition(context.Background()),
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			ctx:           context.Background(),
@@ -195,11 +190,12 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 	require.NoError(t, err)
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -272,7 +268,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			}
 
 			qt := &searchTask{
-				ctx: ctx,
+				baseTask: baseTask{metaCache: cache},
+				ctx:      ctx,
 				SearchRequest: &internalpb.SearchRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Search,
@@ -365,6 +362,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -476,6 +474,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -795,9 +794,6 @@ func createCollWithFields(t *testing.T, collName string, rc types.MixCoordClient
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
 
-	_, err = globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collName)
-	assert.NoError(t, err)
-
 	fieldNameId := make(map[string]int64)
 	for _, field := range schema.Fields {
 		fieldNameId[field.Name] = field.FieldID
@@ -902,11 +898,12 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		ctx = context.TODO()
 	)
 	require.NoError(t, err)
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -924,6 +921,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	getSearchTaskWithNq := func(t *testing.T, collName string, nq int64) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -954,6 +952,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -1154,7 +1153,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.request.UseDefaultConsistency = false
 		st.request.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", collName, 0)
+		collInfo, err := cache.GetCollectionInfo(ctx, "", collName, 0)
 		assert.NoError(t, err)
 
 		assert.NoError(t, st.PreExecute(ctx))
@@ -1481,8 +1480,16 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	err = InitMetaCache(ctx, qc)
+	_, err = initMetaCache(ctx, qc)
 	require.NoError(t, err)
+
+	collectionID := UniqueID(1000)
+	mockCache := NewMockCache(t)
+	info := mustNewSchemaInfo(schema)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
+	mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *searchTask {
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -1510,6 +1517,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		}
 
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: mockCache},
 			ctx:            ctx,
 			collectionName: collectionName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1540,15 +1548,6 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		return task
 	}
-
-	collectionID := UniqueID(1000)
-	cache := NewMockCache(t)
-	info := mustNewSchemaInfo(schema)
-	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	globalMetaCache = cache
 
 	{
 		task := getSearchTask(t, collectionName, []string{"sentence"}, false)
@@ -1603,6 +1602,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			subReqs = append(subReqs, subReq)
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: mockCache},
 			ctx:            ctx,
 			collectionName: collectionName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1707,7 +1707,7 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	err = InitMetaCache(ctx, qc)
+	_, err = initMetaCache(ctx, qc)
 	require.NoError(t, err)
 
 	defer qc.Close()
@@ -1775,7 +1775,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -2017,7 +2017,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -2261,7 +2261,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -3386,7 +3386,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	defer rc.Close()
 
-	err = InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -3421,7 +3421,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
@@ -3460,6 +3460,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	// test begins
 	task := &searchTask{
+		baseTask:  baseTask{metaCache: cache},
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
@@ -4594,7 +4595,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
-	globalMetaCache = cache
+	node.setMetaCache(cache)
 
 	mgr := shardclient.NewMockShardClientManager(t)
 	// mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
@@ -4668,7 +4669,8 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		outputFields := []string{pkField, vecField}
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4712,7 +4714,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		node := mocks.NewMockProxy(t)
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4744,7 +4747,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		node.lbPolicy = lb
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4789,7 +4793,8 @@ func TestSearchTask_Requery(t *testing.T) {
 		}
 
 		qt := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
@@ -4882,11 +4887,9 @@ type GetPartitionIDsSuite struct {
 
 func (s *GetPartitionIDsSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
-	globalMetaCache = s.mockMetaCache
 }
 
 func (s *GetPartitionIDsSuite) TearDownTest() {
-	globalMetaCache = nil
 	Params.Reset(Params.ProxyCfg.PartitionNameRegexp.Key)
 }
 
@@ -4899,7 +4902,7 @@ func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	result, err := getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4907,12 +4910,12 @@ func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 }
 
@@ -4925,7 +4928,7 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	result, err := getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4933,7 +4936,7 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_.*"})
+	result, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_.*"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4941,12 +4944,12 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 }
 
@@ -4959,10 +4962,10 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
 
 	t.Run("default consistency level", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5005,6 +5008,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 			}, nil).Times(3)
 
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5028,6 +5032,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("legacy_guarantee_ts", func(t *testing.T) {
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5056,6 +5061,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 			nil, errors.New("mock error")).Once()
 
 		st := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5080,6 +5086,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		st2 := &searchTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.SearchRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -5130,15 +5137,11 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 			CollID:                s.colID,
 			PartitionKeyIsolation: true,
 		}, nil)
-	globalMetaCache = s.mockMetaCache
-}
-
-func (s *MaterializedViewTestSuite) TearDownTest() {
-	globalMetaCache = nil
 }
 
 func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
 	task := &searchTask{
+		baseTask:       baseTask{metaCache: s.mockMetaCache},
 		ctx:            s.ctx,
 		collectionName: s.colName,
 		SearchRequest:  &internalpb.SearchRequest{},
@@ -5169,6 +5172,7 @@ func (s *MaterializedViewTestSuite) getHybridSearchTask(dsl string) *searchTask 
 	}
 
 	task := &searchTask{
+		baseTask:       baseTask{metaCache: s.mockMetaCache},
 		ctx:            s.ctx,
 		collectionName: s.colName,
 		SearchRequest:  &internalpb.SearchRequest{},
@@ -5563,12 +5567,19 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
 		return request, chainPB
 	}
-	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain) {
+	newL1FunctionChainRequest := func(ops ...*schemapb.FunctionChainOp) (*milvuspb.SearchRequest, *schemapb.FunctionChain) {
+		request := newRequest()
+		chainPB := l1FunctionChain(ops...)
+		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
+		return request, chainPB
+	}
+	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain, *schemapb.FunctionChain) {
 		request := newRequest()
 		l0Chain := l0FunctionChain()
+		l1Chain := l1FunctionChain(mapOp("$score", "expr", columnArg("$score")))
 		l2Chain := l2FunctionChain(mapOp("score1", "expr", columnArg("ts")), mapOp("$score", "expr", columnArg("score1"), columnArg("$score")))
-		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l2Chain}
-		return request, l0Chain, l2Chain
+		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l1Chain, l2Chain}
+		return request, l0Chain, l1Chain, l2Chain
 	}
 	newFunctionScoreRequest := func() *milvuspb.SearchRequest {
 		request := newRequest()
@@ -5589,9 +5600,15 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		}
 		return request
 	}
-	withSearchIteratorV2 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	withSearchIteratorV1 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
 		request.SearchParams = append(request.SearchParams,
 			&commonpb.KeyValuePair{Key: IteratorField, Value: "true"},
+		)
+		return request
+	}
+	withSearchIteratorV2 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+		request = withSearchIteratorV1(request)
+		request.SearchParams = append(request.SearchParams,
 			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "true"},
 			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "10"},
 		)
@@ -5683,12 +5700,46 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
 	})
 
+	t.Run("search iterator v1 rejects function score", func(t *testing.T) {
+		task := newTask(withSearchIteratorV1(newFunctionScoreRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l2 function chain", func(t *testing.T) {
+		task := newTask(withSearchIteratorV1(newFunctionChainRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		task := newTask(withSearchIteratorV1(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v1 rejects l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(withSearchIteratorV1(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
 	t.Run("search iterator v2 rejects function score", func(t *testing.T) {
 		task := newTask(withSearchIteratorV2(newFunctionScoreRequest()))
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("search iterator v2 rejects l2 function chain", func(t *testing.T) {
@@ -5696,7 +5747,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("search iterator v2 rejects l0 function chain", func(t *testing.T) {
@@ -5705,7 +5756,16 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		err := task.initSearchRequest(ctx)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
+	})
+
+	t.Run("search iterator v2 rejects l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(withSearchIteratorV2(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator")
 	})
 
 	t.Run("ordinary search routes l0 chain to querynode plan", func(t *testing.T) {
@@ -5721,8 +5781,21 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
 	})
 
-	t.Run("ordinary search routes l0 chain and keeps l2 rerank meta", func(t *testing.T) {
-		request, l0Chain, _ := newMixedFunctionChainRequest()
+	t.Run("ordinary search routes l1 chain to querynode plan", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.Nil(t, task.rerankMeta)
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search routes l0 and l1 chains and keeps l2 rerank meta", func(t *testing.T) {
+		request, l0Chain, l1Chain, _ := newMixedFunctionChainRequest()
 		task := newTask(request)
 
 		require.NoError(t, task.initSearchRequest(ctx))
@@ -5732,12 +5805,75 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
-		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 2)
 		assert.True(t, proto.Equal(l0Chain, plan.GetQuerynodeFunctionChains()[0]))
+		assert.True(t, proto.Equal(l1Chain, plan.GetQuerynodeFunctionChains()[1]))
+	})
+
+	t.Run("ordinary search rejects l1 with search aggregation", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		task := newTask(request)
+		task.aggCtx = &search_agg.SearchAggregationContext{}
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "L1 function chain is not supported with search_aggregation")
+	})
+
+	t.Run("ordinary search allows l1 limit with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(l1LimitFunctionChain(3).GetOps()...)
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search allows l1 map with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search allows l1 sort with group by", func(t *testing.T) {
+		request, chainPB := newL1FunctionChainRequest(&schemapb.FunctionChainOp{
+			Op:     chaintypes.OpTypeSort,
+			Inputs: []string{"$score"},
+			Params: map[string]*schemapb.FunctionParamValue{
+				"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+			},
+		})
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
 	})
 
 	t.Run("ordinary search rejects order by with l0 function chain", func(t *testing.T) {
 		request, _ := newL0FunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
+	})
+
+	t.Run("ordinary search rejects order by with l1 function chain", func(t *testing.T) {
+		request, _ := newL1FunctionChainRequest(mapOp("$score", "expr", columnArg("$score")))
 		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
 		task := newTask(request)
 

@@ -86,6 +86,14 @@ func (queue *baseTaskQueue) utFull() bool {
 	return int64(queue.unissuedTasks.Len()) >= queue.getMaxTaskNum()
 }
 
+// isFull is the lock-acquiring counterpart of utFull; utFull assumes the
+// caller already holds utLock.
+func (queue *baseTaskQueue) isFull() bool {
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
+	return queue.utFull()
+}
+
 func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
@@ -211,7 +219,7 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	var id UniqueID
 	if t.CanSkipAllocTimestamp() {
 		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
-		id, err = globalMetaCache.AllocID(t.TraceCtx())
+		id, err = t.getMetaCache().AllocID(t.TraceCtx())
 		if err != nil {
 			return err
 		}

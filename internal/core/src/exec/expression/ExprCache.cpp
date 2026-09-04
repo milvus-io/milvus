@@ -21,6 +21,7 @@
 #include "cachinglayer/Metrics.h"
 #include "exec/expression/DiskSlotFile.h"
 #include "exec/expression/EntryPool.h"
+#include "log/Log.h"
 #include "xxhash.h"
 
 namespace milvus {
@@ -97,12 +98,6 @@ ExprResCacheManager::SetEnabled(bool enabled) {
 bool
 ExprResCacheManager::IsEnabled() {
     return enabled_.load();
-}
-
-void
-ExprResCacheManager::Init(size_t capacity_bytes, bool enabled) {
-    SetEnabled(enabled);
-    // capacity_bytes is kept for compatibility but not used directly
 }
 
 bool
@@ -234,15 +229,6 @@ ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     entry_pool_->Configure(capacity_bytes,
                            config_.compression_enabled,
                            config_.mem_min_eval_duration_us);
-}
-
-size_t
-ExprResCacheManager::GetCapacityBytes() const {
-    std::shared_lock state_lock(state_mutex_);
-    if (config_.mode == CacheMode::Memory) {
-        return config_.mem_max_bytes;
-    }
-    return config_.disk_max_bytes;
 }
 
 size_t

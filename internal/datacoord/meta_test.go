@@ -2117,16 +2117,23 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(5, got.GetInsertBinlogCount())
 	})
 
-	suite.Run("in-place result merges column groups into Binlogs", func() {
+	suite.Run("in-place result atomically merges ordinary and function-output column groups", func() {
 		// The compactor ships only the groups this run wrote, so the receiver
-		// must upsert them: assigning the array would drop the segment's other
-		// column groups. Replaying the same result must not duplicate them.
+		// must upsert them: the live Binlogs keeps the complete column set and
+		// a not-yet-restarted QueryNode estimate stays correct. Replaying the
+		// result must neither duplicate the new groups nor re-apply the
+		// manifest-gated statistics delta.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
 		old := segs.GetSegment(1)
 		old.StorageVersion = storage.StorageV3
 		old.ManifestPath = currentManifest
+		old.Stats = &datapb.Statistics{
+			InsertBinlogSize:  1024,
+			InsertBinlogCount: 1,
+			NullCounts:        map[int64]int64{100: 0},
+		}
 		old.Binlogs = []*datapb.FieldBinlog{
 			{FieldID: 0, ChildFields: []int64{0, 1, 100}, Binlogs: []*datapb.Binlog{{LogID: 10000}}},
 		}
@@ -2139,7 +2146,12 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
 			Schema:        &schemapb.CollectionSchema{Version: 3},
 		}
-		newGroup := &datapb.FieldBinlog{
+		ordinaryGroup := &datapb.FieldBinlog{
+			FieldID:     101,
+			ChildFields: []int64{101},
+			Binlogs:     []*datapb.Binlog{{LogID: 10001, EntriesNum: 5, MemorySize: 256}},
+		}
+		functionOutputGroup := &datapb.FieldBinlog{
 			FieldID:     102,
 			ChildFields: []int64{102},
 			Binlogs:     []*datapb.Binlog{{LogID: 10002, EntriesNum: 5, MemorySize: 512}},
@@ -2149,19 +2161,24 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{
 					SegmentID:      1,
 					NumOfRows:      5,
-					InsertLogs:     []*datapb.FieldBinlog{newGroup},
+					InsertLogs:     []*datapb.FieldBinlog{ordinaryGroup, functionOutputGroup},
 					Manifest:       resultManifest,
 					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
-					Stats:          &datapb.Statistics{InsertBinlogSize: 1},
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  768,
+						InsertBinlogCount: 2,
+						NullCounts:        map[int64]int64{101: 5, 102: 0},
+					},
 				},
 			},
 		}
 		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
-		// Pre-existing group survives, the materialized group is present.
-		suite.ElementsMatch([]int64{0, 102},
+		// The pre-existing group survives and both newly appended groups are
+		// visible through the same adopted manifest.
+		suite.ElementsMatch([]int64{0, 101, 102},
 			lo.Map(infos[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
 		for _, fb := range infos[0].GetBinlogs() {
 			if fb.GetFieldID() == 0 {
@@ -2169,23 +2186,31 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					"no child collision, so the pre-existing group keeps its fields")
 			}
 		}
+		firstStats := infos[0].GetStats()
+		suite.EqualValues(1792, firstStats.GetInsertBinlogSize())
+		suite.EqualValues(3, firstStats.GetInsertBinlogCount())
+		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, firstStats.GetNullCounts())
 
 		// Replay: the segment now sits at resultManifest, so this is the
-		// idempotent-adoption branch. The merge must not duplicate the group.
+		// idempotent-adoption branch. The merge must not duplicate either new
+		// group, and the manifest-gated increment must not be accumulated twice.
 		replayed, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(replayed, 1)
-		suite.Require().Len(replayed[0].GetBinlogs(), 2)
-		suite.ElementsMatch([]int64{0, 102},
+		suite.Require().Len(replayed[0].GetBinlogs(), 3)
+		suite.ElementsMatch([]int64{0, 101, 102},
 			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
+		replayedStats := replayed[0].GetStats()
+		suite.EqualValues(1792, replayedStats.GetInsertBinlogSize())
+		suite.EqualValues(3, replayedStats.GetInsertBinlogCount())
+		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, replayedStats.GetNullCounts())
 	})
 
-	suite.Run("materialized column group is visible to the index-eligibility gate", func() {
-		// Regression pin for the real consumer: indexInspector calls
-		// getSegmentBinlogFields on the segment and canCreateIndexForSegment
-		// refuses to build an index on a function-output field absent from that
-		// set. compaction_task_bump_schema_version enqueues the segment for
-		// index building right after this mutation, so field 102 must be there.
+	suite.Run("materialized column group is visible on the live segment", func() {
+		// Regression pin: the merged column group keeps the live Binlogs
+		// complete (pre-restart QueryNode estimation reads it), while index
+		// eligibility is gated by the schema-version advance — the inspector
+		// does not read Binlogs and the build worker reads the manifest.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2220,9 +2245,35 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 
-		fields := getSegmentBinlogFields(m.segments.GetSegment(1))
-		suite.Contains(fields, int64(102), "materialized function-output field must be index-eligible")
-		suite.Contains(fields, int64(100), "pre-existing fields must stay index-eligible")
+		updated := m.segments.GetSegment(1)
+		fields := make(map[int64]struct{})
+		for _, binlog := range updated.GetBinlogs() {
+			for _, childFieldID := range binlog.GetChildFields() {
+				fields[childFieldID] = struct{}{}
+			}
+		}
+		suite.Contains(fields, int64(102), "materialized function-output field must be visible on live Binlogs")
+		suite.Contains(fields, int64(100), "pre-existing fields keep their data")
+
+		handler := NewNMockHandler(suite.T())
+		handler.EXPECT().GetCollection(mock.Anything, updated.GetCollectionID()).Return(&collectionInfo{
+			ID: updated.GetCollectionID(),
+			Schema: &schemapb.CollectionSchema{
+				Version: 3,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{OutputFieldIds: []int64{102}},
+				},
+			},
+		}, nil).Once()
+		inspector := &indexInspector{handler: handler}
+		suite.True(inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
+			CollectionID: updated.GetCollectionID(),
+			FieldID:      102,
+			IndexID:      1,
+		}), "materialized function-output field must be index-eligible")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {
@@ -3444,7 +3495,6 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-		metakv.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -3456,7 +3506,6 @@ func TestMeta_Basic(t *testing.T) {
 
 		metakv2 := mockkv.NewMetaKv(t)
 		metakv2.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-		metakv2.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		metakv2.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv2.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv2.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()

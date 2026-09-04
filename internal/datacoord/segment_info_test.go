@@ -393,6 +393,9 @@ func TestNewSegmentInfo_BackfillsStatsForLegacySegment(t *testing.T) {
 	mkBinlog := func(logID, entries, mem int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
 		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem, TimestampFrom: tsFrom, TimestampTo: tsTo}}}
 	}
+	insertBinlog := mkBinlog(1, 50, 2048, 100, 500)
+	insertBinlog.FieldID = 10
+	insertBinlog.ChildFields = []int64{100, 101}
 
 	// Persisted segment record has no Stats field, mirroring a V2 segment
 	// loaded after upgrade.
@@ -400,7 +403,7 @@ func TestNewSegmentInfo_BackfillsStatsForLegacySegment(t *testing.T) {
 		ID:        21,
 		State:     commonpb.SegmentState_Flushed,
 		NumOfRows: 50,
-		Binlogs:   []*datapb.FieldBinlog{mkBinlog(1, 50, 2048, 100, 500)},
+		Binlogs:   []*datapb.FieldBinlog{insertBinlog},
 		Statslogs: []*datapb.FieldBinlog{mkBinlog(2, 0, 64, 0, 0)},
 		Deltalogs: []*datapb.FieldBinlog{mkBinlog(3, 7, 128, 200, 400)},
 	})
@@ -417,6 +420,9 @@ func TestNewSegmentInfo_BackfillsStatsForLegacySegment(t *testing.T) {
 	assert.EqualValues(t, 500, stats.GetTimestampTo())
 	assert.EqualValues(t, 200, stats.GetDeltaTimestampFrom())
 	assert.EqualValues(t, 400, stats.GetDeltaTimestampTo())
+	assert.Equal(t, []*datapb.ColumnGroupStatistics{{
+		GroupId: 10, FieldIds: []int64{100, 101}, MemorySize: 2048,
+	}}, stats.GetLoadResource().GetColumnGroups())
 }
 
 // NewSegmentInfo must respect an explicitly-supplied Stats field — used by

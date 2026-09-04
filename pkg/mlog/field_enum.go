@@ -3,6 +3,9 @@ package mlog
 import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 )
 
 // Well-known field keys for consistent logging across Milvus components.
@@ -31,6 +34,7 @@ const (
 	keyPChannel       = "pchannel"
 	keyMessageID      = "messageID"
 	keyMessage        = "message"
+	keySchema         = "schema"
 )
 
 var wellKnownLowerKeyToLogKey = map[string]string{
@@ -56,6 +60,7 @@ var wellKnownLowerKeyToLogKey = map[string]string{
 	"pchannel":       keyPChannel,
 	"messageid":      keyMessageID,
 	"message":        keyMessage,
+	"schema":         keySchema,
 }
 
 func restoreWellKnownLogKey(key string) string {
@@ -233,6 +238,11 @@ func FieldMessageID(val zapcore.ObjectMarshaler) Field { return Object(keyMessag
 
 // FieldMessage creates a field for message content.
 func FieldMessage(val zapcore.ObjectMarshaler) Field { return Object(keyMessage, val) }
+
+// FieldSchema creates a credential-safe field for a collection schema.
+func FieldSchema(val *schemapb.CollectionSchema) Field {
+	return Any(keySchema, externalspec.RedactCollectionSchemaForLog(val))
+}
 
 // FieldMessages creates an array field for message contents.
 func FieldMessages[T zapcore.ObjectMarshaler](msgs []T) Field {

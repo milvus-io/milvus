@@ -12,7 +12,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, FieldSchema, Function, FunctionType, WeightedRanker
 from pymilvus.client.types import LoadState
 from utils.util_log import test_log as log
 
@@ -1977,6 +1977,137 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         rows_by_id = query_by_ids(self, client, collection_name, survivor_ids, [CONTENT_FIELD])
         assert_rows_payload(rows_by_id, expected, [CONTENT_FIELD])
         assert query_by_ids(self, client, collection_name, deleted, [CONTENT_FIELD]) == {}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_add_function_field_bump_preserves_lob(self):
+        """
+        target: verify the add_function_field schema bump over sealed TEXT LOB data
+                preserves every payload byte-exact (issue #52159 family)
+        method: seal mixed external/inline/empty/null TEXT rows plus a varchar tag; add
+                a BM25 function on the tag; gate the bump on schema-version consistency
+                stats; compare every TEXT payload through output_fields; search via the
+                new sparse field; keep writing after the bump
+        expected: bump reaches consistent==total; all TEXT payloads byte-exact afterwards;
+                  BM25 hits the tagged row; post-bump writes stay correct; count intact
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        tag_field = "tag"
+        sparse_field_name = "tag_sparse"
+        external_size = int_env("MILVUS_TEXT_INLINE_THRESHOLD", 65536) + 1
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=ID_FIELD, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
+        schema.add_field(
+            field_name=CONTENT_FIELD,
+            datatype=DataType.TEXT,
+            nullable=True,
+            enable_analyzer=True,
+            analyzer_params=STANDARD_ANALYZER,
+        )
+        schema.add_field(
+            field_name=tag_field,
+            datatype=DataType.VARCHAR,
+            max_length=256,
+            nullable=True,
+            enable_analyzer=True,
+            analyzer_params=STANDARD_ANALYZER,
+        )
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", load=False)
+        self.create_index(client, collection_name, index_params=index_params)
+
+        contents = {
+            1900: make_text(external_size, "bump-lob-a"),
+            1901: make_text(external_size + 4096, "bump-lob-b"),
+            1902: make_text(2048, "bump-inline-a"),
+            1903: "",
+            1904: None,
+        }
+        rows = [
+            {ID_FIELD: pk, VECTOR_FIELD: vector_for_pk(pk), CONTENT_FIELD: content, tag_field: f"tagmark row{pk}"}
+            for pk, content in contents.items()
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        expected = {pk: {CONTENT_FIELD: payload_meta(content)} for pk, content in contents.items()}
+        expected_tag = {pk: f"tagmark row{pk}" for pk in contents}
+        desc, _ = self.describe_collection(client, collection_name)
+        schema_version_initial = desc["schema_version"]
+
+        bm25_function = Function(
+            name="tag_bm25",
+            function_type=FunctionType.BM25,
+            input_field_names=[tag_field],
+            output_field_names=[sparse_field_name],
+        )
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(
+            field_name=sparse_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
+        client.add_function_field(
+            collection_name,
+            FieldSchema(name=sparse_field_name, dtype=DataType.SPARSE_FLOAT_VECTOR),
+            bm25_function,
+            index_params=bound_index_params,
+        )
+
+        desc, _ = self.describe_collection(client, collection_name)
+        assert desc["schema_version"] > schema_version_initial
+        assert self.wait_for_schema_version_consistency(client, collection_name), (
+            "schema bump did not reach segment consistency after add_function_field"
+        )
+        assert self.wait_for_index_ready(client, collection_name, index_name=sparse_field_name, timeout=180)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        rows_by_id = query_by_ids(
+            self, client, collection_name, contents.keys(), [CONTENT_FIELD, tag_field, VECTOR_FIELD]
+        )
+        assert_rows_payload(rows_by_id, expected, [CONTENT_FIELD])
+        for pk, row in rows_by_id.items():
+            assert row[tag_field] == expected_tag[pk], f"id={pk} sibling tag corrupted"
+            expected_vector = vector_for_pk(pk)
+            assert len(row[VECTOR_FIELD]) == DIM and all(
+                abs(a - b) < 1e-6 for a, b in zip(row[VECTOR_FIELD], expected_vector)
+            ), f"id={pk} sibling vector corrupted"
+
+        search_res, _ = self.search(
+            client,
+            collection_name,
+            data=["row1901"],
+            anns_field=sparse_field_name,
+            search_params={"metric_type": "BM25", "params": {}},
+            limit=5,
+            output_fields=[ID_FIELD],
+            consistency_level="Strong",
+        )
+        assert 1901 in [result_id(hit) for hit in search_res[0]]
+
+        post_pk = 1910
+        post_content = make_text(external_size, "bump-post")
+        self.insert(
+            client,
+            collection_name,
+            [
+                {
+                    ID_FIELD: post_pk,
+                    VECTOR_FIELD: vector_for_pk(post_pk),
+                    CONTENT_FIELD: post_content,
+                    tag_field: f"tagmark row{post_pk}",
+                }
+            ],
+        )
+        self.flush(client, collection_name)
+        rows_by_id = query_by_ids(self, client, collection_name, [post_pk], [CONTENT_FIELD, tag_field])
+        assert_rows_payload(rows_by_id, {post_pk: {CONTENT_FIELD: payload_meta(post_content)}}, [CONTENT_FIELD])
+        assert rows_by_id[post_pk][tag_field] == f"tagmark row{post_pk}"
+        assert_count(self, client, collection_name, len(contents) + 1)
+
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):

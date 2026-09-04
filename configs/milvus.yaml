@@ -435,6 +435,11 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+    # cost. Disabling restores the old always-decode behavior.
+    dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
     writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
@@ -548,6 +553,7 @@ queryNode:
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+      growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
@@ -865,8 +871,6 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
@@ -1086,6 +1090,20 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    iops:
+      # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+      # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+      # The default matches the milvus-storage default.
+      initialRate: 2000
+      # Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+      # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+      # The default matches the milvus-storage default.
+      maxRate: 5000
+    externalVector:
+      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
+      partialNullPolicy: error
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1123,8 +1141,6 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
-    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:

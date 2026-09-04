@@ -389,14 +389,14 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 
 func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() {
 	s.SetupTest()
-	s.prepareCompactionWithBM25OutputTask(10240, false)
+	s.prepareCompactionWithBM25OutputTask(10240)
 }
 
 func (s *ClusteringCompactionTaskSuite) prepareCompactionWithMissingBM25OutputTask(rowNum int) {
-	s.prepareCompactionWithBM25OutputTask(rowNum, true)
+	s.prepareCompactionWithBM25OutputTask(rowNum, 102)
 }
 
-func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowNum int, removeBM25Output bool) {
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowNum int, removeFieldIDs ...int64) {
 	schema := genCollectionSchemaWithBM25()
 	segmentID := int64(1001)
 	segWriter, err := NewSegmentWriter(schema, int64(rowNum), compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
@@ -415,8 +415,8 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowN
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.Require().NoError(err)
-	if removeBM25Output {
-		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+	for _, fieldID := range removeFieldIDs {
+		removeFieldBinlogForTest(kvs, fBinlogs, fieldID)
 	}
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
 		return downloadValuesForPathsForTest(kvs, paths)
@@ -515,6 +515,22 @@ func (s *ClusteringCompactionTaskSuite) TestScalarClusteringMaterializesMissingB
 	s.EqualValues(3, bm25Rows)
 }
 
+func (s *ClusteringCompactionTaskSuite) TestScalarClusteringPrefillsMissingBM25InputBeforeOutput() {
+	s.prepareCompactionWithBM25OutputTask(3, 101, 102)
+	typeutil.GetField(s.task.plan.GetSchema(), 101).Nullable = true
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	var inputRows, bm25Rows int64
+	for _, segment := range result.GetSegments() {
+		inputRows += fieldBinlogEntriesForTest(segment.GetInsertLogs(), 101)
+		bm25Rows += fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102)
+	}
+	s.EqualValues(3, inputRows)
+	s.EqualValues(3, bm25Rows)
+}
+
 func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOrMissingFields() {
 	s.prepareCompactionWithMissingBM25OutputTask(2)
 	s.task.plan.ClusteringKeyField = 101
@@ -532,6 +548,32 @@ func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOr
 	analyzeResult, err := s.task.scalarAnalyzeSegment(context.Background(), s.task.plan.SegmentBinlogs[0])
 	s.Require().NoError(err)
 	s.Equal(map[interface{}]int64{"varchar": 2}, analyzeResult)
+}
+
+// An import segment committed at birthday+2s carries a deltalog entry deleting
+// PK=100 at birthday+1s. That delete predates the commit, so it must not remove
+// the row, and every output row timestamp must be normalized to commit_ts.
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionPreservesImportCommitTimestamp() {
+	s.preparScalarCompactionNormalTask()
+	commitTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(2 * time.Second))
+	s.plan.SegmentBinlogs[0].CommitTimestamp = commitTs
+	s.task.compactionParams = compaction.GenParams()
+
+	compactionResult, err := s.task.Compact()
+	s.Require().NoError(err)
+
+	s.EqualValues(10240, lo.SumBy(compactionResult.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
+		return seg.GetNumOfRows()
+	}))
+
+	for _, seg := range compactionResult.GetSegments() {
+		for _, fieldBinlog := range seg.GetInsertLogs() {
+			for _, b := range fieldBinlog.GetBinlogs() {
+				s.EqualValues(commitTs, b.GetTimestampFrom())
+				s.EqualValues(commitTs, b.GetTimestampTo())
+			}
+		}
+	}
 }
 
 func genRow(magic int64) map[int64]interface{} {
@@ -632,9 +674,10 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 				},
 			},
 			{
-				FieldID:  102,
-				Name:     "sparse",
-				DataType: schemapb.DataType_SparseFloatVector,
+				FieldID:          102,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
 			},
 		},
 		Functions: []*schemapb.FunctionSchema{{

@@ -301,16 +301,28 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
         true,
         file_manager_context);
 
-    auto dataset = knowhere::GenDataSet(kRows, kDim, data.data());
-    index.BuildWithDataset(dataset, config);
-
     std::unique_ptr<bool[]> valid_data(new bool[kRows]);
     int64_t valid_count = 0;
     for (int64_t i = 0; i < kRows; ++i) {
         valid_data[i] = i % 3 != 0;
         valid_count += valid_data[i] ? 1 : 0;
     }
-    index.BuildValidData(valid_data.get(), kRows);
+
+    std::vector<float> compact_data;
+    compact_data.reserve(valid_count * kDim);
+    for (int64_t i = 0; i < kRows; ++i) {
+        if (!valid_data[i]) {
+            continue;
+        }
+        compact_data.insert(compact_data.end(),
+                            data.begin() + i * kDim,
+                            data.begin() + (i + 1) * kDim);
+    }
+
+    auto dataset = knowhere::GenDataSet(valid_count, kDim, compact_data.data());
+    dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidData(valid_data.get(), kRows));
+    index.BuildWithDataset(dataset, config);
 
     auto stats = index.Upload();
     auto index_files = stats->GetIndexFiles();
@@ -346,7 +358,8 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
 
     loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
 
-    ASSERT_EQ(loaded_index.Count(), kRows);
+    ASSERT_EQ(loaded_index.Count(), valid_count);
+    ASSERT_EQ(loaded_index.GetIdMap().OutCount(), kRows);
     EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
     for (int64_t i = 0; i < kRows; ++i) {
         EXPECT_EQ(loaded_index.IsRowValid(i), valid_data[i]) << i;

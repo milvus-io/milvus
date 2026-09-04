@@ -492,7 +492,7 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
 // Coarse(R-Tree) node (bucketed early, prunes others) and an expensive Refine
 // node (bucketed last, consumes bitmap_input + fuses per-row construction).
 // Gated by queryNode.segcore.enableGISSplitFusion. See
-// docs/design_docs/gis_filter_coarse_refine_split_fusion.md.
+// docs/design-docs/design_docs/20260727-gis-filter-coarse-refine-split-fusion.md.
 static void
 SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                      ExecContext* context) {

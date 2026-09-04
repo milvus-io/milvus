@@ -23,6 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -177,7 +180,7 @@ func ValidateExternalSource(source string) error {
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return merr.Wrap(err, "invalid external_source URL")
+		return merr.WrapErrParameterInvalidMsg("external_source is not a valid URL")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {
@@ -197,20 +200,78 @@ func ValidateExternalSource(source string) error {
 }
 
 // ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
-// Errors are wrapped via merr.WrapErrParameterInvalid for direct return.
+// Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
 func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
-		return merr.WrapErrParameterInvalid("valid external_source", externalSource, err.Error())
+		return merr.Wrap(err, "external_source is invalid")
 	}
 	spec, err := ParseExternalSpec(externalSpec)
 	if err != nil {
-		return merr.WrapErrParameterInvalid("valid external_spec", "<redacted>", err.Error())
+		return merr.Wrap(err, "external_spec is invalid")
 	}
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
-		return merr.WrapErrParameterInvalid("valid external_spec", "<redacted>", err.Error())
+		return merr.Wrap(err, "external_spec is invalid")
 	}
 	return nil
+}
+
+// RedactExternalSource returns a log-safe external source. Normal storage URIs
+// are preserved for diagnostics, while malformed URIs and URI components that
+// can carry credentials (userinfo, query, or fragment) are hidden completely.
+func RedactExternalSource(source string) string {
+	if source == "" {
+		return ""
+	}
+	u, err := url.Parse(source)
+	if err != nil || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" || ValidateExternalSource(source) != nil {
+		return "<redacted>"
+	}
+	return source
+}
+
+// RedactExternalSpecForLog preserves approved top-level metadata while
+// replacing the complete extfs authentication/configuration object. Unknown
+// top-level fields are dropped because future extensions may carry secrets.
+func RedactExternalSpecForLog(specStr string) string {
+	if specStr == "" {
+		return ""
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+		return "<redacted>"
+	}
+
+	redacted := make(map[string]json.RawMessage, 4)
+	for _, key := range []string{"format", "columns", "snapshot_id"} {
+		if value, ok := spec[key]; ok {
+			redacted[key] = value
+		}
+	}
+	if _, ok := spec["extfs"]; ok {
+		redacted["extfs"] = json.RawMessage(`"***"`)
+	}
+
+	out, err := json.Marshal(redacted)
+	if err != nil {
+		return "<redacted>"
+	}
+	return string(out)
+}
+
+// RedactCollectionSchemaForLog returns a copy of schema with external storage
+// credentials removed. Callers can safely log the result without mutating the
+// schema used by request handling or distributed load paths.
+func RedactCollectionSchemaForLog(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(schema).(*schemapb.CollectionSchema)
+	redacted.ExternalSource = RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
 }
 
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one
@@ -452,13 +513,13 @@ var awsFamilyScheme = map[string]bool{
 	SchemeAWS: true,
 }
 
-// RedactExternalSpec returns a log-safe representation of an external spec
-// JSON string. Secret extfs values (see secretExtfsKeys) are replaced with
-// "***" so that AK/SK/PEM material never reaches log sinks. Unknown fields
-// are preserved so API callers can still observe extension metadata. On parse
-// failure it returns "<invalid spec>" rather than the raw input — the input
-// itself may already contain a partially-recognized credential blob, so we
-// never echo it back. Empty input returns empty string for log readability.
+// RedactExternalSpec returns a credential-redacted representation of a
+// validated external spec for user-visible responses. Known secret extfs
+// values (see secretExtfsKeys) are replaced with "***", while unknown fields
+// are preserved as extension metadata. Because unknown pre-validation fields
+// may themselves be sensitive, external-collection request logging uses
+// RedactExternalSpecForLog. On parse failure this returns "<invalid spec>"
+// rather than the raw input.
 func RedactExternalSpec(specStr string) string {
 	if specStr == "" {
 		return ""

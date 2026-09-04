@@ -365,7 +365,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<FixedWidthChunk*>(chunk.get())->Span());
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -378,12 +378,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
-            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            std::pair<std::vector<std::string_view>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<StringChunk*>(chunk.get())->StringViews(offset_len));
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -395,12 +395,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
-        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+        return PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(milvus::OpContext* op_ctx,
                      int64_t chunk_id,
                      std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -413,7 +413,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
-            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
             std::move(chunk_wrapper),
             static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
     }
@@ -766,6 +766,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                                  .output_data();
                 fn(std::move(array), i);
             });
+    }
+
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            return;
+        }
+        BuildVectorArrayValidOffsets(chunk_pws);
     }
 
  private:

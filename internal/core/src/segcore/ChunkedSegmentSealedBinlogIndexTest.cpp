@@ -387,6 +387,10 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         } else {
             throw std::runtime_error("not implemented");
         }
+        if (nullable) {
+            raw_dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                valid_data.data(), data_n));
+        }
     }
 
  public:
@@ -1047,17 +1051,6 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
                 vec_indexing_for_serde->Load(binary_set, load_conf);
             }
 
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
-            }
-
             LoadIndexInfo load_info;
             load_info.field_id = vec_field_id.get();
             load_info.index_params = GenIndexParams(indexing.get());
@@ -1330,17 +1323,6 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
                 vec_indexing_for_serde->Load(binary_set, load_conf);
             }
 
-            if (nullable) {
-                auto vec_indexing =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing, nullptr);
-                std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-                for (int64_t i = 0; i < data_n; ++i) {
-                    valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-                }
-                vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
-            }
-
             LoadIndexInfo load_info;
             load_info.field_id = vec_field_id.get();
             load_info.index_params = GenIndexParams(indexing.get());
@@ -1475,17 +1457,6 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
                 {knowhere::meta::METRIC_TYPE, metric_type}};
             auto binary_set = indexing->Serialize(load_conf);
             vec_indexing_for_serde->Load(binary_set, load_conf);
-        }
-
-        if (nullable) {
-            auto vec_indexing =
-                dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-            ASSERT_NE(vec_indexing, nullptr);
-            std::unique_ptr<bool[]> valid_data_bool(new bool[data_n]);
-            for (int64_t i = 0; i < data_n; ++i) {
-                valid_data_bool[i] = (valid_data[i >> 3] >> (i & 0x07)) & 1;
-            }
-            vec_indexing->UpdateValidData(valid_data_bool.get(), data_n);
         }
 
         LoadIndexInfo load_info;

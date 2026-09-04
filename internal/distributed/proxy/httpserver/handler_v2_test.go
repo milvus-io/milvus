@@ -25,12 +25,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -42,13 +44,17 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -83,6 +89,35 @@ func init() {
 	streaming.SetupNoopWALForTest()
 }
 
+type httpServerLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*httpServerLogBuffer) Sync() error {
+	return nil
+}
+
+func captureHTTPServerLogs(t *testing.T) *httpServerLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &httpServerLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
@@ -100,7 +135,7 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 }
 
 func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
-	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 	testCases := []struct {
 		name string
 		req  any
@@ -132,12 +167,155 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			request := fmt.Sprint(field.Interface)
 			assert.NotContains(t, request, "AKIAEXAMPLE")
 			assert.NotContains(t, request, "SUPERSECRET")
+			assert.NotContains(t, request, "FUTURE_SECRET_SENTINEL")
 			assert.Contains(t, request, "***")
+			assert.Contains(t, request, "parquet")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIA_EXTERNAL_SENTINEL","access_key_value":"SECRET_EXTERNAL_SENTINEL","future_password":"FUTURE_SPEC_REST_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_REST_SENTINEL:SOURCE_SECRET_REST_SENTINEL@bucket/path"
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &CollectionReq{
+				CollectionName: "external_collection",
+				Schema: CollectionSchema{
+					ExternalSource: externalSource,
+					ExternalSpec:   externalSpec,
+				},
+				TopLevelExternalSource: externalSource,
+				TopLevelExternalSpec:   externalSpec,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &RefreshExternalCollectionReq{
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_REST_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_REST_SENTINEL")
+			assert.NotContains(t, request, "AKIA_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "SECRET_EXTERNAL_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_REST_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
+func TestCreateExternalCollectionValidationDoesNotLogExternalSpec(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "top-level config rejected",
+			body: `{
+				"collectionName": "external_books",
+				"externalSource": "s3://bucket/books",
+				"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}",
+				"schema": {"fields": []}
+			}`,
+		},
+		{
+			name: "quick create rejected",
+			body: `{
+				"collectionName": "external_books",
+				"dimension": 2,
+				"schema": {
+					"externalSource": "s3://bucket/books",
+					"externalSpec": "{\"format\":\"parquet\",\"extfs\":{\"cloud_provider\":\"aws\",\"access_key_id\":\"AKIA_LOG_SENTINEL\",\"access_key_value\":\"SECRET_LOG_SENTINEL\",\"future_password\":\"FUTURE_LOG_SECRET_SENTINEL\",\"region\":\"us-east-1\"}}"
+				}
+			}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			logs := captureHTTPServerLogs(t)
+			testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			output := logs.String()
+			assert.NotContains(t, output, "AKIA_LOG_SENTINEL")
+			assert.NotContains(t, output, "SECRET_LOG_SENTINEL")
+			assert.NotContains(t, output, "FUTURE_LOG_SECRET_SENTINEL")
+			assert.Contains(t, output, "***")
+		})
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTPasswords(t *testing.T) {
+	description := "account description"
+	testCases := []struct {
+		name    string
+		req     any
+		secrets []string
+	}{
+		{
+			name: "create user",
+			req: &PasswordReq{
+				UserName:    "alice",
+				Password:    "CREATE_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{"CREATE_PASSWORD_SENTINEL_DO_NOT_LOG"},
+		},
+		{
+			name: "update password",
+			req: &NewPasswordReq{
+				UserName:    "alice",
+				Password:    "OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				NewPassword: "NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+				Description: &description,
+			},
+			secrets: []string{
+				"OLD_PASSWORD_SENTINEL_DO_NOT_LOG",
+				"NEW_PASSWORD_SENTINEL_DO_NOT_LOG",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.Contains(t, request, "alice")
+			for _, secret := range testCase.secrets {
+				assert.NotContains(t, request, secret)
+			}
 		})
 	}
 }
 
 func TestHTTPWrapper(t *testing.T) {
+	h := &HandlersV2{metaCache: func() proxy.Cache { return nil }}
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
 	ginHandler := gin.Default()
@@ -194,7 +372,7 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	path = "/wrapper/post/trace/call"
 	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
+		return h.wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
 	})))
@@ -242,6 +420,7 @@ func TestHTTPWrapper(t *testing.T) {
 }
 
 func TestGrpcWrapper(t *testing.T) {
+	h := &HandlersV2{metaCache: func() proxy.Cache { return nil }}
 	getTestCases := []rawTestCase{}
 	getTestCasesNeedAuth := []rawTestCase{}
 	needAuthPrefix := "/auth"
@@ -254,12 +433,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -273,12 +452,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -295,12 +474,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -319,12 +498,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
+		h.wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -371,11 +550,11 @@ func TestGrpcWrapper(t *testing.T) {
 
 	path = "/wrapper/grpc/auth"
 	app.GET(path, func(c *gin.Context) {
-		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "test", DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
+		h.wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
 	})
 	t.Run("check authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -2527,6 +2706,13 @@ type externalCollectionRESTProxy struct {
 	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
+	createSnapshotReq          *milvuspb.CreateSnapshotRequest
+	dropSnapshotReq            *milvuspb.DropSnapshotRequest
+	listSnapshotsReq           *milvuspb.ListSnapshotsRequest
+	describeSnapshotReq        *milvuspb.DescribeSnapshotRequest
+	restoreSnapshotReq         *milvuspb.RestoreSnapshotRequest
+	pinSnapshotDataReq         *milvuspb.PinSnapshotDataRequest
+	unpinSnapshotDataReq       *milvuspb.UnpinSnapshotDataRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2667,6 +2853,58 @@ func (m *externalCollectionRESTProxy) ListRestoreSnapshotJobs(ctx context.Contex
 			Progress:       10,
 		}},
 	}, nil
+}
+
+func (m *externalCollectionRESTProxy) CreateSnapshot(ctx context.Context, request *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	m.createSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) DropSnapshot(ctx context.Context, request *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	m.dropSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) ListSnapshots(ctx context.Context, request *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	m.listSnapshotsReq = request
+	return &milvuspb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: []string{"snapshot_1", "snapshot_2"},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) DescribeSnapshot(ctx context.Context, request *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	m.describeSnapshotReq = request
+	return &milvuspb.DescribeSnapshotResponse{
+		Status:         merr.Success(),
+		Name:           request.GetName(),
+		Description:    "daily backup",
+		CollectionName: request.GetCollectionName(),
+		PartitionNames: []string{"_default"},
+		CreateTs:       100,
+		S3Location:     "s3://bucket/snapshot_1",
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) RestoreSnapshot(ctx context.Context, request *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+	m.restoreSnapshotReq = request
+	return &milvuspb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  200,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) PinSnapshotData(ctx context.Context, request *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	m.pinSnapshotDataReq = request
+	return &milvuspb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+		PinId:  300,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) UnpinSnapshotData(ctx context.Context, request *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	m.unpinSnapshotDataReq = request
+	return merr.Success(), nil
 }
 
 func TestFieldSchemaGetProtoWithExternalField(t *testing.T) {
@@ -2862,6 +3100,345 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 }
 
+func TestSnapshotCRUDRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, CreateAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"description": "daily backup",
+		"compactionProtectionSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.createSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.createSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.createSnapshotReq.GetName())
+	assert.Equal(t, "daily backup", proxy.createSnapshotReq.GetDescription())
+	assert.Equal(t, int64(3600), proxy.createSnapshotReq.GetCompactionProtectionSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.listSnapshotsReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.listSnapshotsReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.0").String())
+	assert.Equal(t, "snapshot_2", gjson.Get(w.Body.String(), "data.1").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DescribeAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.describeSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.describeSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.describeSnapshotReq.GetName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.snapshotName").String())
+	assert.Equal(t, "daily backup", gjson.Get(w.Body.String(), "data.description").String())
+	assert.Equal(t, "source_books", gjson.Get(w.Body.String(), "data.collectionName").String())
+	assert.Equal(t, "_default", gjson.Get(w.Body.String(), "data.partitionNames.0").String())
+	assert.Equal(t, int64(100), gjson.Get(w.Body.String(), "data.createTs").Int())
+	assert.Equal(t, "s3://bucket/snapshot_1", gjson.Get(w.Body.String(), "data.s3Location").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DropAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.dropSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.dropSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.dropSnapshotReq.GetName())
+}
+
+func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const largeInt64 int64 = 9007199254740993
+	testCases := []struct {
+		name                   string
+		path                   string
+		body                   string
+		responsePath           string
+		preserveReleasedNumber bool
+		setup                  func(*mocks.MockProxy)
+	}{
+		{
+			name:         "describe snapshot create timestamp",
+			path:         versionalV2(SnapshotCategory, DescribeAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.createTs",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.DescribeSnapshotResponse{
+					Status:   merr.Success(),
+					CreateTs: largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "restore snapshot job ID",
+			path:         versionalV2(SnapshotCategory, RestoreAction),
+			body:         `{"sourceCollectionName":"source_books","targetCollectionName":"restored_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "pin snapshot ID",
+			path:         versionalV2(SnapshotCategory, PinAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.pinId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().PinSnapshotData(mock.Anything, mock.Anything).Return(&milvuspb.PinSnapshotDataResponse{
+					Status: merr.Success(),
+					PinId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "restore external snapshot job ID",
+			path:                   versionalV2(SnapshotJobCategory, RestoreExternalAction),
+			body:                   `{"targetCollectionName":"restored_books","snapshotMetadataURI":"s3://bucket/snapshot.json"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreExternalSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "describe restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, DescribeAction),
+			body:                   `{"jobId":"9007199254740993"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().GetRestoreSnapshotState(mock.Anything, mock.Anything).Return(&milvuspb.GetRestoreSnapshotStateResponse{
+					Status: merr.Success(),
+					Info:   &milvuspb.RestoreSnapshotInfo{JobId: largeInt64},
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "list restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, ListAction),
+			body:                   `{}`,
+			responsePath:           "data.records.0.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().ListRestoreSnapshotJobs(mock.Anything, mock.Anything).Return(&milvuspb.ListRestoreSnapshotJobsResponse{
+					Status: merr.Success(),
+					Jobs:   []*milvuspb.RestoreSnapshotInfo{{JobId: largeInt64}},
+				}, nil).Once()
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		for _, allowInt64 := range []bool{false, true} {
+			name := fmt.Sprintf("%s/allow_int64_%t", testCase.name, allowInt64)
+			t.Run(name, func(t *testing.T) {
+				proxy := mocks.NewMockProxy(t)
+				testCase.setup(proxy)
+				server := initHTTPServerV2(proxy, false)
+
+				req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewBufferString(testCase.body))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprintf("%t", allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+
+				require.Equal(t, http.StatusOK, recorder.Code)
+				expectedRaw := `"9007199254740993"`
+				if testCase.preserveReleasedNumber || allowInt64 {
+					expectedRaw = "9007199254740993"
+				}
+				assert.Equal(t, expectedRaw, gjson.Get(recorder.Body.String(), testCase.responsePath).Raw)
+			})
+		}
+	}
+}
+
+func TestRestoreSnapshotRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "source_db",
+		"sourceCollectionName": "source_books",
+		"targetDbName": "target_db",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(200), gjson.Get(w.Body.String(), "data.jobId").Int())
+	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.restoreSnapshotReq.GetCollectionName())
+	assert.Equal(t, "target_db", proxy.restoreSnapshotReq.GetTargetDbName())
+	assert.Equal(t, "restored_books", proxy.restoreSnapshotReq.GetTargetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.restoreSnapshotReq.GetName())
+	assert.False(t, proxy.restoreSnapshotReq.GetRewriteData())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "source_db",
+		"sourceCollectionName": "source_books",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "default", proxy.restoreSnapshotReq.GetTargetDbName())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "archive",
+		"sourceCollectionName": "source_books",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	req.Header.Set(HTTPHeaderDBName, "tenant_a")
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "archive", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "tenant_a", proxy.restoreSnapshotReq.GetTargetDbName())
+}
+
+func TestPinSnapshotDataRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, PinAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"ttlSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(300), gjson.Get(w.Body.String(), "data.pinId").Int())
+	assert.Equal(t, "default", proxy.pinSnapshotDataReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.pinSnapshotDataReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.pinSnapshotDataReq.GetName())
+	assert.Equal(t, int64(3600), proxy.pinSnapshotDataReq.GetTtlSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, UnpinAction), bytes.NewReader([]byte(`{
+		"pinId": "9007199254740993"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(9007199254740993), proxy.unpinSnapshotDataReq.GetPinId())
+}
+
+func TestSnapshotRESTV2Validation(t *testing.T) {
+	paramtable.Init()
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	tests := []struct {
+		name   string
+		action string
+		body   string
+	}{
+		{
+			name:   "missing snapshot name",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books"}`,
+		},
+		{
+			name:   "missing collection name for list",
+			action: ListAction,
+			body:   `{}`,
+		},
+		{
+			name:   "negative compaction protection",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","compactionProtectionSeconds":-1}`,
+		},
+		{
+			name:   "negative pin TTL",
+			action: PinAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","ttlSeconds":-1}`,
+		},
+		{
+			name:   "invalid pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":"0"}`,
+		},
+		{
+			name:   "malformed pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":"not-an-int64"}`,
+		},
+		{
+			name:   "numeric pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":300}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, test.action), bytes.NewReader([]byte(test.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.NotEqual(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		})
+	}
+}
+
 func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -2947,6 +3524,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(2001), proxy.getRestoreSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"collectionName":"restored_collection"`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotCompleted"`)
 
@@ -2961,6 +3539,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 	assert.Equal(t, "default", proxy.listRestoreSnapshotJobsReq.GetDbName())
 	assert.Equal(t, "restored_collection", proxy.listRestoreSnapshotJobsReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"records":[`)
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotPending"`)
 }
 
@@ -3738,6 +4317,138 @@ func TestCreateImportJobPreservesRBACRoleContext(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), returnBody)
 	assert.NoError(t, err)
 	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
+// newRESTV2ServerForRBACTest builds a v2 REST server whose auth middleware sets
+// the parsed username directly, without re-initializing the proxy privilege
+// cache (genAuthMiddleWare resets it, which would wipe test grants).
+func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+	t.Helper()
+	h := NewHandlersV2(pxy)
+	ginHandler := gin.Default()
+	appV2 := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
+		username, _, ok := ParseUsernamePassword(c)
+		if !ok || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return
+		}
+		c.Set(ContextUsername, username)
+	})
+	h.RegisterRoutesToV2(appV2)
+	return ginHandler
+}
+
+// TestRESTV2AliasRBAC guards the alias-resolution wiring of the REST v2
+// authorization path: the handlers must authorize through the injected
+// MetaCache (PrivilegeInterceptorWithMetaCache), not a nil one, so a role
+// granted on the real collection is honored when the request addresses the
+// collection through an alias.
+func TestRESTV2AliasRBAC(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), realCol, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	testEngine := newRESTV2ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	loadPath := versionalV2(CollectionCategory, LoadAction)
+	for _, tc := range []struct {
+		name string
+		coll string
+	}{
+		{"real collection name", realCol},
+		{"alias resolves to the granted collection", alias},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bytes.NewReader([]byte(`{"collectionName": "` + tc.coll + `"}`))
+			req := httptest.NewRequest(http.MethodPost, loadPath, body)
+			req.SetBasicAuth(username, "pwd")
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(nil), returnBody.Code, w.Body.String())
+		})
+	}
+}
+
+// TestRESTV2AliasRBAC_GrantOnAliasStringDenied verifies the inverse: a grant
+// scoped to the alias string must NOT authorize access through the alias, since
+// the alias is resolved to the real collection before enforcement.
+func TestRESTV2AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), alias, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := newRESTV2ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	body := bytes.NewReader([]byte(`{"collectionName": "` + alias + `"}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, LoadAction), body)
+	req.SetBasicAuth(username, "pwd")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	mp.AssertNotCalled(t, "LoadCollection", mock.Anything, mock.Anything)
 }
 
 func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {

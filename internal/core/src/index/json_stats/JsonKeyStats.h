@@ -24,7 +24,6 @@
 #include <functional>
 #include <initializer_list>
 #include <istream>
-#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -169,6 +168,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                   "IsNull not supported for JsonKeyStats");
     }
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override {
         ThrowInfo(ErrorCode::NotImplemented,
@@ -250,20 +254,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            const bool* valid_data;
-            if (GetShreddingJsonType(path) == JSONType::STRING ||
-                GetShreddingJsonType(path) == JSONType::ARRAY) {
-                auto pw = column->StringViews(op_ctx, i);
-                valid_data = pw.get().second.data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            } else {
-                auto pw = column->Span(op_ctx, i);
-                auto chunk = pw.get();
-                valid_data = chunk.valid_data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            }
+            column->ApplyValidDataInChunk(
+                op_ctx, i, 0, chunk_size, valid_res + processed_size);
             processed_size += chunk_size;
         }
         AssertInfo(processed_size == valid_res.size(),
@@ -305,7 +297,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                     auto [data_vec, valid_data] = pw.get();
 
                     func(data_vec.data(),
-                         valid_data.data(),
+                         valid_data,
                          chunk_size,
                          res + processed_size,
                          valid_res + processed_size,
@@ -314,31 +306,22 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                     auto pw = column->Span(op_ctx, i);
                     auto chunk = pw.get();
                     const T* data = static_cast<const T*>(chunk.data());
-                    const bool* valid_data = chunk.valid_data();
+                    const auto validity = chunk.validity();
                     func(data,
-                         valid_data,
+                         validity,
                          chunk_size,
                          res + processed_size,
                          valid_res + processed_size,
                          values...);
                 }
             } else {
-                const bool* valid_data;
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    auto pw = column->StringViews(op_ctx, i);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
+                if (column->IsNullable()) {
+                    auto pw = column->GetChunk(op_ctx, i);
                     auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
+                    chunk->ApplyValidityMask(
+                        0, chunk_size, res + processed_size);
+                    chunk->ApplyValidityMask(
+                        0, chunk_size, valid_res + processed_size);
                 }
             }
 
@@ -444,7 +427,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  private:
     void
-    CollectSingleJsonStatsInfo(const char* json_str,
+    CollectSingleJsonStatsInfo(std::string_view json_str,
                                std::map<JsonKey, KeyStatsInfo>& infos);
 
     std::string
@@ -493,7 +476,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
 
     void
-    BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
+    BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id);
 
     void
     BuildKeyStatsForNullRow();
@@ -529,39 +512,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsBoolean(const std::string& str) {
         return str == "true" || str == "false";
-    }
-
-    bool
-    IsInt8(const std::string& str) {
-        std::istringstream iss(str);
-        int8_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int8_t>::min() &&
-               num <= std::numeric_limits<int8_t>::max();
-    }
-
-    bool
-    IsInt16(const std::string& str) {
-        std::istringstream iss(str);
-        int16_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int16_t>::min() &&
-               num <= std::numeric_limits<int16_t>::max();
-    }
-
-    bool
-    IsInt32(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int32_t>::min() &&
-               num <= std::numeric_limits<int32_t>::max();
     }
 
     bool
@@ -626,33 +576,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
                       const std::string& warmup_policy = "");
-
-    void
-    ApplyValidData(const bool* valid_data,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res,
-                   const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
-    }
-
-    void
-    ApplyOnlyValidData(const bool* valid_data,
-                       TargetBitmapView valid_res,
-                       const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    valid_res[i] = false;
-                }
-            }
-        }
-    }
 
     void
     GetColumnSchemaFromParquet(int64_t column_group_id,

@@ -3080,7 +3080,8 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 	}
 
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, request)
+	metaCache := getProxyMetaCache(pxy)
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -3738,7 +3739,10 @@ func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb
 	description := function.Description
 	params := []*commonpb.KeyValuePair{}
 	for key, value := range function.Params {
-		if reflect.TypeOf(value).Kind() == reflect.Slice || reflect.TypeOf(value).Kind() == reflect.Map {
+		valueType := reflect.TypeOf(value)
+		if valueType == nil {
+			params = append(params, &commonpb.KeyValuePair{Key: key, Value: "null"})
+		} else if valueType.Kind() == reflect.Slice || valueType.Kind() == reflect.Map {
 			bs, err := json.Marshal(value)
 			if err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("Marshal function params fail, please check it!")

@@ -126,6 +126,96 @@ MakeSearchResult(std::vector<int64_t> offsets) {
     return result;
 }
 
+struct NullableVectorArrayRow {
+    bool valid = true;
+    std::vector<float> values;
+};
+
+std::vector<char>
+BuildNullableVectorArrayChunkBuffer(
+    int64_t dim, const std::vector<NullableVectorArrayRow>& rows) {
+    const auto row_count = static_cast<int64_t>(rows.size());
+    const auto bitmap_bytes = (row_count + 7) / 8;
+    const auto header_bytes = sizeof(uint32_t) * (row_count * 2 + 1);
+    const auto payload_offset =
+        static_cast<uint32_t>(bitmap_bytes + header_bytes);
+    const auto vector_bytes = static_cast<uint32_t>(dim * sizeof(float));
+
+    size_t payload_values = 0;
+    for (const auto& row : rows) {
+        AssertInfo(row.valid || row.values.empty(),
+                   "null vector-array row must not carry payload");
+        AssertInfo(row.values.size() % dim == 0,
+                   "vector-array row payload is not aligned to dim");
+        payload_values += row.values.size();
+    }
+
+    std::vector<char> buffer(bitmap_bytes + header_bytes +
+                                 payload_values * sizeof(float) +
+                                 MMAP_ARRAY_PADDING,
+                             0);
+    std::vector<uint32_t> header(static_cast<size_t>(row_count * 2 + 1));
+
+    auto payload_cursor = payload_offset;
+    auto* payload = buffer.data() + payload_offset;
+    for (int64_t i = 0; i < row_count; ++i) {
+        const auto& row = rows[i];
+        if (row.valid) {
+            buffer[i >> 3] |= 1U << (i & 0x07);
+        }
+        header[i * 2] = payload_cursor;
+        header[i * 2 + 1] = static_cast<uint32_t>(row.values.size() / dim);
+        if (!row.values.empty()) {
+            const auto payload_bytes = row.values.size() * sizeof(float);
+            memcpy(payload, row.values.data(), payload_bytes);
+            payload += payload_bytes;
+            payload_cursor +=
+                static_cast<uint32_t>(row.values.size() / dim) * vector_bytes;
+        }
+    }
+    header[row_count * 2] = payload_cursor;
+    memcpy(buffer.data() + bitmap_bytes,
+           header.data(),
+           header.size() * sizeof(uint32_t));
+    return buffer;
+}
+
+std::shared_ptr<ChunkedColumnInterface>
+BuildNullableVectorArrayColumn(
+    const FieldMeta& field_meta,
+    int64_t dim,
+    const std::vector<std::vector<NullableVectorArrayRow>>& chunk_rows,
+    std::vector<std::vector<char>>& buffers) {
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> rows_per_chunk;
+    chunks.reserve(chunk_rows.size());
+    rows_per_chunk.reserve(chunk_rows.size());
+    buffers.reserve(chunk_rows.size());
+
+    for (const auto& rows : chunk_rows) {
+        buffers.emplace_back(BuildNullableVectorArrayChunkBuffer(dim, rows));
+        rows_per_chunk.push_back(static_cast<int64_t>(rows.size()));
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(std::make_unique<VectorArrayChunk>(
+            dim,
+            static_cast<int32_t>(rows.size()),
+            buffers.back().data(),
+            buffers.back().size(),
+            field_meta.get_element_type(),
+            chunk_mmap_guard,
+            true));
+    }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        rows_per_chunk, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    return MakeChunkedColumnBase(
+        DataType::VECTOR_ARRAY, std::move(slot), field_meta);
+}
+
 segcore::SegmentSealedUPtr
 CreateColdVectorOutputSegment(const SchemaPtr& schema,
                               const FieldId& vector_field_id,
@@ -478,6 +568,70 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     }
 }
 
+// #52877: lazy reopen may skip the drop-only schema and see the old and new
+// StructArrays as one same-name transition with disjoint child field IDs.
+TEST(test_chunk_segment,
+     ReopenInvalidatesOffsetsForReaddedStructArrayWithSameName) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto old_label = old_schema->AddDebugArrayField(
+        "chunks[label]", DataType::VARCHAR, true);
+    auto old_score =
+        old_schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+
+    constexpr int64_t row_count = 5;
+    constexpr int64_t array_len = 3;
+    auto dataset = segcore::DataGen(old_schema,
+                                    row_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    array_len);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+
+    auto old_offsets = segment->GetArrayOffsets(old_label);
+    ASSERT_NE(old_offsets, nullptr);
+    ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
+    // DataGen marks alternating rows valid for nullable scalar fields, starting
+    // with row 0. Sealed binlog serialization drops payloads from null rows, so
+    // only the three valid rows contribute elements to the shared offsets.
+    constexpr int64_t valid_row_count = (row_count + 1) / 2;
+    ASSERT_EQ(old_offsets->GetTotalElementCount(), valid_row_count * array_len);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto new_label = FieldId(old_score.get() + 1);
+    auto new_score = FieldId(new_label.get() + 1);
+    new_schema->AddField(FieldName("chunks[label]"),
+                         new_label,
+                         DataType::ARRAY,
+                         DataType::VARCHAR,
+                         true);
+    new_schema->AddField(FieldName("chunks[score]"),
+                         new_score,
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true);
+
+    // Model lazy reopen skipping the intermediate drop-only schema: the struct
+    // name is unchanged, while every child field ID belongs to a new generation.
+    segment->Reopen(new_schema);
+
+    auto new_offsets = segment->GetArrayOffsets(new_label);
+    ASSERT_NE(new_offsets, nullptr);
+    EXPECT_NE(new_offsets.get(), old_offsets.get());
+    EXPECT_EQ(new_offsets.get(), segment->GetArrayOffsets(new_score).get());
+    EXPECT_EQ(new_offsets->GetRowCount(), row_count);
+    EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
+    EXPECT_EQ(segment->GetArrayOffsets(old_label), nullptr);
+    EXPECT_EQ(segment->GetArrayOffsets(old_score), nullptr);
+}
+
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
     int dim = 16;
     int chunk_num = 2;
@@ -567,7 +721,6 @@ TEST(test_chunk_segment,
      SearchOnSealedColumnNullableVectorArrayUsesLogicalRowOffsets) {
     constexpr int64_t dim = 2;
     constexpr int64_t row_count = 6;
-    constexpr int64_t vector_count = 3;
 
     auto schema = std::make_shared<Schema>();
     auto vec_id =
@@ -578,58 +731,16 @@ TEST(test_chunk_segment,
                                          true);
     auto field_meta = schema->operator[](vec_id);
 
-    const auto bitmap_bytes = (row_count + 7) / 8;
-    const auto header_bytes = sizeof(uint32_t) * (row_count * 2 + 1);
-    const auto payload_offset =
-        static_cast<uint32_t>(bitmap_bytes + header_bytes);
-    const auto vector_bytes = static_cast<uint32_t>(dim * sizeof(float));
-    const std::array<float, vector_count * dim> payload{
-        1.0F, 0.0F, 0.0F, 1.0F, -1.0F, 0.0F};
-    std::vector<char> buffer(bitmap_bytes + header_bytes +
-                                 payload.size() * sizeof(float) +
-                                 MMAP_ARRAY_PADDING,
-                             0);
-
-    // Logical rows: [NULL, [], [A], [B], [], [C]].
-    buffer[0] = 0b00111110;
-    const std::array<uint32_t, row_count * 2 + 1> header{
-        payload_offset,
-        0,
-        payload_offset,
-        0,
-        payload_offset,
-        1,
-        payload_offset + vector_bytes,
-        1,
-        payload_offset + 2 * vector_bytes,
-        0,
-        payload_offset + 2 * vector_bytes,
-        1,
-        payload_offset + 3 * vector_bytes};
-    memcpy(buffer.data() + bitmap_bytes,
-           header.data(),
-           header.size() * sizeof(uint32_t));
-    memcpy(buffer.data() + payload_offset,
-           payload.data(),
-           payload.size() * sizeof(float));
-
-    std::vector<std::unique_ptr<Chunk>> chunks;
-    auto chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-    chunks.emplace_back(
-        std::make_unique<VectorArrayChunk>(dim,
-                                           row_count,
-                                           buffer.data(),
-                                           buffer.size(),
-                                           DataType::VECTOR_FLOAT,
-                                           chunk_mmap_guard,
-                                           true));
-    auto translator = std::make_unique<TestChunkTranslator>(
-        std::vector<int64_t>{row_count}, "", std::move(chunks));
-    auto slot =
-        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
-            std::move(translator), nullptr);
-    auto column = MakeChunkedColumnBase(
-        DataType::VECTOR_ARRAY, std::move(slot), field_meta);
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(field_meta,
+                                                 dim,
+                                                 {{{false, {}},
+                                                   {true, {}},
+                                                   {true, {1.0F, 0.0F}},
+                                                   {true, {0.0F, 1.0F}},
+                                                   {true, {}},
+                                                   {true, {-1.0F, 0.0F}}}},
+                                                 buffers);
     ASSERT_FALSE(column->GetOffsetMapping().IsEnabled());
     auto offsets_pw = column->VectorArrayOffsets(nullptr, 0);
     const std::array<size_t, row_count + 1> expected_offsets{
@@ -686,7 +797,95 @@ TEST(test_chunk_segment,
     EXPECT_EQ(filtered_result.seg_offsets_[2], INVALID_SEG_OFFSET);
     EXPECT_FLOAT_EQ(filtered_result.distances_[0], 1.0F);
     EXPECT_FLOAT_EQ(filtered_result.distances_[1], -1.0F);
-    EXPECT_FALSE(column->GetOffsetMapping().IsEnabled());
+    EXPECT_TRUE(column->GetOffsetMapping().IsEnabled());
+    EXPECT_EQ(column->GetOffsetMapping().GetValidCount(), 5);
+    const std::array<size_t, 6> expected_valid_offsets{0, 0, 1, 2, 2, 3};
+    const auto& valid_offsets = column->GetValidArrayOffsetsInChunk(0);
+    ASSERT_EQ(valid_offsets.size(), expected_valid_offsets.size());
+    for (size_t i = 0; i < expected_valid_offsets.size(); ++i) {
+        EXPECT_EQ(valid_offsets[i], expected_valid_offsets[i]);
+    }
+}
+
+TEST(test_chunk_segment,
+     SearchOnSealedColumnNullableVectorArrayUsesCachedChunkOffsets) {
+    constexpr int64_t dim = 2;
+    constexpr int64_t row_count = 7;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_id =
+        schema->AddDebugVectorArrayField("profile[embedding]",
+                                         DataType::VECTOR_FLOAT,
+                                         dim,
+                                         knowhere::metric::MAX_SIM_COSINE,
+                                         true);
+    auto field_meta = schema->operator[](vec_id);
+
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(
+        field_meta,
+        dim,
+        {{{false, {}}, {true, {}}, {true, {1.0F, 0.0F}}},
+         {{false, {}},
+          {true, {0.0F, 1.0F}},
+          {true, {}},
+          {true, {-1.0F, 0.0F}}}},
+        buffers);
+
+    SearchInfo search_info;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::MAX_SIM_COSINE}};
+    search_info.field_id_ = vec_id;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_COSINE;
+    search_info.topk_ = 3;
+
+    const std::array<float, dim> query{1.0F, 0.0F};
+    const std::array<size_t, 2> query_offsets{0, 1};
+    const std::map<std::string, std::string> index_info;
+    milvus::OpContext op_context;
+
+    auto run_search = [&](const BitsetView& bitset) {
+        SearchResult result;
+        query::SearchOnSealedColumn(*schema,
+                                    column.get(),
+                                    search_info,
+                                    index_info,
+                                    query.data(),
+                                    query_offsets.data(),
+                                    1,
+                                    row_count,
+                                    bitset,
+                                    &op_context,
+                                    result);
+        return result;
+    };
+
+    auto result = run_search(BitsetView{});
+    ASSERT_EQ(result.seg_offsets_.size(), 3);
+    EXPECT_EQ(result.seg_offsets_[0], 2);
+    EXPECT_EQ(result.seg_offsets_[1], 4);
+    EXPECT_EQ(result.seg_offsets_[2], 6);
+
+    std::array<uint8_t, 1> filtered_bits{1U << 4};
+    auto filtered_result =
+        run_search(BitsetView(filtered_bits.data(), row_count));
+    ASSERT_EQ(filtered_result.seg_offsets_.size(), 3);
+    EXPECT_EQ(filtered_result.seg_offsets_[0], 2);
+    EXPECT_EQ(filtered_result.seg_offsets_[1], 6);
+    EXPECT_EQ(filtered_result.seg_offsets_[2], INVALID_SEG_OFFSET);
+
+    const std::array<size_t, 3> chunk0_offsets{0, 0, 1};
+    const std::array<size_t, 4> chunk1_offsets{0, 1, 1, 2};
+    const auto& valid_offsets0 = column->GetValidArrayOffsetsInChunk(0);
+    const auto& valid_offsets1 = column->GetValidArrayOffsetsInChunk(1);
+    ASSERT_EQ(valid_offsets0.size(), chunk0_offsets.size());
+    ASSERT_EQ(valid_offsets1.size(), chunk1_offsets.size());
+    for (size_t i = 0; i < chunk0_offsets.size(); ++i) {
+        EXPECT_EQ(valid_offsets0[i], chunk0_offsets[i]);
+    }
+    for (size_t i = 0; i < chunk1_offsets.size(); ++i) {
+        EXPECT_EQ(valid_offsets1[i], chunk1_offsets[i]);
+    }
 }
 
 // Test search on nullable vector field with all null vectors
@@ -906,8 +1105,8 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
 // This test verifies:
 // 1. CachedSearchIterator uses valid_count_per_chunk (not total row count)
 //    as chunk_size, preventing out-of-bounds reads
-// 2. TransformOffset is applied after NextBatch, converting physical offsets
-//    (valid-only) back to logical offsets (including nulls)
+// 2. Knowhere BF receives each chunk's physical->logical id window and returns
+//    logical offsets directly.
 TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     int dim = 16;
     int chunk_num = 2;
@@ -1020,9 +1219,6 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     SearchResult search_result;
     milvus::OpContext op_context;
 
-    // This exercises both fixes:
-    // Fix 1: CachedSearchIterator uses valid_count_per_chunk as chunk_size
-    // Fix 2: TransformOffset converts physical -> logical offsets
     query::SearchOnSealedColumn(*schema,
                                 column.get(),
                                 search_info,

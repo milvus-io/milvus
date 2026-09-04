@@ -15,6 +15,7 @@
 #include "index/Index.h"
 #include "index/Utils.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "index/VectorMemIndex.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
@@ -126,6 +127,10 @@ InterimSealedIndexTranslator::get_cells(
     }
     const auto& offset_mapping = vec_data_->GetOffsetMapping();
     bool nullable = offset_mapping.IsEnabled();
+    const FixedVector<bool>* valid_data = nullptr;
+    if (nullable) {
+        valid_data = &vec_data_->GetValidData();
+    }
 
     if (!is_sparse_) {
         auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
@@ -192,11 +197,17 @@ InterimSealedIndexTranslator::get_cells(
 
     int64_t total_valid_count =
         nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
+    if (nullable) {
+        vec_index->SetIdMapType(knowhere::IdMap::Type::GROWING);
+    }
 
     if (total_valid_count == 0) {
         if (nullable) {
-            const auto& valid_data = vec_data_->GetValidData();
-            vec_index->BuildValidData(valid_data.data(), valid_data.size());
+            auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+            dataset->SetIsSparse(is_sparse_);
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                valid_data->data(), valid_data->size()));
+            vec_index->BuildWithDataset(dataset, build_config_);
         }
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             result;
@@ -209,10 +220,20 @@ InterimSealedIndexTranslator::get_cells(
         auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
 
-        int64_t actual_row_count = nullable ? vec_data_->GetValidCountInChunk(i)
-                                            : vec_data_->chunk_row_nums(i);
+        const int64_t logical_begin = vec_data_->GetNumRowsUntilChunk(i);
+        const int64_t logical_rows = vec_data_->chunk_row_nums(i);
+        int64_t actual_row_count =
+            nullable ? vec_data_->GetValidCountInChunk(i) : logical_rows;
 
         if (actual_row_count == 0) {
+            if (nullable && !first_build) {
+                auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+                dataset->SetIsSparse(is_sparse_);
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data() + logical_begin,
+                    static_cast<size_t>(logical_rows)));
+                vec_index->AddWithDataset(dataset, build_config_);
+            }
             continue;
         }
 
@@ -222,17 +243,23 @@ InterimSealedIndexTranslator::get_cells(
         dataset->SetIsSparse(is_sparse_);
 
         if (first_build) {
+            if (nullable) {
+                const auto logical_prefix = logical_begin + logical_rows;
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data(), static_cast<size_t>(logical_prefix)));
+            }
             vec_index->BuildWithDataset(dataset, build_config_);
             first_build = false;
         } else {
+            if (nullable) {
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data() + logical_begin,
+                    static_cast<size_t>(logical_rows)));
+            }
             vec_index->AddWithDataset(dataset, build_config_);
         }
     }
 
-    if (nullable) {
-        const auto& valid_data = vec_data_->GetValidData();
-        vec_index->BuildValidData(valid_data.data(), valid_data.size());
-    }
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;
     result.emplace_back(std::make_pair(0, std::move(vec_index)));

@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -33,7 +34,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert streaming %d", it.ID()))
 
 	collectionName := it.insertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		mlog.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
@@ -41,7 +42,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.getVChannels(collID)
+	channelNames, err := it.chMgr.GetVChannels(collID)
 	if err != nil {
 		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
 		it.result.Status = merr.Status(err)
@@ -64,9 +65,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -89,6 +90,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 func repackInsertDataForStreamingService(
 	ctx context.Context,
+	metaCache Cache,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
@@ -97,14 +99,14 @@ func repackInsertDataForStreamingService(
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
-	walName := getActiveWALName()
+	walName := channelmgr.GetActiveWALName()
 
 	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	if err != nil {
 		return nil, err
 	}
 	partitionName := insertMsg.PartitionName
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
+	partitionID, err := metaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +140,7 @@ func repackInsertDataForStreamingService(
 
 func repackInsertDataWithPartitionKeyForStreamingService(
 	ctx context.Context,
+	metaCache Cache,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
@@ -148,7 +151,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
-	walName := getActiveWALName()
+	walName := channelmgr.GetActiveWALName()
 
 	var channel2RowOffsets map[string][]int
 	var err error
@@ -160,7 +163,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	if err != nil {
 		return nil, err
 	}
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, metaCache, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		mlog.Warn(ctx, "get default partition names failed in partition key mode",
 			mlog.FieldCollectionName(insertMsg.CollectionName),
@@ -171,7 +174,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	// Get partition ids
 	partitionIDs := make(map[string]int64, 0)
 	for _, partitionName := range partitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
+		partitionID, err := metaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 		if err != nil {
 			mlog.Warn(ctx, "get partition id failed",
 				mlog.FieldCollectionName(insertMsg.CollectionName),
@@ -267,7 +270,7 @@ func repackInsertDataByPartitionForStreamingService(
 		pack := pending[0]
 		pending = pending[1:]
 		if pack.insertMsg == nil {
-			packedMsgs, err := genInsertMsgsByPartition(
+			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
 				ctx,
 				0,
 				partitionID,

@@ -123,6 +123,11 @@ const (
 	// Scalar index engine version 4:
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
+	// - Nested (struct sub-field) HYBRID indexes may select STL_SORT for
+	//   high-cardinality data (in addition to the existing INVERTED); an
+	//   older reader's ScalarIndexSort predates nested-index support and
+	//   cannot load a nested STL_SORT physical index
+	//   (see MinScalarIndexVersionForNestedHybridStlSort)
 	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(3)
@@ -132,6 +137,14 @@ const (
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForNestedHybridStlSort is the minimum scalar index
+	// engine version at which nested (struct sub-field) HYBRID indexes may
+	// select STL_SORT for high-cardinality data instead of INVERTED. Below
+	// this version, nested HYBRID indexes always keep INVERTED at high
+	// cardinality so that an older reader (e.g. 2.6, whose ScalarIndexSort
+	// predates nested-index support) can still load the index.
+	MinScalarIndexVersionForNestedHybridStlSort = int32(4)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
@@ -865,6 +878,24 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	// right shift by 1 to preserve sign bit
 	reversed = reversed >> 1
 
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
+// AllocAutoIDN is the int64 counterpart of AllocAutoID. It allocates n contiguous
+// ids in a single logical range via allocFunc (which itself takes an int64 count,
+// e.g. datacoord's allocator.AllocN), so callers can request more than
+// math.MaxUint32 ids at once. The returned [begin, end) carries the clusterID bits
+// in its high bits, identical to AllocAutoID.
+func AllocAutoIDN(allocFunc func(int64) (int64, int64, error), n int64, clusterID uint64) (int64, int64, error) {
+	if n <= 0 {
+		return 0, 0, nil
+	}
+	idStart, idEnd, err := allocFunc(n)
+	if err != nil {
+		return 0, 0, err
+	}
+	// right shift by 1 to preserve sign bit
+	reversed := bits.Reverse64(clusterID) >> 1
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
 

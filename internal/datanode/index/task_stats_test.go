@@ -17,7 +17,9 @@
 package index
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +47,43 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type statsTaskLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*statsTaskLogBuffer) Sync() error {
+	return nil
+}
+
+func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &statsTaskLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
+func statsLogSentinel(parts ...string) string {
+	return strings.Join(parts, "_")
+}
+
+func statsLogCredentialJSON(value string) string {
+	return `{"private_key":"` + value + `"}`
+}
 
 func TestTaskStatsSuite(t *testing.T) {
 	suite.Run(t, new(TaskStatsSuite))
@@ -185,6 +225,49 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		_, err = task.sort(ctx)
 		s.Error(err)
 	})
+}
+
+func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	accessKey := statsLogSentinel("STORAGE", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("STORAGE", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("STORAGE", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("GCP", "CREDENTIAL", "JSON", "SENTINEL")
+
+	manager := NewTaskManager(ctx)
+	task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:    s.clusterID,
+		TaskID:       100,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		SegmentID:    102,
+		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
+			StorageType:       "s3",
+			BucketName:        "stats-bucket",
+			RootPath:          "stats/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
+		},
+	}, manager, s.mockChunkManager, nil)
+
+	err := task.PreExecute(ctx)
+	s.Require().NoError(err)
+	output := logs.String()
+	s.NotContains(output, accessKey)
+	s.NotContains(output, secretKey)
+	s.NotContains(output, caCert)
+	s.NotContains(output, gcpCredential)
+	s.Contains(output, "storageConfig")
+	s.Contains(output, "storage.example.test")
+	s.Contains(output, "stats-bucket")
+	s.Contains(output, "stats/root")
+	s.Contains(output, "s3")
+	s.Contains(output, "<redacted>")
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {

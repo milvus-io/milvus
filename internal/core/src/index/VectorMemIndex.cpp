@@ -45,7 +45,6 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/File.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/RangeSearchHelper.h"
@@ -142,7 +141,7 @@ AppendEmptyEmbListOffsetsToBinarySet(int64_t dim,
         return;
     }
 
-    auto count = ToValidDataCount(offsets.size());
+    auto count = static_cast<uint64_t>(offsets.size());
     auto bytes =
         sizeof(int64_t) + sizeof(uint64_t) + offsets.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> data(new uint8_t[bytes]);
@@ -246,8 +245,8 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
         return iterators;
     };
 
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping)) {
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map)) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -304,8 +303,8 @@ template <typename T>
 BinarySet
 VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
-    const auto& offset_mapping = GetOffsetMapping();
-    bool all_null_nullable = IsAllNullNullable(offset_mapping);
+    const auto& id_map = GetIdMap();
+    bool all_null_nullable = IsAllNullNullable(id_map);
     if (IsEmptyEmbListIndex()) {
         AppendEmptyEmbListOffsetsToBinarySet(
             GetDim(), empty_emb_list_offsets_, ret);
@@ -317,7 +316,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
                       KnowhereStatusString(stat));
     }
 
-    AppendValidDataToBinarySet(offset_mapping, ret);
+    AppendValidDataToBinarySet(id_map, ret);
     Disassemble(ret);
 
     return ret;
@@ -327,14 +326,25 @@ template <typename T>
 void
 VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                        const Config& config) {
+    const auto restored_id_map =
+        RestoreIdMapFromBinarySet(binary_set, index_.GetIdMap());
     auto empty_emb_list_state =
         LoadEmptyEmbListOffsetsFromBinarySet(binary_set);
     if (empty_emb_list_state.has_value()) {
         SetDim(empty_emb_list_state->dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state->offsets);
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(index_.Node(),
+                                  ErrorCode::UnexpectedError,
+                                  "empty emb-list load");
+        }
     } else if (ContainsOnlyValidData(binary_set)) {
         if (config.contains(DIM_KEY)) {
             SetDim(GetDimFromConfig(config));
+        }
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(
+                index_.Node(), ErrorCode::UnexpectedError, "all-null load");
         }
     } else {
         auto stat = index_.Deserialize(binary_set, config);
@@ -342,10 +352,9 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
             ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to Deserialize index: {}",
                       KnowhereStatusString(stat));
-        SetDim(index_.Dim());
+        auto dim = index_.Dim();
+        SetDim(dim > 0 ? dim : GetDim());
     }
-
-    LoadValidDataFromBinarySet(binary_set, this);
 }
 
 template <typename T>
@@ -491,7 +500,16 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::Json index_config;
     index_config.update(config);
 
+    if (dataset != nullptr && dataset->HasIdMapData() &&
+        !index_.GetIdMap().IsEnabled()) {
+        index_.GetIdMap().SetType(knowhere::IdMap::Type::SEALED);
+    }
     SetDim(dataset->GetDim());
+    const auto id_map_only_build =
+        GetIdMapOnlyBuildPlan(dataset, elem_type_ != DataType::NONE);
+    if (id_map_only_build.empty_embedding_list) {
+        empty_emb_list_offsets_ = {0};
+    }
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     LOG_INFO("start build memory index with KNOWHERE, build_id: {}",
@@ -504,7 +522,11 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     rc.ElapseFromBegin("Done");
     LOG_INFO("build memory index with KNOWHERE done, build_id: {}",
              config.value("build_id", "unknown"));
-    SetDim(index_.Dim());
+    if (id_map_only_build.enabled) {
+        return;
+    }
+    auto dim = index_.Dim();
+    SetDim(dim > 0 ? dim : dataset->GetDim());
 }
 
 template <typename T>
@@ -557,6 +579,20 @@ VectorMemIndex<T>::Build(const Config& config) {
             chunk_offset += rows;
         }
     }
+    auto make_dataset = [&](int64_t rows,
+                            int64_t dim,
+                            const void* tensor,
+                            bool is_sparse = false) {
+        auto dataset = GenDataset(rows, dim, tensor);
+        if (is_sparse) {
+            dataset->SetIsSparse(true);
+        }
+        if (nullable) {
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                valid_data.get(), static_cast<size_t>(total_num_rows)));
+        }
+        return dataset;
+    };
 
     if (!IndexIsSparse(GetIndexType())) {
         int64_t dim = 0;
@@ -572,8 +608,8 @@ VectorMemIndex<T>::Build(const Config& config) {
             }
         }
         if (nullable && total_valid_rows == 0) {
-            SetDim(dim);
-            BuildValidData(valid_data.get(), total_num_rows);
+            auto dataset = make_dataset(0, dim, nullptr);
+            BuildWithDataset(dataset, build_config);
             return;
         }
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
@@ -633,12 +669,14 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
 
-            total_valid_rows = lim_offset;
-            if (lim_offset == 0) {
-                SetDim(dim);
-                empty_emb_list_offsets_ = std::move(offsets);
+            const auto total_vectors = static_cast<int64_t>(lim_offset);
+            if (total_vectors == 0) {
                 if (nullable) {
-                    BuildValidData(valid_data.get(), total_num_rows);
+                    auto dataset = make_dataset(0, dim, nullptr);
+                    BuildWithDataset(dataset, build_config);
+                } else {
+                    empty_emb_list_offsets_ = std::move(offsets);
+                    SetDim(dim);
                 }
                 return;
             }
@@ -646,18 +684,20 @@ VectorMemIndex<T>::Build(const Config& config) {
 
         field_datas.clear();
 
-        auto dataset = GenDataset(total_valid_rows, dim, buf.get());
+        auto rows = elem_type_ == DataType::NONE
+                        ? total_valid_rows
+                        : static_cast<int64_t>(lim_offset);
+        auto dataset = make_dataset(rows, dim, buf.get());
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
         if (!offsets.empty()) {
             dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                          const_cast<const size_t*>(offsets.data()));
+            dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                         static_cast<int64_t>(offsets.size() - 1));
         }
         BuildWithDataset(dataset, build_config);
-        if (nullable) {
-            BuildValidData(valid_data.get(), total_num_rows);
-        }
     } else {
         // sparse
         int64_t dim = 0;
@@ -669,8 +709,8 @@ VectorMemIndex<T>::Build(const Config& config) {
                     ->Dim());
         }
         if (nullable && total_valid_rows == 0) {
-            SetDim(dim);
-            BuildValidData(valid_data.get(), total_num_rows);
+            auto dataset = make_dataset(0, dim, nullptr, true);
+            BuildWithDataset(dataset, build_config);
             return;
         }
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
@@ -690,15 +730,11 @@ VectorMemIndex<T>::Build(const Config& config) {
             }
             offset += field_data->get_valid_rows();
         }
-        auto dataset = GenDataset(total_valid_rows, dim, vec.data());
-        dataset->SetIsSparse(true);
+        auto dataset = make_dataset(total_valid_rows, dim, vec.data(), true);
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
         BuildWithDataset(dataset, build_config);
-        if (nullable) {
-            BuildValidData(valid_data.get(), total_num_rows);
-        }
     }
 }
 
@@ -731,8 +767,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -823,8 +859,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorMemIndex<T>::HasRawData() const {
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -833,8 +869,8 @@ VectorMemIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorMemIndex<T>::IsIndexRefineEnabled() const {
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();
@@ -852,6 +888,13 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     // if dataset is empty, return empty vector
     if (dataset->GetRows() == 0) {
         return {};
+    }
+
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map)) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "failed to get vector, nullable vector index contains no "
+                  "valid vectors");
     }
 
     auto res = index_.GetVectorByIds(dataset);
@@ -875,12 +918,7 @@ VectorMemIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
         auto rows = dataset->GetRows();
         auto emb_list_count =
             static_cast<int64_t>(empty_emb_list_offsets_.size()) - 1;
-        for (int64_t i = 0; i < rows; ++i) {
-            AssertInfo(ids[i] >= 0 && ids[i] < emb_list_count,
-                       "emb list id {} out of range {}",
-                       ids[i],
-                       emb_list_count);
-        }
+        CheckEmptyEmbListIds(ids, rows, emb_list_count);
         return {{}, std::vector<size_t>(rows + 1, 0)};
     }
 
@@ -898,6 +936,13 @@ std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     if (dataset->GetRows() == 0) {
         return nullptr;
+    }
+
+    const auto& id_map = GetIdMap();
+    if (IsAllNullNullable(id_map)) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "failed to get vector, nullable vector index contains no "
+                  "valid vectors");
     }
 
     auto res = index_.GetVectorByIds(dataset);
@@ -1132,6 +1177,25 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                 embedding_list_raw_index_path.value();
         }
     }
+    auto restore_id_map = [&]() -> RestoredIdMap {
+        if (!valid_data_count_codec && !valid_data_codec) {
+            return {};
+        }
+        AssertInfo(valid_data_count_codec && valid_data_codec,
+                   "nullable vector index valid_data files are incomplete");
+        return RestoreIdMapFromValidDataPayload(
+            index_.GetIdMap(),
+            valid_data_count_codec->PayloadData(),
+            valid_data_count_codec->PayloadSize(),
+            valid_data_codec->PayloadData(),
+            valid_data_codec->PayloadSize(),
+            &conf,
+            std::filesystem::path(local_filepath.value())
+                .parent_path()
+                .string());
+    };
+    const auto restored_id_map = restore_id_map();
+
     auto start_deserialize = std::chrono::system_clock::now();
     std::chrono::duration<double> deserialize_duration{};
     if (wrote_index_data) {
@@ -1152,6 +1216,11 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             static_cast<size_t>(empty_emb_list_offsets_codec->PayloadSize()));
         this->SetDim(empty_emb_list_state.dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state.offsets);
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(index_.Node(),
+                                  ErrorCode::UnexpectedError,
+                                  "empty emb-list mmap load");
+        }
     } else {
         LOG_INFO("load all-null nullable vector index valid data only...");
         AssertInfo(valid_data_count_codec && valid_data_codec,
@@ -1159,25 +1228,16 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         if (conf.contains(DIM_KEY)) {
             this->SetDim(GetDimFromConfig(conf));
         }
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(index_.Node(),
+                                  ErrorCode::UnexpectedError,
+                                  "all-null mmap load");
+        }
     }
     milvus::monitor::internal_storage_deserialize_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());
-
-    // Restore valid_data for nullable vector support
-    if (valid_data_count_codec && valid_data_codec) {
-        size_t count;
-        milvus::fastmem::FastMemcpy(
-            &count, valid_data_count_codec->PayloadData(), sizeof(size_t));
-
-        std::unique_ptr<bool[]> valid_data(new bool[count]);
-        auto bitmap = valid_data_codec->PayloadData();
-        for (size_t i = 0; i < count; ++i) {
-            valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
-        }
-        BuildValidData(valid_data.get(), count);
-    }
 
     this->mmap_file_raii_ =
         std::make_unique<MmapFileRAII>(local_filepath.value());
