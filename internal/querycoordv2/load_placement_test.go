@@ -25,15 +25,32 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// formHook is the smallest thing a distribution can install: the placement
+// only asks whether a hook is there, never what it does.
+type formHook struct{ hook.Hook }
+
+// setForm makes this test's binary one a distribution compiled itself into,
+// or a stock one, and restores a stock binary when the test ends.
+func setForm(t *testing.T, installed bool) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	if installed {
+		ext.SetHook(formHook{})
+	}
+}
 
 func loadedIn(collectionID int64, resourceGroups ...string) job.CurrentLoadConfig {
 	replicas := make(map[int64]*meta.Replica, len(resourceGroups))
@@ -50,6 +67,7 @@ func loadedIn(collectionID int64, resourceGroups ...string) job.CurrentLoadConfi
 
 func TestCompletePlacementKeepsOutOfScopeResourceGroups(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	expected := map[string]int{"rg_1": 1}
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, expected, loadedIn(7, "rg_0"))
@@ -61,6 +79,7 @@ func TestCompletePlacementKeepsOutOfScopeResourceGroups(t *testing.T) {
 
 func TestCompletePlacementDoesNotOverrideNamedResourceGroups(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	current := loadedIn(7, "rg_0", "rg_1")
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, map[string]int{"rg_1": 2}, current)
@@ -69,6 +88,7 @@ func TestCompletePlacementDoesNotOverrideNamedResourceGroups(t *testing.T) {
 
 func TestCompletePlacementOnFirstLoadIsUnchanged(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	expected := map[string]int{"rg_0": 1}
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_0"}, expected, job.CurrentLoadConfig{})
@@ -77,6 +97,7 @@ func TestCompletePlacementOnFirstLoadIsUnchanged(t *testing.T) {
 
 func TestCompletePlacementWhenRequestNamesEveryLoadedResourceGroup(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_0"}, map[string]int{"rg_0": 1}, loadedIn(7, "rg_0"))
 	assert.Equal(t, map[string]int{"rg_0": 1}, got)
@@ -84,6 +105,7 @@ func TestCompletePlacementWhenRequestNamesEveryLoadedResourceGroup(t *testing.T)
 
 func TestCompletePlacementKeepsEverySibling(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_2"}, map[string]int{"rg_2": 1},
 		loadedIn(7, "rg_0", "rg_1"))
@@ -92,6 +114,7 @@ func TestCompletePlacementKeepsEverySibling(t *testing.T) {
 
 func TestCompletePlacementKeepsSiblingReplicaCount(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, map[string]int{"rg_1": 1},
 		loadedIn(7, "rg_0", "rg_0"))
@@ -108,6 +131,7 @@ func (stubBroadcaster) Close() {}
 
 func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	const collectionID = int64(7)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
@@ -141,6 +165,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 
 func TestCompletePlacementForARequestNamingNoResourceGroup(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	expected := map[string]int{meta.DefaultResourceGroupName: 1}
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, nil, expected, loadedIn(7, "rg_0"))
@@ -150,6 +175,7 @@ func TestCompletePlacementForARequestNamingNoResourceGroup(t *testing.T) {
 
 func TestCompletePlacementWhenTheDefaultResourceGroupIsNamedExplicitly(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{meta.DefaultResourceGroupName},
 		map[string]int{meta.DefaultResourceGroupName: 1}, loadedIn(7, "rg_0"))
@@ -211,6 +237,7 @@ func TestLoadReplicaConfigUnderClusterLevelForceOverride(t *testing.T) {
 // the collection ends up with one more replica than anybody asked for.
 func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	const collectionID = int64(8)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
@@ -249,6 +276,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 // number" of a resource group the caller never mentioned.
 func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	const collectionID = int64(9)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
@@ -288,17 +316,24 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 // scoped, and the groups it did not name keep their replicas.
 func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T) {
 	paramtable.Init()
+	setForm(t, true)
 	const collectionID = int64(10)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
 		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
 	s := &Server{broker: broker}
+	// The collection is registered as loaded, so CheckIfLoadPartitionsExecutable
+	// runs for real: the scoped expansion must pass it.
+	current := loadedIn(collectionID, "rg_a")
+	current.Collection = &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
+	}
 	var captured *job.AlterLoadConfigRequest
 	mockey.PatchConvey("a load_partitions naming one resource group carries the other's placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
 		mockey.Mock(utils.AssignReplica).Return(map[string]int{"rg_b": 1}, nil).Build()
-		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_a")).Build()
+		mockey.Mock((*Server).getCurrentLoadConfig).Return(current).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
 				captured = req
@@ -311,8 +346,98 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 				ReplicaNumber:  1,
 				ResourceGroups: []string{"rg_b"},
 			})
-		assert.NoError(t, err)
+		assert.NoError(t, err, "adding a group to a loaded collection is not a replica-number change for a form")
 	})
 	require.NotNil(t, captured)
 	assert.Equal(t, map[string]int{"rg_a": 1, "rg_b": 1}, captured.Expected.ExpectedReplicaNumber)
+	assert.Equal(t, []string{"rg_b"}, captured.ScopedResourceGroups, "the scoping list travels with the request")
+}
+
+// A stock binary never completes a placement: the request states it whole,
+// whatever groups it names, and the function hands back exactly what
+// AssignReplica produced.
+func TestAStockBinaryStatesTheWholePlacementOnEveryRequest(t *testing.T) {
+	paramtable.Init()
+	setForm(t, false)
+	expected := map[string]int{"rg_1": 1}
+	got := completePlacementForOutOfScopeResourceGroups(
+		context.Background(), 7, []string{"rg_1"}, expected, loadedIn(7, "rg_0"))
+	assert.Equal(t, map[string]int{"rg_1": 1}, got,
+		"on a stock binary a load naming rg_1 moves the replica there, as it always has")
+}
+
+// The LoadCollection callback on a stock binary: a second load naming rg_1 on
+// a collection loaded in rg_0 broadcasts a placement of rg_1 alone, so the
+// reconciliation moves the replica - master's contract, in which the request's
+// replica_number is the total.
+func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
+	paramtable.Init()
+	setForm(t, false)
+	const collectionID = int64(11)
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
+	s := &Server{broker: broker}
+	var captured *job.AlterLoadConfigRequest
+	mockey.PatchConvey("a stock load naming one resource group states the whole placement", t, func() {
+		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
+			Return(stubBroadcaster{}, nil).Build()
+		mockey.Mock(utils.AssignReplica).Return(map[string]int{"rg_1": 1}, nil).Build()
+		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_0")).Build()
+		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
+			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
+				captured = req
+				return nil, nil
+			}).Build()
+		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
+			&querypb.LoadCollectionRequest{
+				CollectionID:   collectionID,
+				ReplicaNumber:  1,
+				ResourceGroups: []string{"rg_1"},
+			})
+		assert.NoError(t, err)
+	})
+	require.NotNil(t, captured, "the broadcast request must have been built")
+	assert.Equal(t, map[string]int{"rg_1": 1}, captured.Expected.ExpectedReplicaNumber,
+		"a stock binary must not carry the replicas of a resource group the request left out")
+}
+
+// The LoadPartitions callback on a stock binary, same shape: the placement
+// broadcast is the one the request asked for, and the load is not refused,
+// since one replica is replaced by one replica.
+func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
+	paramtable.Init()
+	setForm(t, false)
+	const collectionID = int64(12)
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+	s := &Server{broker: broker}
+	current := loadedIn(collectionID, "rg_a")
+	current.Collection = &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
+	}
+	var captured *job.AlterLoadConfigRequest
+	mockey.PatchConvey("a stock load_partitions naming one resource group states the whole placement", t, func() {
+		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
+			Return(stubBroadcaster{}, nil).Build()
+		mockey.Mock(utils.AssignReplica).Return(map[string]int{"rg_b": 1}, nil).Build()
+		mockey.Mock((*Server).getCurrentLoadConfig).Return(current).Build()
+		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
+			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
+				captured = req
+				return nil, nil
+			}).Build()
+		err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(),
+			&querypb.LoadPartitionsRequest{
+				CollectionID:   collectionID,
+				PartitionIDs:   []int64{1},
+				ReplicaNumber:  1,
+				ResourceGroups: []string{"rg_b"},
+			})
+		assert.NoError(t, err, "one replica for one replica is not a replica-number change")
+	})
+	require.NotNil(t, captured)
+	assert.Equal(t, map[string]int{"rg_b": 1}, captured.Expected.ExpectedReplicaNumber)
 }
