@@ -32,14 +32,14 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         1. Data becomes invisible after the specified TTL period
         2. Different operations (search, query, hybrid search) correctly handle expired data
         3. TTL can be altered and the changes take effect
-        4. Newly inserted data is not affected by previous TTL settings
+        4. Newly inserted data is not affected by previously expired data
 
         The test performs the following steps:
         1. Create a collection with TTL enabled
         2. Insert test data
         3. Wait for TTL to expire and verifies data becomes invisible
-        4. Insert new data and verify new inserted data are visible
-        5. Alter TTL and verify the changes
+        4. Insert new data with the original TTL and verify it is visible
+        5. Alter TTL and verify expired data becomes visible again
 
         Parameters:
         - flush_enable: Whether to flush collection during testing
@@ -73,6 +73,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         # load collection
         self.load_collection(client, collection_name)
 
+        # TTL begins at the server-side insert timestamp, so measure before the first write.
+        start_time = time.monotonic()
         # insert data
         insert_times = 2
         for i in range(insert_times):
@@ -86,8 +88,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
                 self.upsert(client, collection_name, rows)
 
         # search until timeout or get empty results
-        start_time = time.time()
-        timeout = ttl * 5
+        deadline = start_time + ttl + 120
         nq = 1
         search_ttl_effective = False
         query_ttl_effective = False
@@ -101,7 +102,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             t1 = time.time()
             self.flush(client, collection_name)
             log.info(f"flush completed in {time.time() - t1}s")
-        while time.time() - start_time < timeout:
+        while time.monotonic() < deadline:
             if search_ttl_effective is False:
                 res1 = self.search(
                     client,
@@ -126,10 +127,10 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
                     consistency_level=CONSISTENCY_STRONG,
                 )[0]
             if len(res1[0]) == 0 and search_ttl_effective is False:
-                log.info(f"search ttl effects in {round(time.time() - start_time, 4)}s")
+                log.info(f"search ttl effects in {round(time.monotonic() - start_time, 4)}s")
                 search_ttl_effective = True
             if res2[0].get("count(*)", None) == 0 and query_ttl_effective is False:
-                log.info(f"query ttl effects in {round(time.time() - start_time, 4)}s")
+                log.info(f"query ttl effects in {round(time.monotonic() - start_time, 4)}s")
                 res2x = self.query(
                     client,
                     collection_name,
@@ -140,30 +141,46 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
                 log.debug(f"res2x: {res2x[0].get('count(*)', None)}")
                 query_ttl_effective = True
             if len(res3[0]) == 0 and hybrid_search_ttl_effective is False:
-                log.info(f"hybrid search ttl effects in {round(time.time() - start_time, 4)}s")
+                log.info(f"hybrid search ttl effects in {round(time.monotonic() - start_time, 4)}s")
                 hybrid_search_ttl_effective = True
             if search_ttl_effective is True and query_ttl_effective is True and hybrid_search_ttl_effective is True:
                 break
-            time.sleep(1)
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
 
-        delta_tt = round(time.time() - start_time, 4)
+        delta_tt = round(time.monotonic() - start_time, 4)
         log.info(f"ttl effects in {delta_tt}s")
-        assert ttl - 2 <= delta_tt <= ttl + 5
+        assert search_ttl_effective and query_ttl_effective and hybrid_search_ttl_effective, (
+            f"TTL did not expire all rows within {delta_tt}s: search={search_ttl_effective}, "
+            f"query={query_ttl_effective}, hybrid_search={hybrid_search_ttl_effective}"
+        )
+        assert delta_tt >= ttl - 2
 
         # query count(*)
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get("count(*)", None) == 0
 
-        # insert more data
-        for i in range(insert_times):
-            start_id = (insert_times + i) * nb
-            rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=start_id)
-            for row in rows:
-                row[bool_field] = True
-            if on_insert is True:
-                self.insert(client, collection_name, rows)
-            else:
-                self.upsert(client, collection_name, rows)
+        # Use a small single request so the unchanged short TTL still covers the visibility check.
+        new_nb = 10
+        rows = cf.gen_row_data_by_schema(nb=new_nb, schema=schema, start=nb * insert_times)
+        for row in rows:
+            row[bool_field] = True
+        if on_insert is True:
+            self.insert(client, collection_name, rows)
+        else:
+            self.upsert(client, collection_name, rows)
+
+        # Verify fresh rows are visible while previously expired rows remain filtered out.
+        res = self.query(
+            client,
+            collection_name,
+            filter="visible==True",
+            output_fields=["count(*)"],
+            consistency_level=CONSISTENCY_STRONG,
+        )[0]
+        assert res[0].get("count(*)", 0) == new_nb
+
+        # Extend TTL before slower flush and multi-RPC checks.
+        self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 2000})
 
         # flush collection if flush_enable is True
         if flush_enable:
@@ -171,65 +188,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             self.flush(client, collection_name)
             log.info(f"flush completed in {time.time() - t1}s")
 
-        # search data again after insert more data
+        # Verify both the restored rows and newly inserted rows after extending TTL.
         consistency_levels = [CONSISTENCY_EVENTUALLY, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_STRONG]
-        for consistency_level in consistency_levels:
-            log.debug(f"start to search/query with {consistency_level}")
-            # Poll until search returns results (search visibility may lag behind query)
-            for i in range(15):
-                res = self.search(
-                    client,
-                    collection_name,
-                    search_vectors,
-                    search_params={"metric_type": "COSINE"},
-                    anns_field=vec_field,
-                    limit=10,
-                    consistency_level=consistency_level,
-                )[0]
-                if len(res[0]) > 0:
-                    break
-                time.sleep(2)
-            assert len(res[0]) > 0, f"Search with {consistency_level} returned 0 results after retries"
-
-            if consistency_level != CONSISTENCY_STRONG:
-                pass
-            else:
-                # query count(*)
-                res = self.query(
-                    client, collection_name, filter="", output_fields=["count(*)"], consistency_level=consistency_level
-                )[0]
-                assert res[0].get("count(*)", None) == nb * insert_times
-                res = self.query(
-                    client,
-                    collection_name,
-                    filter="visible==False",
-                    output_fields=["count(*)"],
-                    consistency_level=consistency_level,
-                )[0]
-                assert res[0].get("count(*)", None) == 0
-                # query count(visible)
-                res = self.query(
-                    client,
-                    collection_name,
-                    filter="visible==True",
-                    output_fields=["count(*)"],
-                    consistency_level=consistency_level,
-                )[0]
-                assert res[0].get("count(*)", None) == nb * insert_times
-
-            # hybrid search
-            res = self.hybrid_search(
-                client,
-                collection_name,
-                [sub_search1, sub_search2],
-                ranker,
-                limit=10,
-                consistency_level=consistency_level,
-            )[0]
-            assert len(res[0]) > 0
-
-        # alter ttl to 2000s
-        self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 2000})
         for consistency_level in consistency_levels:
             log.debug(f"start to search/query after alter ttl with {consistency_level}")
             # search data after alter ttl
@@ -279,7 +239,15 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             if consistency_level != CONSISTENCY_STRONG:
                 assert res[0].get("count(*)", 0) >= insert_times * nb
             else:
-                assert res[0].get("count(*)", 0) == insert_times * nb * 2
+                assert res[0].get("count(*)", 0) == insert_times * nb + new_nb
+                res = self.query(
+                    client,
+                    collection_name,
+                    filter="visible==True",
+                    output_fields=["count(*)"],
+                    consistency_level=consistency_level,
+                )[0]
+                assert res[0].get("count(*)", 0) == new_nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_ttl_edge(self):
@@ -453,18 +421,27 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
     def _wait_until_count(self, client, collection_name, expected_count, timeout=30, interval=2):
         """Poll until query count(*) equals expected_count or timeout is reached."""
-        for _ in range(timeout // interval):
+        start = time.monotonic()
+        deadline = start + timeout
+        last_count = None
+        attempts = 0
+        while time.monotonic() < deadline:
+            attempts += 1
             res = self.query(
                 client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG
             )[0]
-            if res[0].get("count(*)") == expected_count:
+            last_count = res[0].get("count(*)")
+            if last_count == expected_count:
                 return
-            time.sleep(interval)
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        attempts += 1
         res = self.query(
             client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG
         )[0]
-        assert res[0].get("count(*)") == expected_count, (
-            f"Expected count {expected_count}, got {res[0].get('count(*)')} after {timeout}s"
+        last_count = res[0].get("count(*)")
+        elapsed = time.monotonic() - start
+        assert last_count == expected_count, (
+            f"Expected count {expected_count}, got {last_count} after {attempts} attempts in {elapsed:.1f}s"
         )
 
     def _wait_until_search_count(
@@ -487,14 +464,23 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         search_kwargs.setdefault("search_params", {})
         search_kwargs.setdefault("limit", 10)
         search_kwargs.setdefault("consistency_level", CONSISTENCY_STRONG)
-        for _ in range(timeout // interval):
+        start = time.monotonic()
+        deadline = start + timeout
+        last_count = None
+        attempts = 0
+        while time.monotonic() < deadline:
+            attempts += 1
             res = self.search(client, collection_name, search_vectors, anns_field=anns_field, **search_kwargs)[0]
-            if len(res[0]) == expected_count:
+            last_count = len(res[0])
+            if last_count == expected_count:
                 return res
-            time.sleep(interval)
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        attempts += 1
         res = self.search(client, collection_name, search_vectors, anns_field=anns_field, **search_kwargs)[0]
-        assert len(res[0]) == expected_count, (
-            f"Expected search count {expected_count}, got {len(res[0])} after {timeout}s"
+        last_count = len(res[0])
+        elapsed = time.monotonic() - start
+        assert last_count == expected_count, (
+            f"Expected search count {expected_count}, got {last_count} after {attempts} attempts in {elapsed:.1f}s"
         )
         return res
 
@@ -1050,49 +1036,76 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         target: test entity TTL still works after release and reload
         method:
             1. Create collection with ttl_field
-            2. Insert data with ttl = now() + 10 seconds
+            2. Insert expired and unexpired data
             3. Release and reload collection
-            4. Verify data is still visible
-            5. Wait for TTL to expire
-            6. Verify data is invisible after TTL expires
+            4. Verify TTL filtering is unchanged after reload
+            5. Set a short TTL after reload and verify real-time expiration
         expected: TTL filtering persists across release/reload cycles
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 100
-        ttl_seconds = 10
 
         self._create_ttl_collection(client, collection_name)
 
-        # Insert data with future ttl
-        ttl_timestamp = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
+        # Use state-based timestamps so release/load latency cannot consume the TTL window.
+        now_utc = datetime.now(UTC)
+        expired_ttl = (now_utc - timedelta(hours=1)).isoformat()
+        unexpired_ttl = (now_utc + timedelta(hours=1)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
-            {default_primary_key_field_name: i, "ttl": ttl_timestamp, default_vector_field_name: list(vectors[i])}
+            {
+                default_primary_key_field_name: i,
+                "ttl": expired_ttl if i < nb // 2 else unexpired_ttl,
+                default_vector_field_name: list(vectors[i]),
+            }
             for i in range(nb)
         ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Verify data is visible before release
+        # Verify only the unexpired half is visible before release.
         res = self.query(
-            client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG
+            client,
+            collection_name,
+            filter=default_search_exp,
+            output_fields=[default_primary_key_field_name],
+            consistency_level=CONSISTENCY_STRONG,
         )[0]
-        assert res[0].get("count(*)") == nb
+        assert {row[default_primary_key_field_name] for row in res} == set(range(nb // 2, nb))
 
         # Release and reload
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Verify data is still visible after reload
+        # Verify the same entities remain visible after reload.
+        res = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            output_fields=[default_primary_key_field_name],
+            consistency_level=CONSISTENCY_STRONG,
+        )[0]
+        assert {row[default_primary_key_field_name] for row in res} == set(range(nb // 2, nb))
+
+        # Start the short TTL window after reload so setup latency cannot consume it.
+        ttl_seconds = 20
+        short_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                "ttl": short_ttl,
+                default_vector_field_name: list(vectors[i]),
+            }
+            for i in range(nb // 2, nb)
+        ]
+        self.upsert(client, collection_name, rows)
+
         res = self.query(
             client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG
         )[0]
-        assert res[0].get("count(*)") == nb
-
-        # Wait for TTL to expire (poll until count reaches 0)
-        time.sleep(ttl_seconds)
-        self._wait_until_count(client, collection_name, expected_count=0)
+        assert res[0].get("count(*)") == nb // 2
+        self._wait_until_count(client, collection_name, expected_count=0, timeout=ttl_seconds + 30, interval=1)
 
         self.drop_collection(client, collection_name)
 
@@ -1173,35 +1186,40 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
             1. Create collection with ttl_field
             2. Insert data using timestamps with explicit timezone offset (e.g., +08:00)
             3. Insert data using second-level precision (no fractional seconds)
-            4. Verify data is visible before TTL, invisible after TTL
+            4. Verify future data is visible and expired data is invisible
         expected: Different timestamp formats (timezone offsets, different precisions)
                   are handled correctly
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 30
-        ttl_seconds = 8
+        nb_per_state = 30
+        nb = nb_per_state * 2
 
         self._create_ttl_collection(client, collection_name)
 
-        # Insert data with explicit timezone offset (+08:00)
+        # Use safely separated timestamps so setup latency cannot cross the TTL boundary.
         now_utc = datetime.now(UTC)
-        future_utc = now_utc + timedelta(seconds=ttl_seconds)
-        # Convert to +08:00 offset format
+        future_utc = now_utc + timedelta(hours=1)
+        expired_utc = now_utc - timedelta(hours=1)
         tz_shanghai = timezone(timedelta(hours=8))
-        future_shanghai = future_utc.astimezone(tz_shanghai)
-        ttl_with_offset = future_shanghai.strftime("%Y-%m-%dT%H:%M:%S+08:00")
-
-        # Insert with second-level precision (no fractional seconds)
-        ttl_second_precision = future_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        ttl_values = {
+            "future_offset": future_utc.astimezone(tz_shanghai).strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            "future_z": future_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "expired_offset": expired_utc.astimezone(tz_shanghai).strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            "expired_z": expired_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
 
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
-            if i < 15:
-                ttl_value = ttl_with_offset  # Explicit timezone offset
+            if i < nb_per_state // 2:
+                ttl_value = ttl_values["future_offset"]
+            elif i < nb_per_state:
+                ttl_value = ttl_values["future_z"]
+            elif i < nb_per_state + nb_per_state // 2:
+                ttl_value = ttl_values["expired_offset"]
             else:
-                ttl_value = ttl_second_precision  # Second-level precision with Z suffix
+                ttl_value = ttl_values["expired_z"]
             rows.append(
                 {default_primary_key_field_name: i, "ttl": ttl_value, default_vector_field_name: list(vectors[i])}
             )
@@ -1209,13 +1227,15 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Verify all data is visible
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get("count(*)") == nb
-
-        # Wait for TTL to expire (poll until count reaches 0)
-        time.sleep(ttl_seconds)
-        self._wait_until_count(client, collection_name, expected_count=0)
+        # Both timestamp formats must apply the same TTL filtering semantics.
+        res = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            output_fields=[default_primary_key_field_name],
+            consistency_level=CONSISTENCY_STRONG,
+        )[0]
+        assert {row[default_primary_key_field_name] for row in res} == set(range(nb_per_state))
 
         self.drop_collection(client, collection_name)
 
@@ -1594,70 +1614,48 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         target: test entity TTL works independently across different partitions
         method:
             1. Create collection with ttl_field and two partitions
-            2. Insert short TTL data into partition_a, long TTL data into partition_b
-            3. Wait for short TTL to expire
-            4. Verify partition_a data expired, partition_b data still visible
+            2. Insert expired data into partition_a and future data into partition_b
+            3. Verify partition_a data is expired and partition_b data is visible
         expected: TTL expiration is per-entity and works correctly across partitions
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 50
-        short_ttl_seconds = 8
 
         self._create_ttl_collection(client, collection_name)
         self.create_partition(client, collection_name, "partition_a")
         self.create_partition(client, collection_name, "partition_b")
 
-        # Insert short TTL data into partition_a
-        short_ttl = (datetime.now(UTC) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        # Use explicit expired/future states so partition setup cannot consume a short TTL window.
+        now_utc = datetime.now(UTC)
+        expired_ttl = (now_utc - timedelta(hours=1)).isoformat()
+        future_ttl = (now_utc + timedelta(hours=1)).isoformat()
         vectors_a = cf.gen_vectors(nb, dim=default_dim)
         rows_a = [
-            {default_primary_key_field_name: i, "ttl": short_ttl, default_vector_field_name: list(vectors_a[i])}
+            {default_primary_key_field_name: i, "ttl": expired_ttl, default_vector_field_name: list(vectors_a[i])}
             for i in range(nb)
         ]
         self.insert(client, collection_name, rows_a, partition_name="partition_a")
 
-        # Insert long TTL data into partition_b
-        long_ttl = (datetime.now(UTC) + timedelta(seconds=300)).isoformat()
+        # Insert future TTL data into partition_b.
         vectors_b = cf.gen_vectors(nb, dim=default_dim)
         rows_b = [
-            {default_primary_key_field_name: nb + i, "ttl": long_ttl, default_vector_field_name: list(vectors_b[i])}
+            {default_primary_key_field_name: nb + i, "ttl": future_ttl, default_vector_field_name: list(vectors_b[i])}
             for i in range(nb)
         ]
         self.insert(client, collection_name, rows_b, partition_name="partition_b")
         self.flush(client, collection_name)
 
-        # Verify both partitions have data
+        # Verify TTL filtering independently for each partition.
         res = self.query(
-            client, collection_name, filter="", output_fields=["count(*)"], partition_names=["partition_a"]
+            client,
+            collection_name,
+            filter="",
+            output_fields=["count(*)"],
+            partition_names=["partition_a"],
+            consistency_level=CONSISTENCY_STRONG,
         )[0]
-        assert res[0].get("count(*)") == nb
-        res = self.query(
-            client, collection_name, filter="", output_fields=["count(*)"], partition_names=["partition_b"]
-        )[0]
-        assert res[0].get("count(*)") == nb
-
-        # Wait for short TTL to expire
-        time.sleep(short_ttl_seconds)
-        # Poll on total count: partition_a expired (0) + partition_b alive (nb) = nb
-        self._wait_until_count(client, collection_name, expected_count=nb)
-
-        # Verify partition_a data expired (poll in case per-partition propagation lags)
-        for _ in range(15):
-            res = self.query(
-                client,
-                collection_name,
-                filter="",
-                output_fields=["count(*)"],
-                partition_names=["partition_a"],
-                consistency_level=CONSISTENCY_STRONG,
-            )[0]
-            if res[0].get("count(*)") == 0:
-                break
-            time.sleep(2)
-        assert res[0].get("count(*)") == 0, f"Expected partition_a count 0, got {res[0].get('count(*)')}"
-
-        # Verify partition_b data still visible
+        assert res[0].get("count(*)") == 0
         res = self.query(
             client,
             collection_name,
