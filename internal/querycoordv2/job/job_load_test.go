@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -466,9 +468,22 @@ func (suite *IncrementalExpansionSuite) SetupSuite() {
 	paramtable.Init()
 }
 
+// formHook is the smallest thing a distribution can install: the fast path
+// only asks whether a hook is there, never what it does.
+type formHook struct{ hook.Hook }
+
+// installForm makes this test's binary one a distribution compiled itself
+// into; the stock cases below uninstall it again.
+func (suite *IncrementalExpansionSuite) installForm() {
+	ext.ResetForTest()
+	suite.T().Cleanup(ext.ResetForTest)
+	ext.SetHook(formHook{})
+}
+
 func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.ctx = context.Background()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	suite.installForm()
 
 	suite.catalog = mocks.NewQueryCoordCatalog(suite.T())
 	// The collection under test always carries exactly one partition, so a
@@ -640,19 +655,73 @@ func (suite *IncrementalExpansionSuite) TestFirstLoadOverwritesMetaAndRegistersU
 	suite.Equal([]int64{expansionPartitionID}, tasks[0].partitionIDs)
 }
 
-// TestReloadOverwritesMeta pins the upstream path for a load that repeats the
-// current configuration: nothing is added, so the meta write still happens.
-func (suite *IncrementalExpansionSuite) TestReloadOverwritesMeta() {
+// TestAnIdenticalReplicaSetOnALoadedCollectionIsAReplay: a message whose
+// replica set is exactly what meta holds, on a Loaded collection, can only be
+// this job's own message coming back after the spawn persisted and the rest
+// did not run - a request that changes nothing is never broadcast. It must
+// leave the serving collection alone: no overwrite, no new task, and the
+// replica number written to what the message says.
+func (suite *IncrementalExpansionSuite) TestAnIdenticalReplicaSetOnALoadedCollectionIsAReplay() {
 	suite.seedLoadedCollection(1, rgA, 1)
 
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(replicaConfig(1, rgA)))
 	suite.NoError(err)
-	suite.Equal(1, putCalls, "a reload must still store the collection meta")
+	suite.Equal(0, putCalls, "a replay must not write the collection back to Loading")
 
 	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
-	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
-	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup)
+	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus())
+	suite.EqualValues(100, collection.LoadPercentage)
+	suite.EqualValues(1, collection.GetReplicaNumber())
+	suite.Empty(tasks, "no resource group was added, so no task is registered")
+}
+
+// TestAReplayedExpansionKeepsTheCollectionLoaded is the replay-safety case.
+// The spawn persists rgB's replica; the process then fails before the replica
+// number is written (a crash between the two looks the same to the message,
+// which is acknowledged only once Execute returns nil). The message is
+// executed again. At no point may the serving rgA see its collection leave
+// Loaded, and rgB must end up with exactly one observer task.
+func (suite *IncrementalExpansionSuite) TestAReplayedExpansionKeepsTheCollectionLoaded() {
+	suite.seedLoadedCollection(1, rgA, 1)
+	message := suite.buildExpansionRequest(replicaConfig(1, rgA), replicaConfig(2, rgB))
+
+	// The first attempt dies at UpdateReplicaNumber, after the spawn.
+	crashed := errors.New("querycoord went away")
+	var origin func(*meta.CollectionManager, context.Context, int64, int32, bool) error
+	attempts := 0
+	crash := mockey.Mock((*meta.CollectionManager).UpdateReplicaNumber).
+		To(func(cm *meta.CollectionManager, ctx context.Context, collectionID int64, replicaNumber int32, userSpecified bool) error {
+			attempts++
+			if attempts == 1 {
+				return crashed
+			}
+			return origin(cm, ctx, collectionID, replicaNumber, userSpecified)
+		}).Origin(&origin).Build()
+	defer crash.UnPatch()
+
+	putCalls, tasks, err := suite.runJob(message)
+	suite.ErrorIs(err, crashed)
+	suite.Equal(0, putCalls)
+	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 2, "the spawn persisted before the failure")
+	suite.Equal(querypb.LoadStatus_Loaded, suite.meta.GetCollection(suite.ctx, expansionCollectionID).GetStatus(),
+		"the failed attempt must not have touched the serving state")
+	suite.Require().Len(tasks, 1, "the attempt that added rgB is the one that registers its task")
+	suite.Equal(rgB, tasks[0].resourceGroup)
+
+	// The replay.
+	putCalls, tasks, err = suite.runJob(message)
+	suite.NoError(err)
+	suite.Equal(0, putCalls, "a replay must not write the collection back to Loading")
+
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
+	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus(), "rgA never stops serving")
+	suite.EqualValues(100, collection.LoadPercentage)
+	suite.EqualValues(2, collection.GetReplicaNumber(), "the replay completes what the first attempt could not")
+	partition := suite.meta.GetPartition(suite.ctx, expansionPartitionID)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
+	suite.EqualValues(2, partition.GetReplicaNumber())
+	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 2)
+	suite.Empty(tasks, "the replay registers no second task for rgB")
 }
 
 // TestReplicaNumberIncreaseInSameResourceGroupOverwritesMeta covers the plain
@@ -685,6 +754,29 @@ func (suite *IncrementalExpansionSuite) TestReplicaNumberDecreaseOverwritesMeta(
 	suite.Equal(1, putCalls, "a replica-number decrease must still store the collection meta")
 	suite.Require().Len(tasks, 1)
 	suite.Equal("", tasks[0].resourceGroup)
+}
+
+// TestAStockBinaryResetsTheCollectionOnAnExpansion pins master's behavior on
+// the very request the fast path exists for: with no form installed, a load
+// that adds rgB to a collection loaded in rgA writes the collection back to
+// Loading/0 and registers the collection-wide task, exactly as every load of
+// an already-loaded collection always has.
+func (suite *IncrementalExpansionSuite) TestAStockBinaryResetsTheCollectionOnAnExpansion() {
+	ext.ResetForTest()
+	suite.seedLoadedCollection(1, rgA, 1)
+
+	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
+		replicaConfig(1, rgA), replicaConfig(2, rgB)))
+	suite.NoError(err)
+	suite.Equal(1, putCalls, "a stock binary stores the collection meta on every load")
+
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
+	suite.Require().NotNil(collection)
+	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus(), "master resets the collection to Loading")
+	suite.EqualValues(0, collection.LoadPercentage)
+	suite.EqualValues(2, collection.GetReplicaNumber())
+	suite.Require().Len(tasks, 1)
+	suite.Equal("", tasks[0].resourceGroup, "and watches it collection-wide")
 }
 
 // TestIncrementalExpansionKeepsLoadedResourceGroupIntact is the incident case:
@@ -759,6 +851,15 @@ func (suite *IncrementalExpansionSuite) TestIsIncrementalExpansionLegs() {
 			expected: true,
 		},
 		{
+			name: "the same expansion on a stock binary",
+			seed: func() {
+				ext.ResetForTest()
+				suite.seedLoadedCollection(1, rgA, 1)
+			},
+			request:  suite.buildRequest(expansionDbID, []int64{expansionPartitionID}, sameFields, expansionReplicas),
+			expected: false,
+		},
+		{
 			name:     "collection not loaded at all",
 			seed:     func() { suite.seedReplica(1, rgA, 1) },
 			request:  suite.buildRequest(expansionDbID, []int64{expansionPartitionID}, sameFields, expansionReplicas),
@@ -830,8 +931,18 @@ func (suite *IncrementalExpansionSuite) TestIsIncrementalExpansionLegs() {
 			expected: false,
 		},
 		{
-			name: "the replica set does not grow",
+			name: "an identical replica set on a loaded collection is a replayed expansion",
 			seed: func() { suite.seedLoadedCollection(1, rgA, 1) },
+			request: suite.buildRequest(expansionDbID, []int64{expansionPartitionID}, sameFields,
+				[]*messagespb.LoadReplicaConfig{replicaConfig(1, rgA)}),
+			expected: true,
+		},
+		{
+			name: "an identical replica set on a loading collection keeps the overwrite",
+			seed: func() {
+				suite.seedCollection(querypb.LoadStatus_Loading, querypb.LoadType_LoadCollection, expansionDbID)
+				suite.seedReplica(1, rgA, 1)
+			},
 			request: suite.buildRequest(expansionDbID, []int64{expansionPartitionID}, sameFields,
 				[]*messagespb.LoadReplicaConfig{replicaConfig(1, rgA)}),
 			expected: false,
