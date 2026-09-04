@@ -62,8 +62,9 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	// A request that names resource groups speaks only for those and leaves the
-	// placement of the others alone; a request that names none states the whole
+	// With a form installed, a request that names resource groups speaks only
+	// for those and leaves the placement of the others alone; a request that
+	// names none - and every request on a stock binary - states the whole
 	// placement, which is the native behavior, and this returns what
 	// AssignReplica just produced. The scoping list comes from the same call
 	// that resolved the configuration, so both are decided from one reading of
