@@ -206,8 +206,15 @@ func (m *versionManagerImpl) getCurrentVersion() int32 {
 		// With no QueryNode session, version 0 is read by knowhere as "only
 		// DISKANN loads off disk" and misroutes other disk indexes onto the
 		// in-memory path, so this answers the version compiled into the
-		// coordinator itself, on the assumption that a QueryNode started
-		// later runs the same image as the coordinator.
+		// coordinator itself.
+		//
+		// The assumption is that a QueryNode started later runs the same image
+		// as the coordinator, and it is stated in one more place: the ceiling
+		// with no session (getMaximumVersionFrom) is this same version, so an
+		// operator override above it is clamped rather than written into index
+		// builds nothing can load. If that assumption is wrong -- a QueryNode
+		// on an older image joins -- its session replaces both figures the
+		// moment it registers, and the answers become cluster-wide again.
 		return segcore.GetIndexEngineInfo().CurrentIndexVersion
 	}
 
@@ -293,7 +300,7 @@ func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumVersion() int32 {
-	return getMaximumVersionFrom(m.versions)
+	return getMaximumVersionFrom(m.versions, segcore.GetIndexEngineInfo().CurrentIndexVersion)
 }
 
 func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
@@ -304,12 +311,24 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
-	return getMaximumVersionFrom(m.scalarIndexVersions)
+	return getMaximumVersionFrom(m.scalarIndexVersions, common.CurrentScalarIndexEngineVersion)
 }
 
-func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion) int32 {
+// getMaximumVersionFrom returns the highest index version every registered
+// QueryNode can load. compiledIn is the answer when none is registered: the
+// version this coordinator's own image can load.
+//
+// That bound is the same assumption getCurrentVersion makes with no session --
+// a QueryNode started later runs this image -- and it has a consequence worth
+// stating, because it is the whole point of returning it here. This is the
+// ceiling clampVersion applies to dataCoord.targetVecIndexVersion and
+// dataCoord.targetScalarIndexVersion, so an operator override above what this
+// image can load is clamped down to it (with the rate-limited warning) instead
+// of being written into index builds unchecked. An unbounded MaxInt32 made the
+// clamp a no-op precisely when there is no QueryNode to disprove the override.
+func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion, compiledIn int32) int32 {
 	if len(versions) == 0 {
-		return math.MaxInt32
+		return compiledIn
 	}
 
 	maximum := int32(math.MaxInt32)
