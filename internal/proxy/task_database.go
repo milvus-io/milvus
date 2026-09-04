@@ -75,7 +75,6 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
-
 	return nil
 }
 

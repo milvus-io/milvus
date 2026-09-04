@@ -113,6 +113,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 				mlog.Warn(ctx, "fail to decode the token", mlog.Err(err))
 				return nil, status.Error(codes.Unauthenticated, "invalid token format")
 			}
+
 			if !strings.Contains(rawToken, util.CredentialSeparator) {
 				user, err := VerifyAPIKey(rawToken)
 				if err != nil {

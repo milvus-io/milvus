@@ -34,9 +34,10 @@ func TestQueryResourceGroupSurvivesOnTheContext(t *testing.T) {
 
 // TestQueryResourceGroupKeyIsUnreachableFromOutside proves nothing but this
 // package can plant a routing scope. An extension carries its own values on the
-// same context - that is what RewriteRequestParams is for - and one of them
-// guessing the string "rg" or "resource_group" must not become the scope every
-// shard-leader lookup honors. The scope is milvus's decision, made in exactly
+// same context - a hook's Before returns the context the handler runs under -
+// and one of them guessing the string "rg" or "resource_group" must not become
+// the scope every shard-leader lookup honors. The scope is milvus's decision,
+// made in exactly
 // one place, and this is what keeps it that way.
 func TestQueryResourceGroupKeyIsUnreachableFromOutside(t *testing.T) {
 	ctx := context.Background()
