@@ -493,7 +493,7 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 	s.ob.observeTimeout(s.ctx, progress)
 
 	s.Empty(s.replicaIDsInRG(400, rgB), "a stalled resource group must be released")
-	s.Len(s.replicaIDsInRG(400, rgA), 1, "a sibling resource group must survive its neighbour's timeout")
+	s.Len(s.replicaIDsInRG(400, rgA), 1, "a sibling resource group must survive its neighbor's timeout")
 	s.NotNil(s.meta.GetCollection(s.ctx, 400), "the collection must survive while any resource group holds it")
 	s.EqualValues(1, s.meta.GetCollection(s.ctx, 400).GetReplicaNumber(),
 		"releasing the timed-out resource group's replicas must write ReplicaNumber back down, "+
