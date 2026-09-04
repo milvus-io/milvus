@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/big"
 	"path"
 	"sort"
 	"sync"
@@ -350,12 +351,15 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
 	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
 	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
-	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
+	preAllocIDNum, preAllocIDNumCapped, err := calculatePreAllocIDNum(totalRows, int64(binlogNum), expansionFactor)
+	if err != nil {
+		return nil, err
+	}
 
 	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
 		ids, ide, e := alloc.AllocN(int64(n))
 		return ids, ide, e
-	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
+	}, preAllocIDNum, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +367,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
 		mlog.Int64("totalRows", totalRows),
 		mlog.Int("fieldsNum", fieldsNum),
+		mlog.Uint32("preAllocIDNum", preAllocIDNum),
+		mlog.Bool("preAllocIDNumCapped", preAllocIDNumCapped),
 		mlog.Int64("idBegin", idBegin),
 		mlog.Int64("idEnd", idEnd),
 		mlog.Uint64("ts", ts))...,
@@ -414,6 +420,38 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
+}
+
+func calculatePreAllocIDNum(totalRows, binlogNum, expansionFactor int64) (uint32, bool, error) {
+	if totalRows < 0 {
+		return 0, false, merr.WrapErrServiceInternalMsg(
+			"import total rows must not be negative: %d", totalRows,
+		)
+	}
+	if expansionFactor <= 0 {
+		return 0, false, merr.WrapErrParameterInvalidMsg(
+			"import pre-allocate ID expansion factor must be positive: %d",
+			expansionFactor,
+		)
+	}
+
+	preAllocIDNum := big.NewInt(totalRows)
+	preAllocIDNum.Add(preAllocIDNum, big.NewInt(1))
+	preAllocIDNum.Mul(preAllocIDNum, big.NewInt(binlogNum))
+	maxBatchSize := new(big.Int).SetUint64(uint64(math.MaxUint32))
+	if preAllocIDNum.Cmp(maxBatchSize) > 0 {
+		return 0, false, merr.WrapErrParameterInvalidMsg(
+			"too large to allocate IDs: required %s, max %d",
+			preAllocIDNum.String(), uint64(math.MaxUint32),
+		)
+	}
+
+	preAllocIDNum.Mul(preAllocIDNum, big.NewInt(expansionFactor))
+	if preAllocIDNum.Cmp(maxBatchSize) > 0 {
+		// AllocIDRequest.Count is uint32; saturate instead of wrapping to a smaller range.
+		return math.MaxUint32, true, nil
+	}
+	return uint32(preAllocIDNum.Uint64()), false, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
