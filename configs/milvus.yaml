@@ -161,7 +161,7 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  # The maximum number of objects requested per batch in minio ListObjects rpc, 
+  # The maximum number of objects requested per batch in minio ListObjects rpc,
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
 
@@ -301,8 +301,8 @@ pulsar:
   # Perform a backlog cleanup every time the data of given bytes is written.
   # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
   # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
-  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
-  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog.
+  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy,
   # so admin of pulsar should give enough retention time to avoid the wal message lost.
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
@@ -420,8 +420,8 @@ proxy:
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
-  # maximum number of result entries, typically Nq * TopK * GroupSize. 
-  # It costs additional memory and time to process a large number of result entries. 
+  # maximum number of result entries, typically Nq * TopK * GroupSize.
+  # It costs additional memory and time to process a large number of result entries.
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
@@ -815,7 +815,7 @@ dataCoord:
     compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   sealPolicy:
     channel:
@@ -832,7 +832,7 @@ dataCoord:
   forceRebuildSegmentIndex: false # force rebuild segment index to specify index engine's version
   # if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
-  # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
+  # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version
   targetVecIndexVersion: 10
   forceRebuildScalarSegmentIndex: false # force rebuild scalar segment index to specified scalar index engine's version
   # if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
@@ -857,6 +857,14 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # How many times a compaction may be rebuilt before it is left to the periodic trigger.
+    # Every compaction that ends without succeeding -- a worker refusal or reported failure, a
+    # DataCoord-side error, or an outcome that could not be established -- is retried by rebuilding
+    # the work under a fresh plan ID, so that an execution which may still be running cannot collide
+    # with the retry. This caps that rebuilding for work which fails for a reason a fresh plan ID
+    # cannot fix, such as bad input data. Values below 1 are treated as 1: the original attempt
+    # always runs.
+    maxAttempts: 10
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
@@ -926,8 +934,6 @@ dataCoord:
     exportJobRetention: 10800 # Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.
     exportMaxConcurrentJobs: 1 # Maximum number of snapshot export jobs executed concurrently by DataCoord.
   enableActiveStandby: false
-  taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
-  taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
@@ -962,7 +968,20 @@ dataCoord:
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    # How many times one pre-import or import task may be attempted before its job fails.
+    #
+    # The original task is attempt one. Every retry uses a fresh task ID; import retries
+    # also use fresh segment IDs. A persisted lineage counter advances only when the
+    # replacement is committed and enforces this limit.
+    maxAttempts: 10
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
+  # How many times one copy segment task may be attempted before its job fails.
+  #
+  # Each attempt runs under a fresh task ID and a fresh set of target segment IDs, so an
+  # abandoned attempt can never write where its replacement writes. Past this count the
+  # work is settled as failed instead of being rebuilt again.
+  copySegmentMaxAttempts: 10
+  externalCollectionMaxRetryTimes: 10 # Maximum number of in-process worker create, query, or execution failures before an external collection refresh job is marked failed. Each retry replaces only the failed task and reuses its manifest, file range, and owned segments. The counter resets when DataCoord restarts.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -1055,6 +1074,9 @@ dataNode:
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
+  task:
+    sweepInterval: 3600 # How often, in seconds, DataNode scans its worker-side task entries (compaction/import/index/analyze/stats/external-refresh) for presumed orphans. Only takes effect on restart.
+    retention: 86400 # Worker-side task entries that started longer than this, in seconds, are canceled and removed as presumed orphans. The coordinator rebuilds the work under fresh identities, but a task that legitimately runs longer than this is canceled and rebuilt, so keep this well above the worst-case duration of an index build or import on this cluster. Values below 1 fall back to the default.
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
@@ -1238,7 +1260,7 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    # default password for root user. The maximum length is 72 characters. 
+    # default password for root user. The maximum length is 72 characters.
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
@@ -1381,7 +1403,7 @@ quotaAndLimits:
     # Maximum number of db-related requests per second.
     # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
     # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
-    # 		
+    #
     max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
@@ -1601,7 +1623,7 @@ streaming:
     # Use the underlying wal default value if 0 is given.
     length: 128
   logging:
-    # The threshold of slow log, 1s by default. 
+    # The threshold of slow log, 1s by default.
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
   flush:
@@ -1614,7 +1636,7 @@ streaming:
     # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.2 by default
     growingSegmentBytesHwmThreshold: 0.2
     # The lower watermark of total growing segment bytes for one streaming node,
-    # growing segment flush process will try to flush some growing segment into sealed 
+    # growing segment flush process will try to flush some growing segment into sealed
     # until the total bytes of growing segment is less than this threshold, 0.1 by default.
     growingSegmentBytesLwmThreshold: 0.1
     l0:
@@ -1628,12 +1650,12 @@ streaming:
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
   walRecovery:
-    # The interval of persist recovery info, 10s by default. 
+    # The interval of persist recovery info, 10s by default.
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
     # Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage
     persistInterval: 10s
     # The max dirty message count of wal recovery, 100 by default.
-    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately,
     # but not wait for the persist interval.
     maxDirtyMessage: 100
     # The graceful close timeout for wal recovery, 3s by default.

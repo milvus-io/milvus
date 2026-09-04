@@ -16,9 +16,16 @@
 
 package taskcommon
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
+// Times is written by scheduler callbacks under the per-task key lock and read
+// under its own mutex. time.Time is multi-word, so the mutex is what keeps a
+// concurrent read from observing a torn value.
 type Times struct {
+	mu        sync.Mutex
 	queueTime time.Time
 	startTime time.Time
 	endTime   time.Time
@@ -33,6 +40,8 @@ func NewTimes() *Times {
 }
 
 func (t *Times) SetTaskTime(timeType TimeType, time time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	switch timeType {
 	case TimeQueue:
 		t.queueTime = time
@@ -52,6 +61,8 @@ const (
 )
 
 func (t TimeType) GetTaskTime(times *Times) time.Time {
+	times.mu.Lock()
+	defer times.mu.Unlock()
 	switch t {
 	case TimeQueue:
 		return times.queueTime

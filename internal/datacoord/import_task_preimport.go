@@ -21,6 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/time/rate"
+
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -38,10 +41,10 @@ var _ ImportTask = (*preImportTask)(nil)
 type preImportTask struct {
 	task atomic.Pointer[datapb.PreImportTask]
 
+	alloc      allocator.Allocator
 	importMeta ImportMeta
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
-	retryTimes int64
 }
 
 func (p *preImportTask) GetJobID() int64 {
@@ -101,25 +104,47 @@ func (p *preImportTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (p *preImportTask) GetTaskVersion() int64 {
-	return p.retryTimes
+	return p.task.Load().GetTaskVersion()
 }
 
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
-	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
-	req := AssemblePreImportRequest(p, job)
-
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
-	if err != nil {
-		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
-		p.retryTimes++
+	ctx := context.TODO()
+	mlog.Info(ctx, "processing pending preimport task...", WrapTaskLog(p)...)
+	job := p.importMeta.GetJob(ctx, p.GetJobID())
+	if p.importMeta.GetTask(ctx, p.GetTaskID()) == nil || job == nil ||
+		job.GetState() == internalpb.ImportJobState_Failed ||
+		job.GetState() == internalpb.ImportJobState_Completed {
+		// GC may have finalized this scheduler identity after the inspector took
+		// its enqueue snapshot. End the stale wrapper locally; there is no meta
+		// left that could own a new worker attempt.
+		local := typeutil.Clone(p.task.Load())
+		local.State = datapb.ImportTaskStateV2_None
+		p.task.Store(local)
+		mlog.Info(ctx, "discarding stale preimport task before dispatch", WrapTaskLog(p)...)
 		return
 	}
-	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
+	req := AssemblePreImportRequest(p, job)
+
+	// Persist the assignment before crossing the at-least-once Create boundary.
+	// Recording it afterwards loses the attempt whenever the worker accepted the
+	// request but its response did not come back: the task stays Pending naming
+	// nobody, so nothing can reclaim that attempt, and the scheduler hands the
+	// same task ID to a second node while the first keeps running it. Failing to
+	// write leaves the task Pending and undispatched, which is the safe side.
+	err := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(p, mlog.Err(err))...)
+		mlog.Warn(context.TODO(), "failed to persist preimport assignment, not sending task",
+			WrapTaskLog(p, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		return
+	}
+	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	if err != nil {
+		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
+		// The Create outcome is ambiguous. Record retry debt and best-effort
+		// clean up this attempt; the inspector publishes a fresh task ID.
+		p.handoffRetry(cluster, err.Error())
 		return
 	}
 	pendingDuration := p.GetTR().RecordSpan()
@@ -128,17 +153,38 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 }
 
 func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
+	ctx := context.TODO()
+	if p.importMeta.GetTask(ctx, p.GetTaskID()) == nil {
+		// A stale inspector snapshot can be enqueued after terminal GC finalized
+		// the old scheduler entry. Stop polling without recreating retry metadata.
+		local := typeutil.Clone(p.task.Load())
+		local.State = datapb.ImportTaskStateV2_None
+		p.task.Store(local)
+		mlog.Info(ctx, "discarding stale preimport task before query", WrapTaskLog(p)...)
+		return
+	}
 	req := &datapb.QueryPreImportRequest{
 		JobID:  p.GetJobID(),
 		TaskID: p.GetTaskID(),
 	}
 	resp, err := cluster.QueryPreImport(p.GetNodeID(), req)
-	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
-		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
-		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to update preimport task state to pending", WrapTaskLog(p, mlog.Err(updateErr))...)
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry ||
+		resp.GetState() == datapb.ImportTaskStateV2_None {
+		// Record retry debt and best-effort clean up this attempt. The inspector
+		// rotates the task ID before dispatching the replacement.
+		reason := ""
+		if resp != nil {
+			reason = resp.GetReason()
 		}
-		mlog.Info(context.TODO(), "reset preimport task state to pending due to error occurs", WrapTaskLog(p, mlog.Err(err), mlog.String("reason", resp.GetReason()))...)
+		if err != nil {
+			reason = err.Error()
+		}
+		p.handoffRetry(cluster, reason)
+		fields := []mlog.Field{mlog.String("reason", reason)}
+		if err != nil {
+			fields = append(fields, mlog.Err(err))
+		}
+		mlog.Info(context.TODO(), "preimport attempt handed to business retry", WrapTaskLog(p, fields...)...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
@@ -146,6 +192,11 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 			UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to update job state to Failed", mlog.FieldJobID(p.GetJobID()), mlog.Err(err))
+			return
+		}
+		if taskErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(resp.GetReason())); taskErr != nil {
+			mlog.Warn(context.TODO(), "failed to update preimport task state to Failed", WrapTaskLog(p, mlog.Err(taskErr))...)
 		}
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.String("reason", resp.GetReason()))...)
 		return
@@ -177,6 +228,27 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 }
 
+// handoffRetry records retry debt before best-effort worker cleanup. The
+// inspector gives the replacement a fresh task ID, so a failed or delayed old
+// Drop cannot affect the new attempt and must not block business-layer retry.
+func (p *preImportTask) handoffRetry(cluster session.Cluster, reason string) {
+	if err := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_Retry),
+		UpdateReason(reason)); err != nil {
+		mlog.Warn(context.TODO(), "failed to persist preimport retry handoff", WrapTaskLog(p, mlog.Err(err))...)
+		// Stop scheduler polling locally. If DataCoord crashes before the fresh-ID
+		// swap, the persisted InProgress assignment is queried again on recovery.
+		local := typeutil.Clone(p.task.Load())
+		local.State = datapb.ImportTaskStateV2_Retry
+		local.Reason = reason
+		p.task.Store(local)
+	}
+	if err := dropImportTaskOnWorker(p, cluster); err != nil {
+		mlog.RatedWarn(context.TODO(), rate.Limit(1), "failed to drop old preimport attempt",
+			WrapTaskLog(p, mlog.Err(err))...)
+	}
+}
+
 func (p *preImportTask) DropTaskOnWorker(cluster session.Cluster) {
 	err := DropImportTask(p, cluster, p.importMeta)
 	if err != nil {
@@ -196,6 +268,7 @@ func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
 
 func (p *preImportTask) Clone() ImportTask {
 	cloned := &preImportTask{
+		alloc:      p.alloc,
 		importMeta: p.importMeta,
 		tr:         p.tr,
 		times:      p.times,

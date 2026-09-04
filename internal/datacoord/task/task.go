@@ -38,6 +38,12 @@ type Task interface {
 	DropTaskOnWorker(cluster session.Cluster)
 }
 
+// NodeFilter is optional: tasks with a worker capability requirement can skip
+// incompatible nodes without consuming their slots or blocking unrelated work.
+type NodeFilter interface {
+	CanRunOnNode(nodeID int64, slots *session.WorkerSlots) bool
+}
+
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.Int64("ID", task.GetTaskID()),

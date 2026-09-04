@@ -104,8 +104,6 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		return map[CompactionTriggerType][]CompactionView{}, nil
 	}
 
-	collections := policy.meta.GetCollections()
-
 	if time.Since(policy.lastPeriod) > paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.GetAsDuration(time.Second) {
 		policy.currentCount = 0
 		policy.lastPeriod = time.Now()
@@ -114,19 +112,19 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 	maxCount := paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.GetAsInt()
 
 	views := make([]CompactionView, 0)
-	for _, collection := range collections {
+	for collectionID := range policy.meta.GetAllCollectionNumRows() {
 		if policy.currentCount >= maxCount {
 			break
 		}
-		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+		if policy.meta.isCollectionCompactionBlocked(collectionID) {
 			mlog.Info(ctx, "skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
-				mlog.FieldCollectionID(collection.ID))
+				mlog.FieldCollectionID(collectionID))
 			continue
 		}
-		collectionViews, err := policy.triggerOneCollection(ctx, collection.ID, maxCount)
+		collectionViews, err := policy.triggerOneCollection(ctx, collectionID, maxCount)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
-			mlog.Warn(ctx, "fail to trigger storage version compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
+			mlog.Warn(ctx, "fail to trigger storage version compaction", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			continue
 		}
 		views = append(views, collectionViews...)

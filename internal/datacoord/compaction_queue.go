@@ -74,13 +74,10 @@ func (pq *PriorityQueue[T]) Update(item *Item[T], value T, priority int) {
 	heap.Fix(pq, item.index)
 }
 
-// errFull / errNoSuchElement are INTERNAL sentinels: caught by errors.Is
-// inside the compaction inspector / scheduler loop and never serialized
-// across any gRPC boundary. See docs/dev/error_sentinel_convention.md.
-var (
-	errFull          = errors.New("compaction queue is full")
-	errNoSuchElement = errors.New("compaction queue has no element")
-)
+// errNoSuchElement is an INTERNAL sentinel: caught by errors.Is inside the
+// compaction inspector / scheduler loop and never serialized across any gRPC
+// boundary. See docs/dev/error_sentinel_convention.md.
+var errNoSuchElement = errors.New("compaction queue has no element")
 
 type Prioritizer func(t CompactionTask) int
 
@@ -100,7 +97,14 @@ type CompactionQueue struct {
 	// string zero value cannot stand in for "unset" without colliding with it.
 	prioritizer     Prioritizer
 	prioritizerName *string
-	capacity        int
+	// capacity is an advisory limit, not a gate. It is read before a producer
+	// commits to creating work (IsFull), and never enforced at Enqueue: by the
+	// time a task reaches Enqueue it is already persisted, and refusing it there
+	// would leave durable work with no runtime owner. Concurrent producers and
+	// the scheduler's own put-backs can therefore push the queue a handful of
+	// items past the limit, which is the point -- the limit exists to stop
+	// unbounded growth, not to be exact. Zero means unbounded.
+	capacity int
 }
 
 func NewCompactionQueue(capacity int, prioritizer Prioritizer) *CompactionQueue {
@@ -112,15 +116,25 @@ func NewCompactionQueue(capacity int, prioritizer Prioritizer) *CompactionQueue 
 	}
 }
 
-func (q *CompactionQueue) Enqueue(t CompactionTask) error {
+// Enqueue always accepts. Every task that reaches it is already persisted, so
+// the only thing a refusal could achieve is a durable record with nothing in
+// memory driving it -- stuck until the next DataCoord restart, holding its input
+// segments compacting the whole time. Backpressure belongs one step earlier, at
+// IsFull, before a producer commits to creating the work at all.
+func (q *CompactionQueue) Enqueue(t CompactionTask) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
-	if q.capacity > 0 && len(q.pq) >= q.capacity {
-		return errFull
-	}
-
 	heap.Push(&q.pq, &Item[CompactionTask]{value: t, priority: q.prioritizer(t)})
-	return nil
+}
+
+// IsFull reports whether the queue has reached its advisory limit. Producers
+// consult it before they claim segments and persist a task; nothing enforces it
+// afterwards, so the answer can be stale by the time the task is enqueued. That
+// is deliberate -- see capacity.
+func (q *CompactionQueue) IsFull() bool {
+	q.lock.RLock()
+	defer q.lock.RUnlock()
+	return q.capacity > 0 && len(q.pq) >= q.capacity
 }
 
 func (q *CompactionQueue) Dequeue() (CompactionTask, error) {
@@ -192,11 +206,11 @@ func (q *CompactionQueue) Len() int {
 
 var (
 	DefaultPrioritizer Prioritizer = func(task CompactionTask) int {
-		return int(task.GetTaskProto().GetPlanID())
+		return int(task.GetTask().GetPlanID())
 	}
 
 	LevelPrioritizer Prioritizer = func(task CompactionTask) int {
-		switch task.GetTaskProto().GetType() {
+		switch task.GetTask().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
 		case datapb.CompactionType_MixCompaction:
@@ -211,7 +225,7 @@ var (
 	}
 
 	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
-		switch task.GetTaskProto().GetType() {
+		switch task.GetTask().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:

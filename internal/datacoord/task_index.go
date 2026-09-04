@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -47,6 +48,10 @@ import (
 
 type indexBuildTask struct {
 	*model.SegmentIndex
+
+	// stateGuard makes the fields below readable by the scheduler without the
+	// per-task key lock; see statsTask.stateGuard.
+	stateGuard sync.RWMutex
 
 	taskSlot int64
 
@@ -108,6 +113,8 @@ func (it *indexBuildTask) GetTaskSlot() int64 {
 }
 
 func (it *indexBuildTask) GetTaskState() taskcommon.State {
+	it.stateGuard.RLock()
+	defer it.stateGuard.RUnlock()
 	return taskcommon.State(it.IndexState)
 }
 
@@ -124,10 +131,14 @@ func (it *indexBuildTask) GetTaskType() taskcommon.Type {
 }
 
 func (it *indexBuildTask) GetTaskVersion() int64 {
-	return it.IndexVersion
+	// Index retries use fresh BuildIDs. IndexVersion remains a persisted object
+	// path marker and is intentionally not exposed as an attempt counter.
+	return 0
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
+	it.stateGuard.Lock()
+	defer it.stateGuard.Unlock()
 	it.IndexState = commonpb.IndexState(state)
 	it.FailReason = failReason
 }
@@ -140,12 +151,16 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 	return nil
 }
 
-func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
-	if err := it.meta.indexMeta.UpdateVersion(it.BuildID, nodeID); err != nil {
+func (it *indexBuildTask) assignTask(nodeID int64) error {
+	if err := it.meta.indexMeta.AssignTask(it.BuildID, nodeID); err != nil {
 		return err
 	}
-	it.IndexVersion++
+	it.stateGuard.Lock()
 	it.NodeID = nodeID
+	it.IndexVersion = 1
+	it.IndexState = commonpb.IndexState_InProgress
+	it.FailReason = ""
+	it.stateGuard.Unlock()
 	return nil
 }
 
@@ -157,34 +172,56 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 	return nil
 }
 
-func (it *indexBuildTask) resetTask(reason string) {
-	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+func (it *indexBuildTask) retryTask(reason string) {
+	if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateRetry, reason); err != nil {
+		// The scheduler must still release this attempt when the catalog write
+		// failed. The index inspector re-reads the authoritative Init/InProgress
+		// record on its own interval and retries from there.
+		it.SetState(indexpb.JobState_JobStateRetry, reason)
+	}
 }
 
-func (it *indexBuildTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason string) {
-	if err := it.tryDropTaskOnWorker(cluster); err != nil {
-		return
-	}
-	it.resetTask(reason)
+func (it *indexBuildTask) dropAndRetryTaskOnWorker(cluster session.Cluster, reason string) {
+	// Drop is best effort. The retry receives a fresh BuildID, so even if the
+	// old worker ignores cancellation its late result has no metadata to adopt.
+	_ = it.tryDropTaskOnWorker(cluster)
+	it.retryTask(reason)
 }
 
 func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	ctx := context.TODO()
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID))
 
-	// Check if task exists in meta
+	// Re-read the authoritative task before assigning it. GC may mark the
+	// SegmentIndex deleted after the inspector snapshot; a deleted record is a
+	// cleanup anchor, not dispatchable work.
 	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
-	if !exist || segIndex == nil {
-		log.Info(ctx, "index task has not exist in meta table, removing task")
-		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
+	if !exist || segIndex == nil || segIndex.IsDeleted {
+		const reason = "index task is no longer dispatchable in meta"
+		log.Info(ctx, reason)
+		it.SetState(indexpb.JobState_JobStateNone, reason)
 		return
 	}
 
 	// Check segment health and index existence
 	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
 	if !isSegmentHealthy(segment) || !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
-		log.Info(ctx, "task is no need to build index, removing it")
-		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
+		const reason = "index task no longer has a live segment or index"
+		log.Info(ctx, "index task no longer has a live owner, marking it failed")
+		if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+			log.Warn(ctx, "failed to persist obsolete index task state", mlog.Err(err))
+		}
+		return
+	}
+	if it.handler == nil {
+		log.Warn(ctx, "collection handler is not configured; defer index build")
+		return
+	}
+	collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID)
+	if err != nil || collectionInfo == nil || collectionInfo.Schema == nil {
+		// Keep Init unchanged. The inspector will enqueue the authoritative task
+		// again, rather than making index-threshold decisions without a schema.
+		log.Warn(ctx, "cannot resolve collection schema; defer index build", mlog.Err(err))
 		return
 	}
 
@@ -197,66 +234,64 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	isEmbeddingListIndex := false
 	skipVectorArrayThreshold := false
 	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
-		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
-			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
-				if f.FieldID == fieldID {
-					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-						// Derive valid rows from the persisted Statistics NullCounts
-						// instead of iterating field binlogs.
-						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
-						if !ok {
-							// NullCounts carries an entry for every field present
-							// in the segment's data (zero included). A missing key
-							// means the field was added to the schema after this
-							// segment was flushed: every row reads as null, so
-							// there is nothing to index.
-							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
-								mlog.Int64("fieldID", fieldID))
-							nullCount = segIndex.NumRows
-						}
-						effectiveRows = segIndex.NumRows - nullCount
+		for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
+			if f.FieldID == fieldID {
+				if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
+					// Derive valid rows from the persisted Statistics NullCounts
+					// instead of iterating field binlogs.
+					nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
+					if !ok {
+						// NullCounts carries an entry for every field present
+						// in the segment's data (zero included). A missing key
+						// means the field was added to the schema after this
+						// segment was flushed: every row reads as null, so
+						// there is nothing to index.
+						log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
+							mlog.FieldFieldID(fieldID))
+						nullCount = segIndex.NumRows
 					}
-					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
-					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
-					if isVectorArrayIndex {
-						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
-						if err != nil {
-							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
-							log.Warn(ctx, "failed to estimate vector array element count",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.String("failReason", failReason),
-								mlog.Err(err))
-							if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, failReason); updateErr != nil {
-								log.Warn(ctx, "failed to update vector array index task state to Failed",
-									mlog.String("failReason", failReason),
-									mlog.Err(updateErr))
-							}
-							return
-						}
-						estimatedVectorArrayVectors = estimate.vectorCount
-						if estimate.emptyOnStaleSchema {
-							effectiveRows = 0
-							log.Info(ctx, "vector array field binlog is absent on stale schema segment, treating as empty field",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
-								mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
-						}
-						if estimate.manifestBacked {
-							// Recovered StorageV3 segment: the element count can't be derived
-							// from the empty in-memory binlog arrays. Skip the element-count
-							// threshold so DataCoord doesn't fake-finish/block a build that the
-							// manifest-aware worker can complete.
-							skipVectorArrayThreshold = true
-							log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.String("manifestPath", segment.GetManifestPath()))
-						}
-					}
-					break
+					effectiveRows = segIndex.NumRows - nullCount
 				}
+				isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
+				isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
+				if isVectorArrayIndex {
+					estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
+					if err != nil {
+						failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
+						log.Warn(ctx, "failed to estimate vector array element count",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.String("failReason", failReason),
+							mlog.Err(err))
+						if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, failReason); updateErr != nil {
+							log.Warn(ctx, "failed to update vector array index task state to Failed",
+								mlog.String("failReason", failReason),
+								mlog.Err(updateErr))
+						}
+						return
+					}
+					estimatedVectorArrayVectors = estimate.vectorCount
+					if estimate.emptyOnStaleSchema {
+						effectiveRows = 0
+						log.Info(ctx, "vector array field binlog is absent on stale schema segment, treating as empty field",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+							mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
+					}
+					if estimate.manifestBacked {
+						// Recovered StorageV3 segment: the element count can't be derived
+						// from the empty in-memory binlog arrays. Skip the element-count
+						// threshold so DataCoord doesn't fake-finish/block a build that the
+						// manifest-aware worker can complete.
+						skipVectorArrayThreshold = true
+						log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.String("manifestPath", segment.GetManifestPath()))
+					}
+				}
+				break
 			}
 		}
 	}
@@ -293,33 +328,28 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 
 	// Create job request
-	req, err := it.prepareJobRequest(ctx, segment, segIndex, indexParams, indexType)
+	req, err := it.prepareJobRequest(ctx, segment, segIndex, collectionInfo, indexParams, indexType)
 	if err != nil {
 		log.Warn(ctx, "failed to prepare job request", mlog.Err(err))
 		return
 	}
 
-	// Update task version
-	if err := it.UpdateTaskVersion(nodeID); err != nil {
-		log.Warn(ctx, "failed to update task version", mlog.Err(err))
+	// Persist the assignment before the at-least-once Create boundary. An error
+	// response is ambiguous, so fail-stop and let restart recover the
+	// authoritative Init or InProgress record before any Create is retried.
+	if err := it.assignTask(nodeID); err != nil {
+		if it.meta.ctx == nil || it.meta.ctx.Err() == nil {
+			mlog.Fatal(ctx, "failed to persist index task assignment; terminating process",
+				mlog.FieldBuildID(it.BuildID), mlog.FieldNodeID(nodeID), mlog.Err(err))
+		}
+		log.Warn(ctx, "failed to persist index task assignment", mlog.Err(err))
 		return
 	}
-
-	defer func() {
-		if err != nil {
-			it.tryDropTaskOnWorker(cluster)
-		}
-	}()
 
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
-		return
-	}
-
-	// Update state to in progress
-	if err = it.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(ctx, "failed to update task state", mlog.Err(err))
+		it.dropAndRetryTaskOnWorker(cluster, err.Error())
 		return
 	}
 
@@ -467,7 +497,7 @@ func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 
 // Helper method to prepare job request
 func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo, segIndex *model.SegmentIndex,
-	indexParams []*commonpb.KeyValuePair, indexType string,
+	collectionInfo *collectionInfo, indexParams []*commonpb.KeyValuePair, indexType string,
 ) (*workerpb.CreateJobRequest, error) {
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", segment.GetID()))
 
@@ -495,12 +525,11 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		}
 	}
 
-	// Get collection info and field
-	collectionInfo, err := it.handler.GetCollection(ctx, segment.GetCollectionID())
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to get collection info")
+	if collectionInfo == nil || collectionInfo.Schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("collection schema is unavailable")
 	}
 
+	// Get field from the operation-local collection snapshot.
 	schema := collectionInfo.Schema
 	var field *schemapb.FieldSchema
 
@@ -551,11 +580,14 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	req := &workerpb.CreateJobRequest{
-		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
-		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
-		BuildID:                   it.BuildID,
-		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
-		IndexVersion:              segIndex.IndexVersion + 1,
+		ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
+		IndexFilePrefix:       path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
+		BuildID:               it.BuildID,
+		IndexStorePathVersion: segIndex.IndexStorePathVersion,
+		// IndexVersion remains the legacy object-path/API marker. Fresh BuildID is
+		// the attempt identity, so new builds keep the historical first value and
+		// never increment or compare it for ownership.
+		IndexVersion:              1,
 		StorageConfig:             createStorageConfig(),
 		IndexParams:               params,
 		TypeParams:                typeParams,
@@ -640,7 +672,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil {
 		log.Warn(ctx, "query index task result from worker failed", mlog.Err(err))
-		it.dropAndResetTaskOnWorker(cluster, err.Error())
+		it.dropAndRetryTaskOnWorker(cluster, err.Error())
 		return
 	}
 
@@ -652,24 +684,32 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
 					mlog.String("failReason", info.GetFailReason()))
-				it.setJobInfo(info)
+				if err := it.setJobInfo(info); err != nil {
+					log.Warn(ctx, "failed to persist index task result", mlog.Err(err))
+					// The worker attempt already has a stable terminal result. Keep
+					// polling that result until coordinator metadata accepts it; a new
+					// worker attempt would only duplicate finished work.
+				}
 			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
 					mlog.String("failReason", info.GetFailReason()))
-				it.dropAndResetTaskOnWorker(cluster, info.GetFailReason())
+				it.dropAndRetryTaskOnWorker(cluster, info.GetFailReason())
 			}
 			// inProgress or unissued, keep InProgress state
 			return
 		}
 	}
-	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
+	it.dropAndRetryTaskOnWorker(cluster, "index is not in info response")
 	// Task not found in results will be return error
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	ctx := context.TODO()
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID), mlog.Int64("nodeID", it.NodeID))
+	if it.NodeID <= 0 {
+		return nil
+	}
 
 	if err := cluster.DropIndex(it.NodeID, it.BuildID); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		log.Warn(ctx, "notify worker drop the index task failed", mlog.Err(err))

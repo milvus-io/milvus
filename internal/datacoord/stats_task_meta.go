@@ -220,36 +220,6 @@ func (stm *statsTaskMeta) DropStatsTask(ctx context.Context, taskID int64) error
 	return nil
 }
 
-func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
-	stm.keyLock.Lock(taskID)
-	defer stm.keyLock.Unlock(taskID)
-
-	t, ok := stm.tasks.Get(taskID)
-	if !ok {
-		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
-	}
-
-	cloneT := proto.Clone(t).(*indexpb.StatsTask)
-	cloneT.Version++
-	cloneT.NodeID = nodeID
-
-	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
-		mlog.Warn(stm.ctx, "update stats task version failed",
-			mlog.FieldTaskID(t.GetTaskID()),
-			mlog.FieldSegmentID(t.GetSegmentID()),
-			mlog.FieldNodeID(nodeID),
-			mlog.Err(err))
-		return err
-	}
-
-	stm.tasks.Insert(taskID, cloneT)
-	secondaryKey := createSecondaryIndexKey(t.GetSegmentID(), t.GetSubJobType().String())
-	stm.segmentID2Tasks.Insert(secondaryKey, cloneT)
-	mlog.Info(stm.ctx, "update stats task version success", mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID),
-		mlog.Int64("newVersion", cloneT.GetVersion()))
-	return nil
-}
-
 func (stm *statsTaskMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
 	stm.keyLock.Lock(taskID)
 	defer stm.keyLock.Unlock(taskID)
@@ -277,7 +247,7 @@ func (stm *statsTaskMeta) UpdateTaskState(taskID int64, state indexpb.JobState, 
 	return nil
 }
 
-func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
+func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
 	stm.keyLock.Lock(taskID)
 	defer stm.keyLock.Unlock(taskID)
 
@@ -288,6 +258,8 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.State = indexpb.JobState_JobStateInProgress
+	cloneT.NodeID = nodeID
+	cloneT.FailReason = ""
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
 		mlog.Warn(stm.ctx, "update stats task state building failed",
@@ -301,8 +273,47 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 	secondaryKey := createSecondaryIndexKey(t.GetSegmentID(), t.GetSubJobType().String())
 	stm.segmentID2Tasks.Insert(secondaryKey, cloneT)
 
-	mlog.Info(stm.ctx, "update building stats task success", mlog.FieldTaskID(taskID))
+	mlog.Info(stm.ctx, "update building stats task success", mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 	return nil
+}
+
+// ReplaceRetryTask removes one Retry record and publishes a fresh Init record
+// under a new task ID in the same catalog transaction. The old DataNode
+// execution may still exist, but DataCoord no longer has metadata through which
+// that old task ID can publish a result.
+func (stm *statsTaskMeta) ReplaceRetryTask(ctx context.Context, oldTaskID, newTaskID int64) (*indexpb.StatsTask, bool, error) {
+	stm.keyLock.Lock(oldTaskID)
+	defer stm.keyLock.Unlock(oldTaskID)
+
+	oldTask, ok := stm.tasks.Get(oldTaskID)
+	if !ok || oldTask.GetState() != indexpb.JobState_JobStateRetry {
+		return nil, false, nil
+	}
+
+	replacement := proto.Clone(oldTask).(*indexpb.StatsTask)
+	replacement.TaskID = newTaskID
+	replacement.Version = 0
+	replacement.NodeID = 0
+	replacement.State = indexpb.JobState_JobStateInit
+	replacement.FailReason = ""
+
+	if err := stm.catalog.Update(ctx,
+		metastore.DropStatsTask(oldTaskID),
+		metastore.AddStatsTask(replacement)); err != nil {
+		return nil, false, err
+	}
+
+	stm.tasks.Remove(oldTaskID)
+	stm.tasks.Insert(newTaskID, replacement)
+	secondaryKey := createSecondaryIndexKey(oldTask.GetSegmentID(), oldTask.GetSubJobType().String())
+	stm.segmentID2Tasks.Insert(secondaryKey, replacement)
+
+	mlog.Info(ctx, "replaced stats retry task",
+		mlog.Int64("oldTaskID", oldTaskID),
+		mlog.FieldTaskID(newTaskID),
+		mlog.FieldSegmentID(replacement.GetSegmentID()),
+		mlog.String("subJobType", replacement.GetSubJobType().String()))
+	return replacement, true, nil
 }
 
 func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult) error {
@@ -367,6 +378,23 @@ func (stm *statsTaskMeta) HasStatsTask(segmentID int64, subJobType indexpb.Stats
 	secondaryKey := createSecondaryIndexKey(segmentID, subJobType.String())
 	_, exists := stm.segmentID2Tasks.Get(secondaryKey)
 	return exists
+}
+
+// GetPendingTaskCount returns the durable stats-task debt which still needs to
+// be dispatched. Scheduler ownership is intentionally not part of this count:
+// a wrapper may be released after a dispatch failure while its persisted task
+// remains Init, and Retry tasks are waiting for the inspector to make them
+// dispatchable again.
+func (stm *statsTaskMeta) GetPendingTaskCount() int {
+	pendingTaskCount := 0
+	stm.tasks.Range(func(_ UniqueID, task *indexpb.StatsTask) bool {
+		if task.GetState() == indexpb.JobState_JobStateInit ||
+			task.GetState() == indexpb.JobState_JobStateRetry {
+			pendingTaskCount++
+		}
+		return true
+	})
+	return pendingTaskCount
 }
 
 func (stm *statsTaskMeta) CanCleanedTasks() []int64 {

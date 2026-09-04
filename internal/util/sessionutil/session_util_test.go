@@ -999,3 +999,16 @@ func TestGetResourceGroupName(t *testing.T) {
 		assert.Equal(t, "my_rg", s.GetResourceGroupName())
 	})
 }
+
+func TestSessionStatsAttemptPathCapability(t *testing.T) {
+	session := &Session{}
+	WithV3StatsAttemptPath()(session)
+	wire, err := session.MarshalJSON()
+	assert.NoError(t, err)
+	restored := &Session{}
+	assert.NoError(t, restored.UnmarshalJSON(wire))
+	assert.True(t, restored.V3StatsAttemptPath)
+	old := &Session{}
+	assert.NoError(t, old.UnmarshalJSON([]byte(`{"ServerID":1,"Version":"3.0.0-beta"}`)))
+	assert.False(t, old.V3StatsAttemptPath)
+}

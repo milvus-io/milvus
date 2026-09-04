@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -69,17 +71,109 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
-		ID:     s.collectionID,
-		Schema: newTestSchema(),
-	})
-
 	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 }
 
 func TestCopySegmentMeta(t *testing.T) {
 	suite.Run(t, new(CopySegmentMetaSuite))
+}
+
+func (s *CopySegmentMetaSuite) TestCompleteJob_CatalogErrorFailsStop() {
+	const (
+		jobID     = int64(100)
+		segmentID = int64(101)
+	)
+	writeErr := errors.New("ambiguous catalog response")
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(writeErr).Once()
+
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  s.collectionID,
+		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
+		InsertChannel: "ch1",
+	})
+	s.Require().NoError(s.meta.AddSegment(context.Background(), segment))
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.Require().NoError(s.copyMeta.AddJob(context.Background(), job))
+
+	fatalCalled := false
+	fatalHeldPublicationLocks := false
+	concreteCopyMeta := s.copyMeta.(*copySegmentMeta)
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+			jobLockAcquired := concreteCopyMeta.mu.TryLock()
+			if jobLockAcquired {
+				concreteCopyMeta.mu.Unlock()
+			}
+			segmentLockAcquired := s.meta.segMu.TryLock()
+			if segmentLockAcquired {
+				s.meta.segMu.Unlock()
+			}
+			fatalHeldPublicationLocks = !jobLockAcquired && !segmentLockAcquired
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	applied, err := s.copyMeta.CompleteJob(context.Background(), jobID, []int64{segmentID},
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
+	s.False(applied)
+	s.ErrorIs(err, writeErr)
+	s.True(fatalCalled)
+	s.True(fatalHeldPublicationLocks)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		s.copyMeta.GetJob(context.Background(), jobID).GetState())
+	s.Equal(commonpb.SegmentState_Importing,
+		s.meta.GetSegment(context.Background(), segmentID).GetState())
+}
+
+func (s *CopySegmentMetaSuite) TestCompleteTask_CatalogErrorFailsStop() {
+	ctx := context.Background()
+	writeErr := errors.New("ambiguous catalog response")
+	task := createTestCopyTask(s.collectionID, 101)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.Require().NoError(s.copyMeta.AddTask(ctx, task))
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.MatchedBy(func(saved *datapb.CopySegmentTask) bool {
+		return saved.GetTaskId() == task.GetTaskId() &&
+			saved.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted
+	})).Return(writeErr).Once()
+
+	fatalCalled := false
+	fatalHeldTaskLock := false
+	concreteCopyMeta := s.copyMeta.(*copySegmentMeta)
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+			lockAcquired := concreteCopyMeta.mu.TryLock()
+			if lockAcquired {
+				concreteCopyMeta.mu.Unlock()
+			}
+			fatalHeldTaskLock = !lockAcquired
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	applied, err := s.copyMeta.UpdateTaskInState(ctx, task.GetTaskId(),
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted))
+
+	s.NoError(err, "the unreachable post-Fatal path must not enter ordinary task failure handling")
+	s.False(applied)
+	s.True(fatalCalled)
+	s.True(fatalHeldTaskLock)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		s.copyMeta.GetTask(ctx, task.GetTaskId()).GetState())
 }
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
@@ -107,6 +201,127 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
 	s.NoError(err)
 	s.NotNil(copyMeta)
+}
+
+func (s *CopySegmentMetaSuite) TestAddJobWithSegmentsPublishesTogether() {
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+		},
+		tr: timerecord.NewTimeRecorder("copy segment job"),
+	}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            200,
+		CollectionID:  s.collectionID,
+		State:         commonpb.SegmentState_Importing,
+		Level:         datapb.SegmentLevel_L1,
+		IsImporting:   true,
+		InsertChannel: "ch0",
+	})
+
+	err := s.copyMeta.AddJobWithSegments(context.Background(), job, []*SegmentInfo{segment})
+	s.NoError(err)
+	s.Same(job, s.copyMeta.GetJob(context.Background(), job.GetJobId()))
+	s.Same(segment, s.meta.GetSegment(context.Background(), segment.GetID()))
+}
+
+func (s *CopySegmentMetaSuite) TestAddJobWithSegments_CanceledRequestDoesNotSuppressFailStop() {
+	writeErr := errors.New("ambiguous catalog response")
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(writeErr).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+		},
+		tr: timerecord.NewTimeRecorder("copy segment job"),
+	}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            200,
+		CollectionID:  s.collectionID,
+		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
+		InsertChannel: "ch0",
+	})
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(ctx context.Context, _ string, _ ...mlog.Field) {
+			fatalCalled = true
+			s.NoError(ctx.Err(), "fail-stop must use the live DataCoord context")
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := s.copyMeta.AddJobWithSegments(requestCtx, job, []*SegmentInfo{segment})
+	s.ErrorIs(err, writeErr)
+	s.True(fatalCalled, "request cancellation must not suppress fail-stop while DataCoord is alive")
+	s.Nil(s.copyMeta.GetJob(context.Background(), job.GetJobId()))
+	s.Nil(s.meta.GetSegment(context.Background(), segment.GetID()))
+}
+
+func (s *CopySegmentMetaSuite) TestReplaceRetryTaskSkipsTerminalJob() {
+	ctx := context.Background()
+	const (
+		jobID     = int64(300)
+		oldTaskID = int64(301)
+		newTaskID = int64(302)
+		oldTarget = int64(303)
+		newTarget = int64(304)
+	)
+
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+		tr: timerecord.NewTimeRecorder("terminal copy job"),
+	}
+	s.Require().NoError(s.copyMeta.AddJob(ctx, job))
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	oldTask := &copySegmentTask{tr: timerecord.NewTimeRecorder("old task"), times: taskcommon.NewTimes()}
+	oldTask.task.Store(&datapb.CopySegmentTask{
+		TaskId: oldTaskID,
+		JobId:  jobID,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskRetry,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 1,
+			TargetSegmentId: oldTarget,
+		}},
+	})
+	s.Require().NoError(s.copyMeta.AddTask(ctx, oldTask))
+	s.meta.segments.SetSegment(oldTarget, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: oldTarget, CollectionID: s.collectionID,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	}))
+
+	replacement := &copySegmentTask{tr: timerecord.NewTimeRecorder("new task"), times: taskcommon.NewTimes()}
+	replacement.task.Store(&datapb.CopySegmentTask{
+		TaskId: newTaskID,
+		JobId:  jobID,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 1,
+			TargetSegmentId: newTarget,
+		}},
+	})
+
+	replaced, err := s.copyMeta.ReplaceRetryTask(ctx, oldTaskID, replacement)
+	s.NoError(err)
+	s.False(replaced)
+	s.Same(oldTask, s.copyMeta.GetTask(ctx, oldTaskID))
+	s.Nil(s.copyMeta.GetTask(ctx, newTaskID))
+	s.Nil(s.meta.GetSegment(ctx, newTarget))
 }
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListJobsError() {
@@ -545,7 +760,7 @@ func (s *CopySegmentMetaSuite) TestAddTask_Success() {
 	s.Equal(int64(1001), retrievedTask.GetTaskId())
 }
 
-func (s *CopySegmentMetaSuite) TestAddTask_CatalogError() {
+func (s *CopySegmentMetaSuite) TestAddTask_CatalogErrorDuringShutdown() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("catalog error"))
 
 	task := &copySegmentTask{
@@ -559,7 +774,9 @@ func (s *CopySegmentMetaSuite) TestAddTask_CatalogError() {
 		CollectionId: s.collectionID,
 	})
 
-	err := s.copyMeta.AddTask(context.TODO(), task)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := s.copyMeta.AddTask(ctx, task)
 	s.Error(err)
 	s.Contains(err.Error(), "catalog error")
 
@@ -948,9 +1165,9 @@ func (s *CopySegmentMetaSuite) TestCopySegmentTasks_Operations() {
 	s.Len(tasks.listTasks(), 1)
 }
 
-// TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal verifies that transitioning a
+// TestUpdateJobStateAndReleasePin_UnpinsOnTerminal verifies that transitioning a
 // job to Completed with PinId>0 unpins the source snapshot exactly once.
-func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
+func TestUpdateJobStateAndReleasePin_UnpinsOnTerminal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -986,22 +1203,27 @@ func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	}
 	copyMeta.jobs[jobID] = job
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleasePin(context.TODO(), jobID,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	assert.NoError(t, err)
+	assert.True(t, applied)
 	assert.Equal(t, 1, unpinCalls, "UnpinSnapshot must be called exactly once on terminal transition")
 	assert.Equal(t, int64(42), unpinPinID, "Unpin must be called with job.PinId")
+	assert.Zero(t, copyMeta.jobs[jobID].GetPinId(), "successful release must durably clear job.PinId")
 
-	// Second terminal call: already terminal → must not Unpin again.
-	err = copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	// The stale Executing snapshot no longer matches after the first transition.
+	applied, err = copyMeta.UpdateJobStateAndReleasePin(context.TODO(), jobID,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	assert.NoError(t, err)
+	assert.False(t, applied)
 	assert.Equal(t, 1, unpinCalls, "Double terminal transition must not double-unpin")
 }
 
-// TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob verifies jobs persisted
+// TestUpdateJobStateAndReleasePin_SkipsUnpinForLegacyJob verifies jobs persisted
 // before the pin refactor (PinId=0) skip Unpin and do not panic on nil snapshotMeta.
-func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
+func TestUpdateJobStateAndReleasePin_SkipsUnpinForLegacyJob(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -1034,16 +1256,18 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	}
 	copyMeta.jobs[jobID] = job
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleasePin(context.TODO(), jobID,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	assert.NoError(t, err)
+	assert.True(t, applied)
 	assert.False(t, unpinCalled, "UnpinSnapshot must not be called for legacy job (PinId=0)")
 }
 
-// TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed verifies that when UnpinSnapshot
+// TestUpdateJobStateAndReleasePin_UnpinErrorSwallowed verifies that when UnpinSnapshot
 // returns an error the state transition is still persisted, and the caller receives nil.
-// The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
-func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
+// PinId remains on the terminal job so the checker can retry the release.
+func TestUpdateJobStateAndReleasePin_UnpinErrorSwallowed(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -1075,28 +1299,69 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 		tr: timerecord.NewTimeRecorder("test"),
 	}
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleasePin(context.TODO(), jobID,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 
 	assert.NoError(t, err, "unpin error must be swallowed — state transition already persisted")
+	assert.True(t, applied)
 	assert.Equal(t, 1, unpinCalls)
 	// State transition happened despite unpin failure.
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copyMeta.jobs[jobID].GetState())
+	assert.Equal(t, int64(101), copyMeta.jobs[jobID].GetPinId(), "failed release must retain durable ownership")
 }
 
-// TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent
+func TestReleaseJobPin_RetriesAndClearsOwnership(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+
+	unpinCalls := 0
+	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, pinID int64) (int64, string, int, error) {
+			unpinCalls++
+			assert.Equal(t, int64(202), pinID)
+			return 1, "snap_retry", 0, nil
+		}).Build()
+	defer mockUnpin.UnPatch()
+
+	copyMeta := &copySegmentMeta{
+		catalog:      catalog,
+		snapshotMeta: &snapshotMeta{},
+		jobs: map[int64]CopySegmentJob{
+			1001: &copySegmentJob{
+				CopySegmentJob: &datapb.CopySegmentJob{
+					JobId: 1001, State: datapb.CopySegmentJobState_CopySegmentJobFailed,
+					PinId: 202, SourceCollectionId: 1, SnapshotName: "snap_retry",
+				},
+				tr: timerecord.NewTimeRecorder("test"),
+			},
+		},
+		tasks: newCopySegmentTasks(),
+	}
+
+	assert.NoError(t, copyMeta.ReleaseJobPin(context.Background(), 1001))
+	assert.Equal(t, 1, unpinCalls)
+	assert.Zero(t, copyMeta.jobs[1001].GetPinId())
+
+	// Once ownership is cleared, later checker rounds are no-ops.
+	assert.NoError(t, copyMeta.ReleaseJobPin(context.Background(), 1001))
+	assert.Equal(t, 1, unpinCalls)
+}
+
+// TestUpdateJobStateAndReleasePin_NotFound verifies that updating a non-existent
 // job is a no-op and does not error.
-func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_NotFound() {
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleasePin_NotFound() {
+	applied, err := s.copyMeta.UpdateJobStateAndReleasePin(context.TODO(), 999,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.NoError(err)
+	s.False(applied)
 }
 
-// TestUpdateJobStateAndReleaseRef_CatalogError verifies that if the catalog save fails,
-// job state is preserved (no partial transition).
-func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleasePin_TerminalCatalogErrorFailsStop() {
+	writeErr := errors.New("ambiguous catalog response")
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(errors.New("catalog error")).Once()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(writeErr).Once()
 
 	snapshotName := "snap_err"
 	job := &copySegmentJob{
@@ -1111,12 +1376,66 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
 	}
 	s.copyMeta.AddJob(context.TODO(), job)
 
-	// Update fails at catalog layer
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 600,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
-	s.Error(err)
+	fatalCalled := false
+	fatalHeldJobLock := false
+	concreteCopyMeta := s.copyMeta.(*copySegmentMeta)
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+			lockAcquired := concreteCopyMeta.mu.TryLock()
+			if lockAcquired {
+				concreteCopyMeta.mu.Unlock()
+			}
+			fatalHeldJobLock = !lockAcquired
+		}).
+		Build()
+	defer mockFatal.UnPatch()
 
-	// Job should still be in Executing state (catalog write failed, in-memory unchanged)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	applied, err := s.copyMeta.UpdateJobStateAndReleasePin(requestCtx, 600,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.NoError(err, "the unreachable post-Fatal path must not enter ordinary job failure handling")
+	s.False(applied)
+	s.True(fatalCalled, "request cancellation must not suppress fail-stop while DataCoord is alive")
+	s.True(fatalHeldJobLock)
+
 	savedJob := s.copyMeta.GetJob(context.TODO(), 600)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, savedJob.GetState())
+}
+
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleasePin_CatalogErrorDuringShutdown() {
+	writeErr := errors.New("catalog error during shutdown")
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(writeErr).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        601,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.Require().NoError(s.copyMeta.AddJob(context.Background(), job))
+
+	componentCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.copyMeta.(*copySegmentMeta).ctx = componentCtx
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
+
+	applied, err := s.copyMeta.UpdateJobStateAndReleasePin(context.Background(), job.GetJobId(),
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.False(applied)
+	s.ErrorIs(err, writeErr)
+	s.False(fatalCalled)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		s.copyMeta.GetJob(context.Background(), job.GetJobId()).GetState())
 }

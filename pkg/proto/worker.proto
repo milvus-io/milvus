@@ -210,6 +210,10 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
+  // Write StorageV3 stats under a task-ID subdirectory. The coordinator checks
+  // the writer capability and reader compatibility before requesting this layout.
+  // False preserves the legacy layout for requests from older coordinators.
+  bool use_v3_stats_attempt_path = 33;
 }
 
 message CreateJobV2Request {

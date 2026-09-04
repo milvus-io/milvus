@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -46,12 +47,14 @@ var _ ImportTask = (*importTask)(nil)
 type importTask struct {
 	task atomic.Pointer[datapb.ImportTaskV2]
 
+	// ctx is the checker's process context for scheduler callbacks, whose
+	// interface does not carry a context.
+	ctx        context.Context
 	alloc      allocator.Allocator
 	meta       *meta
 	importMeta ImportMeta
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
-	retryTimes int64
 }
 
 func (t *importTask) GetJobID() int64 {
@@ -83,7 +86,7 @@ func (t *importTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (t *importTask) GetTaskVersion() int64 {
-	return t.retryTimes
+	return t.task.Load().GetTaskVersion()
 }
 
 func (t *importTask) GetReason() string {
@@ -122,20 +125,32 @@ func (t *importTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(t.GetState())
 }
 
-func (t *importTask) GetTaskNodeID() int64 {
-	return t.GetNodeID()
-}
-
 func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
-	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	logCtx := t.ctx
+	if logCtx == nil {
+		logCtx = context.TODO()
+	}
+	mlog.Info(logCtx, "processing pending import task...", WrapTaskLog(t)...)
+	job := t.importMeta.GetJob(logCtx, t.GetJobID())
+	if t.importMeta.GetTask(logCtx, t.GetTaskID()) == nil || job == nil ||
+		job.GetState() == internalpb.ImportJobState_Failed ||
+		job.GetState() == internalpb.ImportJobState_Completed {
+		// GC may have finalized this scheduler identity after the inspector took
+		// its enqueue snapshot. End the stale wrapper locally; there is no meta
+		// left that could own a new worker attempt.
+		local := typeutil.Clone(t.task.Load())
+		local.State = datapb.ImportTaskStateV2_None
+		t.task.Store(local)
+		mlog.Info(logCtx, "discarding stale import task before dispatch", WrapTaskLog(t)...)
+		return
+	}
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
-		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		mlog.Warn(logCtx, "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
 		if errors.Is(err, ErrPKRangeTooSmall) {
 			// The one assemble failure a retry cannot fix: the reservation was
 			// sized from an upper bound and preimport produced a larger exact
@@ -144,93 +159,143 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 			// (checkImportingJob only advances once every task is Completed) until
 			// tryTimeoutJob overwrites the reason with a generic timeout message.
 			//
-			// Only the job is updated, as in the DataNode-reported failure path
-			// below and in preimport: the checker's tryFailingTasks marks this
-			// task Failed on the next tick.
+			// Only the job is updated here; the checker's tryFailingTasks marks
+			// this task Failed on the next tick.
 			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
 				UpdateJobState(internalpb.ImportJobState_Failed),
 				UpdateJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+				mlog.Warn(logCtx, "failed to mark import job failed after assemble error",
 					WrapTaskLog(t, mlog.Err(updateErr))...)
 			}
-			return
 		}
-		t.retryTimes++
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
-	if err != nil {
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
-		t.retryTimes++
-		return
-	}
+	// Persist the assignment before crossing the at-least-once Create boundary.
+	// Recording it afterwards loses the attempt whenever the worker accepted the
+	// request but its response did not come back: the task stays Pending naming
+	// nobody, so nothing can reclaim that attempt, and the scheduler hands the
+	// same task ID to a second node while the first keeps running it. Failing to
+	// write leaves the task Pending and undispatched, which is the safe side.
 	err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
+		mlog.Warn(logCtx, "failed to persist import assignment, not sending task",
+			WrapTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		return
+	}
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	if err != nil {
+		mlog.Warn(logCtx, "import failed", WrapTaskLog(t, mlog.Err(err))...)
+		// Import retries rotate task and segment IDs, so an ambiguous old worker
+		// cannot collide with the replacement. Persist retry debt now; the
+		// scheduler releases/drops this attempt and the inspector performs the
+		// replacement on ImportScheduleInterval.
+		t.handoffRetry(context.TODO(), cluster, err.Error())
 		return
 	}
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
-	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+	mlog.Info(logCtx, "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
 func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
+	logCtx := t.ctx
+	if logCtx == nil {
+		logCtx = context.TODO()
+	}
 	req := &datapb.QueryImportRequest{
 		JobID:  t.GetJobID(),
 		TaskID: t.GetTaskID(),
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
-	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
-		// Clear partial progress recorded from the failed attempt. Otherwise,
-		// if the retried attempt's PickSegment lands on a different subset of
-		// the preallocated segments, the segments it skips will keep stale
-		// NumOfRows without insert binlogs — causing sort compaction to fail
-		// with "unexpected row count" or EOF.
-		if segmentIDs := t.GetSegmentIDs(); len(segmentIDs) > 0 {
-			if resetErr := t.meta.UpdateSegmentsInfo(context.TODO(), ResetImportingSegmentRows(segmentIDs...)); resetErr != nil {
-				mlog.Warn(context.TODO(), "failed to reset import segment row counts on retry",
-					WrapTaskLog(t, mlog.Err(resetErr))...)
-				return
+	if t.importMeta.GetTask(t.ctx, t.GetTaskID()) == nil {
+		oldTaskState := typeutil.Clone(t.task.Load())
+		oldTaskState.State = datapb.ImportTaskStateV2_Failed
+		t.task.Store(oldTaskState)
+		mlog.Info(logCtx, "discarding import result for a task no longer in metadata", WrapTaskLog(t)...)
+		return
+	}
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry ||
+		resp.GetState() == datapb.ImportTaskStateV2_None {
+		ctx := t.ctx
+		reason := ""
+		if resp != nil {
+			reason = resp.GetReason()
+		}
+		if err != nil {
+			reason = err.Error()
+		}
+		if t.importMeta.GetJob(ctx, t.GetJobID()) == nil {
+			orphanReason := "import job is gone: " + reason
+			if updateErr := t.importMeta.UpdateTask(ctx, t.GetTaskID(),
+				UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(orphanReason)); updateErr != nil {
+				mlog.Warn(ctx, "failed to retire orphan import task", WrapTaskLog(t, mlog.Err(updateErr))...)
+				local := typeutil.Clone(t.task.Load())
+				local.State = datapb.ImportTaskStateV2_Failed
+				local.Reason = orphanReason
+				t.task.Store(local)
 			}
+			return
 		}
-		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
-		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to update import task state to pending", WrapTaskLog(t, mlog.Err(updateErr))...)
-		}
-		mlog.Info(context.TODO(), "reset import task state to pending due to error occurs", WrapTaskLog(t, mlog.Err(err), mlog.String("reason", resp.GetReason()))...)
+		// Query only records retry debt. The import inspector owns the interval
+		// and performs the catalog transaction that removes this old task and
+		// publishes a fresh task/segment set.
+		t.handoffRetry(ctx, cluster, reason)
+		mlog.Info(ctx, "import attempt handed to business retry",
+			WrapTaskLog(t, mlog.Err(err), mlog.String("reason", reason))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
 		err = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(err))
+			mlog.Warn(logCtx, "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(err))
+			return
 		}
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.String("reason", resp.GetReason()))...)
+		if taskErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(resp.GetReason())); taskErr != nil {
+			mlog.Warn(logCtx, "failed to update import task state to Failed", WrapTaskLog(t, mlog.Err(taskErr))...)
+		}
+		mlog.Warn(logCtx, "import failed", WrapTaskLog(t, mlog.String("reason", resp.GetReason()))...)
 		return
 	}
 
-	collInfo := t.meta.GetCollection(t.GetCollectionID())
+	// Import correctness does not depend on collection-name metadata here; it
+	// is used only as an optional metric label. Avoid an additional RootCoord
+	// lookup on the result-commit path solely for that label.
 	dbName := ""
-	if collInfo != nil {
-		dbName = collInfo.DatabaseName
-	}
 
+	var missingSegmentIDs []int64
 	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		missingSegmentIDs, err = t.validateImportResponseSegments(logCtx, resp.GetImportSegmentsInfo(),
+			resp.GetState() == datapb.ImportTaskStateV2_Completed)
+		if err != nil {
+			if updateErr := t.importMeta.UpdateJob(logCtx, t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(logCtx, "failed to update invalid import job to Failed",
+					mlog.FieldJobID(t.GetJobID()), mlog.Err(updateErr))
+				return
+			}
+			if updateErr := t.importMeta.UpdateTask(logCtx, t.GetTaskID(),
+				UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error())); updateErr != nil {
+				mlog.Warn(logCtx, "failed to update invalid import task to Failed", WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			mlog.Warn(logCtx, "invalid import segment result", WrapTaskLog(t, mlog.Err(err))...)
+			return
+		}
 		for _, info := range resp.GetImportSegmentsInfo() {
 			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
-			if info.GetImportedRows() <= segment.GetNumOfRows() {
+			if segment == nil || info.GetImportedRows() <= segment.GetNumOfRows() {
 				continue // rows not changed, no need to update
 			}
 			diff := info.GetImportedRows() - segment.GetNumOfRows()
 			op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 			err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
 			if err != nil {
-				mlog.Warn(context.TODO(), "update import segment rows failed", WrapTaskLog(t, mlog.Err(err))...)
+				mlog.Warn(logCtx, "update import segment rows failed", WrapTaskLog(t, mlog.Err(err))...)
 				return
 			}
-			mlog.Info(context.TODO(), "update import segment rows done", WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Int64("importedRows", info.GetImportedRows()))...)
+			mlog.Info(logCtx, "update import segment rows done", WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Int64("importedRows", info.GetImportedRows()))...)
 
 			metrics.DataCoordBulkVectors.WithLabelValues(
 				dbName,
@@ -245,7 +310,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// try to parse path and fill logID
 			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
 			if err != nil {
-				mlog.Warn(context.TODO(), "fail to CompressBinLogs for import binlogs",
+				mlog.Warn(logCtx, "fail to CompressBinLogs for import binlogs",
 					WrapTaskLog(t, mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))...)
 				return
 			}
@@ -281,39 +346,192 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
-					mlog.Warn(context.TODO(), "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(updateErr))
+					mlog.Warn(logCtx, "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(updateErr))
 				}
-				mlog.Warn(context.TODO(), "update import segment binlogs failed", WrapTaskLog(t, mlog.String("err", err.Error()))...)
+				mlog.Warn(logCtx, "update import segment binlogs failed", WrapTaskLog(t, mlog.Err(err))...)
 				return
 			}
-			mlog.Info(context.TODO(), "update import segment info done", WrapTaskLog(t,
+			mlog.Info(logCtx, "update import segment info done", WrapTaskLog(t,
 				mlog.FieldSegmentID(info.GetSegmentID()),
 				mlog.Uint64("minTs", minTs),
 				mlog.Uint64("maxTs", maxTs),
 				mlog.Any("segmentInfo", info))...)
 			totalRows += info.GetImportedRows()
 		}
+		if len(missingSegmentIDs) > 0 {
+			operators := make([]UpdateOperator, 0, len(missingSegmentIDs))
+			for _, segmentID := range missingSegmentIDs {
+				operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
+			}
+			if err = t.meta.UpdateSegmentsInfo(logCtx, operators...); err != nil {
+				updateErr := t.importMeta.UpdateJob(logCtx, t.GetJobID(),
+					UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
+				if updateErr != nil {
+					mlog.Warn(logCtx, "failed to update job state to Failed", mlog.FieldJobID(t.GetJobID()), mlog.Err(updateErr))
+				}
+				mlog.Warn(logCtx, "failed to retire empty import segments",
+					WrapTaskLog(t, mlog.Int64s("segmentIDs", missingSegmentIDs), mlog.Err(err))...)
+				return
+			}
+		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
-			mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
+			mlog.Warn(logCtx, "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
 		importDuration := t.GetTR().RecordSpan()
 		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
-		mlog.Info(context.TODO(), "import done", WrapTaskLog(t, mlog.Int64("totalRows", totalRows), mlog.Duration("taskTimeCost/import", importDuration))...)
+		mlog.Info(logCtx, "import done", WrapTaskLog(t, mlog.Int64("totalRows", totalRows), mlog.Duration("taskTimeCost/import", importDuration))...)
 	}
-	mlog.Info(context.TODO(), "query import", WrapTaskLog(t, mlog.String("respState", resp.GetState().String()),
+	mlog.Info(logCtx, "query import", WrapTaskLog(t, mlog.String("respState", resp.GetState().String()),
 		mlog.String("reason", resp.GetReason()))...)
 }
 
+// validateImportResponseSegments checks the worker result against the output
+// identities preallocated for this task before any segment metadata is changed.
+// A completed response may omit a preallocated segment only when it still has
+// the exact empty importing shape; the caller retires that unused identity.
+func (t *importTask) validateImportResponseSegments(ctx context.Context, infos []*datapb.ImportSegmentInfo,
+	completed bool,
+) ([]int64, error) {
+	job := t.importMeta.GetJob(ctx, t.GetJobID())
+	if job == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import job %d is missing", t.GetJobID())
+	}
+	if job.GetCollectionID() != t.GetCollectionID() {
+		return nil, merr.WrapErrImportSysFailedMsg(
+			"import task %d belongs to collection %d, expected %d",
+			t.GetTaskID(), t.GetCollectionID(), job.GetCollectionID())
+	}
+
+	expected := make(map[int64]struct{}, len(t.GetSegmentIDs()))
+	for _, segmentID := range t.GetSegmentIDs() {
+		if _, ok := expected[segmentID]; ok {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d preallocates segment %d more than once", t.GetTaskID(), segmentID)
+		}
+		expected[segmentID] = struct{}{}
+	}
+
+	seen := make(map[int64]struct{}, len(infos))
+	for _, info := range infos {
+		segmentID := info.GetSegmentID()
+		if _, ok := expected[segmentID]; !ok {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d returned unexpected segment %d", t.GetTaskID(), segmentID)
+		}
+		if _, ok := seen[segmentID]; ok {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d returned segment %d more than once", t.GetTaskID(), segmentID)
+		}
+		seen[segmentID] = struct{}{}
+
+		segment := t.meta.GetSegment(ctx, segmentID)
+		if err := validateImportResponseSegmentOwner(job, t.GetCollectionID(), segment); err != nil {
+			return nil, err
+		}
+		if segment.GetState() != commonpb.SegmentState_Importing &&
+			(!completed || segment.GetState() != commonpb.SegmentState_Flushed) {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d returned segment %d in state %s",
+				t.GetTaskID(), segmentID, segment.GetState().String())
+		}
+	}
+
+	if !completed {
+		return nil, nil
+	}
+	missing := make([]int64, 0, len(expected)-len(seen))
+	for _, segmentID := range t.GetSegmentIDs() {
+		if _, ok := seen[segmentID]; ok {
+			continue
+		}
+		segment := t.meta.GetSegment(ctx, segmentID)
+		if err := validateImportResponseSegmentOwner(job, t.GetCollectionID(), segment); err != nil {
+			return nil, err
+		}
+		if segment.GetState() != commonpb.SegmentState_Importing &&
+			segment.GetState() != commonpb.SegmentState_Dropped {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d omitted segment %d in state %s",
+				t.GetTaskID(), segmentID, segment.GetState().String())
+		}
+		if !isEmptyImportSegment(segment) {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"import task %d omitted non-empty segment %d", t.GetTaskID(), segmentID)
+		}
+		if segment.GetState() != commonpb.SegmentState_Dropped {
+			missing = append(missing, segmentID)
+		}
+	}
+	return missing, nil
+}
+
+func validateImportResponseSegmentOwner(job ImportJob, collectionID int64, segment *SegmentInfo) error {
+	if segment == nil {
+		return merr.WrapErrImportSysFailedMsg("preallocated import segment is missing")
+	}
+	if segment.GetCollectionID() != collectionID || segment.GetCollectionID() != job.GetCollectionID() {
+		return merr.WrapErrImportSysFailedMsg(
+			"import segment %d belongs to collection %d, expected %d",
+			segment.GetID(), segment.GetCollectionID(), job.GetCollectionID())
+	}
+	if len(job.GetPartitionIDs()) > 0 && !typeutil.NewSet(job.GetPartitionIDs()...).Contain(segment.GetPartitionID()) {
+		return merr.WrapErrImportSysFailedMsg(
+			"import segment %d belongs to partition %d outside job partitions %v",
+			segment.GetID(), segment.GetPartitionID(), job.GetPartitionIDs())
+	}
+	if len(job.GetVchannels()) > 0 && !typeutil.NewSet(job.GetVchannels()...).Contain(segment.GetInsertChannel()) {
+		return merr.WrapErrImportSysFailedMsg(
+			"import segment %d belongs to channel %q outside job channels %v",
+			segment.GetID(), segment.GetInsertChannel(), job.GetVchannels())
+	}
+	if !segment.GetIsImporting() {
+		return merr.WrapErrImportSysFailedMsg("import segment %d is already published", segment.GetID())
+	}
+	return nil
+}
+
+func isEmptyImportSegment(segment *SegmentInfo) bool {
+	return segment.GetNumOfRows() == 0 &&
+		len(segment.GetBinlogs()) == 0 && len(segment.GetStatslogs()) == 0 &&
+		len(segment.GetDeltalogs()) == 0 && len(segment.GetBm25Statslogs()) == 0 &&
+		len(segment.GetTextStatsLogs()) == 0 && len(segment.GetJsonKeyStats()) == 0 &&
+		segment.GetManifestPath() == ""
+}
+
+// handoffRetry records retry debt for an import attempt. Import replacements
+// use fresh task and segment IDs, so worker cleanup may remain best effort; the
+// inspector performs the identity rotation before dispatching any replacement.
+func (t *importTask) handoffRetry(ctx context.Context, cluster session.Cluster, reason string) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	if err := t.importMeta.UpdateTask(ctx, t.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_Retry), UpdateReason(reason)); err != nil {
+		mlog.Warn(ctx, "failed to persist import retry state", WrapTaskLog(t, mlog.Err(err))...)
+		local := typeutil.Clone(t.task.Load())
+		local.State = datapb.ImportTaskStateV2_Retry
+		local.Reason = reason
+		t.task.Store(local)
+	}
+	if err := dropImportTaskOnWorker(t, cluster); err != nil {
+		mlog.Warn(ctx, "failed to drop old import attempt", WrapTaskLog(t, mlog.Err(err))...)
+	}
+}
+
 func (t *importTask) DropTaskOnWorker(cluster session.Cluster) {
+	logCtx := t.ctx
+	if logCtx == nil {
+		logCtx = context.TODO()
+	}
 	err := DropImportTask(t, cluster, t.importMeta)
 	if err != nil {
-		mlog.Warn(context.TODO(), "drop import failed", WrapTaskLog(t, mlog.Err(err))...)
+		mlog.Warn(logCtx, "drop import failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	mlog.Info(context.TODO(), "drop import task done", WrapTaskLog(t, mlog.FieldNodeID(t.GetNodeID()))...)
+	mlog.Info(logCtx, "drop import task done", WrapTaskLog(t, mlog.FieldNodeID(t.GetNodeID()))...)
 }
 
 func (t *importTask) GetType() TaskType {
@@ -326,6 +544,7 @@ func (t *importTask) GetTR() *timerecord.TimeRecorder {
 
 func (t *importTask) Clone() ImportTask {
 	cloned := &importTask{
+		ctx:        t.ctx,
 		alloc:      t.alloc,
 		meta:       t.meta,
 		importMeta: t.importMeta,

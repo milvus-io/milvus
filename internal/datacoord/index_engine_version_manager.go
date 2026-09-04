@@ -62,11 +62,13 @@ type IndexEngineVersionManager interface {
 }
 
 type versionManagerImpl struct {
-	mu                  lock.Mutex
-	versions            map[int64]sessionutil.IndexEngineVersion
-	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
-	indexNonEncoding    map[int64]bool
-	sessionVersion      map[int64]semver.Version
+	mu                      lock.Mutex
+	versions                map[int64]sessionutil.IndexEngineVersion
+	scalarIndexVersions     map[int64]sessionutil.IndexEngineVersion
+	indexNonEncoding        map[int64]bool
+	sessionVersion          map[int64]semver.Version
+	statsAttemptReaders     map[int64]bool
+	statsAttemptReaderCount int
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
@@ -75,6 +77,7 @@ func newIndexEngineVersionManager() IndexEngineVersionManager {
 		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
 		indexNonEncoding:    map[int64]bool{},
 		sessionVersion:      map[int64]semver.Version{},
+		statsAttemptReaders: map[int64]bool{},
 	}
 }
 
@@ -118,6 +121,10 @@ func (m *versionManagerImpl) removeNodeByID(sessionID int64) {
 	delete(m.scalarIndexVersions, sessionID)
 	delete(m.indexNonEncoding, sessionID)
 	delete(m.sessionVersion, sessionID)
+	if m.statsAttemptReaders[sessionID] {
+		m.statsAttemptReaderCount--
+	}
+	delete(m.statsAttemptReaders, sessionID)
 }
 
 func (m *versionManagerImpl) Update(session *sessionutil.Session) {
@@ -191,6 +198,16 @@ func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
 	m.sessionVersion[session.ServerID] = session.Version
+	if m.statsAttemptReaders == nil {
+		m.statsAttemptReaders = make(map[int64]bool)
+	}
+	if m.statsAttemptReaders[session.ServerID] {
+		m.statsAttemptReaderCount--
+	}
+	m.statsAttemptReaders[session.ServerID] = session.V3StatsAttemptPath
+	if session.V3StatsAttemptPath {
+		m.statsAttemptReaderCount++
+	}
 }
 
 func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
@@ -399,4 +416,12 @@ func (m *versionManagerImpl) GetMinimalSessionVer() semver.Version {
 		}
 	}
 	return minVer
+}
+
+// supportsV3StatsAttemptReaders gates new publications on explicit reader
+// capabilities, not release numbers shared by incompatible development builds.
+func (m *versionManagerImpl) supportsV3StatsAttemptReaders() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.versions) > 0 && m.statsAttemptReaderCount == len(m.versions)
 }

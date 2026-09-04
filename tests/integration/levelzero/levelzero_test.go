@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -40,15 +39,12 @@ type LevelZeroSuite struct {
 }
 
 func (s *LevelZeroSuite) SetupSuite() {
-	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
-
 	s.MiniClusterSuite.SetupSuite()
 	s.dim = 768
 }
 
 func (s *LevelZeroSuite) TearDownSuite() {
 	s.MiniClusterSuite.TearDownSuite()
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 }
 
 func TestLevelZero(t *testing.T) {

@@ -68,9 +68,9 @@ func (_c *MockCompactionInspector_enqueueCompaction_Call) RunAndReturn(run func(
 	return _c
 }
 
-// getCompactionInfo provides a mock function with given fields: ctx, signalID
-func (_m *MockCompactionInspector) getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo {
-	ret := _m.Called(ctx, signalID)
+// getCompactionInfo provides a mock function with given fields: ctx, triggerID
+func (_m *MockCompactionInspector) getCompactionInfo(ctx context.Context, triggerID int64) *compactionInfo {
+	ret := _m.Called(ctx, triggerID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for getCompactionInfo")
@@ -78,7 +78,7 @@ func (_m *MockCompactionInspector) getCompactionInfo(ctx context.Context, signal
 
 	var r0 *compactionInfo
 	if rf, ok := ret.Get(0).(func(context.Context, int64) *compactionInfo); ok {
-		r0 = rf(ctx, signalID)
+		r0 = rf(ctx, triggerID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*compactionInfo)
@@ -95,12 +95,12 @@ type MockCompactionInspector_getCompactionInfo_Call struct {
 
 // getCompactionInfo is a helper method to define mock.On call
 //   - ctx context.Context
-//   - signalID int64
-func (_e *MockCompactionInspector_Expecter) getCompactionInfo(ctx interface{}, signalID interface{}) *MockCompactionInspector_getCompactionInfo_Call {
-	return &MockCompactionInspector_getCompactionInfo_Call{Call: _e.mock.On("getCompactionInfo", ctx, signalID)}
+//   - triggerID int64
+func (_e *MockCompactionInspector_Expecter) getCompactionInfo(ctx interface{}, triggerID interface{}) *MockCompactionInspector_getCompactionInfo_Call {
+	return &MockCompactionInspector_getCompactionInfo_Call{Call: _e.mock.On("getCompactionInfo", ctx, triggerID)}
 }
 
-func (_c *MockCompactionInspector_getCompactionInfo_Call) Run(run func(ctx context.Context, signalID int64)) *MockCompactionInspector_getCompactionInfo_Call {
+func (_c *MockCompactionInspector_getCompactionInfo_Call) Run(run func(ctx context.Context, triggerID int64)) *MockCompactionInspector_getCompactionInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(int64))
 	})
@@ -176,17 +176,17 @@ func (_c *MockCompactionInspector_getCompactionTasksNum_Call) RunAndReturn(run f
 	return _c
 }
 
-// getCompactionTasksNumBySignalID provides a mock function with given fields: signalID
-func (_m *MockCompactionInspector) getCompactionTasksNumBySignalID(signalID int64) int {
-	ret := _m.Called(signalID)
+// getCompactionTasksNumByTriggerID provides a mock function with given fields: triggerID
+func (_m *MockCompactionInspector) getCompactionTasksNumByTriggerID(triggerID int64) int {
+	ret := _m.Called(triggerID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for getCompactionTasksNumBySignalID")
+		panic("no return value specified for getCompactionTasksNumByTriggerID")
 	}
 
 	var r0 int
 	if rf, ok := ret.Get(0).(func(int64) int); ok {
-		r0 = rf(signalID)
+		r0 = rf(triggerID)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
@@ -194,30 +194,30 @@ func (_m *MockCompactionInspector) getCompactionTasksNumBySignalID(signalID int6
 	return r0
 }
 
-// MockCompactionInspector_getCompactionTasksNumBySignalID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'getCompactionTasksNumBySignalID'
-type MockCompactionInspector_getCompactionTasksNumBySignalID_Call struct {
+// MockCompactionInspector_getCompactionTasksNumByTriggerID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'getCompactionTasksNumByTriggerID'
+type MockCompactionInspector_getCompactionTasksNumByTriggerID_Call struct {
 	*mock.Call
 }
 
-// getCompactionTasksNumBySignalID is a helper method to define mock.On call
-//   - signalID int64
-func (_e *MockCompactionInspector_Expecter) getCompactionTasksNumBySignalID(signalID interface{}) *MockCompactionInspector_getCompactionTasksNumBySignalID_Call {
-	return &MockCompactionInspector_getCompactionTasksNumBySignalID_Call{Call: _e.mock.On("getCompactionTasksNumBySignalID", signalID)}
+// getCompactionTasksNumByTriggerID is a helper method to define mock.On call
+//   - triggerID int64
+func (_e *MockCompactionInspector_Expecter) getCompactionTasksNumByTriggerID(triggerID interface{}) *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call {
+	return &MockCompactionInspector_getCompactionTasksNumByTriggerID_Call{Call: _e.mock.On("getCompactionTasksNumByTriggerID", triggerID)}
 }
 
-func (_c *MockCompactionInspector_getCompactionTasksNumBySignalID_Call) Run(run func(signalID int64)) *MockCompactionInspector_getCompactionTasksNumBySignalID_Call {
+func (_c *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call) Run(run func(triggerID int64)) *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64))
 	})
 	return _c
 }
 
-func (_c *MockCompactionInspector_getCompactionTasksNumBySignalID_Call) Return(_a0 int) *MockCompactionInspector_getCompactionTasksNumBySignalID_Call {
+func (_c *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call) Return(_a0 int) *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCompactionInspector_getCompactionTasksNumBySignalID_Call) RunAndReturn(run func(int64) int) *MockCompactionInspector_getCompactionTasksNumBySignalID_Call {
+func (_c *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call) RunAndReturn(run func(int64) int) *MockCompactionInspector_getCompactionTasksNumByTriggerID_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -23,13 +23,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -52,6 +55,63 @@ func TestCatalog_Update_Empty(t *testing.T) {
 	c := NewCatalog(metakv, "", "")
 	err := c.Update(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_ReplaceStatsTask(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saves map[string]string
+	var removals []string
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, gotSaves map[string]string, gotRemovals []string, _ ...predicates.Predicate) error {
+			saves = gotSaves
+			removals = gotRemovals
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	replacement := &indexpb.StatsTask{
+		TaskID:     2,
+		SegmentID:  10,
+		SubJobType: indexpb.StatsSubJob_TextIndexJob,
+		State:      indexpb.JobState_JobStateInit,
+	}
+	err := c.Update(context.TODO(), metastore.DropStatsTask(1), metastore.AddStatsTask(replacement))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{buildStatsTaskKey(1)}, removals)
+
+	value, ok := saves[buildStatsTaskKey(2)]
+	assert.True(t, ok)
+	persisted := &indexpb.StatsTask{}
+	assert.NoError(t, proto.Unmarshal([]byte(value), persisted))
+	assert.True(t, proto.Equal(replacement, persisted))
+}
+
+func TestCatalog_Update_ReplaceSegmentIndex(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saves map[string]string
+	var removals []string
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, gotSaves map[string]string, gotRemovals []string, _ ...predicates.Predicate) error {
+			saves = gotSaves
+			removals = gotRemovals
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	oldIndex := &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 10}
+	newIndex := &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 11}
+	err := c.Update(context.TODO(), metastore.DropSegmentIndex(oldIndex), metastore.AddSegmentIndex(newIndex))
+	require.NoError(t, err)
+	assert.Equal(t, []string{BuildSegmentIndexKey(1, 2, 3, 10)}, removals)
+
+	value, ok := saves[BuildSegmentIndexKey(1, 2, 3, 11)]
+	require.True(t, ok)
+	persisted := &indexpb.SegmentIndex{}
+	require.NoError(t, proto.Unmarshal([]byte(value), persisted))
+	assert.Equal(t, newIndex.BuildID, persisted.GetBuildID())
+	assert.Equal(t, newIndex.IndexID, persisted.GetIndexID())
 }
 
 // TestCatalog_Update_AddSegmentEncodingMatchesLegacy proves AddSegment writes
@@ -167,6 +227,125 @@ func TestCatalog_Update_AlterSegmentEncodingMatchesLegacy(t *testing.T) {
 	// record KV + at least one GC-compat binlog KV - proves the compat write is
 	// preserved, unlike the record-only UpdateSegment path (which writes 1 KV).
 	assert.Greater(t, len(compositeSaves), 1)
+}
+
+func TestCatalog_Update_AlterSegmentAndBinlogsEncodingMatchesLegacy(t *testing.T) {
+	seg := &datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+		Deltalogs:    []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
+		Statslogs:    []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{LogID: 4}},
+		}},
+	}
+	increment := metastore.BinlogsIncrement{
+		UpdateMask: metastore.BinlogsUpdateMask{
+			WithoutBinlogs:       true,
+			WithoutStatslogs:     true,
+			WithoutBm25Statslogs: true,
+		},
+		DroppedBinlogFieldIDs: []int64{99},
+	}
+
+	var legacySaves map[string]string
+	var legacyRemovals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			legacySaves = saves
+			return nil
+		}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, saves)
+			legacyRemovals = removals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+	legacyIncrement := increment
+	legacyIncrement.Segment = seg
+	assert.NoError(t, c.AlterSegments(context.TODO(), []*datapb.SegmentInfo{seg}, legacyIncrement))
+
+	var compositeSaves map[string]string
+	var compositeRemovals []string
+	metakv2 := mocks.NewMetaKv(t)
+	metakv2.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv2.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			compositeSaves = saves
+			compositeRemovals = removals
+			return nil
+		}).Once()
+	c2 := NewCatalog(metakv2, "", "")
+	assert.NoError(t, c2.Update(context.TODO(), metastore.AlterSegmentAndBinlogs(seg, increment)))
+
+	assert.Equal(t, legacySaves, compositeSaves)
+	assert.Equal(t, legacyRemovals, compositeRemovals)
+}
+
+func TestCatalog_Update_L0SegmentsAndCompactionTaskInOneTxn(t *testing.T) {
+	target := &datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 0,
+			Binlogs: []*datapb.Binlog{{
+				LogID: 9001,
+			}},
+		}},
+	}
+	input := &datapb.SegmentInfo{
+		ID:           100,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Dropped,
+		ManifestPath: "/segments/100/manifest.json",
+	}
+	task := &datapb.CompactionTask{
+		PlanID:    7,
+		TriggerID: 8,
+		Type:      datapb.CompactionType_Level0DeleteCompaction,
+		State:     datapb.CompactionTaskState_meta_saved,
+	}
+	increment := metastore.BinlogsIncrement{
+		UpdateMask: metastore.BinlogsUpdateMask{
+			WithoutBinlogs:       true,
+			WithoutStatslogs:     true,
+			WithoutBm25Statslogs: true,
+		},
+	}
+
+	var saves map[string]string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, removals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AlterSegmentAndBinlogs(target, increment),
+		metastore.AlterSegment(input),
+		metastore.AddCompactionTask(task))
+	assert.NoError(t, err)
+	assert.Contains(t, saves, buildSegmentPath(1, 10, 200))
+	assert.Contains(t, saves, buildFieldDeltalogPath(1, 10, 200, 0))
+	assert.Contains(t, saves, buildSegmentPath(1, 10, 100))
+	assert.Contains(t, saves, buildCompactionTaskPath(task))
+
+	persistedTask := &datapb.CompactionTask{}
+	assert.NoError(t, proto.Unmarshal([]byte(saves[buildCompactionTaskPath(task)]), persistedTask))
+	assert.True(t, proto.Equal(task, persistedTask))
 }
 
 // TestCatalog_Update_SegmentRecordPersistedAsIs proves UpdateSegment persists
@@ -334,6 +513,253 @@ func TestCatalog_Update_AddRefreshTasksAndSaveJobEncodingMatchesLegacy(t *testin
 
 	assert.Equal(t, legacySaves, compositeSaves)
 	assert.Len(t, compositeSaves, 3)
+}
+
+func TestCatalog_Update_ReplaceRefreshTask(t *testing.T) {
+	newTask := &datapb.ExternalCollectionRefreshTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	job := &datapb.ExternalCollectionRefreshJob{JobId: 7, CollectionId: 3, TaskIds: []int64{2001}}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actualSaves map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actualSaves
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddRefreshTask(newTask),
+		metastore.SaveRefreshJob(job))
+	assert.NoError(t, err)
+	assert.Contains(t, saves, buildExternalCollectionRefreshTaskKey(2001))
+	assert.Contains(t, saves, buildExternalCollectionRefreshJobKey(7))
+	assert.Empty(t, removals)
+}
+
+func TestCatalog_Update_ReplaceRefreshTaskFallbackKeepsCommitMarkerLast(t *testing.T) {
+	newTask := &datapb.ExternalCollectionRefreshTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	job := &datapb.ExternalCollectionRefreshJob{JobId: 7, CollectionId: 3, TaskIds: []int64{2001}}
+
+	events := make([]string, 0, 2)
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			events = append(events, "task")
+			assert.Contains(t, saves, buildExternalCollectionRefreshTaskKey(2001))
+			return nil
+		}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			events = append(events, "job")
+			assert.Contains(t, saves, buildExternalCollectionRefreshJobKey(7))
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddRefreshTask(newTask),
+		metastore.SaveRefreshJob(job))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"task", "job"}, events)
+}
+
+func TestCatalog_Update_ReplaceCopySegmentTask(t *testing.T) {
+	const oldTaskID = int64(1001)
+	task := &datapb.CopySegmentTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	segment := &datapb.SegmentInfo{
+		ID: 3001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Importing,
+	}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.DropCopySegmentTask(oldTaskID),
+		metastore.AddCopySegmentTask(task),
+		metastore.AddSegment(segment))
+	assert.NoError(t, err)
+	assert.Contains(t, removals, buildCopySegmentTaskKey(oldTaskID))
+	assert.Contains(t, saves, buildCopySegmentTaskKey(task.GetTaskId()))
+	assert.Contains(t, saves, buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()))
+}
+
+func TestCatalog_Update_AddCopySegmentJobAndTargets(t *testing.T) {
+	job := &datapb.CopySegmentJob{JobId: 7, CollectionId: 3}
+	segment := &datapb.SegmentInfo{
+		ID: 3001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Importing,
+	}
+
+	var saves map[string]string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, removals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddSegment(segment),
+		metastore.SaveCopySegmentJob(job))
+	assert.NoError(t, err)
+	assert.Contains(t, saves, buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()))
+	assert.Contains(t, saves, buildCopySegmentJobKey(job.GetJobId()))
+}
+
+func TestCatalog_Update_ReplaceImportTask(t *testing.T) {
+	const oldTaskID = int64(7)
+	task := &datapb.ImportTaskV2{TaskID: 8, CollectionID: 3, SegmentIDs: []int64{3001}}
+	oldSegment := &datapb.SegmentInfo{
+		ID: 2001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Dropped,
+	}
+	newSegment := &datapb.SegmentInfo{
+		ID: 3001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Importing,
+	}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().HasPrefix(mock.Anything, mock.Anything).Return(false, nil).Times(3)
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.DropImportTask(oldTaskID),
+		metastore.AlterSegment(oldSegment),
+		metastore.AddSegment(newSegment),
+		metastore.SaveImportTask(task))
+	assert.NoError(t, err)
+	assert.Contains(t, removals, buildImportTaskKey(oldTaskID))
+	assert.Contains(t, saves, buildSegmentPath(oldSegment.GetCollectionID(), oldSegment.GetPartitionID(), oldSegment.GetID()))
+	assert.Contains(t, saves, buildSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID()))
+	assert.Contains(t, saves, buildImportTaskKey(task.GetTaskID()))
+}
+
+func TestCatalog_Update_ReplacePreImportTask(t *testing.T) {
+	const oldTaskID = int64(7)
+	task := &datapb.PreImportTask{
+		TaskID:       8,
+		JobID:        2,
+		CollectionID: 3,
+		State:        datapb.ImportTaskStateV2_Pending,
+	}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.DropPreImportTask(oldTaskID),
+		metastore.SavePreImportTask(task))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{buildPreImportTaskKey(oldTaskID)}, removals)
+
+	value, ok := saves[buildPreImportTaskKey(task.GetTaskID())]
+	assert.True(t, ok)
+	persisted := &datapb.PreImportTask{}
+	assert.NoError(t, proto.Unmarshal([]byte(value), persisted))
+	assert.True(t, proto.Equal(task, persisted))
+}
+
+func TestCatalog_Update_ReplaceCompactionTask(t *testing.T) {
+	oldTask := &datapb.CompactionTask{TriggerID: 7, PlanID: 1001}
+	newTask := &datapb.CompactionTask{TriggerID: 7, PlanID: 2001}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actualSaves map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actualSaves
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.DropCompactionTask(oldTask),
+		metastore.AddCompactionTask(newTask))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{buildCompactionTaskPath(oldTask)}, removals)
+	assert.Contains(t, saves, buildCompactionTaskPath(newTask))
+
+	persisted := &datapb.CompactionTask{}
+	assert.NoError(t, proto.Unmarshal([]byte(saves[buildCompactionTaskPath(newTask)]), persisted))
+	assert.Equal(t, newTask, persisted)
+}
+
+func TestCatalog_Update_AddAnalyzeTaskAndCompactionTask(t *testing.T) {
+	analyzeTask := &indexpb.AnalyzeTask{
+		TaskID:       3001,
+		CollectionID: 1,
+		PartitionID:  2,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	compactionTask := &datapb.CompactionTask{
+		TriggerID: 7,
+		PlanID:    1001,
+		State:     datapb.CompactionTaskState_analyzing,
+	}
+
+	var saves map[string]string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actualSaves map[string]string, _ []string, _ ...predicates.Predicate) error {
+			saves = actualSaves
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddAnalyzeTask(analyzeTask),
+		metastore.AddCompactionTask(compactionTask))
+	require.NoError(t, err)
+	require.Len(t, saves, 2)
+
+	persistedAnalyze := &indexpb.AnalyzeTask{}
+	require.NoError(t, proto.Unmarshal([]byte(saves[buildAnalyzeTaskKey(analyzeTask.GetTaskID())]), persistedAnalyze))
+	assert.True(t, proto.Equal(analyzeTask, persistedAnalyze))
+
+	persistedCompaction := &datapb.CompactionTask{}
+	require.NoError(t, proto.Unmarshal([]byte(saves[buildCompactionTaskPath(compactionTask)]), persistedCompaction))
+	assert.True(t, proto.Equal(compactionTask, persistedCompaction))
 }
 
 // TestCatalog_Update_DropPartitionStatsAndAnalyzeTask proves the composite

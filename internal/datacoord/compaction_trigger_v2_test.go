@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
@@ -219,16 +218,11 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	}
 	segments := genSegmentsForMeta(s.testLabel)
 	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
-	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
-		ID:     s.testLabel.CollectionID,
-		Schema: &schemapb.CollectionSchema{},
-	})
 	versionManager := NewMockVersionManager(s.T())
 	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
 	s.versionManager = versionManager
@@ -237,7 +231,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Once()
 	s.triggerManager.handler = handler
 
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
@@ -584,8 +578,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	// ManualTrigger validates the collection, the L0 policy builds the view,
+	// and submission validates the collection again before enqueueing it.
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Times(3)
 	s.triggerManager.handler = handler
+	s.triggerManager.l0Policy.handler = handler
 
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 	segments, found := collSegs[1]

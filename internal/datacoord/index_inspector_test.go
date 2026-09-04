@@ -25,11 +25,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -46,7 +49,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
 		ctx := context.Background()
 		notifyChan := make(chan int64, 1)
-		scheduler := task.NewMockGlobalScheduler(t)
+		scheduler := newOwnershipScheduler(t)
 		alloc := allocator.NewMockAllocator(t)
 		handler := NewNMockHandler(t)
 		storage := mocks.NewChunkManager(t)
@@ -54,8 +57,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
 
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments: NewSegmentsInfo(),
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
 				catalog:          catalog,
@@ -147,8 +149,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -166,6 +167,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           1,
 			CollectionID: 2,
+			PartitionID:  3,
 			State:        commonpb.SegmentState_Flushed,
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
@@ -176,10 +178,14 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	meta.segments.SetSegment(seg1.ID, seg1)
 
 	segIndex1 := &model.SegmentIndex{
-		SegmentID:  seg1.ID,
-		IndexID:    3,
-		BuildID:    4,
-		IndexState: commonpb.IndexState_Unissued,
+		CollectionID: seg1.GetCollectionID(),
+		PartitionID:  seg1.GetPartitionID(),
+		SegmentID:    seg1.ID,
+		IndexID:      3,
+		BuildID:      4,
+		NodeID:       99,
+		IndexVersion: 7,
+		IndexState:   commonpb.IndexState_InProgress,
 	}
 	meta.indexMeta.AddSegmentIndex(ctx, segIndex1)
 
@@ -196,9 +202,100 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	}
 
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
+		recovered, ok := scheduled.(*indexBuildTask)
+		require.True(t, ok)
+		assert.Equal(t, int64(4), recovered.GetTaskID(), "restart must preserve the assigned BuildID")
+		assert.Equal(t, int64(99), recovered.NodeID)
+		assert.Equal(t, int64(7), recovered.IndexVersion, "legacy path marker is preserved while polling the old assignment")
+		assert.Equal(t, taskcommon.InProgress, recovered.GetTaskState())
 		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
 	}).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_RetryUsesFreshBuildIDAfterBusinessInterval(t *testing.T) {
+	const (
+		collectionID = int64(10)
+		partitionID  = int64(20)
+		segmentID    = int64(30)
+		indexID      = int64(40)
+		oldBuildID   = int64(50)
+		newBuildID   = int64(51)
+	)
+
+	ctx := context.Background()
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			ctx:              ctx,
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {indexID: {CollectionID: collectionID, IndexID: indexID, FieldID: 100}},
+			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	meta.segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: segmentID, CollectionID: collectionID, PartitionID: partitionID,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 100,
+	}})
+	old := &model.SegmentIndex{
+		CollectionID: collectionID, PartitionID: partitionID, SegmentID: segmentID,
+		IndexID: indexID, BuildID: oldBuildID, IndexState: commonpb.IndexState_Retry,
+	}
+	meta.indexMeta.segmentBuildInfo.Add(old)
+	byIndex := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	byIndex.Insert(indexID, old)
+	meta.indexMeta.segmentIndexes.Insert(segmentID, byIndex)
+
+	inspector := newIndexInspector(ctx, nil, meta, scheduler, alloc,
+		NewNMockHandler(t), mocks.NewChunkManager(t), newIndexEngineVersionManager())
+
+	// Startup preserves the business retry interval and does not replace Retry.
+	inspector.reloadFromMeta()
+	_, ok := meta.indexMeta.GetIndexJob(oldBuildID)
+	require.True(t, ok)
+
+	alloc.EXPECT().AllocID(mock.Anything).Return(newBuildID, nil).Once()
+	catalog.EXPECT().Update(mock.Anything,
+		mock.MatchedBy(func(action metastore.UpdateAction) bool {
+			entry, ok := action.Entry.(metastore.SegmentIndexEntry)
+			return ok && action.Type == metastore.ActionDelete && entry.Index.BuildID == oldBuildID
+		}),
+		mock.MatchedBy(func(action metastore.UpdateAction) bool {
+			entry, ok := action.Entry.(metastore.SegmentIndexEntry)
+			return ok && action.Type == metastore.ActionAdd && entry.Index.BuildID == newBuildID
+		})).Return(nil).Once()
+	scheduler.EXPECT().AbortAndRemoveTask(oldBuildID).Return().Once()
+	scheduler.EXPECT().Enqueue(mock.MatchedBy(func(scheduled task.Task) bool {
+		return scheduled.GetTaskID() == newBuildID && scheduled.GetTaskState() == taskcommon.Init
+	})).Return().Once()
+
+	inspector.enqueueActiveTasks(true)
+	_, oldExists := meta.indexMeta.GetIndexJob(oldBuildID)
+	assert.False(t, oldExists)
+	newTask, newExists := meta.indexMeta.GetIndexJob(newBuildID)
+	require.True(t, newExists)
+	assert.Equal(t, commonpb.IndexState_Unissued, newTask.IndexState)
+	assert.Equal(t, newBuildID, meta.indexMeta.GetSegmentIndexes(collectionID, segmentID)[indexID].BuildID)
+
+	// If the logical index disappears after the swap, persist a terminal state
+	// instead of leaving the fresh record Unissued and outside GC forever.
+	meta.indexMeta.indexes[collectionID][indexID].IsDeleted = true
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything,
+		mock.MatchedBy(func(indexes []*model.SegmentIndex) bool {
+			return len(indexes) == 1 && indexes[0].BuildID == newBuildID &&
+				indexes[0].IndexState == commonpb.IndexState_Failed
+		})).Return(nil).Once()
+	inspector.enqueueActiveTasks(true)
+	retired, ok := meta.indexMeta.GetIndexJob(newBuildID)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Failed, retired.IndexState)
 }
 
 func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
@@ -211,7 +308,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	defer pt.Reset(scalarKey)
 
 	ctx := context.Background()
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -219,8 +316,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -266,15 +362,14 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 func TestIndexInspector_isExternalCollection(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
 	versionManager := newIndexEngineVersionManager()
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
@@ -286,46 +381,50 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
 
 	t.Run("collection not found", func(t *testing.T) {
-		assert.False(t, inspector.isExternalCollection(999))
+		handler.EXPECT().GetCollection(mock.Anything, int64(999)).
+			Return(nil, errors.New("collection not found")).Once()
+		external, err := inspector.isExternalCollection(ctx, 999)
+		assert.Error(t, err)
+		assert.False(t, external)
 	})
 
 	t.Run("normal collection is not external", func(t *testing.T) {
-		m.collections.Insert(10, &collectionInfo{
+		handler.EXPECT().GetCollection(mock.Anything, int64(10)).Return(&collectionInfo{
 			ID: 10,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
 				},
 			},
-		})
-		assert.False(t, inspector.isExternalCollection(10))
+		}, nil).Once()
+		external, err := inspector.isExternalCollection(ctx, 10)
+		require.NoError(t, err)
+		assert.False(t, external)
 	})
 
 	t.Run("external collection is external", func(t *testing.T) {
-		m.collections.Insert(20, &collectionInfo{
+		handler.EXPECT().GetCollection(mock.Anything, int64(20)).Return(&collectionInfo{
 			ID: 20,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
 				},
 			},
-		})
-		assert.True(t, inspector.isExternalCollection(20))
+		}, nil).Once()
+		external, err := inspector.isExternalCollection(ctx, 20)
+		require.NoError(t, err)
+		assert.True(t, external)
 	})
 }
 
 func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "true")
-	defer func() {
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-	}()
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -333,8 +432,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -356,14 +454,14 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
 
 	t.Run("normal unsorted segment is skipped", func(t *testing.T) {
-		m.collections.Insert(2, &collectionInfo{
+		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
 			ID: 2,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
 				},
 			},
-		})
+		}, nil).Once()
 
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -381,16 +479,79 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 		assert.True(t, m.indexMeta.IsUnIndexedSegment(2, 1))
 	})
 
-	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
-		m.collections.Insert(2, &collectionInfo{
-			ID: 2,
+	t.Run("invisible unsorted segment waits for its sort", func(t *testing.T) {
+		// The segment was published invisible: it is owed a sort, and the sorted
+		// replacement is what gets indexed. Indexing the original here would be
+		// wasted work racing that sort.
+
+		handler.EXPECT().GetCollection(mock.Anything, int64(3)).Return(&collectionInfo{
+			ID: 3,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
-					{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
 				},
 			},
-		})
+		}, nil).Once()
+		m.indexMeta.indexes[3] = map[UniqueID]*model.Index{
+			7: {
+				CollectionID: 3,
+				FieldID:      100,
+				IndexID:      7,
+				IndexName:    indexName,
+			},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           4,
+				CollectionID: 3,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     false,
+				IsImporting:  true,
+				IsInvisible:  true,
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
 
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.True(t, m.indexMeta.IsUnIndexedSegment(3, 4),
+			"no index may be created for a segment whose sort is still owed")
+	})
+
+	t.Run("no-sort import origin remains indexable after restart with sort enabled", func(t *testing.T) {
+		// This task was planned while sort compaction was disabled. IsImporting
+		// keeps it unpublished until commit, while IsInvisible=false persists
+		// that the origin itself (rather than a sorted replacement) is the
+		// index target. A different startup config must not reinterpret it.
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           6,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+				IsImporting:  true,
+				IsInvisible:  false,
+				IsSorted:     false,
+				Binlogs:      []*datapb.FieldBinlog{{FieldID: 101}},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64}},
+			},
+		}, nil).Twice()
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12344), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.False(t, m.indexMeta.IsUnIndexedSegment(2, 6))
+	})
+
+	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -409,10 +570,10 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"}},
 			},
-		}, nil).Maybe()
-		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
-		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
-		scheduler.EXPECT().Enqueue(mock.Anything).Return()
+		}, nil).Twice()
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -422,7 +583,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -430,8 +591,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -484,12 +644,10 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 
 func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -497,8 +655,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -524,7 +681,6 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 			},
 		},
 	}
-	m.collections.Insert(collID, collInfo)
 	handler.EXPECT().GetCollection(mock.Anything, collID).Return(collInfo, nil).Maybe()
 
 	t.Run("build function output index when collection has no schema change", func(t *testing.T) {
@@ -624,7 +780,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 		m.segments.SetSegment(segment.GetID(), segment)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
-		assert.NoError(t, err)
+		assert.ErrorContains(t, err, "mock rootcoord unreachable")
 		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(unresolvableCollID, segment.GetID()), UniqueID(10))
 	})
 

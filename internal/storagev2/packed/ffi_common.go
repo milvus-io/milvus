@@ -24,17 +24,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Some
-// milvus-storage paths can still lose their structured error detail and fall
-// back to a generic error code, so callers cannot reliably distinguish a
-// transient failure from a permanent one. Treat all loon failures as retryable
-// for now and rely on a bounded retry budget plus outer error handling to keep
-// the worst case finite.
-//
-// TODO(storage v3): once every milvus-storage FFI path preserves explicit error
-// codes end-to-end, narrow this sentinel to the retryable cases and let other
-// errors propagate immediately as retry.Unrecoverable.
+// ErrLoonTransient identifies failures that milvus-storage classifies as
+// retryable. Callers may safely use this sentinel to retry the operation.
 var ErrLoonTransient = errors.New("loon FFI transient error")
+
+// ErrLoonPermanent identifies failures that milvus-storage classifies as
+// non-retryable. It deliberately remains a system error: the shared FFI layer
+// cannot decide whether a missing object belongs to a user-provided external
+// source or to an internally generated Milvus path. Operation owners may catch
+// this sentinel and terminate their workflow without changing blame category.
+var ErrLoonPermanent = errors.New("loon FFI permanent error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
@@ -342,7 +341,15 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		if C.loon_ffi_is_retryable_errcode(ffiResult.err_code) != 0 {
+			ffiErr := merr.Wrapf(ErrLoonTransient,
+				"Loon FFI operation failed (code=%d): %s", int(ffiResult.err_code), errStr)
+			return merr.WrapErrServiceUnavailableErr(ffiErr, "temporary Loon FFI failure")
+		}
+
+		ffiErr := merr.Wrapf(ErrLoonPermanent,
+			"Loon FFI operation failed (code=%d): %s", int(ffiResult.err_code), errStr)
+		return merr.WrapErrStorage(ffiErr, "permanent Loon FFI failure")
 	}
 	return nil
 }

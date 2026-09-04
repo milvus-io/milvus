@@ -291,6 +291,54 @@ func TestSortCompaction_createTextIndex_ForwardsPlan(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSortCompaction_Compact_InlineTextIndex_ManifestError(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	const fieldID = int64(101)
+	sorted := &datapb.CompactionPlanResult{
+		PlanID: 999,
+		State:  datapb.CompactionTaskState_completed,
+		Segments: []*datapb.CompactionSegment{
+			{
+				SegmentID:  200,
+				NumOfRows:  1,
+				Manifest:   "orig-manifest",
+				InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+			},
+		},
+	}
+	sortMock := mockey.Mock((*sortCompactionTask).sortSegment).Return(sorted, nil).Build()
+	defer sortMock.UnPatch()
+	indexMock := mockey.Mock((*sortCompactionTask).createTextIndex).Return(
+		map[int64]*datapb.TextIndexStats{
+			fieldID: {FieldID: fieldID, Files: []string{"f"}},
+		}, nil,
+	).Build()
+	defer indexMock.UnPatch()
+	manifestMock := mockey.Mock(packed.AddStatsToManifest).Return("", assert.AnError).Build()
+	defer manifestMock.UnPatch()
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 999,
+		Type:   datapb.CompactionType_SortCompaction,
+		Schema: textMatchSchema(fieldID),
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{CollectionID: 1, PartitionID: 2, SegmentID: 100},
+		},
+	}
+	task := NewSortCompactionTask(context.Background(), nil, plan, compaction.GenParams(), []int64{fieldID})
+
+	var result *datapb.CompactionPlanResult
+	var err error
+	require.NotPanics(t, func() {
+		result, err = task.Compact()
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, datapb.CompactionTaskState_failed, result.GetState())
+	require.Equal(t, assert.AnError.Error(), result.GetReason())
+}
+
 // TestMixCompaction_Compact_InlineTextIndex drives the real mixCompactionTask.Compact()
 // and asserts the inline text-index loop's behavior end to end: sorted outputs get
 // TextStatsLogs, the V3-manifest segment gets its manifest rewritten, while empty and
