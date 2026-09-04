@@ -38,6 +38,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+func TestBaseTaskQueue_isFull(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+	queue.setMaxTaskNum(2)
+
+	assert.False(t, queue.isFull())
+	assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	assert.False(t, queue.isFull())
+	assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	assert.True(t, queue.isFull())
+
+	queue.PopUnissuedTask()
+	assert.False(t, queue.isFull())
+}
+
+func TestProxy_IsDQLQueueFull(t *testing.T) {
+	node := &Proxy{}
+	assert.False(t, node.IsDQLQueueFull())
+
+	sched, err := newTaskScheduler(context.Background(), newMockTsoAllocator())
+	assert.NoError(t, err)
+	node.sched = sched
+	sched.dqQueue.setMaxTaskNum(1)
+	assert.False(t, node.IsDQLQueueFull())
+	assert.NoError(t, sched.dqQueue.Enqueue(newDefaultMockDqlTask()))
+	assert.True(t, node.IsDQLQueueFull())
+}
+
 func TestBaseTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task

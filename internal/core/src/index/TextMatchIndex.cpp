@@ -23,10 +23,15 @@ namespace milvus::index {
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* tokenizer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_params,
+                               bool enable_background_merge)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
+    auto memory_budget_in_bytes =
+        commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+            ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+            : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id,
         true,
@@ -34,7 +39,10 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
         ,
         tokenizer_name,
-        analyzer_params);
+        analyzer_params,
+        milvus::tantivy::DEFAULT_NUM_THREADS,
+        memory_budget_in_bytes,
+        enable_background_merge);
     set_is_growing(true);
 }
 

@@ -270,6 +270,12 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->ValidateMagic();
     reader->ReadFooterAndDirectory();
 
+    if (reader->is_encrypted_) {
+        reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(reader->cipher_plugin_ != nullptr,
+                   "Cipher plugin required for encrypted V3 index");
+    }
+
     // Parse __meta__ entry
     auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
     if (!meta_entry.data.empty()) {
@@ -330,6 +336,9 @@ IndexEntryReader::ReadFooterAndDirectory() {
                        MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
                    static_cast<size_t>(file_size_),
                "Directory table + meta entry + footer size exceeds file size");
+    const uint64_t data_region_size = static_cast<uint64_t>(file_size_) -
+                                      MILVUS_V3_MAGIC_SIZE - dir_size -
+                                      MILVUS_V3_FOOTER_SIZE;
 
     // Check if we need a second read
     size_t needed =
@@ -377,20 +386,40 @@ IndexEntryReader::ReadFooterAndDirectory() {
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
-
-        cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(cipher_plugin_ != nullptr,
-                   "Cipher plugin required for encrypted V3 index");
+        AssertInfo(slice_size_ > 0,
+                   "Encrypted entry slice_size must be positive");
 
         for (const auto& entry : dir_json["entries"]) {
             EntryMeta meta;
             meta.encrypted = true;
             meta.enc.original_size = entry["original_size"].get<uint64_t>();
             meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
+            size_t output_offset = 0;
             for (const auto& s : entry["slices"]) {
-                meta.enc.slices.push_back(
-                    {s["offset"].get<uint64_t>(), s["size"].get<uint64_t>()});
+                auto slice = SliceMeta{s["offset"].get<uint64_t>(),
+                                       s["size"].get<uint64_t>()};
+                AssertInfo(slice.offset <= data_region_size &&
+                               slice.size <= data_region_size - slice.offset,
+                           "Encrypted slice range exceeds data region: offset "
+                           "{} size {} "
+                           "region size {}",
+                           slice.offset,
+                           slice.size,
+                           data_region_size);
+                meta.enc.slices.push_back(slice);
+
+                AssertInfo(output_offset < meta.enc.original_size,
+                           "Encrypted slice exceeds original entry size {}",
+                           meta.enc.original_size);
+                size_t remaining =
+                    static_cast<size_t>(meta.enc.original_size - output_offset);
+                size_t plain_len = std::min(remaining, slice_size_);
+                output_offset += plain_len;
             }
+            AssertInfo(output_offset == meta.enc.original_size,
+                       "Encrypted slices cover {} bytes, expected {}",
+                       output_offset,
+                       meta.enc.original_size);
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
             entry_index_.emplace(std::move(name), std::move(meta));

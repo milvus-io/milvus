@@ -381,6 +381,11 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+    # cost. Disabling restores the old always-decode behavior.
+    dqlAdmissionEnabled: true
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
@@ -490,6 +495,7 @@ queryNode:
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+      growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
@@ -526,6 +532,9 @@ queryNode:
       cacheTtl: 0
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
+    dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
+    deletePoolSizeFactor: 1 # size factor (CPUNum * factor) of the DeleteBatch dispatch pool
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index

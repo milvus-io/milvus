@@ -3449,24 +3449,25 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereFetchThreadPoolSize    ParamItem `refreshable:"true"`
-	KnowhereThreadPoolSize         ParamItem `refreshable:"true"`
-	ChunkRows                      ParamItem `refreshable:"false"`
-	EnableInterminSegmentIndex     ParamItem `refreshable:"false"`
-	InterimIndexNlist              ParamItem `refreshable:"false"`
-	InterimIndexNProbe             ParamItem `refreshable:"false"`
-	InterimIndexSubDim             ParamItem `refreshable:"false"`
-	InterimIndexRefineRatio        ParamItem `refreshable:"false"`
-	InterimIndexBuildRatio         ParamItem `refreshable:"false"`
-	InterimIndexRefineQuantType    ParamItem `refreshable:"false"`
-	InterimIndexRefineWithQuant    ParamItem `refreshable:"false"`
-	DenseVectorInterminIndexType   ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate      ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate  ParamItem `refreshable:"false"`
-	InterimIndexTargetIndexVersion ParamItem `refreshable:"false"`
-	MultipleChunkedEnable          ParamItem `refreshable:"false"` // Deprecated
-	EnableGeometryCache            ParamItem `refreshable:"false"`
-	EnableGISSplitFusion           ParamItem `refreshable:"false"`
+	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
+	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
+	ChunkRows                          ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
+	InterimIndexNlist                  ParamItem `refreshable:"false"`
+	InterimIndexNProbe                 ParamItem `refreshable:"false"`
+	InterimIndexSubDim                 ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio            ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio             ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate          ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate      ParamItem `refreshable:"false"`
+	InterimIndexGrowingBuildThreadRate ParamItem `refreshable:"true"`
+	InterimIndexTargetIndexVersion     ParamItem `refreshable:"false"`
+	MultipleChunkedEnable              ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache                ParamItem `refreshable:"false"`
+	EnableGISSplitFusion               ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -3574,6 +3575,19 @@ type queryNodeConfig struct {
 
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
+
+	// MutatePoolSizeFactor controls the size of the online-write CGO pool
+	// (segment Insert/Delete) as CPUNum * factor. The mutate pool is isolated
+	// from load/management work so segment loading cannot starve online writes.
+	MutatePoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DynamicPoolSizeFactor controls the size of the dynamic CGO pool
+	// (segment create/release/statistics/index-info) as CPUNum * factor.
+	DynamicPoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DeletePoolSizeFactor controls the size of the DeleteBatch dispatch pool
+	// as CPUNum * factor.
+	DeletePoolSizeFactor ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4117,6 +4131,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
+
+	p.InterimIndexGrowingBuildThreadRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.growingBuildThreadRate",
+		Version:      "2.6.23",
+		DefaultValue: "0",
+		Doc:          "The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded",
+		Export:       true,
+	}
+	p.InterimIndexGrowingBuildThreadRate.Init(base.mgr)
 
 	p.InterimIndexTargetIndexVersion = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.targetIndexVersion",
@@ -4803,6 +4826,33 @@ user-task-polling:
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
 
+	p.MutatePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.mutatePoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "2",
+		Doc:          "size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes",
+		Export:       true,
+	}
+	p.MutatePoolSizeFactor.Init(base.mgr)
+
+	p.DynamicPoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.dynamicPoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info",
+		Export:       true,
+	}
+	p.DynamicPoolSizeFactor.Init(base.mgr)
+
+	p.DeletePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.deletePoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the DeleteBatch dispatch pool",
+		Export:       true,
+	}
+	p.DeletePoolSizeFactor.Init(base.mgr)
+
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
 		Version:      "2.3.0",
@@ -5475,7 +5525,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
 		Version:      "2.6.8",
 		DefaultValue: "100",
-		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Doc:          "Deprecated. Force-merge grouping no longer uses this threshold.",
 		Export:       false,
 	}
 	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)

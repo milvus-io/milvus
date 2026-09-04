@@ -21,6 +21,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -334,6 +336,48 @@ class IndexEntryWriterV3Test : public testing::Test {
         auto info = fs_->GetFileInfo(path);
         EXPECT_TRUE(info.ok()) << info.status().ToString();
         return info.ValueOrDie().size();
+    }
+
+    // Rewrites the directory table of an existing V3 index file by applying
+    // `mutate` to the parsed directory JSON and writing the file back with an
+    // updated footer. Used to build malformed encrypted directories for
+    // reader-side validation tests. Reads and writes through the fixture's
+    // ArrowFileSystem so the bytes stay in the same store the writer used.
+    void
+    RewriteDirectory(const std::string& file_path,
+                     const std::function<void(nlohmann::json&)>& mutate) {
+        auto input = CreateInputStream(file_path);
+        auto file_size = input->Size();
+
+        std::vector<uint8_t> bytes(file_size);
+        size_t read = input->ReadAt(bytes.data(), 0, file_size);
+        ASSERT_EQ(read, file_size);
+        input.reset();
+
+        ASSERT_GE(file_size, MILVUS_V3_FOOTER_SIZE);
+        const uint8_t* footer_ptr =
+            bytes.data() + file_size - MILVUS_V3_FOOTER_SIZE;
+        uint32_t dir_size = 0;
+        std::memcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
+
+        size_t dir_offset = file_size - MILVUS_V3_FOOTER_SIZE - dir_size;
+        ASSERT_LE(dir_offset, file_size);
+
+        auto dir_json = nlohmann::json::parse(
+            bytes.data() + dir_offset, bytes.data() + dir_offset + dir_size);
+        mutate(dir_json);
+        std::string new_dir = dir_json.dump();
+
+        auto output = CreateOutputStream(file_path);
+        output->Write(bytes.data(), dir_offset);
+        output->Write(new_dir.data(), new_dir.size());
+
+        std::vector<uint8_t> new_footer(bytes.end() - MILVUS_V3_FOOTER_SIZE,
+                                        bytes.end());
+        uint32_t new_dir_size = static_cast<uint32_t>(new_dir.size());
+        std::memcpy(new_footer.data() + 28, &new_dir_size, sizeof(uint32_t));
+        output->Write(new_footer.data(), new_footer.size());
+        output->Close();
     }
 
     milvus_storage::ArrowFileSystemPtr fs_;
@@ -966,8 +1010,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     const size_t entry_size = 1024;
     auto data = GeneratePattern(entry_size);
 
-    // Use small slice_size for testing multi-slice behavior
-    const size_t slice_size = 512;
+    const size_t slice_size = 1024;
 
     {
         // Note: remote_path should be relative to fs root
@@ -1023,8 +1066,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     // Entry larger than slice_size, requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multislice";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 5 * 1024 + 100;  // 5KB + 100B = 6 slices
+    const size_t slice_size = 1024;
+    const size_t entry_size = 5 * slice_size + 100;
     auto data = GeneratePattern(entry_size);
 
     {
@@ -1049,11 +1092,11 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     // Multiple entries, each requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multi_multi";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = 1024;
 
-    const size_t size_a = 3 * 1024 + 500;  // 4 slices
-    const size_t size_b = 2 * 1024 + 100;  // 3 slices
-    const size_t size_c = 5 * 1024;        // 5 slices
+    const size_t size_a = 3 * slice_size + 500;
+    const size_t size_b = 2 * slice_size + 100;
+    const size_t size_c = 5 * slice_size;
 
     auto data_a = GeneratePattern(size_a);
     auto data_b = GeneratePattern(size_b);
@@ -1085,7 +1128,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
     // Large meta entry requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_largemeta";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = 1024;
 
     auto data = GeneratePattern(256);
 
@@ -1099,7 +1142,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
                                               slice_size);
         writer.WriteEntry("data", data.data(), data.size());
 
-        // Meta will be ~5KB = 5 slices
+        // Meta is larger than one slice.
         std::string meta_value(5000, 'M');
         writer.PutMeta("large_meta", meta_value);
         writer.Finish();
@@ -1119,8 +1162,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     // Test fd-based entry with multiple slices
     const std::string file_path = kV3FilePath + "_enc_fd";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 4 * 1024 + 200;  // 5 slices
+    const size_t slice_size = 1024;
+    const size_t entry_size = 4 * slice_size + 200;
     auto data = GeneratePattern(entry_size);
 
     // Write source file
@@ -1154,6 +1197,197 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     ::unlink(tmp_relative.c_str());
 
     VerifyEncryptedEntry(file_path, "fd_entry", entry_size);
+}
+
+// ---- Encrypted directory validation tests ----
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationAcceptsValidDirectory) {
+    const std::string file_path = kV3FilePath + "_dir_valid";
+    const size_t slice_size = 1024;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+
+    auto reader = IndexEntryReader::Open(input, file_size);
+    ASSERT_NE(reader, nullptr);
+    auto entry = reader->ReadEntry("data");
+    ASSERT_EQ(entry.data.size(), entry_size);
+    VerifyPattern(entry.data, entry_size);
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsSliceOffsetPastDataRegion) {
+    const std::string file_path = kV3FilePath + "_dir_bad_slice_offset";
+    constexpr size_t slice_size = 1024;
+    auto data = GeneratePattern(2 * slice_size + 100);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    RewriteDirectory(file_path, [](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["slices"][0]["offset"] =
+                    std::numeric_limits<uint64_t>::max();
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    try {
+        IndexEntryReader::Open(input, GetFileSize(file_path));
+        FAIL() << "expected Open to reject a slice offset past the data region";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Encrypted slice range exceeds data region"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsSliceSizePastDataRegion) {
+    const std::string file_path = kV3FilePath + "_dir_bad_slice_size";
+    constexpr size_t slice_size = 1024;
+    auto data = GeneratePattern(2 * slice_size + 100);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    RewriteDirectory(file_path, [](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["slices"][0]["size"] =
+                    std::numeric_limits<uint64_t>::max();
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    try {
+        IndexEntryReader::Open(input, GetFileSize(file_path));
+        FAIL() << "expected Open to reject a slice size past the data region";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Encrypted slice range exceeds data region"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsOutOfRangeSlice) {
+    const std::string file_path = kV3FilePath + "_dir_out_of_range";
+    const size_t slice_size = 1024;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    // Shrink original_size so the second slice would exceed the entry while
+    // the three slices stay intact.
+    RewriteDirectory(file_path, [slice_size](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["original_size"] = slice_size;
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to reject an out-of-range slice";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Encrypted slice exceeds original entry size"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       EncryptedDirectoryValidationRejectsIncompleteCoverage) {
+    const std::string file_path = kV3FilePath + "_dir_incomplete";
+    const size_t slice_size = 1024;
+    const size_t entry_size = 2 * slice_size + 100;  // 3 slices
+    auto data = GeneratePattern(entry_size);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    // Drop the final slice so the remaining slices under-cover original_size.
+    RewriteDirectory(file_path, [](nlohmann::json& dir) {
+        for (auto& entry : dir["entries"]) {
+            if (entry["name"].get<std::string>() == "data") {
+                entry["slices"].erase(entry["slices"].end() - 1);
+            }
+        }
+    });
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to reject incomplete slice coverage";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find("Encrypted slices cover"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
 }
 
 // ---- ReadEntryStream tests ----

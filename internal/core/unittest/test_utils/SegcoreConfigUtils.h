@@ -54,7 +54,9 @@ class ScopedSegcoreConfigRestore {
               config.get_dense_vector_intermin_index_type()),
           refine_quant_type_(
               RefineTypeToConfigStringForTest(config.get_refine_quant_type())),
-          refine_with_quant_flag_(config.get_refine_with_quant_flag()) {
+          refine_with_quant_flag_(config.get_refine_with_quant_flag()),
+          growing_index_build_thread_rate_(
+              config.get_growing_index_build_thread_rate()) {
     }
 
     ~ScopedSegcoreConfigRestore() {
@@ -69,6 +71,8 @@ class ScopedSegcoreConfigRestore {
             dense_vector_interim_index_type_);
         config_.set_refine_quant_type(refine_quant_type_);
         config_.set_refine_with_quant_flag(refine_with_quant_flag_);
+        config_.set_growing_index_build_thread_rate(
+            growing_index_build_thread_rate_);
     }
 
     ScopedSegcoreConfigRestore(const ScopedSegcoreConfigRestore&) = delete;
@@ -87,6 +91,7 @@ class ScopedSegcoreConfigRestore {
     std::string dense_vector_interim_index_type_;
     std::string refine_quant_type_;
     bool refine_with_quant_flag_;
+    float growing_index_build_thread_rate_;
 };
 
 struct InterimIndexConfigForTest {
@@ -100,6 +105,7 @@ struct InterimIndexConfigForTest {
     float refine_ratio = 3.0F;
     std::string refine_quant_type = "NONE";
     bool refine_with_quant_flag = false;
+    float growing_index_build_thread_rate = 0.0F;
 };
 
 inline void
@@ -112,6 +118,8 @@ ApplyInterimIndexConfigForTest(
     config.set_interim_index_target_version(options.target_index_version);
     config.set_nlist(options.nlist);
     config.set_nprobe(options.nprobe);
+    config.set_growing_index_build_thread_rate(
+        options.growing_index_build_thread_rate);
     if (options.dense_vector_interim_index_type.has_value()) {
         config.set_dense_vector_intermin_index_type(
             options.dense_vector_interim_index_type.value());

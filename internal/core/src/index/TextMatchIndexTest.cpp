@@ -42,6 +42,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+TEST(TextMatch, WriterMemoryBudgets) {
+    EXPECT_EQ(milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
+
 SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
@@ -196,7 +204,8 @@ TEST(TextMatch, Index) {
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "unique_id",
                                          "milvus_tokenizer",
-                                         "{}");
+                                         "{}",
+                                         /*enable_background_merge=*/false);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
@@ -270,7 +279,8 @@ TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
         std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                 "raw_sealed_with_null",
                                 "milvus_tokenizer",
-                                "{}");
+                                "{}",
+                                /*enable_background_merge=*/false);
     with_null->AddTextSealed("alpha", true, 0);
     with_null->AddNullSealed(1);
     with_null->AddTextSealed("beta", true, 2);
@@ -291,7 +301,8 @@ TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
         std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                 "raw_sealed_all_valid",
                                 "milvus_tokenizer",
-                                "{}");
+                                "{}",
+                                /*enable_background_merge=*/false);
     all_valid->AddTextSealed("alpha", true, 0);
     all_valid->AddTextSealed("beta", true, 1);
     all_valid->CreateReader(milvus::index::SetBitsetSealed);
@@ -518,8 +529,11 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
 
     std::vector<milvus::FieldDataPtr> field_datas = {batch0, batch1, batch2};
 
-    auto index = std::make_unique<Index>(
-        200, "test_multi_batch", "milvus_tokenizer", "{}");
+    auto index = std::make_unique<Index>(200,
+                                         "test_multi_batch",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer", "{}");
 
@@ -606,8 +620,11 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
 
     std::vector<milvus::FieldDataPtr> field_datas = {fd};
 
-    auto index = std::make_unique<Index>(
-        200, "test_single_batch", "milvus_tokenizer", "{}");
+    auto index = std::make_unique<Index>(200,
+                                         "test_single_batch",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer", "{}");
 

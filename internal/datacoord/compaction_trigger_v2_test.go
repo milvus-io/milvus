@@ -54,6 +54,41 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta)
 }
 
+func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewAllocatesFromTargetSize() {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{Name: "test_coll"}}, nil).Once()
+	s.triggerManager.handler = handler
+
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(500), nil).Once()
+	s.mockAlloc.EXPECT().AllocN(int64(2)).Return(int64(600), int64(602), nil).Once()
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			s.EqualValues(500, task.GetPlanID())
+			s.EqualValues(100, task.GetMaxSize())
+			allocatedIDs := task.GetPreAllocatedSegmentIDs()
+			s.Require().NotNil(allocatedIDs)
+			s.EqualValues(601, allocatedIDs.GetBegin())
+			s.EqualValues(602, allocatedIDs.GetEnd())
+			return nil
+		}).Once()
+
+	segment := newForceMergePlanningSegment(200, 150)
+	segment.NumOfRows = 100
+	view := &ForceMergeSegmentView{
+		label:              s.testLabel,
+		segments:           []*SegmentInfo{segment},
+		triggerID:          1001,
+		targetSegmentSize:  100,
+		targetSegmentCount: 999,
+	}
+	s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), view)
+}
+
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)

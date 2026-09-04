@@ -533,17 +533,96 @@ TEST(storage, InsertDataGeometryNullable) {
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::GEOMETRY);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
-    // Note: current geometry serialization path writes empty string for null
-    // rows and loses Arrow null-bitmap, so null_count()==0 after round-trip.
 
-    // Expected data: original rows preserved (bitmap ignored by codec)
+    // Null rows must come back as nulls, exactly like every other nullable
+    // variable-length type in this file (see InsertDataStringNullable): the
+    // serializer has to hand the payload writer a negative length for a null
+    // row so Arrow records a 0 bit in the validity bitmap.
+    FixedVector<std::string> expected = {str1, str2, "", "", str5};
     FixedVector<std::string> new_data(data.size());
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] =
             *static_cast<const std::string*>(new_payload->RawValue(i));
-        ASSERT_EQ(new_payload->DataSize(i), data[i].size());
+        ASSERT_EQ(new_payload->DataSize(i), expected[i].size());
     }
-    ASSERT_EQ(data, new_data);
+    ASSERT_EQ(expected, new_data);
+    ASSERT_EQ(new_payload->get_null_count(), 2);
+    EXPECT_TRUE(new_payload->is_valid(0));
+    EXPECT_TRUE(new_payload->is_valid(1));
+    EXPECT_FALSE(new_payload->is_valid(2));
+    EXPECT_FALSE(new_payload->is_valid(3));
+    EXPECT_TRUE(new_payload->is_valid(4));
+    ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+}
+
+// Same round-trip, but with a row count that neither fills nor aligns to a
+// validity-bitmap byte: 13 rows spans two bytes with a partial second one, and
+// the nulls straddle the byte boundary (rows 7 and 8). A serializer that gets
+// the per-row validity lookup right for the first byte but drops or misindexes
+// it afterwards passes the 5-row case above and fails here.
+TEST(storage, InsertDataGeometryNullableAcrossValidityByteBoundary) {
+    auto ctx = GEOS_init_r();
+    constexpr int kRows = 13;
+    FixedVector<std::string> data(kRows);
+    for (int i = 0; i < kRows; ++i) {
+        std::string wkt =
+            "POINT (" + std::to_string(i) + ".0 " + std::to_string(i) + ".0)";
+        data[i] = Geometry(ctx, wkt.c_str()).to_wkb_string();
+    }
+    GEOS_finish_r(ctx);
+
+    // Nulls at rows 3, 7, 8, 12 -- bit i of byte i/8, LSB first, unused
+    // trailing bits set (the convention the other tests in this file use).
+    // byte0 rows 0-7 : 0b01110111 = 0x77   (rows 3, 7 null)
+    // byte1 rows 8-12: 0b11101110 = 0xEE   (rows 8, 12 null)
+    uint8_t valid_data_storage[2] = {0x77, 0xEE};
+    const std::vector<bool> expect_valid = {true,
+                                            true,
+                                            true,
+                                            false,
+                                            true,
+                                            true,
+                                            true,
+                                            false,
+                                            false,
+                                            true,
+                                            true,
+                                            true,
+                                            false};
+
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::GEOMETRY, storage::DataType::NONE, true);
+    field_data->FillFieldData(data.data(), valid_data_storage, kRows, 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::GEOMETRY);
+    ASSERT_EQ(new_payload->get_num_rows(), kRows);
+    ASSERT_EQ(new_payload->get_null_count(), 4);
+    for (int i = 0; i < kRows; ++i) {
+        EXPECT_EQ(new_payload->is_valid(i), expect_valid[i])
+            << "validity mismatch at row " << i;
+        const auto& wkb =
+            *static_cast<const std::string*>(new_payload->RawValue(i));
+        if (expect_valid[i]) {
+            EXPECT_EQ(wkb, data[i]) << "payload mismatch at row " << i;
+        } else {
+            EXPECT_EQ(new_payload->DataSize(i), 0)
+                << "null row " << i << " should carry no payload";
+        }
+    }
 }
 TEST(storage, InsertDataString) {
     FixedVector<std::string> data = {

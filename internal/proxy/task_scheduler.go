@@ -84,6 +84,14 @@ func (queue *baseTaskQueue) utFull() bool {
 	return int64(queue.unissuedTasks.Len()) >= queue.getMaxTaskNum()
 }
 
+// isFull is the lock-acquiring counterpart of utFull; utFull assumes the
+// caller already holds utLock.
+func (queue *baseTaskQueue) isFull() bool {
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
+	return queue.utFull()
+}
+
 func (queue *baseTaskQueue) addUnissuedTask(t task) (*list.Element, error) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
