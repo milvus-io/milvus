@@ -43,7 +43,6 @@ type TaskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
 	utFull() bool
-	addUnissuedTask(t taskmodel.Task) error
 	FrontUnissuedTask() taskmodel.Task
 	PopUnissuedTask() taskmodel.Task
 	AddActiveTask(t taskmodel.Task)
@@ -95,14 +94,14 @@ func (queue *BaseTaskQueue) IsFull() bool {
 	return queue.utFull()
 }
 
-func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) error {
+func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, error) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
 	}
-	queue.unissuedTasks.PushBack(t)
+	element := queue.unissuedTasks.PushBack(t)
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
 	// means "the unissued list is non-empty, wake the scheduler". Concurrent
 	// sends coalesce; the scheduler drains the list on each wake.
@@ -110,7 +109,7 @@ func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) error {
 	case queue.utBufChan <- 1:
 	default:
 	}
-	return nil
+	return element, nil
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() taskmodel.Task {
@@ -153,6 +152,18 @@ func (queue *BaseTaskQueue) popUnissuedTasks(filter func(taskmodel.Task) bool) [
 		e = next
 	}
 	return removed
+}
+
+// removeUnissuedTask removes element only if it is still waiting in this queue.
+// list.Remove is a no-op if the scheduler has already popped the element.
+func (queue *BaseTaskQueue) removeUnissuedTask(element *list.Element) {
+	if element == nil {
+		return
+	}
+
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+	queue.unissuedTasks.Remove(element)
 }
 
 func (queue *BaseTaskQueue) AddActiveTask(t taskmodel.Task) {
@@ -199,10 +210,10 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqID taskmodel.UniqueID) taskmodel.T
 	return nil
 }
 
-func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
+func (queue *BaseTaskQueue) enqueue(t taskmodel.Task) (*list.Element, error) {
 	err := t.OnEnqueue()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Fast-fail when the queue is already full, before any potentially-blocking
@@ -213,7 +224,7 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 	full := queue.utFull()
 	queue.utLock.RUnlock()
 	if full {
-		return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
 	}
 
 	var ts taskmodel.Timestamp
@@ -222,12 +233,12 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
 		id, err = t.GetMetaCache().AllocID(t.TraceCtx())
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		ts, err = queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// we always use same msg id and ts for now.
 		id = taskmodel.UniqueID(ts)
@@ -237,6 +248,11 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 
 	t.SetOnEnqueueTime()
 	return queue.addUnissuedTask(t)
+}
+
+func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
+	_, err := queue.enqueue(t)
+	return err
 }
 
 func (queue *BaseTaskQueue) SetMaxTaskNum(num int64) {
@@ -426,6 +442,18 @@ func (queue *DmTaskQueue) getPChanStatsInfo() (map[taskmodel.PChan]*taskmodel.PC
 // DqTaskQueue represents queue for DQL task such as search/query
 type DqTaskQueue struct {
 	*BaseTaskQueue
+}
+
+func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
+	element, err := queue.enqueue(t)
+	if err != nil {
+		return err
+	}
+
+	t.SetOnWaitError(func() {
+		queue.removeUnissuedTask(element)
+	})
+	return nil
 }
 
 type ClearTaskQueueResult struct {
