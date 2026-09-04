@@ -72,9 +72,17 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 	for v, info := range recoveryInfos {
 		messageID := recoveryMessageID(walName, info.GetInfo().GetSeekPosition())
 		if checkpoint == nil || messageID.LT(checkpoint) {
-			impl.logger.Info(ctx, "flusher recovery checkpoint candidate",
-				mlog.FieldVChannel(v), mlog.Stringer("messageID", messageID),
-				mlog.Bool("positionHadMessageID", len(info.GetInfo().GetSeekPosition().GetMsgID()) != 0))
+			if len(info.GetInfo().GetSeekPosition().GetMsgID()) == 0 {
+				// The whole pchannel replays from the earliest position the WAL
+				// retains on this vchannel's account: correct, but the cost is
+				// the retained history, so it is worth a Warn rather than a
+				// line among the ordinary candidates.
+				impl.logger.Warn(ctx, "flusher recovery checkpoint candidate has no message id, replaying from the earliest position",
+					mlog.FieldVChannel(v), mlog.Stringer("messageID", messageID))
+			} else {
+				impl.logger.Info(ctx, "flusher recovery checkpoint candidate",
+					mlog.FieldVChannel(v), mlog.Stringer("messageID", messageID))
+			}
 			checkpoint = messageID
 		}
 	}

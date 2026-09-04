@@ -69,8 +69,12 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		ExclusiveRequired: true,
 	},
 	// CreateVChannel is the genesis entry of a shard split target vchannel.
-	// Like CreateCollection it registers a vchannel and carries the schema,
-	// so it is appended exclusively under the collection's DDL lock.
+	// Like CreateCollection it registers a vchannel and carries the schema.
+	// Unlike CreateCollection it is a single-vchannel append with no broadcast
+	// and no resource key, so no collection-level DDL lock is involved: only
+	// the vchannel-level exclusive lock applies, and reconciling the partition
+	// list and schema it carries against concurrent DDL is the coordinator's
+	// job, not this message's.
 	MessageTypeCreateVChannel: {
 		ExclusiveRequired: true,
 	},
