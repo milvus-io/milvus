@@ -1726,3 +1726,5 @@ function:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
+  pyUDF:
+    enabled: false # Whether to enable the embedded PyUDF runtime in processes that use PyUDF. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.

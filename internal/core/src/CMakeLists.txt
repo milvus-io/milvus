@@ -109,6 +109,7 @@ add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
 add_subdirectory( rescores )
+add_subdirectory( pyudf )
 add_subdirectory( plan )
 add_subdirectory( minhash )
 
@@ -147,7 +148,7 @@ if (MILVUS_USE_PCH)
     foreach(_target
         milvus_common milvus_config milvus_monitor milvus_storage milvus_index
         milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
-        milvus_exec milvus_futures milvus_rescores
+        milvus_exec milvus_futures milvus_rescores milvus_pyudf
         milvus_plan)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
         if (MILVUS_PCH_CXX_COMPILER_LAUNCHER)
@@ -172,6 +173,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_bitset>
     $<TARGET_OBJECTS:milvus_futures>
     $<TARGET_OBJECTS:milvus_rescores>
+    $<TARGET_OBJECTS:milvus_pyudf>
     $<TARGET_OBJECTS:milvus_plan>
     $<TARGET_OBJECTS:milvus_minhash>
 )
@@ -195,6 +197,10 @@ endif()
 
 if (ENABLE_GCP_NATIVE)
     set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
+endif()
+
+if (MILVUS_ENABLE_PY_UDF)
+    list(APPEND LINK_TARGETS Python3::Python)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})

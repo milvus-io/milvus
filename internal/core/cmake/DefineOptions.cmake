@@ -45,6 +45,14 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
+define_option(MILVUS_ENABLE_PY_UDF
+        "Build embedded CPython runtime for PyUDF"
+        ON)
+
+define_option_string(MILVUS_PY_UDF_PYTHON_VERSION
+        "Exact Python major.minor version for embedded PyUDF (empty accepts Python 3.10+)"
+        "")
+
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 

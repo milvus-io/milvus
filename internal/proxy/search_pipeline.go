@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow/memory/mallocator"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
@@ -1071,6 +1072,10 @@ func buildChainFromMeta(
 	}
 }
 
+func newRerankAllocator() memory.Allocator {
+	return mallocator.NewMallocator()
+}
+
 func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "rerankOperator")
 	defer sp.End()
@@ -1084,7 +1089,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		return nil, merr.WrapErrParameterInvalidMsg("rerank operator: inputs[1] must be []string, got %T", inputs[1])
 	}
 
-	alloc := memory.DefaultAllocator
+	alloc := newRerankAllocator()
 
 	// Only convert fields that the chain actually needs (rerank input fields + group-by field).
 	// Other fields are not used by chain and will be re-fetched by organize/requery later.

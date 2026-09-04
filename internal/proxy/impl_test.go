@@ -702,6 +702,29 @@ func createTestProxy() *Proxy {
 	return node
 }
 
+func TestProxy_SearchPreservesFunctionFailedStatus(t *testing.T) {
+	mockey.PatchConvey("Search preserves function-pipeline errors from task execution", t, func() {
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		functionErr := merr.WrapErrFunctionFailedMsg("py_udf: injected transform_query failure")
+		var enqueueCalls atomic.Int32
+		mockey.Mock((*baseTaskQueue).Enqueue).To(func(_ *baseTaskQueue, queued task) error {
+			enqueueCalls.Add(1)
+			require.NoError(t, queued.OnEnqueue())
+			queued.Notify(functionErr)
+			return nil
+		}).Build()
+
+		resp, err := node.Search(context.Background(), &milvuspb.SearchRequest{})
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrFunctionFailed)
+		require.Equal(t, merr.Code(merr.ErrFunctionFailed), resp.GetStatus().GetCode())
+		require.Contains(t, resp.GetStatus().GetReason(), "py_udf")
+		require.Equal(t, int32(1), enqueueCalls.Load())
+	})
+}
+
 func TestProxy_FlushAll_Success(t *testing.T) {
 	mockey.PatchConvey("TestProxy_FlushAll_Success", t, func() {
 		metaCache := &MetaCache{}
