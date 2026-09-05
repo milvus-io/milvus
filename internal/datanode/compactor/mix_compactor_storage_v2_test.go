@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -322,9 +323,9 @@ func (s *MixCompactionTaskStorageV2Suite) TestProjectedReaderPreservesPackedGrou
 	}
 	modernFieldBinlogs := storage.SortFieldBinlogs(fieldBinlogs)
 	legacyFieldBinlogs := lo.Map(modernFieldBinlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
-		legacy := *fieldBinlog
+		legacy := proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
 		legacy.ChildFields = nil
-		return &legacy
+		return legacy
 	})
 	for _, testCase := range []struct {
 		name         string
