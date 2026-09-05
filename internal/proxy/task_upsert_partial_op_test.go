@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"testing"
 
@@ -671,6 +670,51 @@ func TestResolveFieldPartialUpdateOps_StructSubsetAndExplicitChild(t *testing.T)
 	assert.Equal(t, "age", structChildRawName(plans["profile"].explicitChild))
 }
 
+func TestResolveFieldPartialUpdateOps_ValidatesStructOperandChildName(t *testing.T) {
+	structSchema := pathReplaceStructSchema()
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
+	tests := []struct {
+		name      string
+		childName string
+		valid     bool
+	}{
+		{name: "raw name", childName: "age", valid: true},
+		{name: "canonical name", childName: "profile[age]", valid: true},
+		{name: "missing child", childName: "profile[", valid: false},
+		{name: "missing parent", childName: "[", valid: false},
+		{name: "missing closing bracket", childName: "profile[age", valid: false},
+		{name: "wrong parent", childName: "other[age]", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			age := structScalarChildFieldData(test.childName, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{18}}},
+			})
+			operand := &schemapb.FieldData{
+				FieldName: "profile",
+				Type:      schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{age},
+				}},
+			}
+			plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+				NumRows:    1,
+				FieldsData: []*schemapb.FieldData{operand},
+				FieldOps:   []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][age]")},
+			}, schema)
+			if test.valid {
+				require.NoError(t, err)
+				require.Len(t, plans["profile"].operandChildren, 1)
+				assert.Equal(t, "age", structChildRawName(plans["profile"].operandChildren[0]))
+				return
+			}
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "not found in struct field")
+		})
+	}
+}
+
 func TestResolveFieldPartialUpdateOps_RejectsStructChildElementValidData(t *testing.T) {
 	structSchema := pathReplaceStructSchema()
 	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
@@ -818,8 +862,8 @@ func TestApplyStructPathReplacePreservesMaterializationCause(t *testing.T) {
 			}
 			err := applyStructPathReplace(test.dst, test.operand, plan, []int64{0}, []int64{0})
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, merr.ErrServiceInternal))
-			assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 			assert.ErrorContains(t, err, test.wantCause)
 		})
@@ -948,8 +992,8 @@ func TestValidateExistingPathRowsRejectsInvalidTargets(t *testing.T) {
 	}
 	err = validateExistingArrayPathRows(arrayData, []int64{0}, []int64{0}, arrayPlan)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	assert.ErrorContains(t, err, "does not support Array element valid_data")
 }
