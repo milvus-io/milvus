@@ -280,20 +280,9 @@ func parsePathReplace(path string) (int, string, bool, error) {
 }
 
 func findStructChildSchema(parent *schemapb.StructArrayFieldSchema, childName string) *schemapb.FieldSchema {
-	if typeutil.IsStructSubField(childName) {
-		if rawName, err := typeutil.ExtractStructFieldName(childName); err == nil {
-			childName = rawName
-		}
-	}
 	for _, child := range parent.GetFields() {
-		name := child.GetName()
-		if typeutil.IsStructSubField(name) {
-			rawName, err := typeutil.ExtractStructFieldName(name)
-			if err == nil {
-				name = rawName
-			}
-		}
-		if name == childName {
+		rawName := structChildRawName(child)
+		if childName == rawName || childName == typeutil.ConcatStructFieldName(parent.GetName(), rawName) {
 			return child
 		}
 	}
@@ -302,10 +291,9 @@ func findStructChildSchema(parent *schemapb.StructArrayFieldSchema, childName st
 
 func structChildRawName(child *schemapb.FieldSchema) string {
 	name := child.GetName()
-	if typeutil.IsStructSubField(name) {
-		if rawName, err := typeutil.ExtractStructFieldName(name); err == nil {
-			return rawName
-		}
+	open := strings.IndexByte(name, '[')
+	if open >= 0 && open < len(name)-2 && name[len(name)-1] == ']' && !strings.ContainsRune(name[open+1:len(name)-1], '[') {
+		return name[open+1 : len(name)-1]
 	}
 	return name
 }
@@ -594,7 +582,7 @@ func scalarArrayRowElementCount(row *schemapb.ScalarField, elementType schemapb.
 	if row == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a non-nil Array row")
 	}
-	if len(row.GetValidData()) != 0 {
+	if len(typeutil.GetFieldSpecificValidData(row)) != 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
 	}
 	switch elementType {
@@ -645,7 +633,7 @@ func vectorArrayRowElementCount(row *schemapb.VectorField, elementType schemapb.
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE requires a non-nil vector row and a positive dimension")
 	}
-	if len(row.GetValidData()) != 0 {
+	if len(typeutil.GetFieldSpecificValidData(row)) != 0 {
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE does not support ArrayOfVector element valid_data")
 	}
@@ -911,12 +899,7 @@ func findStructChildFieldData(fields []*schemapb.FieldData, childSchema *schemap
 			return field
 		}
 		name := field.GetFieldName()
-		if typeutil.IsStructSubField(name) {
-			if extracted, err := typeutil.ExtractStructFieldName(name); err == nil {
-				name = extracted
-			}
-		}
-		if name == rawName {
+		if name == rawName || name == childSchema.GetName() {
 			return field
 		}
 	}

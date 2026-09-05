@@ -27,6 +27,15 @@ func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	return getFieldSpecificValidData(fieldData)
 }
 
+// GetFieldSpecificValidData returns validity for the immediate logical values
+// carried by a ScalarField or VectorField, including nested Array values.
+func GetFieldSpecificValidData[T interface {
+	*schemapb.ScalarField | *schemapb.VectorField
+	GetValidData() []bool
+}](field T) []bool {
+	return field.GetValidData()
+}
+
 // SetFieldDataValidData writes validity to the current field-specific location
 // and clears the legacy FieldData.valid_data source.
 func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
@@ -115,9 +124,9 @@ func ProjectFieldDataValidDataForLegacy(fieldData *schemapb.FieldData) {
 
 func getFieldSpecificValidData(fieldData *schemapb.FieldData) []bool {
 	if scalars := fieldData.GetScalars(); scalars != nil {
-		return scalars.GetValidData()
+		return GetFieldSpecificValidData(scalars)
 	}
-	return fieldData.GetVectors().GetValidData()
+	return GetFieldSpecificValidData(fieldData.GetVectors())
 }
 
 type FieldDataBuilder struct {
