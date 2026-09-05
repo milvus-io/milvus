@@ -65,10 +65,6 @@ const (
 // when schemas are provided, this method will use 0-th element
 // otherwise, it shall try to parse schema from row[0]
 func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schema) ([]column.Column, error) {
-	return anyToColumns(rows, keepPkField, schemas...)
-}
-
-func anyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schema) ([]column.Column, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []column.Column{}, errors.New("0 length column")
