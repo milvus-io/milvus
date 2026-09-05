@@ -111,13 +111,13 @@ func TestQueryTaskPreExecutePreservesFixedSnapshot(t *testing.T) {
 		CollectionTTL:   uint64(collectionTTL),
 	}
 	metaCache := &MetaCache{}
-	collectionIDMocker := mockey.Mock(metaCache.GetCollectionID).Return(collectionID, nil).Build()
+	collectionIDMocker := mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
 	defer collectionIDMocker.UnPatch()
-	collectionInfoMocker := mockey.Mock(metaCache.GetCollectionInfo).Return(collectionInfo, nil).Build()
+	collectionInfoMocker := mockey.Mock((*MetaCache).GetCollectionInfo).Return(collectionInfo, nil).Build()
 	defer collectionInfoMocker.UnPatch()
-	collectionSchemaMocker := mockey.Mock(metaCache.GetCollectionSchema).Return(schema, nil).Build()
+	collectionSchemaMocker := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 	defer collectionSchemaMocker.UnPatch()
-	partitionsMocker := mockey.Mock(metaCache.GetPartitions).Return(map[string]UniqueID{
+	partitionsMocker := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]UniqueID{
 		Params.CommonCfg.DefaultPartitionName.GetValue(): partitionID,
 	}, nil).Build()
 	defer partitionsMocker.UnPatch()
