@@ -2206,6 +2206,81 @@ func TestNewSnapshotManager(t *testing.T) {
 	assert.NotNil(t, sm)
 }
 
+func TestSnapshotManager_JSONArtifactVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reader    int32
+		artifact  int32
+		stats     int64
+		jsonPath  bool
+		wantError bool
+	}{
+		{"legacy needs no new capability", 0, 5, 3, true, false},
+		{"V6 without readers", 0, 6, 0, true, true},
+		{"V6 on V5", 5, 6, 0, true, true},
+		{"V6 on V6", 6, 6, 0, true, false},
+		{"future path on V6", 6, 7, 0, true, true},
+		{"future path on matching reader", 7, 7, 0, true, false},
+		{"unrelated vector index", 5, 6, 0, false, false},
+		{"V4 without readers", 0, 0, 4, false, true},
+		{"V4 on V5", 5, 0, 4, false, true},
+		{"V4 on V6", 6, 0, 4, false, false},
+		{"future stats", 7, 0, 5, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := &snapshotManager{}
+			if tc.reader != 0 {
+				sm.indexEngineVersionManager = newIndexEngineVersionManager()
+				sm.indexEngineVersionManager.AddNode(scalarVersionSession(1, tc.reader))
+			}
+			params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}}
+			if tc.jsonPath {
+				params = append(params, &commonpb.KeyValuePair{Key: common.JSONPathKey, Value: "/a"})
+			}
+			data := &snapshotstorage.SnapshotData{
+				Indexes: []*indexpb.IndexInfo{{IndexID: 10, IndexParams: params}},
+				Segments: []*datapb.SegmentDescription{{
+					SegmentId:         100,
+					IndexFiles:        []*indexpb.IndexFilePathInfo{{IndexID: 10, CurrentScalarIndexVersion: tc.artifact}},
+					JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{101: {JsonKeyStatsDataFormat: tc.stats}},
+				}},
+			}
+			err := sm.checkSnapshotJSONArtifactVersions(data)
+			if tc.wantError {
+				require.Error(t, err)
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+				// The common local/external restore entry must reject before
+				// touching its nil broker/allocator or creating target DDL.
+				_, restoreErr := sm.finishRestoreSnapshot(context.Background(), nil, data, "s", 1, "target", "default", 0, false, "", "", nil, nil, nil)
+				require.Error(t, restoreErr)
+				assert.Equal(t, merr.Code(err), merr.Code(restoreErr))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+	manager := newIndexEngineVersionManager()
+	manager.AddNode(scalarVersionSession(1, 6))
+	manager.AddNode(scalarVersionSession(2, 5))
+	sm := &snapshotManager{indexEngineVersionManager: manager}
+	data := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{{
+		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{101: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4}},
+	}}}
+	require.ErrorIs(t, sm.checkSnapshotJSONArtifactVersions(data), merr.ErrServiceNotReady)
+	manager.Update(scalarVersionSession(2, 6))
+	require.NoError(t, sm.checkSnapshotJSONArtifactVersions(data))
+	// Reader maximum, not its default writer version, controls copied files.
+	reader := scalarVersionSession(2, 5)
+	reader.ScalarIndexEngineVersion.MaximumIndexVersion = 6
+	manager.Update(reader)
+	require.NoError(t, sm.checkSnapshotJSONArtifactVersions(data))
+	reader.ScalarIndexEngineVersion.MinimalIndexVersion = 7
+	reader.ScalarIndexEngineVersion.CurrentIndexVersion = 7
+	reader.ScalarIndexEngineVersion.MaximumIndexVersion = 7
+	manager.Update(reader)
+	require.ErrorIs(t, sm.checkSnapshotJSONArtifactVersions(data), merr.ErrServiceNotReady)
+}
+
 func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
 	ctx := context.Background()
 	const collectionID = int64(100)

@@ -43,9 +43,15 @@
 namespace milvus {
 
 bool
-isObjectEmpty(simdjson::ondemand::value value);
+IsJsonValuePresentForExists(simdjson::ondemand::value value);
 bool
-isDocEmpty(simdjson::ondemand::document document);
+IsJsonDocumentPresentForExists(simdjson::ondemand::document document);
+
+inline bool
+IsUnrepresentableJsonNumberError(simdjson::error_code error) {
+    return error == simdjson::NUMBER_ERROR || error == simdjson::BIGINT_ERROR ||
+           error == simdjson::NUMBER_OUT_OF_RANGE;
+}
 
 // Extract specific top-level keys from a JSON string using simdjson ondemand.
 // Uses raw_json() to copy value fragments directly from the source without
@@ -216,11 +222,11 @@ class Json {
         auto doc = this->doc();
         if (pointer.empty()) {
             return doc.error() == simdjson::SUCCESS &&
-                   !isDocEmpty(std::move(doc));
+                   IsJsonDocumentPresentForExists(std::move(doc));
         } else {
             auto res = doc.at_pointer(pointer);
             return res.error() == simdjson::SUCCESS &&
-                   !isObjectEmpty(res.value());
+                   IsJsonValuePresentForExists(res.value());
         }
     }
 
@@ -331,59 +337,67 @@ class Json {
 };
 
 inline bool
-isObjectEmpty(simdjson::ondemand::value value) {
-    if (value.is_null()) {
-        return true;
-    }
-
-    if (value.type().value() == simdjson::ondemand::json_type::object) {
-        auto object = value.get_object();
-        for (auto field : object) {
-            if (!isObjectEmpty(field.value())) {
-                return false;
-            }
+IsJsonValuePresentForExists(simdjson::ondemand::value value) {
+    auto type = value.type();
+    if (type.error() != simdjson::SUCCESS) {
+        if (IsUnrepresentableJsonNumberError(type.error())) {
+            return false;
         }
-        return true;
+        AssertInfo(false,
+                   "failed to inspect JSON value: {}",
+                   simdjson::error_message(type.error()));
+        return false;  // unreachable
     }
 
-    if (value.type().value() == simdjson::ondemand::json_type::array) {
-        auto array = value.get_array();
-        for (auto element : array) {
-            if (!isObjectEmpty(std::move(element))) {
-                return false;
-            }
+    if (type.value() == simdjson::ondemand::json_type::null) {
+        return false;
+    }
+
+    if (type.value() == simdjson::ondemand::json_type::number) {
+        auto error = value.get_number().error();
+        if (error != simdjson::SUCCESS &&
+            !IsUnrepresentableJsonNumberError(error)) {
+            AssertInfo(false,
+                       "failed to inspect JSON number: {}",
+                       simdjson::error_message(error));
         }
-        return true;
+        return error == simdjson::SUCCESS;
     }
 
-    return false;
+    // Presence is a property of the target value, not of its descendants.
+    // Empty objects/arrays and containers containing only null/invalid values
+    // are still present JSON values.
+    return true;
 }
 
 inline bool
-isDocEmpty(simdjson::ondemand::document document) {
-    if (document.is_null()) {
-        return true;
+IsJsonDocumentPresentForExists(simdjson::ondemand::document document) {
+    auto type = document.type();
+    if (type.error() != simdjson::SUCCESS) {
+        if (IsUnrepresentableJsonNumberError(type.error())) {
+            return false;
+        }
+        AssertInfo(false,
+                   "failed to inspect JSON document: {}",
+                   simdjson::error_message(type.error()));
+        return false;  // unreachable
     }
 
-    if (document.type().value() == simdjson::ondemand::json_type::object) {
-        auto object = document.get_object();
-        for (auto field : object) {
-            if (!isObjectEmpty(field.value())) {
-                return false;
-            }
-        }
-        return true;
+    if (type.value() == simdjson::ondemand::json_type::null) {
+        return false;
     }
 
-    if (document.type().value() == simdjson::ondemand::json_type::array) {
-        auto array = document.get_array();
-        for (auto element : array) {
-            if (!isObjectEmpty(std::move(element))) {
-                return false;
-            }
+    if (type.value() == simdjson::ondemand::json_type::number) {
+        auto error = document.get_number().error();
+        if (error != simdjson::SUCCESS &&
+            !IsUnrepresentableJsonNumberError(error)) {
+            AssertInfo(false,
+                       "failed to inspect JSON document number: {}",
+                       simdjson::error_message(error));
         }
-        return true;
+        return error == simdjson::SUCCESS;
     }
-    return false;
+
+    return true;
 }
 }  // namespace milvus

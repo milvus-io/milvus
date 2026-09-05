@@ -135,7 +135,16 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             if (exec_path_ == ExprExecPath::ScalarIndex &&
                 !use_json_flat_raw_offsets) {
                 if (is_numeric) {
+                    const auto cast_type = PinnedJsonIndexCastElementType();
                     if (!use_double && PinnedJsonIndexIsFlat()) {
+                        result = ExecRangeVisitorImplForIndex<int64_t>(input);
+                    } else if (!use_double && cast_type == DataType::INT8) {
+                        result = ExecRangeVisitorImplForIndex<int8_t>(input);
+                    } else if (!use_double && cast_type == DataType::INT16) {
+                        result = ExecRangeVisitorImplForIndex<int16_t>(input);
+                    } else if (!use_double && cast_type == DataType::INT32) {
+                        result = ExecRangeVisitorImplForIndex<int32_t>(input);
+                    } else if (!use_double && cast_type == DataType::INT64) {
                         result = ExecRangeVisitorImplForIndex<int64_t>(input);
                     } else {
                         proto::plan::GenericValue double_lower_val;
@@ -1213,25 +1222,6 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         data_type = expr_->column_.element_type_;
     }
 
-    if (data_type == DataType::JSON) {
-        const auto lower_type = expr_->lower_val_.val_case();
-        const auto upper_type = expr_->upper_val_.val_case();
-        const auto is_numeric =
-            (lower_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             lower_type == proto::plan::GenericValue::ValCase::kFloatVal) &&
-            (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             upper_type == proto::plan::GenericValue::ValCase::kFloatVal);
-        const auto requires_precise_int64_comparison =
-            is_numeric &&
-            (JsonNumericBoundRequiresPreciseInt64Comparison(
-                 expr_->lower_val_) ||
-             JsonNumericBoundRequiresPreciseInt64Comparison(expr_->upper_val_));
-        if (requires_precise_int64_comparison) {
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
-    }
-
     // ARRAY type cannot use scalar index.
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
@@ -1240,6 +1230,21 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
 
     SegmentExpr::DetermineExecPath();
     if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    // An INT* cast index stores integers only. If either bound is a float, the
+    // predicate cannot be answered by the integer projection (a float bound has
+    // no integer representation), so use raw/stats instead. A DOUBLE projection
+    // has no corresponding precision fallback and answers in double semantics.
+    if (data_type == DataType::JSON &&
+        IsIntegerDataType(PinnedJsonIndexCastElementType()) &&
+        PinnedJsonIndexCastElementType() != DataType::BOOL &&
+        (expr_->lower_val_.val_case() ==
+             proto::plan::GenericValue::ValCase::kFloatVal ||
+         expr_->upper_val_.val_case() ==
+             proto::plan::GenericValue::ValCase::kFloatVal)) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 

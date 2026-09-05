@@ -149,6 +149,19 @@ BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data,
     return json_index;
 }
 
+TEST(JsonFlatIndexSafetyTest, RejectsUncoveredRowInsteadOfPublishingPartial) {
+    // serde_json/Tantivy cannot represent 1e400. Until JsonFlatIndex persists
+    // row coverage and query executors merge uncovered rows from raw JSON, the
+    // only safe behavior is to reject the whole build: an empty placeholder
+    // document would lose both /bad existence and the indexable /sibling key.
+    EXPECT_THROW(BuildInMemoryJsonFlatIndex({
+                     R"({"ok": 1})",
+                     R"({"bad": 1e400, "sibling": "must-not-be-lost"})",
+                     R"({"ok": 2})",
+                 }),
+                 std::exception);
+}
+
 class JsonFlatIndexTest : public ::testing::Test {
  protected:
     void
@@ -311,6 +324,10 @@ TEST(JsonFlatIndexExactPathExistsTest, DistinguishesObjectSubpaths) {
     EXPECT_TRUE(recursive_exists[0]);
     EXPECT_TRUE(recursive_exists[1]);
     EXPECT_TRUE(recursive_exists[2]);
+    // Tantivy JSON fast fields contain leaf columns only. An empty container
+    // has no indexed leaf, so flat-index EXISTS cannot implement Milvus'
+    // non-null target-presence contract until the flat format persists a
+    // container-presence marker.
     EXPECT_FALSE(recursive_exists[3]);
     EXPECT_FALSE(recursive_exists[4]);
     EXPECT_FALSE(recursive_exists[5]);
@@ -1253,6 +1270,69 @@ TEST_F(JsonFlatIndexContainsExprTest, PreservesLargeInt64LiteralPrecision) {
 }
 
 TEST_F(JsonFlatIndexContainsExprTest,
+       MatchesLosslesslyEquivalentIntAndDoubleTerms) {
+    const std::vector<bool> expected_valid = {true,
+                                              true,
+                                              true,
+                                              true,
+                                              false,
+                                              false,
+                                              false,
+                                              false,
+                                              true,
+                                              false,
+                                              true,
+                                              true,
+                                              true,
+                                              true};
+
+    proto::plan::GenericValue double_two;
+    double_two.set_float_val(2.0);
+    auto contains_double = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{double_two});
+    auto double_result =
+        EvalExprInBatches(contains_double, segment_.get(), json_data_.size())
+            .result;
+    CheckResult(double_result,
+                {true,
+                 true,
+                 false,
+                 true,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false},
+                expected_valid);
+
+    CheckResult(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains,
+                         {9007199254740992LL}),
+                {false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 true,
+                 false,
+                 false,
+                 true},
+                expected_valid);
+}
+
+TEST_F(JsonFlatIndexContainsExprTest,
        ReusesExactPathValidityAcrossLiteralsAndOperators) {
     auto& cache = exec::ExprResCacheManager::Instance();
     exec::CacheConfig config;
@@ -1350,12 +1430,9 @@ TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
 
 TEST_F(JsonFlatIndexExprTest,
        JSONContainsMixedAndArrayLiteralsFallBackToRawData) {
-    ExprBatchSizeGuard batch_size_guard(7);
-    const auto expect_three_batches = [&](const expr::TypedExprPtr& expr) {
-        std::vector<int64_t> batch_sizes;
-        EXPECT_NO_THROW(batch_sizes = EvalExprBatchSizes(
-                            expr, segment_.get(), json_data_.size()));
-        EXPECT_EQ(batch_sizes, (std::vector<int64_t>{7, 7, 5}));
+    const auto expect_raw_fallback = [&](const expr::TypedExprPtr& expr) {
+        EXPECT_FALSE(
+            CanExprExecuteAllAtOnce(expr, segment_.get(), json_data_.size()));
     };
 
     proto::plan::GenericValue string_value;
@@ -1368,7 +1445,7 @@ TEST_F(JsonFlatIndexExprTest,
         proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
         false,
         std::vector<proto::plan::GenericValue>{string_value, int_value});
-    expect_three_batches(mixed_expr);
+    expect_raw_fallback(mixed_expr);
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
     auto final = query::ExecuteQueryExpr(
@@ -1386,7 +1463,7 @@ TEST_F(JsonFlatIndexExprTest,
         proto::plan::JSONContainsExpr_JSONOp_Contains,
         true,
         std::vector<proto::plan::GenericValue>{array_value});
-    expect_three_batches(array_expr);
+    expect_raw_fallback(array_expr);
     plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, array_expr);
     final = query::ExecuteQueryExpr(
@@ -1397,7 +1474,7 @@ TEST_F(JsonFlatIndexExprTest,
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{string_value},
         true);
-    expect_three_batches(in_field_expr);
+    expect_raw_fallback(in_field_expr);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                   in_field_expr);
     final = query::ExecuteQueryExpr(
@@ -1477,18 +1554,21 @@ TEST_F(JsonFlatIndexExprTest, ReusesValidityAcrossLiteralsAndOperators) {
     EXPECT_EQ(cache.GetEntryCount(), 0);
 }
 
-TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
-    ExprBatchSizeGuard batch_size_guard(7);
-    const auto evaluate = [&](const expr::TypedExprPtr& expr,
-                              bool can_execute_all_at_once) {
-        EXPECT_EQ(
-            CanExprExecuteAllAtOnce(expr, segment_.get(), json_data_.size()),
-            can_execute_all_at_once);
-        ExprBatchEvalResult evaluation;
-        EXPECT_NO_THROW(evaluation = EvalExprInBatches(
-                            expr, segment_.get(), json_data_.size()));
-        EXPECT_EQ(evaluation.batch_sizes, (std::vector<int64_t>{7, 7, 5}));
-        return evaluation.result;
+// Equality and IN keep full int64 precision on a flat index: the term query
+// probes the f64 column only when the integer round-trips exactly.
+// Ranges do not. Range() unions the typed integer query with an f64 fan-out
+// that casts the bound with a bare static_cast and reads integer values
+// coerced to double, so rows whose integers share a double join the result.
+// Milvus no longer re-runs these on raw data -- see
+// docs/agent_guides/json-filtering/cross-path-semantics.md, case 8.
+TEST_F(JsonFlatIndexExprTest, LargeInt64LiteralPrecisionOnFlatIndex) {
+    const auto evaluate = [&](const expr::TypedExprPtr& expr) {
+        EXPECT_TRUE(
+            CanExprExecuteAllAtOnce(expr, segment_.get(), json_data_.size()));
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        return query::ExecuteQueryExpr(
+            plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
     };
 
     proto::plan::GenericValue value;
@@ -1499,44 +1579,29 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
-    auto result = evaluate(equal_expr, true);
-    TargetBitmapView result_view(result->GetRawData(), result->size());
-    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
-    EXPECT_TRUE(valid_view[16]);
-    EXPECT_TRUE(valid_view[17]);
-    EXPECT_TRUE(valid_view[18]);
-    EXPECT_FALSE(result_view[16]);
-    EXPECT_TRUE(result_view[17]);
-    EXPECT_FALSE(result_view[18]);
+    auto result = evaluate(equal_expr);
+    EXPECT_FALSE(result[16]);
+    EXPECT_TRUE(result[17]);
+    EXPECT_FALSE(result[18]);
 
     auto term_expr = std::make_shared<expr::TermFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
-    result = evaluate(term_expr, true);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
-    EXPECT_TRUE(valid_view[16]);
-    EXPECT_TRUE(valid_view[17]);
-    EXPECT_TRUE(valid_view[18]);
-    EXPECT_FALSE(result_view[16]);
-    EXPECT_TRUE(result_view[17]);
-    EXPECT_FALSE(result_view[18]);
+    result = evaluate(term_expr);
+    EXPECT_FALSE(result[16]);
+    EXPECT_TRUE(result[17]);
+    EXPECT_FALSE(result[18]);
 
     auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         proto::plan::OpType::GreaterThan,
         value,
         std::vector<proto::plan::GenericValue>());
-    result = evaluate(greater_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
-    EXPECT_TRUE(valid_view[16]);
-    EXPECT_TRUE(valid_view[17]);
-    EXPECT_TRUE(valid_view[18]);
-    EXPECT_FALSE(result_view[16]);
-    EXPECT_FALSE(result_view[17]);
-    EXPECT_TRUE(result_view[18]);
+    result = evaluate(greater_expr);
+    EXPECT_FALSE(result[16]);
+    EXPECT_FALSE(result[17]);
+    EXPECT_TRUE(result[18]);
 
     auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
@@ -1544,15 +1609,13 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         true,
         true);
-    result = evaluate(between_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
-    EXPECT_TRUE(valid_view[16]);
-    EXPECT_TRUE(valid_view[17]);
-    EXPECT_TRUE(valid_view[18]);
-    EXPECT_FALSE(result_view[16]);
-    EXPECT_TRUE(result_view[17]);
-    EXPECT_FALSE(result_view[18]);
+    // Both bounds are int64, so the integer query alone would return only
+    // row 17. The f64 fan-out casts them to 2^53 and reads rows 16 and 17
+    // coerced to the same double, so row 16 joins.
+    result = evaluate(between_expr);
+    EXPECT_TRUE(result[16]);
+    EXPECT_TRUE(result[17]);
+    EXPECT_FALSE(result[18]);
 
     proto::plan::GenericValue upper_float;
     upper_float.set_float_val(9007199254740994.0);
@@ -1562,12 +1625,11 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         upper_float,
         true,
         true);
-    result = evaluate(mixed_lower_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
-    EXPECT_FALSE(result_view[16]);
-    EXPECT_TRUE(result_view[17]);
-    EXPECT_TRUE(result_view[18]);
+    // Float upper bound: the whole range runs in double, [2^53, 2^53+2].
+    result = evaluate(mixed_lower_expr);
+    EXPECT_TRUE(result[16]);
+    EXPECT_TRUE(result[17]);
+    EXPECT_TRUE(result[18]);
 
     proto::plan::GenericValue lower_float;
     lower_float.set_float_val(9007199254740992.0);
@@ -1577,12 +1639,36 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         true,
         true);
-    result = evaluate(mixed_upper_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
-    EXPECT_TRUE(result_view[16]);
-    EXPECT_TRUE(result_view[17]);
-    EXPECT_FALSE(result_view[18]);
+    // Mirrored: the double range is [2^53, 2^53], which rows 16 and 17 both
+    // coerce into; row 18 stays out.
+    result = evaluate(mixed_upper_expr);
+    EXPECT_TRUE(result[16]);
+    EXPECT_TRUE(result[17]);
+    EXPECT_FALSE(result[18]);
+}
+
+TEST_F(JsonFlatIndexExprTest, MixedNumericTermQueriesBothPhysicalTypes) {
+    proto::plan::GenericValue integer_one;
+    integer_one.set_int64_val(1);
+    proto::plan::GenericValue double_three;
+    double_three.set_float_val(3.0);
+
+    for (auto values :
+         {std::vector<proto::plan::GenericValue>{integer_one, double_three},
+          std::vector<proto::plan::GenericValue>{double_three, integer_one}}) {
+        auto term_expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+            std::move(values),
+            false);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           term_expr);
+        auto final = query::ExecuteQueryExpr(
+            plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+        EXPECT_EQ(final.count(), 3);
+        EXPECT_TRUE(final[0]);
+        EXPECT_TRUE(final[2]);
+        EXPECT_TRUE(final[13]);
+    }
 }
 
 TEST_F(JsonFlatIndexExprTest, EmptyJsonInIsDeterministicForEveryRow) {

@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
 #include "common/bson_view.h"
@@ -69,6 +70,44 @@ GetColumnVector(const VectorPtr& result) {
     return res;
 }
 
+template <typename JsonValue>
+std::optional<int>
+CompareJsonArrayNumberToBound(JsonValue&& value,
+                              const proto::plan::GenericValue& bound) {
+    using ValueType = std::remove_cv_t<std::remove_reference_t<JsonValue>>;
+    if constexpr (std::is_same_v<ValueType, simdjson::dom::element>) {
+        switch (value.type()) {
+            case simdjson::dom::element_type::INT64: {
+                auto number = value.get_int64();
+                return number.error()
+                           ? std::nullopt
+                           : CompareJsonNumberToBound(number.value(), bound);
+            }
+            case simdjson::dom::element_type::UINT64: {
+                auto number = value.get_uint64();
+                return number.error()
+                           ? std::nullopt
+                           : CompareJsonNumberToBound(
+                                 static_cast<double>(number.value()), bound);
+            }
+            case simdjson::dom::element_type::DOUBLE: {
+                auto number = value.get_double();
+                return number.error()
+                           ? std::nullopt
+                           : CompareJsonNumberToBound(number.value(), bound);
+            }
+            default:
+                return std::nullopt;
+        }
+    } else {
+        auto number = value.get_number();
+        return number.error()
+                   ? std::nullopt
+                   : CompareJsonNumberToBoundWithUint64DoubleFallback(
+                         number.value(), bound);
+    }
+}
+
 template <typename T>
 bool
 CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
@@ -106,16 +145,11 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 }
                 break;
             }
-            case proto::plan::GenericValue::kInt64Val: {
-                auto val = it.template get<int64_t>();
-                if (val.error() || val.value() != arr2.array(i).int64_val()) {
-                    return false;
-                }
-                break;
-            }
+            case proto::plan::GenericValue::kInt64Val:
             case proto::plan::GenericValue::kFloatVal: {
-                auto val = it.template get<double>();
-                if (val.error() || val.value() != arr2.array(i).float_val()) {
+                auto comparison =
+                    CompareJsonArrayNumberToBound(it, arr2.array(i));
+                if (!comparison.has_value() || *comparison != 0) {
                     return false;
                 }
                 break;
@@ -166,38 +200,11 @@ CompareTwoJsonArray<milvus::bson::array_view>(milvus::bson::array_view arr1,
                 }
                 break;
             }
-            case proto::plan::GenericValue::kInt64Val: {
-                if (bson_elem.type() == milvus::bson::type::k_int32) {
-                    const int32_t val = bson_elem.get_int32().value;
-                    if (val != proto_elem.int64_val()) {
-                        return false;
-                    }
-                } else if (bson_elem.type() == milvus::bson::type::k_int64) {
-                    const int64_t val = bson_elem.get_int64().value;
-                    if (val != proto_elem.int64_val()) {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-                break;
-            }
+            case proto::plan::GenericValue::kInt64Val:
             case proto::plan::GenericValue::kFloatVal: {
-                double bson_val;
-                switch (bson_elem.type()) {
-                    case milvus::bson::type::k_int32:
-                        bson_val = bson_elem.get_int32().value;
-                        break;
-                    case milvus::bson::type::k_int64:
-                        bson_val = bson_elem.get_int64().value;
-                        break;
-                    case milvus::bson::type::k_double:
-                        bson_val = bson_elem.get_double().value;
-                        break;
-                    default:
-                        return false;
-                }
-                if (bson_val != proto_elem.float_val()) {
+                auto comparison =
+                    CompareBsonNumberToBound(bson_elem.get_value(), proto_elem);
+                if (!comparison.has_value() || *comparison != 0) {
                     return false;
                 }
                 break;

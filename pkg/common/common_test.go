@@ -1,6 +1,7 @@
 package common
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -683,6 +685,9 @@ func TestNamespaceShardingEnabled(t *testing.T) {
 }
 
 func TestClampScalarIndexVersion(t *testing.T) {
+	assert.Equal(t, int32(6), CurrentScalarIndexEngineVersion)
+	assert.Equal(t, CurrentScalarIndexEngineVersion, MaximumScalarIndexEngineVersion)
+
 	max := MaximumScalarIndexEngineVersion
 
 	// Values at or below maximum pass through unchanged
@@ -693,6 +698,14 @@ func TestClampScalarIndexVersion(t *testing.T) {
 	// Values above maximum are clamped
 	assert.Equal(t, max, ClampScalarIndexVersion(max+1))
 	assert.Equal(t, max, ClampScalarIndexVersion(max+100))
+}
+
+func TestIsFullJSONCastType(t *testing.T) {
+	assert.True(t, IsFullJSONCastType("JSON"))
+	assert.True(t, IsFullJSONCastType("json"))
+	assert.True(t, IsFullJSONCastType(strconv.Itoa(int(schemapb.DataType_JSON))))
+	assert.False(t, IsFullJSONCastType("DOUBLE"))
+	assert.False(t, IsFullJSONCastType(""))
 }
 
 func TestWKTWKBConversion(t *testing.T) {

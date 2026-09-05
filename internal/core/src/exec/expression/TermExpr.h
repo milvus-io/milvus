@@ -25,6 +25,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "segcore/SegmentInterface.h"
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
@@ -128,6 +129,9 @@ class PhyTermFilterExpr : public SegmentExpr {
     VectorPtr
     ExecVisitorImplForIndex();
 
+    VectorPtr
+    ExecMixedJsonNumericForFlatIndex();
+
     template <typename T>
     VectorPtr
     ExecVisitorImplForData(EvalCtx& context);
@@ -166,6 +170,12 @@ class PhyTermFilterExpr : public SegmentExpr {
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<JsonNumberMembershipMatcher>
+        json_number_membership_matcher_;
+    bool mixed_json_numeric_{false};
+    bool mixed_json_index_values_inited_{false};
+    std::vector<int64_t> mixed_json_int_values_;
+    std::vector<double> mixed_json_double_values_;
     SingleElement arg_val_;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 

@@ -105,10 +105,10 @@ const (
 
 const (
 	// Scalar index engine version tracks the *capability* of a Milvus node
-	// (which index types / features it supports). It is reported by QueryNodes
-	// in their session and aggregated by datacoord so that newly built indexes
-	// are clamped to a version every node in the cluster can load — this is
-	// what makes rolling upgrades safe.
+	// (which index types / features it supports). QueryNodes report reader
+	// compatibility and DataNodes report builder compatibility in their
+	// sessions. DataCoord uses the QueryNode range for normal build-version
+	// resolution and both node classes to gate cross-node artifact migrations.
 	//
 	// Engine version is distinct from the on-disk file format version
 	// (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h). Multiple engine
@@ -135,14 +135,24 @@ const (
 	//   An older QueryNode does not recognize FMINDEX and would fail to load
 	//   such a segment, so creation is gated on the whole cluster reporting >= 5
 	//   (see MinScalarIndexVersionForFMINDEX).
+	//
+	// Scalar index engine version 6:
+	// - Typed JSON path indexes preserve empty containers as existing values.
+	//   Older artifacts used a different presence bitmap, so background
+	//   migration is gated until every QueryNode and DataNode reports >= 6.
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(5)
-	MaximumScalarIndexEngineVersion = int32(5)
+	CurrentScalarIndexEngineVersion = int32(6)
+	MaximumScalarIndexEngineVersion = int32(6)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForJsonPathPresence is the first scalar index engine
+	// version whose typed JSON path presence bitmap treats empty containers as
+	// existing values.
+	MinScalarIndexVersionForJsonPathPresence = int32(6) //nolint:revive // intentionally "Json" to match the existing constant family
 
 	// MinScalarIndexVersionForNestedHybridStlSort is the minimum scalar index
 	// engine version at which nested (struct sub-field) HYBRID indexes may
@@ -166,6 +176,14 @@ func ClampScalarIndexVersion(v int32) int32 {
 		return MaximumScalarIndexEngineVersion
 	}
 	return v
+}
+
+// IsFullJSONCastType reports whether a JSON index cast type denotes the Flat
+// full-JSON index. Both the symbolic and protobuf numeric forms are accepted
+// because persisted/request index params may contain either representation.
+func IsFullJSONCastType(castType string) bool {
+	return strings.EqualFold(castType, schemapb.DataType_JSON.String()) ||
+		castType == strconv.Itoa(int(schemapb.DataType_JSON))
 }
 
 const DefaultTimezone = "UTC"
@@ -214,9 +232,23 @@ const (
 )
 
 const (
-	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
-	JSONStatsDataFormatVersion = 3
+	// JSONStatsDataFormatV3 moved metadata to a separate meta.json file.
+	JSONStatsDataFormatV3 int64 = 3
+	// JSONStatsDataFormatV4 normalizes unrepresentable JSON numbers to null and
+	// preserves empty strings in typed columns.
+	JSONStatsDataFormatV4 int64 = 4
+
+	// JSONStatsDataFormatVersion is kept as the latest format supported by this
+	// binary. The format selected for new writes is controlled by
+	// dataCoord.jsonStatsFormatVersion.
+	JSONStatsDataFormatVersion = JSONStatsDataFormatV4
 )
+
+// IsSupportedJSONStatsDataFormat reports whether this binary can read and
+// write the JSON stats format.
+func IsSupportedJSONStatsDataFormat(version int64) bool {
+	return version == JSONStatsDataFormatV3 || version == JSONStatsDataFormatV4
+}
 
 // Search, Index parameter keys
 const (

@@ -14,7 +14,7 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
-var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR", "JSON"}
+var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "INT8", "INT16", "INT32", "INT64", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR", "JSON"}
 
 var validJSONCastFunctions = []string{"STRING_TO_DOUBLE"}
 

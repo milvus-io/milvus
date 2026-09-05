@@ -611,6 +611,18 @@ class SegmentInternalInterface : public SegmentInterface {
         return false;
     }
 
+    // Returns whether a sealed segment has a typed JSON Path index at `path`
+    // whose cast type accepts the supplied operand type/shape. JsonFlatIndex is
+    // deliberately excluded. This is non-virtual: expressions only need a
+    // metadata probe, and adding a virtual slot here would change the
+    // SegmentInterface ABI for every segment type.
+    bool
+    HasTypedJsonPathIndexForOperandType(FieldId field_id,
+                                        std::string_view path,
+                                        DataType data_type,
+                                        bool any_type,
+                                        bool is_array) const;
+
     int64_t
     get_real_count() const override;
 

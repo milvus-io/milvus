@@ -124,6 +124,163 @@ class ContainsAllMatcher {
     size_t num_words_{0};
 };
 
+// Match one on-demand JSON array element against mixed-type query literals.
+// Inspecting the actual JSON type first lets us consume the on-demand value
+// exactly once.  In particular, an unrepresentable number (for example
+// 1e400) only makes that element a non-match; it cannot poison a sibling JSON
+// path or abort the whole query as whole-document DOM parsing would.
+template <typename OnMatch>
+void
+VisitMatchingJsonCandidatePositions(
+    simdjson::simdjson_result<simdjson::ondemand::value>& value,
+    const std::vector<proto::plan::GenericValue>& candidates,
+    const JsonNumberCandidatePositionIndex& number_position_index,
+    OnMatch&& on_match) {
+    auto type = value.type();
+    if (type.error()) {
+        return;
+    }
+
+    switch (type.value()) {
+        case simdjson::ondemand::json_type::boolean: {
+            auto parsed = value.template get<bool>();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kBoolVal &&
+                    parsed.value() == candidates[i].bool_val() && on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case simdjson::ondemand::json_type::number: {
+            auto parsed = value.get_number();
+            if (parsed.error()) {
+                return;
+            }
+            number_position_index
+                .VisitMatchingPositionsWithUint64DoubleFallback(
+                    parsed.value(), std::forward<OnMatch>(on_match));
+            return;
+        }
+        case simdjson::ondemand::json_type::string: {
+            auto parsed = value.template get<std::string_view>();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kStringVal &&
+                    parsed.value() == candidates[i].string_val() &&
+                    on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case simdjson::ondemand::json_type::array: {
+            // Mixed-type expressions may compare this array with more than
+            // one array literal.  An on-demand array and its elements are
+            // forward-only, so materialize only this current element into a
+            // DOM value instead of retaining ephemeral on-demand cursors.
+            auto raw = value.raw_json();
+            if (raw.error()) {
+                return;
+            }
+            simdjson::padded_string padded(raw.value());
+            thread_local simdjson::dom::parser parser;
+            auto parsed = parser.parse(padded).get_array();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kArrayVal &&
+                    CompareTwoJsonArray(parsed, candidates[i].array_val()) &&
+                    on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+// Membership-only counterpart used by Contains and ContainsAny. It consumes
+// one on-demand element and returns a bool, so numeric candidates do not pay
+// for position vectors or a callback that immediately discards the position.
+bool
+JsonValueMatchesAnyCandidate(
+    simdjson::simdjson_result<simdjson::ondemand::value>& value,
+    const std::vector<proto::plan::GenericValue>& candidates,
+    const JsonNumberMembershipMatcher& number_membership_matcher) {
+    auto type = value.type();
+    if (type.error()) {
+        return false;
+    }
+
+    switch (type.value()) {
+        case simdjson::ondemand::json_type::boolean: {
+            auto parsed = value.template get<bool>();
+            if (parsed.error()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_bool_val() &&
+                                          parsed.value() ==
+                                              candidate.bool_val();
+                               });
+        }
+        case simdjson::ondemand::json_type::number: {
+            auto parsed = value.get_number();
+            return !parsed.error() &&
+                   number_membership_matcher.MatchesAnyWithUint64DoubleFallback(
+                       parsed.value());
+        }
+        case simdjson::ondemand::json_type::string: {
+            auto parsed = value.template get<std::string_view>();
+            if (parsed.error()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_string_val() &&
+                                          parsed.value() ==
+                                              candidate.string_val();
+                               });
+        }
+        case simdjson::ondemand::json_type::array: {
+            auto raw = value.raw_json();
+            if (raw.error()) {
+                return false;
+            }
+            simdjson::padded_string padded(raw.value());
+            thread_local simdjson::dom::parser parser;
+            auto parsed = parser.parse(padded).get_array();
+            if (parsed.error()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_array_val() &&
+                                          CompareTwoJsonArray(
+                                              parsed, candidate.array_val());
+                               });
+        }
+        default:
+            return false;
+    }
+}
+
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
@@ -189,9 +346,12 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 if (value_type_ == DataType::INT64 && PinnedJsonIndexIsFlat()) {
                     result = EvalArrayContainsForIndexSegment(DataType::INT64);
                 } else {
+                    auto cast_type = PinnedJsonIndexCastElementType();
                     result = EvalArrayContainsForIndexSegment(
-                        value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                       : value_type_);
+                        value_type_ == DataType::INT64
+                            ? (cast_type != DataType::NONE ? cast_type
+                                                           : DataType::DOUBLE)
+                            : value_type_);
                 }
             } else {
                 result = EvalJsonContainsForDataSegment(context);
@@ -516,9 +676,19 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
-        arg_inited_ = true;
+    if constexpr (std::is_same_v<GetType, int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(expr_->vals_);
+        }
+    }
+    if constexpr (!std::is_same_v<GetType, int64_t> &&
+                  !std::is_same_v<GetType, double>) {
+        if (!arg_inited_) {
+            arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
+            arg_inited_ = true;
+        }
     }
 
     size_t processed_cursor = 0;
@@ -532,7 +702,9 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::shared_ptr<MultiElement>& elements) {
+            const std::shared_ptr<MultiElement>& elements,
+            const std::shared_ptr<JsonNumberMembershipMatcher>&
+                number_membership_matcher) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -546,23 +718,20 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
                 return std::make_pair(false, false);
             }
             for (auto&& it : array) {
-                auto val = it.template get<GetType>();
-                if (val.error()) {
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        auto double_val = it.template get<double>();
-                        if (!double_val.error() &&
-                            double_val.value() ==
-                                std::floor(double_val.value())) {
-                            if (elements->In(static_cast<int64_t>(
-                                    double_val.value())) > 0) {
-                                return std::make_pair(true, true);
-                            }
-                        }
+                if constexpr (std::is_same_v<GetType, int64_t> ||
+                              std::is_same_v<GetType, double>) {
+                    auto number = it.get_number();
+                    if (!number.error() &&
+                        number_membership_matcher
+                            ->MatchesAnyWithUint64DoubleFallback(
+                                number.value())) {
+                        return std::make_pair(true, true);
                     }
-                    continue;
-                }
-                if (elements->In(val.value()) > 0) {
-                    return std::make_pair(true, true);
+                } else {
+                    auto val = it.template get<GetType>();
+                    if (!val.error() && elements->In(val.value()) > 0) {
+                        return std::make_pair(true, true);
+                    }
                 }
             }
             return std::make_pair(true, false);
@@ -592,20 +761,24 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    pointer,
-                                                    arg_set_);
+        processed_size =
+            ProcessDataByOffsets<Json>(execute_sub_batch,
+                                       std::nullptr_t{},
+                                       input,
+                                       res,
+                                       valid_res,
+                                       pointer,
+                                       arg_set_,
+                                       json_number_membership_matcher_);
     } else {
-        processed_size = ProcessDataChunks<Json>(execute_sub_batch,
-                                                 std::nullptr_t{},
-                                                 res,
-                                                 valid_res,
-                                                 pointer,
-                                                 arg_set_);
+        processed_size =
+            ProcessDataChunks<Json>(execute_sub_batch,
+                                    std::nullptr_t{},
+                                    res,
+                                    valid_res,
+                                    pointer,
+                                    arg_set_,
+                                    json_number_membership_matcher_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1164,138 +1337,141 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
-        for (auto const& element : expr_->vals_) {
-            elements->insert(GetValueFromProto<GetType>(element));
-        }
-        arg_cached_set_ = elements;
-        arg_inited_ = true;
-    }
-
-    auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
-    int processed_cursor = 0;
-    ContainsAllMatcher<GetType> matcher(*elements);
-    std::vector<uint64_t> found_large(
-        matcher.use_small() ? 0 : matcher.num_words());
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &matcher, &
-         found_large ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::set<GetType>& elements) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        auto executor = [&](const size_t i) {
-            auto doc = data[i].doc();
-            auto array = doc.at_pointer(pointer).get_array();
-            if (array.error()) {
-                return std::make_pair(false, false);
+    auto process_with_matcher =
+        [&]<typename MatchArray>(MatchArray& match_array) -> int64_t {
+        int processed_cursor = 0;
+        auto execute_sub_batch =
+            [&processed_cursor, &bitmap_input, &
+             match_array ]<FilterType filter_type = FilterType::sequential>(
+                const milvus::Json* data,
+                ValidityView valid_data,
+                const int32_t* offsets,
+                const int size,
+                TargetBitmapView res,
+                TargetBitmapView valid_res,
+                const std::string& pointer) {
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // We only need to update processed_cursor for bitmap_input
+            // indexing.
+            if (data == nullptr) {
+                processed_cursor += size;
+                return;
             }
+            auto executor = [&](const size_t i) {
+                auto doc = data[i].doc();
+                auto array = doc.at_pointer(pointer).get_array();
+                if (array.error()) {
+                    return std::make_pair(false, false);
+                }
+                return std::make_pair(true, match_array(array));
+            };
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (size_t i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = (offsets) ? offsets[i] : i;
+                }
+                if (valid_data && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                auto [valid, matched] = executor(offset);
+                if (!valid) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                res[i] = matched;
+            }
+            processed_cursor += size;
+        };
+
+        if (has_offset_input_) {
+            return ProcessDataByOffsets<Json>(execute_sub_batch,
+                                              std::nullptr_t{},
+                                              input,
+                                              res,
+                                              valid_res,
+                                              pointer);
+        }
+        return ProcessDataChunks<Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
+    };
+
+    int64_t processed_size;
+    if constexpr (std::is_same_v<GetType, int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_position_index_) {
+            json_number_position_index_ =
+                std::make_shared<JsonNumberCandidatePositionIndex>(
+                    expr_->vals_);
+        }
+        ContainsAllCandidateTracker match_tracker(expr_->vals_.size());
+        auto match_array = [number_position_index = json_number_position_index_,
+                            &match_tracker](auto&& array) {
+            match_tracker.Reset();
+            for (auto&& it : array) {
+                auto number = it.get_number();
+                if (!number.error()) {
+                    number_position_index
+                        ->VisitMatchingPositionsWithUint64DoubleFallback(
+                            number.value(), [&](size_t candidate_position) {
+                                return match_tracker.MarkCandidateMatched(
+                                    candidate_position);
+                            });
+                }
+                if (match_tracker.AllCandidatesMatched()) {
+                    return true;
+                }
+            }
+            return match_tracker.AllCandidatesMatched();
+        };
+        processed_size = process_with_matcher(match_array);
+    } else {
+        if (!arg_inited_) {
+            auto elements = std::make_shared<std::set<GetType>>();
+            for (auto const& element : expr_->vals_) {
+                elements->insert(GetValueFromProto<GetType>(element));
+            }
+            arg_cached_set_ = elements;
+            arg_inited_ = true;
+        }
+        auto elements =
+            std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+        ContainsAllMatcher<GetType> matcher(*elements);
+        std::vector<uint64_t> found_large(
+            matcher.use_small() ? 0 : matcher.num_words());
+        auto match_array = [&matcher, &found_large](auto&& array) {
             if (matcher.use_small()) {
                 uint64_t found = 0;
                 for (auto&& it : array) {
                     auto val = it.template get<GetType>();
                     if (val.error()) {
-                        if constexpr (std::is_same_v<GetType, int64_t>) {
-                            auto double_val = it.template get<double>();
-                            if (!double_val.error() &&
-                                double_val.value() ==
-                                    std::floor(double_val.value())) {
-                                if (matcher.set_if_found(
-                                        static_cast<int64_t>(
-                                            double_val.value()),
-                                        found)) {
-                                    return std::make_pair(true, true);
-                                }
-                            }
-                        }
                         continue;
                     }
                     if (matcher.set_if_found(val.value(), found)) {
-                        return std::make_pair(true, true);
+                        return true;
                     }
                 }
-                return std::make_pair(true, found == matcher.full_mask());
-            } else {
-                std::fill(found_large.begin(), found_large.end(), 0);
-                size_t remaining = matcher.target_count();
-                for (auto&& it : array) {
-                    auto val = it.template get<GetType>();
-                    if (val.error()) {
-                        if constexpr (std::is_same_v<GetType, int64_t>) {
-                            auto double_val = it.template get<double>();
-                            if (!double_val.error() &&
-                                double_val.value() ==
-                                    std::floor(double_val.value())) {
-                                if (matcher.set_if_found(
-                                        static_cast<int64_t>(
-                                            double_val.value()),
-                                        found_large,
-                                        remaining)) {
-                                    return std::make_pair(true, true);
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    if (matcher.set_if_found(
-                            val.value(), found_large, remaining)) {
-                        return std::make_pair(true, true);
-                    }
-                }
-                return std::make_pair(true, remaining == 0);
+                return found == matcher.full_mask();
             }
-        };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto [valid, matched] = executor(offset);
-            if (!valid) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            res[i] = matched;
-        }
-        processed_cursor += size;
-    };
 
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    pointer,
-                                                    *elements);
-    } else {
-        processed_size = ProcessDataChunks<Json>(execute_sub_batch,
-                                                 std::nullptr_t{},
-                                                 res,
-                                                 valid_res,
-                                                 pointer,
-                                                 *elements);
+            std::fill(found_large.begin(), found_large.end(), 0);
+            size_t remaining = matcher.target_count();
+            for (auto&& it : array) {
+                auto val = it.template get<GetType>();
+                if (val.error()) {
+                    continue;
+                }
+                if (matcher.set_if_found(val.value(), found_large, remaining)) {
+                    return true;
+                }
+            }
+            return remaining == 0;
+        };
+        processed_size = process_with_matcher(match_array);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1497,15 +1673,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     const auto& elements = expr_->vals_;
-    std::unordered_set<int> elements_index;
-    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
-        elements_index.insert(i);
+    if (!json_number_position_index_) {
+        json_number_position_index_ =
+            std::make_shared<JsonNumberCandidatePositionIndex>(elements);
     }
+    ContainsAllCandidateTracker match_tracker(elements.size());
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &
+         match_tracker ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -1514,7 +1691,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
-            const std::unordered_set<int>& elements_index) {
+            const std::shared_ptr<JsonNumberCandidatePositionIndex>&
+                number_position_index) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1523,86 +1701,26 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
         }
         auto executor = [&](size_t i) {
             const auto& json = data[i];
-            auto doc = json.dom_doc();
+            auto doc = json.doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return std::make_pair(false, false);
             }
-            std::unordered_set<int> tmp_elements_index(elements_index);
+            match_tracker.Reset();
             for (auto&& it : array) {
-                int i = -1;
-                for (auto& element : elements) {
-                    i++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                auto double_val = it.template get<double>();
-                                if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
-                    if (tmp_elements_index.size() == 0) {
-                        return std::make_pair(true, true);
-                    }
-                }
-                if (tmp_elements_index.size() == 0) {
+                VisitMatchingJsonCandidatePositions(
+                    it,
+                    elements,
+                    *number_position_index,
+                    [&](size_t candidate_position) {
+                        return match_tracker.MarkCandidateMatched(
+                            candidate_position);
+                    });
+                if (match_tracker.AllCandidatesMatched()) {
                     return std::make_pair(true, true);
                 }
             }
-            return std::make_pair(true, tmp_elements_index.size() == 0);
+            return std::make_pair(true, match_tracker.AllCandidatesMatched());
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -1630,14 +1748,15 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    pointer,
-                                                    elements,
-                                                    elements_index);
+        processed_size =
+            ProcessDataByOffsets<Json>(execute_sub_batch,
+                                       std::nullptr_t{},
+                                       input,
+                                       res,
+                                       valid_res,
+                                       pointer,
+                                       elements,
+                                       json_number_position_index_);
     } else {
         processed_size = ProcessDataChunks<Json>(execute_sub_batch,
                                                  std::nullptr_t{},
@@ -1645,7 +1764,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                                                  valid_res,
                                                  pointer,
                                                  elements,
-                                                 elements_index);
+                                                 json_number_position_index_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1663,21 +1782,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     const auto& elements = expr_->vals_;
-    std::set<int> elements_index;
-    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
-        elements_index.insert(i);
-    }
     if (elements.empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-
     if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
         // Cache hit — skip Stats computation.
     } else if (cached_index_chunk_id_ != 0 &&
                segment_->type() == SegmentType::Sealed) {
+        if (!json_number_position_index_) {
+            json_number_position_index_ =
+                std::make_shared<JsonNumberCandidatePositionIndex>(elements);
+        }
         auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
@@ -1703,7 +1821,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
                 ShreddingArrayBsonContainsAllWithDiffTypeExecutor executor(
-                    elements, elements_index);
+                    elements, json_number_position_index_);
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
                     target_field,
@@ -1717,92 +1835,37 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
         }
 
+        ContainsAllCandidateTracker shared_match_tracker(elements.size());
         auto shared_executor = [&elements,
-                                &elements_index,
+                                number_position_index =
+                                    json_number_position_index_,
+                                &shared_match_tracker,
                                 &res_view,
                                 &valid_res_view](milvus::BsonView bson,
                                                  uint32_t row_offset,
                                                  uint32_t value_offset) {
-            std::set<int> tmp_elements_index(elements_index);
             auto array = bson.ParseAsArrayAtOffset(value_offset);
             if (!array.has_value()) {
                 return;
             }
             valid_res_view[row_offset] = true;
 
+            shared_match_tracker.Reset();
             for (const auto& sub_value : array.value()) {
-                int i = -1;
-                for (auto& element : elements) {
-                    i++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<bool>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                std::string>(sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                milvus::bson::array_view>(
-                                sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val.value(),
-                                                    element.array_val())) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
-                    if (tmp_elements_index.size() == 0) {
-                        res_view[row_offset] = true;
-                        return;
-                    }
-                }
-                if (tmp_elements_index.size() == 0) {
+                VisitMatchingBsonCandidatePositions(
+                    sub_value.get_value(),
+                    elements,
+                    *number_position_index,
+                    [&](size_t candidate_position) {
+                        return shared_match_tracker.MarkCandidateMatched(
+                            candidate_position);
+                    });
+                if (shared_match_tracker.AllCandidatesMatched()) {
                     res_view[row_offset] = true;
                     return;
                 }
             }
-            res_view[row_offset] = tmp_elements_index.size() == 0;
+            res_view[row_offset] = shared_match_tracker.AllCandidatesMatched();
         };
         if (!index->HasAllShreddingFields(pointer,
                                           {milvus::index::JSONType::ARRAY})) {
@@ -2102,6 +2165,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     const auto& elements = expr_->vals_;
+    if (!json_number_membership_matcher_) {
+        json_number_membership_matcher_ =
+            std::make_shared<JsonNumberMembershipMatcher>(elements);
+    }
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
@@ -2114,7 +2181,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::vector<proto::plan::GenericValue>& elements) {
+            const std::vector<proto::plan::GenericValue>& elements,
+            const std::shared_ptr<JsonNumberMembershipMatcher>&
+                number_membership_matcher) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -2123,75 +2192,15 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
         }
         auto executor = [&](const size_t i) {
             auto& json = data[i];
-            auto doc = json.dom_doc();
+            auto doc = json.doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return std::make_pair(false, false);
             }
-            // Note: array can only be iterated once
             for (auto&& it : array) {
-                for (auto const& element : elements) {
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                auto double_val = it.template get<double>();
-                                if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
-                                    return std::make_pair(true, true);
-                                }
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
+                if (JsonValueMatchesAnyCandidate(
+                        it, elements, *number_membership_matcher)) {
+                    return std::make_pair(true, true);
                 }
             }
             return std::make_pair(true, false);
@@ -2222,20 +2231,24 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    pointer,
-                                                    elements);
+        processed_size =
+            ProcessDataByOffsets<Json>(execute_sub_batch,
+                                       std::nullptr_t{},
+                                       input,
+                                       res,
+                                       valid_res,
+                                       pointer,
+                                       elements,
+                                       json_number_membership_matcher_);
     } else {
-        processed_size = ProcessDataChunks<Json>(execute_sub_batch,
-                                                 std::nullptr_t{},
-                                                 res,
-                                                 valid_res,
-                                                 pointer,
-                                                 elements);
+        processed_size =
+            ProcessDataChunks<Json>(execute_sub_batch,
+                                    std::nullptr_t{},
+                                    res,
+                                    valid_res,
+                                    pointer,
+                                    elements,
+                                    json_number_membership_matcher_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -2259,11 +2272,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-
     if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
         // Cache hit — skip Stats computation.
     } else if (cached_index_chunk_id_ != 0 &&
                segment_->type() == SegmentType::Sealed) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(elements);
+        }
         auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
@@ -2289,7 +2305,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
                 ShreddingArrayBsonContainsAnyWithDiffTypeExecutor executor(
-                    elements);
+                    elements, json_number_membership_matcher_);
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
                     target_field,
@@ -2303,10 +2319,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             }
         }
 
-        auto shared_executor = [&elements, &res_view, &valid_res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_offset,
-                                   uint32_t value_offset) {
+        auto shared_executor = [&elements,
+                                number_membership_matcher =
+                                    json_number_membership_matcher_,
+                                &res_view,
+                                &valid_res_view](milvus::BsonView bson,
+                                                 uint32_t row_offset,
+                                                 uint32_t value_offset) {
             auto array = bson.ParseAsArrayAtOffset(value_offset);
             if (!array.has_value()) {
                 return;
@@ -2314,70 +2333,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             valid_res_view[row_offset] = true;
 
             for (const auto& sub_value : array.value()) {
-                for (auto const& element : elements) {
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<bool>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                res_view[row_offset] = true;
-                                return;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                res_view[row_offset] = true;
-                                return;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                res_view[row_offset] = true;
-                                return;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                std::string>(sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                res_view[row_offset] = true;
-                                return;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                milvus::bson::array_view>(
-                                sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val.value(),
-                                                    element.array_val())) {
-                                res_view[row_offset] = true;
-                                return;
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
+                if (BsonValueMatchesAnyCandidate(sub_value.get_value(),
+                                                 elements,
+                                                 *number_membership_matcher)) {
+                    res_view[row_offset] = true;
+                    return;
                 }
             }
         };
@@ -2452,8 +2412,20 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     }
 
     std::unordered_set<GetType> elements;
+    bool has_overflow = false;
     for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueWithCastNumber<GetType>(element));
+        if constexpr (std::is_integral_v<GetType> &&
+                      !std::is_same_v<GetType, bool>) {
+            bool overflowed = false;
+            GetType v =
+                GetValueFromProtoWithOverflow<GetType>(element, overflowed);
+            if (!overflowed) {
+                elements.insert(v);
+            }
+            has_overflow |= overflowed;
+        } else {
+            elements.insert(GetValueWithCastNumber<GetType>(element));
+        }
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
 
@@ -2461,7 +2433,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
 
     auto execute_sub_batch =
-        [this, &array_offsets](
+        [this, &array_offsets, has_overflow](
             Index* index_ptr,
             const boost::container::vector<GetType>& vals) -> TargetBitmap {
         // Query helper: for nested index, convert element-level to row-level
@@ -2489,9 +2461,17 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         switch (expr_->op_) {
             case proto::plan::JSONContainsExpr_JSONOp_Contains:
             case proto::plan::JSONContainsExpr_JSONOp_ContainsAny:
+                if (vals.empty()) {
+                    return TargetBitmap(active_count_, false);
+                }
                 return query_in(vals.size(), vals.data());
 
             case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+                // Every requested value is required. An out-of-range value
+                // cannot occur in this array's element type.
+                if (has_overflow) {
+                    return TargetBitmap(active_count_, false);
+                }
                 TargetBitmap result(active_count_);
                 result.set();
                 for (size_t i = 0; i < vals.size(); i++) {

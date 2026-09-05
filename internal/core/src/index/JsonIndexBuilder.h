@@ -44,17 +44,26 @@ using JsonErrorRecorder = std::function<void(const Json& json,
 using JsonNullAdder = std::function<void(int64_t offset)>;
 using JsonNonExistAdder = std::function<void(int64_t offset)>;
 
+enum class JsonPathPresenceSemantics {
+    // Scalar index engine < v6: null, empty containers, and containers whose
+    // descendants are all absent are encoded as not existing.
+    LEGACY_RECURSIVE_NON_EMPTY,
+    // Scalar index engine v6+: presence is a property of the target itself;
+    // every non-null target exists regardless of its descendants.
+    NON_NULL_TARGET,
+};
+
 // Result of converting JSON field data to typed FieldData.
 struct JsonToTypedResult {
     // Typed field data with nullable semantics. Rows where the path doesn't
     // exist or the cast fails are marked as invalid.
     FieldDataPtr field_data;
 
-    // Offsets of rows where the JSON path does not exist (row is null, path
-    // missing, or path value is null). This is a SUBSET of the invalid rows
-    // in field_data — rows that exist but fail to cast are NOT included.
-    // Used for EXISTS queries: Exists() should return true for rows where
-    // the path exists, even if the value can't be cast to the index type.
+    // Offsets of rows where Milvus JSON EXISTS is false under the selected
+    // build semantics. Missing/null and unrepresentable-number targets are
+    // always absent; empty containers differ between legacy and v6 semantics.
+    // This is a SUBSET of invalid typed rows: ordinary type/cast mismatch
+    // remains a physically present JSON value and is not included.
     std::vector<size_t> non_exist_offsets;
 };
 
@@ -67,7 +76,9 @@ ConvertJsonToTypedFieldData(
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
     const JsonCastType& cast_type,
-    JsonCastFunction cast_function);
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics =
+        JsonPathPresenceSemantics::NON_NULL_TARGET);
 
 extern template JsonToTypedResult
 ConvertJsonToTypedFieldData<bool>(
@@ -75,7 +86,35 @@ ConvertJsonToTypedFieldData<bool>(
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
     const JsonCastType& cast_type,
-    JsonCastFunction cast_function);
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<int8_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<int16_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<int32_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template JsonToTypedResult
 ConvertJsonToTypedFieldData<int64_t>(
@@ -83,7 +122,8 @@ ConvertJsonToTypedFieldData<int64_t>(
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
     const JsonCastType& cast_type,
-    JsonCastFunction cast_function);
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template JsonToTypedResult
 ConvertJsonToTypedFieldData<double>(
@@ -91,7 +131,8 @@ ConvertJsonToTypedFieldData<double>(
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
     const JsonCastType& cast_type,
-    JsonCastFunction cast_function);
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template JsonToTypedResult
 ConvertJsonToTypedFieldData<std::string>(
@@ -99,7 +140,8 @@ ConvertJsonToTypedFieldData<std::string>(
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
     const JsonCastType& cast_type,
-    JsonCastFunction cast_function);
+    JsonCastFunction cast_function,
+    JsonPathPresenceSemantics presence_semantics);
 
 // A helper function for processing json data for building inverted index
 template <typename T>
@@ -113,7 +155,9 @@ ProcessJsonFieldData(
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics =
+        JsonPathPresenceSemantics::NON_NULL_TARGET);
 
 extern template void
 ProcessJsonFieldData<bool>(
@@ -125,7 +169,47 @@ ProcessJsonFieldData<bool>(
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template void
+ProcessJsonFieldData<int8_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonDataAdder<int8_t> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template void
+ProcessJsonFieldData<int16_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonDataAdder<int16_t> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
+
+extern template void
+ProcessJsonFieldData<int32_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function,
+    JsonDataAdder<int32_t> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template void
 ProcessJsonFieldData<int64_t>(
@@ -137,7 +221,8 @@ ProcessJsonFieldData<int64_t>(
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template void
 ProcessJsonFieldData<double>(
@@ -149,7 +234,8 @@ ProcessJsonFieldData<double>(
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
 
 extern template void
 ProcessJsonFieldData<std::string>(
@@ -161,6 +247,7 @@ ProcessJsonFieldData<std::string>(
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonPathPresenceSemantics presence_semantics);
 
 }  // namespace milvus::index

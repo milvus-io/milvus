@@ -18,3 +18,20 @@ add_executable(fastmem_benchmark FastMemBenchmark.cpp)
 target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)
 install(TARGETS fastmem_benchmark DESTINATION benchmark)
+
+add_executable(
+    json_number_candidate_matcher_benchmark
+    JsonNumberCandidateMatcherBenchmark.cpp
+)
+target_include_directories(
+    json_number_candidate_matcher_benchmark
+    PRIVATE ${CMAKE_HOME_DIRECTORY}/src
+)
+target_link_libraries(
+    json_number_candidate_matcher_benchmark
+    PRIVATE
+        benchmark::benchmark
+        milvus_core
+        milvus_conan_deps
+)
+install(TARGETS json_number_candidate_matcher_benchmark DESTINATION benchmark)

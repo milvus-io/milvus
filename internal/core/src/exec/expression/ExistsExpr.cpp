@@ -248,6 +248,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
+                        // A valid typed value is present. ARRAY columns keep
+                        // empty arrays and [null] as valid BSON operands, so no
+                        // recursive content inspection is needed here.
                         index->ExecutorForGettingValid(
                             op_ctx_, field, temp_valid_view);
                         res_view |= temp_valid_view;
@@ -265,7 +268,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         bson_index_,
                         pointer,
                         [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                            res_view[row_id] |=
+                                bson.IsBsonValuePresentForExists(offset);
                         });
                 }
 

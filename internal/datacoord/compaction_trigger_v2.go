@@ -64,6 +64,8 @@ const (
 	BumpSchemaVersionTicker
 	StorageVersionTicker
 	TargetTicker
+	JSONStatsMigrationTicker
+	JSONPathIndexMigrationTicker
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
@@ -185,6 +187,8 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
+	m.policies[JSONStatsMigrationTicker] = newJSONStatsMigrationPolicy(meta, m.allocator, m.handler, versionManager)
+	m.policies[JSONPathIndexMigrationTicker] = newJSONPathIndexMigrationPolicy(meta, m.allocator, m.handler, versionManager)
 	if m.targetReconciler != nil {
 		m.policies[TargetTicker] = m.targetReconciler
 	}
@@ -234,6 +238,10 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer singleTicker.Stop()
 	storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer storageVersionTicker.Stop()
+	jsonStatsMigrationTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer jsonStatsMigrationTicker.Stop()
+	jsonPathIndexMigrationTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer jsonPathIndexMigrationTicker.Stop()
 	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer bumpSchemaVersionTicker.Stop()
 	targetTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
@@ -252,6 +260,10 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTicker.C:
 			m.handleTicker(ctx, StorageVersionTicker)
+		case <-jsonStatsMigrationTicker.C:
+			m.handleTicker(ctx, JSONStatsMigrationTicker)
+		case <-jsonPathIndexMigrationTicker.C:
+			m.handleTicker(ctx, JSONPathIndexMigrationTicker)
 		case <-bumpSchemaVersionTicker.C:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
 		case <-targetTicker.C:

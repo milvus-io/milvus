@@ -14,15 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for JSON numeric single-parse via at_numeric().
+// Tests for JSON numeric parsing, exact comparison, and candidate matching.
 // Verifies that:
 // 1. int64 JSON values are compared with full precision (no double round-trip).
 // 2. uint64 and double JSON values fall back to double comparison, consistent
 //    with the Tantivy index and JSON-stats paths.
 // 3. The old static_cast<int64_t> truncation bug is eliminated.
+// 4. Linear/hash strategies agree for membership and ContainsAll positions.
 
 #include <gtest/gtest.h>
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -31,6 +31,7 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "exec/expression/UnaryExpr.h"
 #include "simdjson/padded_string.h"
 
@@ -85,23 +86,182 @@ TEST(JsonNumericTest, AtNumericDoubleDetection) {
     EXPECT_DOUBLE_EQ(n.get_double(), 3.14);
 }
 
+TEST(JsonNumericTest,
+     MembershipAndPositionMatchersPreserveExactNumericSemantics) {
+    std::vector<proto::plan::GenericValue> candidates(5);
+    candidates[0].set_int64_val(2);
+    candidates[1].set_float_val(2.0);
+    candidates[2].set_float_val(2.5);
+    candidates[3].set_int64_val(9007199254740993LL);
+    candidates[4].set_float_val(9007199254740992.0);
+
+    JsonNumberMembershipMatcher membership_matcher(candidates);
+    JsonNumberCandidatePositionIndex position_index(candidates);
+    auto matching_positions = [&](auto probe) {
+        std::vector<size_t> positions;
+        position_index.VisitMatchingPositions(
+            probe, [&](size_t candidate_position) {
+                positions.push_back(candidate_position);
+                return false;
+            });
+        return positions;
+    };
+
+    EXPECT_TRUE(membership_matcher.MatchesAny(int64_t{2}));
+    EXPECT_TRUE(membership_matcher.MatchesAny(2.0));
+    EXPECT_TRUE(membership_matcher.MatchesAny(2.5));
+    EXPECT_TRUE(membership_matcher.MatchesAny(int64_t{9007199254740993LL}));
+    EXPECT_TRUE(membership_matcher.MatchesAny(9007199254740992.0));
+    EXPECT_FALSE(membership_matcher.MatchesAny(int64_t{3}));
+    EXPECT_EQ(matching_positions(int64_t{2}), (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(matching_positions(2.0), (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(matching_positions(2.5), (std::vector<size_t>{2}));
+    EXPECT_EQ(matching_positions(int64_t{9007199254740993LL}),
+              (std::vector<size_t>{3}));
+    EXPECT_EQ(matching_positions(9007199254740992.0), (std::vector<size_t>{4}));
+
+    proto::plan::GenericValue nan;
+    nan.set_float_val(std::numeric_limits<double>::quiet_NaN());
+    JsonNumberMembershipMatcher nan_only({nan});
+    EXPECT_TRUE(nan_only.HasNumericCandidates());
+    EXPECT_FALSE(nan_only.MatchesAny(std::numeric_limits<double>::quiet_NaN()));
+}
+
+TEST(JsonNumericTest, AutoStrategyUsesMatchableNumericCandidateCount) {
+    auto make_int_candidates = [](size_t count) {
+        std::vector<proto::plan::GenericValue> candidates(count);
+        for (size_t i = 0; i < count; ++i) {
+            candidates[i].set_int64_val(static_cast<int64_t>(i));
+        }
+        return candidates;
+    };
+
+    auto at_threshold_candidates =
+        make_int_candidates(kMaxLinearScanJsonNumberCandidates);
+    JsonNumberMembershipMatcher membership_at_threshold(
+        at_threshold_candidates);
+    JsonNumberCandidatePositionIndex positions_at_threshold(
+        at_threshold_candidates);
+    EXPECT_EQ(membership_at_threshold.lookup_strategy(),
+              JsonNumberLookupStrategy::LINEAR_SCAN);
+    EXPECT_EQ(positions_at_threshold.lookup_strategy(),
+              JsonNumberLookupStrategy::LINEAR_SCAN);
+
+    auto above_threshold_candidates =
+        make_int_candidates(kMaxLinearScanJsonNumberCandidates + 1);
+    JsonNumberMembershipMatcher membership_above_threshold(
+        above_threshold_candidates);
+    JsonNumberCandidatePositionIndex positions_above_threshold(
+        above_threshold_candidates);
+    EXPECT_EQ(membership_above_threshold.lookup_strategy(),
+              JsonNumberLookupStrategy::HASH_LOOKUP);
+    EXPECT_EQ(positions_above_threshold.lookup_strategy(),
+              JsonNumberLookupStrategy::HASH_LOOKUP);
+
+    auto candidates = make_int_candidates(kMaxLinearScanJsonNumberCandidates);
+    proto::plan::GenericValue nan;
+    nan.set_float_val(std::numeric_limits<double>::quiet_NaN());
+    candidates.push_back(nan);
+    proto::plan::GenericValue text;
+    text.set_string_val("ignored");
+    candidates.push_back(text);
+    JsonNumberMembershipMatcher ignored_non_searchable(std::move(candidates));
+    EXPECT_EQ(ignored_non_searchable.lookup_strategy(),
+              JsonNumberLookupStrategy::LINEAR_SCAN);
+}
+
+TEST(JsonNumericTest, LinearScanAndHashLookupAgreeOnMatchesAndPositions) {
+    std::vector<proto::plan::GenericValue> candidates(12);
+    candidates[0].set_float_val(2.0);
+    candidates[1].set_int64_val(2);
+    candidates[2].set_float_val(2.5);
+    candidates[3].set_int64_val(9007199254740993LL);
+    candidates[4].set_float_val(9007199254740992.0);
+    candidates[5].set_int64_val(-1);
+    candidates[6].set_float_val(-1.0);
+    candidates[7].set_float_val(-0.0);
+    candidates[8].set_int64_val(0);
+    candidates[9].set_float_val(std::numeric_limits<double>::infinity());
+    candidates[10].set_int64_val(42);
+    candidates[11].set_float_val(42.5);
+
+    JsonNumberMembershipMatcher membership_linear_scan(
+        candidates, JsonNumberLookupStrategy::LINEAR_SCAN);
+    JsonNumberMembershipMatcher membership_hash_lookup(
+        candidates, JsonNumberLookupStrategy::HASH_LOOKUP);
+    JsonNumberMembershipMatcher membership_auto_selected(candidates);
+    JsonNumberCandidatePositionIndex positions_linear_scan(
+        candidates, JsonNumberLookupStrategy::LINEAR_SCAN);
+    JsonNumberCandidatePositionIndex positions_hash_lookup(
+        candidates, JsonNumberLookupStrategy::HASH_LOOKUP);
+    JsonNumberCandidatePositionIndex positions_auto_selected(candidates);
+    ASSERT_EQ(membership_auto_selected.lookup_strategy(),
+              JsonNumberLookupStrategy::HASH_LOOKUP);
+    ASSERT_EQ(positions_auto_selected.lookup_strategy(),
+              JsonNumberLookupStrategy::HASH_LOOKUP);
+
+    auto matching_positions = [](const JsonNumberCandidatePositionIndex& index,
+                                 auto probe) {
+        std::vector<size_t> positions;
+        index.VisitMatchingPositions(probe, [&](size_t candidate_position) {
+            positions.push_back(candidate_position);
+            return false;
+        });
+        return positions;
+    };
+    auto expect_same = [&](auto probe) {
+        EXPECT_EQ(membership_linear_scan.MatchesAny(probe),
+                  membership_hash_lookup.MatchesAny(probe));
+        EXPECT_EQ(membership_linear_scan.MatchesAny(probe),
+                  membership_auto_selected.MatchesAny(probe));
+        EXPECT_EQ(matching_positions(positions_linear_scan, probe),
+                  matching_positions(positions_hash_lookup, probe));
+        EXPECT_EQ(matching_positions(positions_linear_scan, probe),
+                  matching_positions(positions_auto_selected, probe));
+    };
+
+    expect_same(int64_t{2});
+    expect_same(2.0);
+    expect_same(2.5);
+    expect_same(int64_t{9007199254740993LL});
+    expect_same(9007199254740992.0);
+    expect_same(int64_t{-1});
+    expect_same(-0.0);
+    expect_same(0.0);
+    expect_same(std::numeric_limits<double>::infinity());
+    expect_same(std::numeric_limits<double>::quiet_NaN());
+    expect_same(int64_t{999});
+
+    EXPECT_EQ(matching_positions(positions_linear_scan, int64_t{2}),
+              (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(matching_positions(positions_linear_scan, int64_t{-1}),
+              (std::vector<size_t>{5, 6}));
+    EXPECT_EQ(matching_positions(positions_linear_scan, int64_t{0}),
+              (std::vector<size_t>{7, 8}));
+    EXPECT_EQ(
+        matching_positions(positions_linear_scan, int64_t{9007199254740993LL}),
+        (std::vector<size_t>{3}));
+    EXPECT_EQ(matching_positions(positions_linear_scan, 9007199254740992.0),
+              (std::vector<size_t>{4}));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// Document why static_cast<int64_t> is wrong (the bug we're fixing)
+// Verify uint64 values outside the int64 domain are compared without a
+// narrowing cast.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-TEST(JsonNumericTest, StaticCastTruncationIsBuggy) {
-    uint64_t uint64_val = 9223372036854775808ULL;  // INT64_MAX + 1
-    int64_t truncated = static_cast<int64_t>(uint64_val);
+TEST(JsonNumericTest, Uint64OutsideInt64DomainDoesNotMatchInt64Min) {
+    auto json = makeJson(R"({"k": 9223372036854775808})");
+    auto parsed = json.at_numeric("/k");
+    ASSERT_FALSE(parsed.error());
+    ASSERT_TRUE(parsed.value().is_uint64());
 
-    // Wraps to INT64_MIN
-    EXPECT_EQ(truncated, std::numeric_limits<int64_t>::min());
-
-    // Gives WRONG comparison results:
-    int64_t val = 100;
-    EXPECT_FALSE(truncated >
-                 val);  // Bug: INT64_MIN > 100 → false (should be true)
-    EXPECT_TRUE(truncated <
-                val);  // Bug: INT64_MIN < 100 → true (should be false)
+    proto::plan::GenericValue int64_min;
+    int64_min.set_int64_val(std::numeric_limits<int64_t>::min());
+    auto comparison = CompareJsonNumberToBoundWithUint64DoubleFallback(
+        parsed.value(), int64_min);
+    ASSERT_TRUE(comparison.has_value());
+    EXPECT_GT(*comparison, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -369,28 +529,21 @@ TEST(JsonNumericTest, DoubleFallbackPrecisionBoundary) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TermExpr (IN) logic: verify floor-check works correctly with at_numeric().
-// The TermExpr path only matches if the JSON value is integer-valued.
+// TermExpr (IN) numeric contract: compare the parsed number directly to the
+// query literal, without converting the data to int64.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-TEST(JsonNumericTest, TermFloorCheckWithAtNumeric) {
-    // Simulates the TermExpr executor logic:
-    // 1. Parse with at_numeric()
-    // 2. For int64: direct term lookup
-    // 3. For uint64/double: floor check + cast to int64 for lookup
-
+TEST(JsonNumericTest, TermComparisonWithAtNumeric) {
     auto check_in_terms =
         [](const Json& j, std::string_view pointer, int64_t term) -> bool {
         auto x_num = j.at_numeric(pointer);
         if (x_num.error())
             return false;
-        auto n = x_num.value();
-        if (n.is_int64()) {
-            return n.get_int64() == term;
-        }
-        auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                  : n.get_double();
-        return std::floor(dval) == dval && static_cast<int64_t>(dval) == term;
+        proto::plan::GenericValue bound;
+        bound.set_int64_val(term);
+        auto comparison = CompareJsonNumberToBoundWithUint64DoubleFallback(
+            x_num.value(), bound);
+        return comparison.has_value() && *comparison == 0;
     };
 
     // int64 value: exact match
@@ -403,10 +556,17 @@ TEST(JsonNumericTest, TermFloorCheckWithAtNumeric) {
     // double non-integer: 1.5 does NOT match term 1 (floor check fails)
     EXPECT_FALSE(check_in_terms(makeJson(R"({"k": 1.5})"), "/k", 1));
 
-    // uint64 > INT64_MAX: floor check passes but cast to int64 overflows →
-    // won't match any int64 term.  (Same behavior as old double fallback.)
+    // uint64 > INT64_MAX cannot alias an int64 term, including INT64_MIN.
     EXPECT_FALSE(
         check_in_terms(makeJson(R"({"k": 9223372036854775808})"), "/k", 100));
+    EXPECT_FALSE(check_in_terms(makeJson(R"({"k": 9223372036854775808})"),
+                                "/k",
+                                std::numeric_limits<int64_t>::min()));
+
+    EXPECT_TRUE(check_in_terms(
+        makeJson(R"({"k": 9007199254740993})"), "/k", 9007199254740993LL));
+    EXPECT_FALSE(check_in_terms(
+        makeJson(R"({"k": 9007199254740993})"), "/k", 9007199254740992LL));
 
     // Missing field: error → false
     EXPECT_FALSE(check_in_terms(makeJson(R"({"x": 1})"), "/k", 1));

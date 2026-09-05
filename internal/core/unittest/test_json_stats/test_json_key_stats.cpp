@@ -18,10 +18,12 @@
 #include <stddef.h>
 #include <cstdint>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <random>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
@@ -193,7 +195,8 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
                                                   collection_id,
                                                   partition_id,
                                                   segment_id,
-                                                  field_id);
+                                                  field_id,
+                                                  JSON_STATS_DATA_FORMAT_V3);
         index_ = std::make_shared<JsonKeyStats>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
@@ -368,6 +371,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         field_id_ = 101;
         index_build_id_ = GenerateRandomInt64(1, 100000);
         index_version_ = 10000;
+        json_stats_data_format_ = JSON_STATS_DATA_FORMAT_V3;
         root_path_ = TestLocalPath;
 
         storage::StorageConfig storage_config;
@@ -405,7 +409,9 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     }
 
     void
-    BuildAndUpload(int64_t lack_binlog_rows = 0) {
+    BuildAndUpload(int64_t lack_binlog_rows = 0,
+                   int64_t json_stats_max_shredding_columns = 1024,
+                   int64_t json_stats_data_format = JSON_STATS_DATA_FORMAT_V3) {
         auto field_data =
             storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
         field_data->FillFieldData(data_.data(), data_.size());
@@ -428,15 +434,27 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         chunk_manager_->Write(
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
+        json_stats_data_format_ = json_stats_data_format;
+        stats_base_path_ =
+            storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                  index_build_id_,
+                                                  index_version_,
+                                                  collection_id_,
+                                                  partition_id_,
+                                                  segment_id_,
+                                                  field_id_,
+                                                  json_stats_data_format_);
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
+        ctx.set_stats_base_path(stats_base_path_);
 
         Config config;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] =
             static_cast<int64_t>(data_.size()) + lack_binlog_rows;
-
-        build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
+        build_index_ = std::make_shared<JsonKeyStats>(
+            ctx, false, json_stats_max_shredding_columns);
+        build_index_->SetDataFormatVersion(json_stats_data_format_);
         build_index_->Build(config);
 
         auto create_index_result = build_index_->Upload(config);
@@ -451,21 +469,16 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     Load() {
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
+        ctx.set_stats_base_path(stats_base_path_);
         Config config;
         config["index_files"] = index_files_;
         config[milvus::index::ENABLE_MMAP] = true;
         config[milvus::index::MMAP_FILE_PATH] = TestLocalPath + "mmap-file";
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        config[STATS_BASE_PATH_KEY] =
-            storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
-                                                  index_build_id_,
-                                                  index_version_,
-                                                  collection_id_,
-                                                  partition_id_,
-                                                  segment_id_,
-                                                  field_id_);
+        config[STATS_BASE_PATH_KEY] = stats_base_path_;
         load_index_ = std::make_shared<JsonKeyStats>(ctx, true);
+        load_index_->SetDataFormatVersion(json_stats_data_format_);
         load_index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
@@ -510,7 +523,9 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     int64_t field_id_;
     int64_t index_build_id_;
     int64_t index_version_;
+    int64_t json_stats_data_format_;
     std::string root_path_;
+    std::string stats_base_path_;
     storage::FieldDataMeta field_meta_;
     storage::IndexMeta index_meta_;
     std::vector<milvus::Json> data_;
@@ -541,6 +556,281 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestSimpleJson) {
     VerifyJsonType("/double_DOUBLE", JSONType::DOUBLE);
     VerifyJsonType("/string_STRING", JSONType::STRING);
     VerifyJsonType("/bool_BOOL", JSONType::BOOL);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V3AcceptsRepresentableSubnormal) {
+    InitContext();
+    PrepareData({R"({"value":-1.48e-309})", R"({"other":1})"});
+    ASSERT_NO_THROW(BuildAndUpload());
+    ASSERT_NO_THROW(Load());
+
+    VerifyBasicOperations();
+    auto fields = load_index_->GetShreddingFields(
+        "/value", std::vector<JSONType>{JSONType::DOUBLE});
+    ASSERT_EQ(fields.size(), 1);
+
+    TargetBitmap exists(data_.size(), true);
+    ASSERT_EQ(load_index_->ExecutorForGettingValid(
+                  nullptr, *fields.begin(), TargetBitmapView(exists)),
+              data_.size());
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);
+
+    TargetBitmap matched(data_.size());
+    TargetBitmap query_valid(data_.size(), true);
+    auto match_subnormal = [](const double* values,
+                              ValidityView valid_values,
+                              int size,
+                              TargetBitmapView result,
+                              TargetBitmapView valid_result) {
+        for (int i = 0; i < size; ++i) {
+            valid_result[i] = valid_values[i];
+            result[i] = valid_values[i] && values[i] == -1.48e-309;
+        }
+    };
+    ASSERT_EQ(load_index_->ExecutorForShreddingData<double>(
+                  nullptr,
+                  *fields.begin(),
+                  match_subnormal,
+                  nullptr,
+                  TargetBitmapView(matched),
+                  TargetBitmapView(query_valid)),
+              data_.size());
+    EXPECT_TRUE(matched[0]);
+    EXPECT_FALSE(matched[1]);
+    EXPECT_TRUE(query_valid[0]);
+    EXPECT_FALSE(query_valid[1]);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V3RejectsUnrepresentableScalarNumber) {
+    InitContext();
+    PrepareData({R"({"value":1e400})"});
+    EXPECT_ANY_THROW(BuildAndUpload(0, 1024, JSON_STATS_DATA_FORMAT_V3));
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V3RejectsUnrepresentableArrayElement) {
+    InitContext();
+    PrepareData({R"({"value":[1e400,7]})"});
+    EXPECT_ANY_THROW(BuildAndUpload(0, 1024, JSON_STATS_DATA_FORMAT_V3));
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V4PreservesTypedEmptyString) {
+    InitContext();
+    PrepareData({R"({"value":""})",
+                 R"({"value":"non-empty"})",
+                 R"({"value":null})",
+                 R"({})"});
+    ASSERT_NO_THROW(BuildAndUpload(0, 1024, JSON_STATS_DATA_FORMAT_V4));
+    ASSERT_NO_THROW(Load());
+
+    VerifyBasicOperations();
+    auto fields = load_index_->GetShreddingFields(
+        "/value", std::vector<JSONType>{JSONType::STRING});
+    ASSERT_EQ(fields.size(), 1);
+
+    TargetBitmap exists(data_.size(), true);
+    ASSERT_EQ(load_index_->ExecutorForGettingValid(
+                  nullptr, *fields.begin(), TargetBitmapView(exists)),
+              data_.size());
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    EXPECT_FALSE(exists[2]);
+    EXPECT_FALSE(exists[3]);
+
+    TargetBitmap matched(data_.size());
+    TargetBitmap query_valid(data_.size(), true);
+    auto match_empty = [](const std::string_view* values,
+                          ValidityView valid_values,
+                          int size,
+                          TargetBitmapView result,
+                          TargetBitmapView valid_result) {
+        for (int i = 0; i < size; ++i) {
+            valid_result[i] = valid_values[i];
+            result[i] = valid_values[i] && values[i].empty();
+        }
+    };
+    ASSERT_EQ(load_index_->ExecutorForShreddingData<std::string_view>(
+                  nullptr,
+                  *fields.begin(),
+                  match_empty,
+                  nullptr,
+                  TargetBitmapView(matched),
+                  TargetBitmapView(query_valid)),
+              data_.size());
+    EXPECT_TRUE(matched[0]);
+    EXPECT_FALSE(matched[1]);
+    EXPECT_FALSE(matched[2]);
+    EXPECT_FALSE(matched[3]);
+    EXPECT_TRUE(query_valid[0]);
+    EXPECT_TRUE(query_valid[1]);
+    EXPECT_FALSE(query_valid[2]);
+    EXPECT_FALSE(query_valid[3]);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V3KeepsTypedEmptyStringSentinel) {
+    InitContext();
+    PrepareData({R"({"value":""})", R"({"value":"non-empty"})"});
+    ASSERT_NO_THROW(BuildAndUpload());
+    ASSERT_NO_THROW(Load());
+
+    auto fields = load_index_->GetShreddingFields(
+        "/value", std::vector<JSONType>{JSONType::STRING});
+    ASSERT_EQ(fields.size(), 1);
+    TargetBitmap valid(data_.size(), true);
+    ASSERT_EQ(load_index_->ExecutorForGettingValid(
+                  nullptr, *fields.begin(), TargetBitmapView(valid)),
+              data_.size());
+    EXPECT_FALSE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V4BuildsAndLoadsRootScalarDocuments) {
+    InitContext();
+    PrepareData({
+        "1",
+        "1.5",
+        "-1.48e-309",
+        "1e400",
+        R"("text")",
+        "true",
+        "null",
+        "[1,2]",
+        R"({"":9})",
+    });
+
+    ASSERT_NO_THROW(BuildAndUpload(0, 1024, JSON_STATS_DATA_FORMAT_V4));
+    ASSERT_NO_THROW(Load());
+    VerifyBasicOperations();
+
+    auto fields = load_index_->GetShreddingFields(
+        "", std::vector<JSONType>{JSONType::DOUBLE});
+    ASSERT_EQ(fields.size(), 1);
+
+    TargetBitmap valid(data_.size(), true);
+    ASSERT_EQ(load_index_->ExecutorForGettingValid(
+                  nullptr, *fields.begin(), TargetBitmapView(valid)),
+              data_.size());
+    EXPECT_FALSE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+    EXPECT_TRUE(valid[2]);
+    EXPECT_FALSE(valid[3]);
+    EXPECT_EQ(valid.count(), 2);
+
+    TargetBitmap shared_root(data_.size());
+    PinWrapper<BsonInvertedIndex*> root_bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        root_bson_index,
+        "",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            shared_root[row_id] = true;
+            if (row_id == 0) {
+                EXPECT_EQ(bson.ParseAsValueAtOffset<int64_t>(offset), 1);
+            } else if (row_id == 4) {
+                EXPECT_EQ(bson.ParseAsValueAtOffset<std::string>(offset),
+                          "text");
+            } else if (row_id == 5) {
+                EXPECT_EQ(bson.ParseAsValueAtOffset<bool>(offset), true);
+            } else if (row_id == 7) {
+                auto array = bson.ParseAsArrayAtOffset(offset);
+                ASSERT_TRUE(array.has_value());
+                EXPECT_EQ(std::distance(array->begin(), array->end()), 2);
+            } else {
+                ADD_FAILURE() << "unexpected shared root row " << row_id;
+            }
+        });
+    EXPECT_EQ(shared_root.count(), 4);
+
+    // The BSON empty-key wrapper for a root value is remapped only for rows
+    // that actually contain a root scalar/array. A real JSON member named ""
+    // remains addressable by its RFC 6901 pointer "/".
+    TargetBitmap empty_member(data_.size());
+    PinWrapper<BsonInvertedIndex*> member_bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        member_bson_index,
+        "/",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            empty_member[row_id] = true;
+            EXPECT_EQ(row_id, 8);
+            EXPECT_EQ(bson.ParseAsValueAtOffset<int64_t>(offset), 9);
+        });
+    EXPECT_EQ(empty_member.count(), 1);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V3SharedArrayKeepsSubnormalQueryable) {
+    InitContext();
+    PrepareData({R"({"array":[-1.48e-309,7]})", R"({"other":1})"});
+    ASSERT_NO_THROW(BuildAndUpload(0, 0));
+    ASSERT_NO_THROW(Load());
+
+    VerifyBasicOperations();
+    EXPECT_TRUE(load_index_->GetShreddingFields("/array").empty());
+
+    TargetBitmap exists(data_.size());
+    TargetBitmap matched(data_.size());
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        "/array",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            exists[row_id] = true;
+            auto array = bson.ParseAsArrayAtOffset(offset);
+            ASSERT_TRUE(array.has_value());
+            auto element = array->begin();
+            ASSERT_NE(element, array->end());
+            ASSERT_EQ(element->type(), milvus::bson::type::k_double);
+            matched[row_id] = element->get_double().value == -1.48e-309;
+        });
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);
+    EXPECT_TRUE(matched[0]);
+    EXPECT_FALSE(matched[1]);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, V4EncodesInvalidNumbersAsNull) {
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < 10; ++i) {
+        if (i == 0) {
+            json_strings.emplace_back(
+                R"({"typed":1e400,"shared":18446744073709551616})");
+        } else {
+            json_strings.push_back(
+                fmt::format(R"({{"typed":{},"ok":{}}})", i + 0.5, i));
+        }
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    EXPECT_NO_THROW(BuildAndUpload(0, 1, JSON_STATS_DATA_FORMAT_V4));
+    Load();
+
+    auto typed_fields = load_index_->GetShreddingFields("/typed");
+    ASSERT_EQ(typed_fields.size(), 1);
+    TargetBitmap typed_valid(json_strings.size(), true);
+    TargetBitmapView typed_valid_view(typed_valid);
+    for (const auto& field : typed_fields) {
+        load_index_->ExecutorForGettingValid(nullptr, field, typed_valid_view);
+    }
+    EXPECT_FALSE(typed_valid[0]);
+    EXPECT_EQ(typed_valid.count(), json_strings.size() - 1);
+
+    bool saw_shared_value = false;
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        "/shared",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            EXPECT_EQ(row_id, 0);
+            EXPECT_TRUE(bson.IsBsonValueEmpty(offset));
+            EXPECT_FALSE(bson.ParseAsValueAtOffset<double>(offset).has_value());
+            saw_shared_value = true;
+        });
+    // Null values are not inserted into the shared-key inverted index, so the
+    // invalid numeric path is indistinguishable from null/missing to EXISTS.
+    EXPECT_FALSE(saw_shared_value);
 }
 
 TEST_F(JsonKeyStatsUploadLoadTest, TestNestedJson) {
@@ -1198,6 +1488,40 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsSingle) {
 
     EXPECT_EQ(load_index_->Count(), kTotalRows);
     VerifyPathInShredding("/val");
+}
+
+// Missing binlog rows for an added JSON field are filled before stats are
+// built. Their default Json views must retain padded backing after
+// FillFieldData returns; ASAN catches the former stack-use-after-scope here.
+TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsWithJsonDefault) {
+    constexpr int64_t kLackRows = 2;
+    constexpr int64_t kValidRows = 1;
+    constexpr int64_t kTotalRows = kLackRows + kValidRows;
+
+    InitContext();
+    field_meta_.field_schema.mutable_default_value()->set_bytes_data(
+        R"({"defaulted":7})");
+    PrepareData({R"({"actual":1})"});
+    BuildAndUpload(kLackRows, /*json_stats_max_shredding_columns=*/0);
+    Load();
+
+    ASSERT_EQ(load_index_->Count(), kTotalRows);
+    TargetBitmap defaulted_rows(kTotalRows);
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        "/defaulted",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            auto value = bson.ParseAsValueAtOffset<int64_t>(offset);
+            ASSERT_TRUE(value.has_value());
+            EXPECT_EQ(value.value(), 7);
+            defaulted_rows[row_id] = true;
+        });
+
+    EXPECT_TRUE(defaulted_rows[0]);
+    EXPECT_TRUE(defaulted_rows[1]);
+    EXPECT_FALSE(defaulted_rows[2]);
 }
 
 // Test lack_binlog_rows with all rows going to shared (low hit ratio)

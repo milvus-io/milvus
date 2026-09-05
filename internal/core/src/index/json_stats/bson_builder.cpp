@@ -19,6 +19,7 @@
 #include "common/FastMem.h"
 #include <string.h>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <map>
 #include <string>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Utils.h"
 #include "common/bson_shim.h"
 #include "glog/logging.h"
@@ -42,96 +44,204 @@ namespace milvus::index {
 
 namespace {
 
-// Append a simdjson DOM element to a libbson document/array target under the
-// given key (for arrays the key is the stringified index).
 void
-AppendJsonElementToBson(simdjson::dom::element elem,
-                        bson_t* out,
-                        const char* key,
-                        int key_len) {
-    using simdjson::dom::element_type;
+AppendNodeToDom(DomNode& root,
+                const std::vector<std::string>& keys,
+                DomNode value_node) {
+    if (keys.empty()) {
+        // BSON documents cannot directly hold a scalar root. Use an empty
+        // field name as the physical wrapper; BuildKeyStatsForRow remaps its
+        // offset from "/" back to the logical root pointer "". A real JSON
+        // object member named "" is still kept as "/" because that row does
+        // not contain a root scalar.
+        root.document_children[""] = std::move(value_node);
+        return;
+    }
 
-    auto type = elem.type();
-    switch (type) {
-        case element_type::STRING: {
-            auto sv = std::string_view(elem.get_string());
+    DomNode* current = &root;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        const std::string& key = keys[i];
+        if (i == keys.size() - 1) {
+            current->document_children[key] = std::move(value_node);
+        } else {
+            auto& child = current->document_children[key];
+            if (child.type != DomNode::Type::DOCUMENT) {
+                child = DomNode(DomNode::Type::DOCUMENT);
+            }
+            current = &child;
+        }
+    }
+}
+
+double
+ParseJsonDouble(const std::string& value) {
+    simdjson::padded_string padded(value.data(), value.size());
+    simdjson::ondemand::parser parser;
+    auto document = parser.iterate(padded);
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(document.error()));
+    auto number = document.get_number();
+    AssertInfo(number.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(number.error()));
+    return number.value().as_double();
+}
+
+void
+AppendJsonValueToBson(simdjson::ondemand::value value,
+                      bson_t* out,
+                      const char* key,
+                      int key_len,
+                      UnrepresentableJsonNumberPolicy number_policy) {
+    auto type = value.type();
+    if (type.error() != simdjson::SUCCESS &&
+        number_policy == UnrepresentableJsonNumberPolicy::NORMALIZE_TO_NULL &&
+        IsUnrepresentableJsonNumberError(type.error())) {
+        bson_append_null(out, key, key_len);
+        return;
+    }
+    AssertInfo(type.error() == simdjson::SUCCESS,
+               "failed to read json array element type: {}",
+               simdjson::error_message(type.error()));
+
+    switch (type.value()) {
+        case simdjson::ondemand::json_type::string: {
+            auto string = value.get_string();
+            AssertInfo(string.error() == simdjson::SUCCESS,
+                       "failed to read json string: {}",
+                       simdjson::error_message(string.error()));
+            auto sv = string.value();
             bson_append_utf8(
                 out, key, key_len, sv.data(), static_cast<int>(sv.size()));
             break;
         }
-        case element_type::INT64:
-            bson_append_int64(out, key, key_len, int64_t(elem.get_int64()));
+        case simdjson::ondemand::json_type::number: {
+            auto number_result = value.get_number();
+            if (number_result.error() != simdjson::SUCCESS) {
+                AssertInfo(
+                    number_policy ==
+                        UnrepresentableJsonNumberPolicy::NORMALIZE_TO_NULL,
+                    "V3 JSON stats cannot encode invalid array number: {}",
+                    simdjson::error_message(number_result.error()));
+                // Keep the array shape and valid siblings, but normalize the
+                // unrepresentable element to JSON null in V4.
+                bson_append_null(out, key, key_len);
+                break;
+            }
+            const auto& number = number_result.value();
+            if (number.is_int64()) {
+                bson_append_int64(out, key, key_len, number.get_int64());
+            } else {
+                bson_append_double(out, key, key_len, number.as_double());
+            }
             break;
-        case element_type::UINT64:
-            bson_append_double(out, key, key_len, double(elem.get_uint64()));
+        }
+        case simdjson::ondemand::json_type::boolean: {
+            auto boolean = value.get_bool();
+            AssertInfo(boolean.error() == simdjson::SUCCESS,
+                       "failed to read json boolean: {}",
+                       simdjson::error_message(boolean.error()));
+            bson_append_bool(out, key, key_len, boolean.value());
             break;
-        case element_type::DOUBLE:
-            bson_append_double(out, key, key_len, double(elem.get_double()));
-            break;
-        case element_type::BOOL:
-            bson_append_bool(out, key, key_len, bool(elem.get_bool()));
-            break;
-        case element_type::NULL_VALUE:
+        }
+        case simdjson::ondemand::json_type::null:
             bson_append_null(out, key, key_len);
             break;
-        case element_type::OBJECT: {
+        case simdjson::ondemand::json_type::object: {
+            auto object = value.get_object();
+            AssertInfo(object.error() == simdjson::SUCCESS,
+                       "failed to read nested json object: {}",
+                       simdjson::error_message(object.error()));
             bson_t child;
             bson_append_document_begin(out, key, key_len, &child);
-            for (auto [k, v] : elem.get_object()) {
-                AppendJsonElementToBson(
-                    v, &child, k.data(), static_cast<int>(k.size()));
+            for (auto field : object.value()) {
+                auto field_key = field.unescaped_key();
+                AssertInfo(field_key.error() == simdjson::SUCCESS,
+                           "failed to read nested json object key: {}",
+                           simdjson::error_message(field_key.error()));
+                auto child_value = field.value();
+                AssertInfo(child_value.error() == simdjson::SUCCESS,
+                           "failed to read nested json object value: {}",
+                           simdjson::error_message(child_value.error()));
+                AppendJsonValueToBson(
+                    child_value.value(),
+                    &child,
+                    field_key.value().data(),
+                    static_cast<int>(field_key.value().size()),
+                    number_policy);
             }
             bson_append_document_end(out, &child);
             break;
         }
-        case element_type::ARRAY: {
+        case simdjson::ondemand::json_type::array: {
+            auto array = value.get_array();
+            AssertInfo(array.error() == simdjson::SUCCESS,
+                       "failed to read nested json array: {}",
+                       simdjson::error_message(array.error()));
             bson_t child;
             bson_append_array_begin(out, key, key_len, &child);
             uint32_t i = 0;
             char buf[16];
             const char* idx_key = nullptr;
-            for (simdjson::dom::element v : elem.get_array()) {
+            for (auto child_value : array.value()) {
+                AssertInfo(child_value.error() == simdjson::SUCCESS,
+                           "failed to read nested json array value: {}",
+                           simdjson::error_message(child_value.error()));
                 size_t klen =
                     bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
-                AppendJsonElementToBson(
-                    v, &child, idx_key, static_cast<int>(klen));
+                AppendJsonValueToBson(child_value.value(),
+                                      &child,
+                                      idx_key,
+                                      static_cast<int>(klen),
+                                      number_policy);
                 i++;
             }
             bson_append_array_end(out, &child);
             break;
         }
         default:
-            bson_append_null(out, key, key_len);
-            break;
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "unsupported json array element type");
     }
 }
 
 }  // namespace
 
 std::vector<uint8_t>
-BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
-    simdjson::dom::parser parser;
-    simdjson::dom::element root = parser.parse(json_array);
-    if (root.type() != simdjson::dom::element_type::ARRAY) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "input is not a JSON array: {}",
-                  json_array);
-    }
+BuildBsonArrayBytesFromJsonString(
+    const std::string& json_array,
+    UnrepresentableJsonNumberPolicy number_policy) {
+    simdjson::padded_string padded(json_array.data(), json_array.size());
+    simdjson::ondemand::parser parser;
+    auto document = parser.iterate(padded);
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "failed to parse json array: {}",
+               simdjson::error_message(document.error()));
+    auto root = document.get_array();
+    AssertInfo(root.error() == simdjson::SUCCESS,
+               "input is not a json array: {}",
+               simdjson::error_message(root.error()));
 
-    bson_t arr;
-    bson_init(&arr);
+    BsonDocument arr;
     uint32_t i = 0;
     char buf[16];
     const char* idx_key = nullptr;
-    for (simdjson::dom::element elem : root.get_array()) {
+    for (auto element : root.value()) {
+        AssertInfo(element.error() == simdjson::SUCCESS,
+                   "failed to read json array element: {}",
+                   simdjson::error_message(element.error()));
         size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
-        AppendJsonElementToBson(elem, &arr, idx_key, static_cast<int>(klen));
+        AppendJsonValueToBson(element.value(),
+                              arr.get(),
+                              idx_key,
+                              static_cast<int>(klen),
+                              number_policy);
         i++;
     }
-    std::vector<uint8_t> out(bson_get_data(&arr),
-                             bson_get_data(&arr) + arr.len);
-    bson_destroy(&arr);
-    return out;
+    return std::vector<uint8_t>(arr.data(), arr.data() + arr.length());
 }
 
 void
@@ -143,25 +253,21 @@ BsonBuilder::AppendToDom(DomNode& root,
               Join(keys, "."),
               value,
               ToString(type));
-    DomNode* current = &root;
-    for (size_t i = 0; i < keys.size(); ++i) {
-        const std::string& key = keys[i];
-        if (i == keys.size() - 1) {
-            current->document_children[key] = CreateValueNode(value, type);
-        } else {
-            auto& children = current->document_children;
-            auto it = children.find(key);
-            if (it != children.end()) {
-                if (it->second.type != DomNode::Type::DOCUMENT) {
-                    it->second = DomNode(DomNode::Type::DOCUMENT);
-                }
-                current = &it->second;
-            } else {
-                children[key] = DomNode(DomNode::Type::DOCUMENT);
-                current = &children[key];
-            }
-        }
-    }
+    AppendNodeToDom(root, keys, CreateValueNode(value, type));
+}
+
+void
+BsonBuilder::AppendDoubleToDom(DomNode& root,
+                               const std::vector<std::string>& keys,
+                               double value) {
+    AppendNodeToDom(root, keys, CreateDoubleValueNode(value));
+}
+
+void
+BsonBuilder::AppendArrayToDom(DomNode& root,
+                              const std::vector<std::string>& keys,
+                              std::vector<uint8_t> array_bytes) {
+    AppendNodeToDom(root, keys, CreateArrayValueNode(std::move(array_bytes)));
 }
 
 DomNode
@@ -191,10 +297,7 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(std::move(s));
         }
         case JSONType::DOUBLE: {
-            DomScalar s;
-            s.type = JSONType::DOUBLE;
-            s.d = std::stod(value);
-            return DomNode(std::move(s));
+            return CreateDoubleValueNode(ParseJsonDouble(value));
         }
         case JSONType::STRING: {
             DomScalar s;
@@ -206,7 +309,8 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             try {
                 DomScalar s;
                 s.type = JSONType::ARRAY;
-                s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
+                s.arr_bytes = BuildBsonArrayBytesFromJsonString(
+                    value, UnrepresentableJsonNumberPolicy::NORMALIZE_TO_NULL);
                 return DomNode(std::move(s));
             } catch (const simdjson::simdjson_error& e) {
                 ThrowInfo(
@@ -232,6 +336,22 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
         default:
             ThrowInfo(ErrorCode::Unsupported, "Unsupported JSON type {}", type);
     }
+}
+
+DomNode
+BsonBuilder::CreateDoubleValueNode(double value) {
+    DomScalar scalar;
+    scalar.type = JSONType::DOUBLE;
+    scalar.d = value;
+    return DomNode(std::move(scalar));
+}
+
+DomNode
+BsonBuilder::CreateArrayValueNode(std::vector<uint8_t> array_bytes) {
+    DomScalar scalar;
+    scalar.type = JSONType::ARRAY;
+    scalar.arr_bytes = std::move(array_bytes);
+    return DomNode(std::move(scalar));
 }
 
 void

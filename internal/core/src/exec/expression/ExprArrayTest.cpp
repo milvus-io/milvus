@@ -785,6 +785,99 @@ TEST(Expr, TestArrayNullExpr) {
     }
 }
 
+template <typename T>
+class ArrayContainsOverflowTest : public testing::Test {};
+using ArrayContainsOverflowTypes = testing::Types<int8_t, int16_t, int32_t>;
+TYPED_TEST_SUITE(ArrayContainsOverflowTest, ArrayContainsOverflowTypes);
+
+TYPED_TEST(ArrayContainsOverflowTest, AllRequiresEveryCandidate) {
+    using T = TypeParam;
+    const auto dtype = sizeof(T) == 1   ? DataType::INT8
+                       : sizeof(T) == 2 ? DataType::INT16
+                                        : DataType::INT32;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField("a", DataType::ARRAY, dtype, true);
+    schema->set_primary_field_id(pk);
+    constexpr size_t count = 4;
+    auto raw = DataGen(schema, count, 42, 0, 1, 2);
+    for (auto& field : *raw.raw_->mutable_fields_data()) {
+        if (field.field_id() != fid.get())
+            continue;
+        auto* arrays =
+            field.mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& values : {std::vector<int>{1},
+                                   std::vector<int>{1, 2},
+                                   std::vector<int>{},
+                                   std::vector<int>{1}}) {
+            auto* array = arrays->Add();
+            for (int v : values) array->mutable_int_data()->add_data(v);
+        }
+        field.clear_valid_data();
+        for (bool v : {true, true, true, false}) field.add_valid_data(v);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    FixedVector<Array> arrays;
+    for (const auto& value : raw.get_col<ScalarFieldProto>(fid))
+        arrays.emplace_back(value);
+    auto field = storage::CreateFieldData(DataType::ARRAY, dtype, true);
+    uint8_t validity = 0x07;
+    field->FillFieldData(arrays.data(), &validity, count, 0);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+    ctx.fieldDataMeta.field_schema.set_element_type(
+        static_cast<proto::schema::DataType>(dtype));
+    ctx.fieldDataMeta.field_schema.set_nullable(true);
+    ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+    ctx.fieldDataMeta.field_id = fid.get();
+    auto idx = std::make_unique<index::BitmapIndex<T>>(ctx, false);
+    idx->BuildWithFieldData({field});
+    LoadIndexInfo load;
+    load.field_id = fid.get();
+    load.field_type = DataType::ARRAY;
+    load.element_type = dtype;
+    load.index_params = GenIndexParams(idx.get());
+    load.cache_index = CreateTestCacheIndex(
+        "array_overflow_" + std::to_string(sizeof(T)), std::move(idx));
+    segment->LoadIndex(load);
+    const int64_t overflow = int64_t(std::numeric_limits<T>::max()) + 1;
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (bool partial : {false, true}) {
+            std::vector<proto::plan::GenericValue> values{Int64Value(overflow)};
+            if (partial)
+                values.push_back(Int64Value(1));
+            auto predicate = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(fid, DataType::ARRAY, dtype),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, predicate);
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), count, MAX_TIMESTAMP);
+            const bool match =
+                partial &&
+                op == proto::plan::JSONContainsExpr_JSONOp_ContainsAny;
+            AssertColumnVector(result,
+                               {match, match, false, false},
+                               {true, true, true, false},
+                               "overflow candidates");
+            auto negated = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, predicate);
+            auto not_plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, negated);
+            auto not_result =
+                ExecuteQueryExpr(not_plan, segment.get(), count, MAX_TIMESTAMP);
+            EXPECT_EQ(not_result[0], !match);
+            EXPECT_EQ(not_result[1], !match);
+            EXPECT_TRUE(not_result[2]);
+            EXPECT_FALSE(not_result[3]);
+        }
+    }
+}
+
 TEST(Expr, TestArrayNullExprWithBitmapIndex) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(

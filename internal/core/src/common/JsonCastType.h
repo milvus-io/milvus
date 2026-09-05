@@ -23,7 +23,18 @@ namespace milvus {
 using MilvusDataType = milvus::DataType;
 class JsonCastType {
  public:
-    enum class DataType { UNKNOWN, BOOL, DOUBLE, VARCHAR, ARRAY, JSON };
+    enum class DataType {
+        UNKNOWN,
+        BOOL,
+        DOUBLE,
+        VARCHAR,
+        INT8,
+        INT16,
+        INT32,
+        INT64,
+        ARRAY,
+        JSON
+    };
 
     static const JsonCastType UNKNOWN;
 
@@ -69,6 +80,18 @@ struct fmt::formatter<milvus::JsonCastType::DataType> : formatter<string_view> {
                 break;
             case milvus::JsonCastType::DataType::VARCHAR:
                 name = "VARCHAR";
+                break;
+            case milvus::JsonCastType::DataType::INT8:
+                name = "INT8";
+                break;
+            case milvus::JsonCastType::DataType::INT16:
+                name = "INT16";
+                break;
+            case milvus::JsonCastType::DataType::INT32:
+                name = "INT32";
+                break;
+            case milvus::JsonCastType::DataType::INT64:
+                name = "INT64";
                 break;
             case milvus::JsonCastType::DataType::ARRAY:
                 name = "ARRAY";

@@ -106,6 +106,16 @@ func (st *statsTask) GetTaskVersion() int64 {
 	return st.GetVersion()
 }
 
+func (st *statsTask) getJSONStatsDataFormat() int64 {
+	format := st.GetJsonStatsDataFormat()
+	if format == 0 {
+		// StatsTask predates the persisted format field. Such a task was created
+		// while V3 was the only writable format and must stay V3 on retry.
+		return common.JSONStatsDataFormatV3
+	}
+	return format
+}
+
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 	st.State = state
 	st.FailReason = failReason
@@ -491,7 +501,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		// update version after check
 		TaskVersion:                      st.GetVersion(),
 		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
-		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
+		JsonKeyStatsDataFormat:           st.getJSONStatsDataFormat(),
 		TaskSlot:                         st.taskSlot,
 		StorageVersion:                   segment.StorageVersion,
 		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
@@ -634,7 +644,7 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 				// Pin current_scalar_index_version to the value the worker actually
 				// built the index with (echoed per entry), not a fresh resolve which
 				// could drift from the shipped index.
-				Stats: packed.TextIndexStatEntries(textStats, pinnedScalarIndexVersion(textStats)),
+				Stats: packed.TextIndexStatEntries(textStats),
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{TextStats: textStats},
@@ -710,15 +720,6 @@ func statsAlreadyCommitted[T any](existing, incoming map[int64]T, buildID func(T
 		}
 	}
 	return true
-}
-
-// pinnedScalarIndexVersion returns the current_scalar_index_version the worker
-// built the text index with, echoed identically on every entry.
-func pinnedScalarIndexVersion(textStats map[int64]*datapb.TextIndexStats) int32 {
-	for _, ts := range textStats {
-		return ts.GetCurrentScalarIndexVersion()
-	}
-	return 0
 }
 
 // jsonKeyStatEntriesForManifest rebuilds JSON key StatEntries with absolute file

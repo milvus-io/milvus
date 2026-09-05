@@ -889,6 +889,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
 		assert.Equal(t, int64(10000), Params.CompactionPreAllocateIDExpansionFactor.GetAsInt64())
 		assert.False(t, Params.StorageFormatCompactionEnabled.GetAsBool())
+		assert.Equal(t, int64(3), Params.JSONStatsFormatVersion.GetAsInt64())
+		params.Save(Params.JSONStatsFormatVersion.Key, "4")
+		assert.Equal(t, int64(4), Params.JSONStatsFormatVersion.GetAsInt64())
+		params.Save(Params.JSONStatsFormatVersion.Key, "5")
+		assert.Equal(t, int64(3), Params.JSONStatsFormatVersion.GetAsInt64())
+		params.Reset(Params.JSONStatsFormatVersion.Key)
 
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())

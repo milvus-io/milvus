@@ -13,7 +13,7 @@ type BITMAPChecker struct {
 	scalarIndexChecker
 }
 
-var validBITMAPJSONCastTypes = []string{"BOOL", "VARCHAR"}
+var validBITMAPJSONCastTypes = []string{"BOOL", "INT8", "INT16", "INT32", "INT64", "VARCHAR"}
 
 func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {

@@ -94,7 +94,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 		if len(g.values) >= 2 {
 			// This rewrite requires both an executable TermExpr and strict
 			// != == NOT(==) semantics for every predicate under three-valued logic.
-			canRewrite := canBuildTermExpr(g.values...)
+			canRewrite := canApplyHomogeneousTermRewrite(g.values...)
 			if canRewrite {
 				for _, value := range g.values {
 					if !canRewriteNotEqual(g.col, value) {

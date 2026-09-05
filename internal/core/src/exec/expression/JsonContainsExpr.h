@@ -17,6 +17,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <set>
+#include <utility>
+#include <vector>
 
 #include <fmt/core.h>
 
@@ -34,6 +39,181 @@
 
 namespace milvus {
 namespace exec {
+
+// Reusable per-row found state for ContainsAll. Candidate positions are kept
+// instead of candidate values because equivalent literals such as 2 and 2.0
+// must both be marked by a single matching JSON value.
+class ContainsAllCandidateTracker {
+ public:
+    explicit ContainsAllCandidateTracker(size_t candidate_count)
+        : candidate_count_(candidate_count),
+          uses_inline_mask_(candidate_count <= 64),
+          all_candidates_mask_(candidate_count == 64 ? ~uint64_t(0)
+                               : candidate_count < 64
+                                   ? (uint64_t(1) << candidate_count) - 1
+                                   : 0),
+          matched_candidate_words_(
+              uses_inline_mask_ ? 0 : (candidate_count + 63) / 64) {
+    }
+
+    void
+    Reset() {
+        if (uses_inline_mask_) {
+            matched_candidates_mask_ = 0;
+        } else {
+            std::fill(matched_candidate_words_.begin(),
+                      matched_candidate_words_.end(),
+                      0);
+            remaining_candidate_count_ = candidate_count_;
+        }
+    }
+
+    bool
+    MarkCandidateMatched(size_t candidate_position) {
+        if (uses_inline_mask_) {
+            matched_candidates_mask_ |= uint64_t(1) << candidate_position;
+            return matched_candidates_mask_ == all_candidates_mask_;
+        }
+
+        auto& word = matched_candidate_words_[candidate_position / 64];
+        const auto bit = uint64_t(1) << (candidate_position % 64);
+        if (!(word & bit)) {
+            word |= bit;
+            --remaining_candidate_count_;
+        }
+        return remaining_candidate_count_ == 0;
+    }
+
+    bool
+    AllCandidatesMatched() const {
+        return uses_inline_mask_
+                   ? matched_candidates_mask_ == all_candidates_mask_
+                   : remaining_candidate_count_ == 0;
+    }
+
+ private:
+    size_t candidate_count_{0};
+    bool uses_inline_mask_{true};
+    uint64_t all_candidates_mask_{0};
+    uint64_t matched_candidates_mask_{0};
+    std::vector<uint64_t> matched_candidate_words_;
+    size_t remaining_candidate_count_{0};
+};
+
+template <typename OnMatch>
+void
+VisitMatchingBsonCandidatePositions(
+    const milvus::bson::value_view& value,
+    const std::vector<proto::plan::GenericValue>& candidates,
+    const JsonNumberCandidatePositionIndex& number_position_index,
+    OnMatch&& on_match) {
+    switch (value.type()) {
+        case milvus::bson::type::k_int32:
+        case milvus::bson::type::k_int64:
+        case milvus::bson::type::k_double:
+            number_position_index.VisitMatchingPositionsForBsonNumber(
+                value, std::forward<OnMatch>(on_match));
+            return;
+        case milvus::bson::type::k_bool: {
+            auto parsed = milvus::BsonView::GetValueFromBsonView<bool>(value);
+            if (!parsed.has_value()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].has_bool_val() &&
+                    *parsed == candidates[i].bool_val() && on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case milvus::bson::type::k_string: {
+            auto parsed =
+                milvus::BsonView::GetValueFromBsonView<std::string>(value);
+            if (!parsed.has_value()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].has_string_val() &&
+                    *parsed == candidates[i].string_val() && on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case milvus::bson::type::k_array: {
+            auto parsed = milvus::BsonView::GetValueFromBsonView<
+                milvus::bson::array_view>(value);
+            if (!parsed.has_value()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].has_array_val() &&
+                    CompareTwoJsonArray(*parsed, candidates[i].array_val()) &&
+                    on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+inline bool
+BsonValueMatchesAnyCandidate(
+    const milvus::bson::value_view& value,
+    const std::vector<proto::plan::GenericValue>& candidates,
+    const JsonNumberMembershipMatcher& number_membership_matcher) {
+    switch (value.type()) {
+        case milvus::bson::type::k_int32:
+        case milvus::bson::type::k_int64:
+        case milvus::bson::type::k_double:
+            return number_membership_matcher.MatchesAnyBsonNumber(value);
+        case milvus::bson::type::k_bool: {
+            auto parsed = milvus::BsonView::GetValueFromBsonView<bool>(value);
+            if (!parsed.has_value()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_bool_val() &&
+                                          *parsed == candidate.bool_val();
+                               });
+        }
+        case milvus::bson::type::k_string: {
+            auto parsed =
+                milvus::BsonView::GetValueFromBsonView<std::string>(value);
+            if (!parsed.has_value()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_string_val() &&
+                                          *parsed == candidate.string_val();
+                               });
+        }
+        case milvus::bson::type::k_array: {
+            auto parsed = milvus::BsonView::GetValueFromBsonView<
+                milvus::bson::array_view>(value);
+            if (!parsed.has_value()) {
+                return false;
+            }
+            return std::any_of(candidates.begin(),
+                               candidates.end(),
+                               [&](const auto& candidate) {
+                                   return candidate.has_array_val() &&
+                                          CompareTwoJsonArray(
+                                              *parsed, candidate.array_val());
+                               });
+        }
+        default:
+            return false;
+    }
+}
 
 class ShreddingArrayBsonContainsArrayExecutor {
  public:
@@ -245,9 +425,10 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
  public:
     ShreddingArrayBsonContainsAllWithDiffTypeExecutor(
         std::vector<proto::plan::GenericValue> elements,
-        std::set<int> elements_index)
+        std::shared_ptr<const JsonNumberCandidatePositionIndex>
+            number_position_index)
         : elements_(std::move(elements)),
-          elements_index_(std::move(elements_index)) {
+          number_position_index_(std::move(number_position_index)) {
     }
 
     void
@@ -256,6 +437,7 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
+        ContainsAllCandidateTracker match_tracker(elements_.size());
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -268,91 +450,38 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            std::set<int> tmp_elements_index(elements_index_);
+            match_tracker.Reset();
             for (const auto& sub_value : array.value()) {
-                int idx = -1;
-                for (auto& element : elements_) {
-                    idx++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<bool>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(idx);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                tmp_elements_index.erase(idx);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                tmp_elements_index.erase(idx);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                std::string>(sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(idx);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                milvus::bson::array_view>(
-                                sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val.value(),
-                                                    element.array_val())) {
-                                tmp_elements_index.erase(idx);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
-                    }
-                    if (tmp_elements_index.size() == 0) {
-                        break;
-                    }
-                }
-                if (tmp_elements_index.size() == 0) {
+                VisitMatchingBsonCandidatePositions(
+                    sub_value.get_value(),
+                    elements_,
+                    *number_position_index_,
+                    [&](size_t candidate_position) {
+                        return match_tracker.MarkCandidateMatched(
+                            candidate_position);
+                    });
+                if (match_tracker.AllCandidatesMatched()) {
                     break;
                 }
             }
-            res[i] = tmp_elements_index.size() == 0;
+            res[i] = match_tracker.AllCandidatesMatched();
         }
     }
 
  private:
     std::vector<proto::plan::GenericValue> elements_;
-    std::set<int> elements_index_;
+    std::shared_ptr<const JsonNumberCandidatePositionIndex>
+        number_position_index_;
 };
 
 class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
  public:
     explicit ShreddingArrayBsonContainsAnyWithDiffTypeExecutor(
-        std::vector<proto::plan::GenericValue> elements)
-        : elements_(std::move(elements)) {
+        std::vector<proto::plan::GenericValue> elements,
+        std::shared_ptr<const JsonNumberMembershipMatcher>
+            number_membership_matcher)
+        : elements_(std::move(elements)),
+          number_membership_matcher_(std::move(number_membership_matcher)) {
     }
 
     void
@@ -375,64 +504,13 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
             }
             bool matched = false;
             for (const auto& sub_value : array.value()) {
-                for (auto const& element : elements_) {
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<bool>(
-                                    sub_value.get_value());
-                            if (val.has_value() &&
-                                val.value() == element.bool_val()) {
-                                matched = true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                matched = true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto comparison = CompareBsonNumberToBound(
-                                sub_value.get_value(), element);
-                            if (comparison.has_value() && *comparison == 0) {
-                                matched = true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                std::string>(sub_value.get_value());
-                            if (val.has_value() &&
-                                val.value() == element.string_val()) {
-                                matched = true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = milvus::BsonView::GetValueFromBsonView<
-                                milvus::bson::array_view>(
-                                sub_value.get_value());
-                            if (val.has_value() &&
-                                CompareTwoJsonArray(val.value(),
-                                                    element.array_val())) {
-                                matched = true;
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
-                    }
-                    if (matched)
-                        break;
-                }
-                if (matched)
+                matched =
+                    BsonValueMatchesAnyCandidate(sub_value.get_value(),
+                                                 elements_,
+                                                 *number_membership_matcher_);
+                if (matched) {
                     break;
+                }
             }
             res[i] = matched;
         }
@@ -440,6 +518,8 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 
  private:
     std::vector<proto::plan::GenericValue> elements_;
+    std::shared_ptr<const JsonNumberMembershipMatcher>
+        number_membership_matcher_;
 };
 
 class PhyJsonContainsFilterExpr : public SegmentExpr {
@@ -496,6 +576,26 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
+    // The one operand shape no JSON accelerator can answer: mixed element
+    // types, or an array literal whose element boundaries a typed projection
+    // does not preserve. Both run on raw JSON, as on master.
+    bool
+    JsonOperandShapeIsIndexable() const {
+        return expr_->same_type_ &&
+               std::none_of(expr_->vals_.begin(),
+                            expr_->vals_.end(),
+                            [](const auto& value) {
+                                return value.val_case() ==
+                                       proto::plan::GenericValue::kArrayVal;
+                            });
+    }
+
+    bool
+    PrefersTypedJsonPathIndex() const override {
+        return JsonOperandShapeIsIndexable() &&
+               HasTypedJsonPathIndexForOperandTypeAtInit();
+    }
+
     void
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {
@@ -503,13 +603,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         if (expr_->column_.data_type_ == DataType::JSON &&
-            (!expr_->same_type_ ||
-             std::any_of(expr_->vals_.begin(),
-                         expr_->vals_.end(),
-                         [](const auto& value) {
-                             return value.val_case() ==
-                                    proto::plan::GenericValue::kArrayVal;
-                         }))) {
+            !JsonOperandShapeIsIndexable()) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -518,21 +612,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
+        // A DOUBLE JSON Path index answers large integer elements with double
+        // semantics instead of declining the index. INT* Path indexes answer
+        // within their configured width. JsonFlatIndex keeps an exact integer
+        // field and is unaffected.
         SegmentExpr::DetermineExecPath();
-        if (exec_path_ != ExprExecPath::ScalarIndex ||
-            expr_->column_.data_type_ != DataType::JSON ||
-            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
-            return;
-        }
-        const auto has_unsafe_int_literal = std::any_of(
-            expr_->vals_.begin(),
-            expr_->vals_.end(),
-            [this](const auto& value) {
-                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
-            });
-        if (has_unsafe_int_literal) {
-            exec_path_ = ExprExecPath::RawData;
-        }
     }
 
  private:
@@ -606,6 +690,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<JsonNumberMembershipMatcher>
+        json_number_membership_matcher_;
+    std::shared_ptr<JsonNumberCandidatePositionIndex>
+        json_number_position_index_;
     std::shared_ptr<void>
         arg_cached_set_;  // For caching std::set<T> or std::vector<T>
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};

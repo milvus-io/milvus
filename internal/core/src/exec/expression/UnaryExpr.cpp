@@ -260,12 +260,35 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         if (PinnedJsonIndexIsFlat()) {
                             result = ExecRangeVisitorImplForIndex<int64_t>();
                         } else {
-                            proto::plan::GenericValue double_val;
-                            double_val.set_float_val(
-                                static_cast<double>(expr_->val_.int64_val()));
-                            value_arg_.SetValue<double>(double_val);
-                            arg_inited_ = true;
-                            result = ExecRangeVisitorImplForIndex<double>();
+                            switch (PinnedJsonIndexCastElementType()) {
+                                case DataType::INT8:
+                                    result =
+                                        ExecRangeVisitorImplForIndex<int8_t>();
+                                    break;
+                                case DataType::INT16:
+                                    result =
+                                        ExecRangeVisitorImplForIndex<int16_t>();
+                                    break;
+                                case DataType::INT32:
+                                    result =
+                                        ExecRangeVisitorImplForIndex<int32_t>();
+                                    break;
+                                case DataType::INT64:
+                                    result =
+                                        ExecRangeVisitorImplForIndex<int64_t>();
+                                    break;
+                                default: {
+                                    proto::plan::GenericValue double_val;
+                                    double_val.set_float_val(
+                                        static_cast<double>(
+                                            expr_->val_.int64_val()));
+                                    value_arg_.SetValue<double>(double_val);
+                                    arg_inited_ = true;
+                                    result =
+                                        ExecRangeVisitorImplForIndex<double>();
+                                    break;
+                                }
+                            }
                         }
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
@@ -286,8 +309,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     case proto::plan::GenericValue::ValCase::kInt64Val:
                         if ((has_offset_input_ ||
                              exec_path_ != ExprExecPath::JsonStats) &&
-                            !IsInt64SafeForJsonDoubleIndex(
-                                expr_->val_.int64_val())) {
+                            JsonNumericBoundRequiresPreciseInt64Comparison(
+                                expr_->val_)) {
                             result =
                                 ExecRangeVisitorImplJsonPreciseNumeric(context);
                         } else {
@@ -295,7 +318,15 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         }
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
-                        result = ExecRangeVisitorImplJson<double>(context);
+                        if ((has_offset_input_ ||
+                             exec_path_ != ExprExecPath::JsonStats) &&
+                            JsonNumericBoundRequiresPreciseInt64Comparison(
+                                expr_->val_)) {
+                            result =
+                                ExecRangeVisitorImplJsonPreciseNumeric(context);
+                        } else {
+                            result = ExecRangeVisitorImplJson<double>(context);
+                        }
                         break;
                     case proto::plan::GenericValue::ValCase::kStringVal:
                         result = ExecRangeVisitorImplJson<std::string>(context);
@@ -414,7 +445,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            auto comparison = CompareJsonNumberToBound(number.value(), bound);
+            auto comparison = CompareJsonNumberToBoundWithUint64DoubleFallback(
+                number.value(), bound);
             res[i] = comparison.has_value() &&
                      JsonNumberMatchesOp(*comparison, op_type);
         }
@@ -877,10 +909,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
-// number in a single parse.  Branches on actual type to preserve int64
-// precision; uint64 and double values fall back to double comparison,
-// consistent with the Tantivy index and JSON-stats paths.
+// Numeric GetType uses at_numeric() (get_number()) so unrepresentable JSON
+// numbers stay UNKNOWN.  The int64_t branch preserves integer precision;
+// uint64 and double values fall back to double comparison, consistent with
+// the Tantivy index and JSON-stats paths.
 // - 'cmp' must reference 'value' (auto-typed as int64_t or double).
 // Missing path and type mismatch are UNKNOWN/NULL under JSON 3VL semantics.
 #define UnaryRangeJSONCompare(cmp)                                     \
@@ -901,6 +933,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                                  : n.get_double();                     \
                 res[i] = (cmp);                                        \
             }                                                          \
+        } else if constexpr (std::is_same_v<GetType, double>) {        \
+            auto x_num = data[offset].at_numeric(pointer);             \
+            if (x_num.error()) {                                       \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x_num.value().as_double();                    \
+            res[i] = (cmp);                                            \
         } else {                                                       \
             auto x = data[offset].template at<GetType>(pointer);       \
             if (x.error()) {                                           \
@@ -2091,16 +2131,6 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         data_type = expr_->column_.element_type_;
     }
 
-    if (data_type == DataType::JSON &&
-        expr_->val_.val_case() ==
-            proto::plan::GenericValue::ValCase::kInt64Val &&
-        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val()) &&
-        expr_->op_type_ != proto::plan::OpType::Equal &&
-        expr_->op_type_ != proto::plan::OpType::NotEqual) {
-        exec_path_ = ExprExecPath::RawData;
-        return;
-    }
-
     if (data_type == DataType::ARRAY) {
         const auto val_case = expr_->val_.val_case();
         const auto& array = expr_->val_.array_val();
@@ -2191,16 +2221,11 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             break;
         }
         case DataType::JSON: {
+            // A DOUBLE JSON Path index answers integers past 2^53 with double
+            // precision rather than declining to a raw scan. INT* Path indexes
+            // answer within their configured integer width. See the cross-path
+            // semantics document.
             const auto val_case = expr_->val_.val_case();
-            if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
-                !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
-                const auto is_equality =
-                    expr_->op_type_ == proto::plan::OpType::Equal ||
-                    expr_->op_type_ == proto::plan::OpType::NotEqual;
-                can_use = PinnedJsonIndexIsFlat() && is_equality;
-                break;
-            }
-
             auto val_type = FromValCase(val_case);
             switch (val_type) {
                 case DataType::STRING:

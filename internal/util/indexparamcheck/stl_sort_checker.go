@@ -14,7 +14,7 @@ type STLSORTChecker struct {
 	scalarIndexChecker
 }
 
-var validSTLSORTJSONCastTypes = []string{"DOUBLE", "VARCHAR"}
+var validSTLSORTJSONCastTypes = []string{"INT8", "INT16", "INT32", "INT64", "DOUBLE", "VARCHAR"}
 
 func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {

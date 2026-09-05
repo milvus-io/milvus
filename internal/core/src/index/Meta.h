@@ -53,6 +53,10 @@ constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 constexpr const char* RTREE_INDEX_TYPE = "RTREE";
 constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
     "scalar_index_engine_version";
+// Typed JSON path indexes built by scalar index engine v6 and newer treat any
+// non-null target as present. Older engines retain the recursive-non-empty
+// EXISTS semantics in their persisted non_exist_offsets bitmap.
+constexpr int32_t JSON_PATH_NON_NULL_PRESENCE_MIN_SCALAR_INDEX_VERSION = 6;
 constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;

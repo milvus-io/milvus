@@ -61,20 +61,41 @@ type IndexEngineVersionManager interface {
 	GetMinimalSessionVer() semver.Version
 }
 
+// ScalarIndexMigrationVersionManager tracks the DataNode writer capabilities
+// needed by scalar-index migrations in addition to the QueryNode versions
+// already owned by IndexEngineVersionManager. The vector writer ceiling
+// protects unrelated vector artifacts rebuilt by the same compaction. It is a
+// narrow extension so existing callers and mocks need DataNode lifecycle
+// methods only when they gate a cross-node artifact migration.
+type ScalarIndexMigrationVersionManager interface {
+	StartupDataNodes(sessions map[string]*sessionutil.Session)
+	AddDataNode(session *sessionutil.Session)
+	RemoveDataNode(session *sessionutil.Session)
+	UpdateDataNode(session *sessionutil.Session)
+	SupportsScalarIndexVersion(targetVersion int32) bool
+	GetDataNodeVectorIndexWriterVersionRange() (int32, int32, bool)
+}
+
+var _ ScalarIndexMigrationVersionManager = (*versionManagerImpl)(nil)
+
 type versionManagerImpl struct {
-	mu                  lock.Mutex
-	versions            map[int64]sessionutil.IndexEngineVersion
-	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
-	indexNonEncoding    map[int64]bool
-	sessionVersion      map[int64]semver.Version
+	mu                          lock.Mutex
+	versions                    map[int64]sessionutil.IndexEngineVersion
+	scalarIndexVersions         map[int64]sessionutil.IndexEngineVersion
+	dataNodeIndexVersions       map[int64]sessionutil.IndexEngineVersion
+	dataNodeScalarIndexVersions map[int64]sessionutil.IndexEngineVersion
+	indexNonEncoding            map[int64]bool
+	sessionVersion              map[int64]semver.Version
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
 	return &versionManagerImpl{
-		versions:            map[int64]sessionutil.IndexEngineVersion{},
-		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
-		indexNonEncoding:    map[int64]bool{},
-		sessionVersion:      map[int64]semver.Version{},
+		versions:                    map[int64]sessionutil.IndexEngineVersion{},
+		scalarIndexVersions:         map[int64]sessionutil.IndexEngineVersion{},
+		dataNodeIndexVersions:       map[int64]sessionutil.IndexEngineVersion{},
+		dataNodeScalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
+		indexNonEncoding:            map[int64]bool{},
+		sessionVersion:              map[int64]semver.Version{},
 	}
 }
 
@@ -191,6 +212,113 @@ func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
 	m.sessionVersion[session.ServerID] = session.Version
+}
+
+func (m *versionManagerImpl) StartupDataNodes(sessions map[string]*sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sessionIDs := make(map[int64]struct{}, len(sessions))
+	for _, session := range sessions {
+		sessionIDs[session.ServerID] = struct{}{}
+		m.addOrUpdateDataNode(session)
+	}
+	for sessionID := range m.dataNodeScalarIndexVersions {
+		if _, ok := sessionIDs[sessionID]; !ok {
+			m.removeDataNodeByID(sessionID)
+		}
+	}
+}
+
+func (m *versionManagerImpl) AddDataNode(session *sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.addOrUpdateDataNode(session)
+}
+
+func (m *versionManagerImpl) addOrUpdateDataNode(session *sessionutil.Session) {
+	m.dataNodeIndexVersions[session.ServerID] = session.IndexEngineVersion
+	m.dataNodeScalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
+}
+
+func (m *versionManagerImpl) RemoveDataNode(session *sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeDataNodeByID(session.ServerID)
+}
+
+func (m *versionManagerImpl) removeDataNodeByID(sessionID int64) {
+	delete(m.dataNodeIndexVersions, sessionID)
+	delete(m.dataNodeScalarIndexVersions, sessionID)
+}
+
+func (m *versionManagerImpl) UpdateDataNode(session *sessionutil.Session) {
+	m.AddDataNode(session)
+}
+
+// SupportsScalarIndexVersion returns true only when every online QueryNode and
+// DataNode advertises a complete range containing targetVersion. Missing node
+// classes and legacy/malformed sessions whose current or maximum scalar
+// version is absent both fail closed, so a rolling upgrade cannot rewrite an
+// artifact while an incompatible reader or builder is still present.
+func (m *versionManagerImpl) SupportsScalarIndexVersion(targetVersion int32) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if targetVersion <= 0 || len(m.scalarIndexVersions) == 0 || len(m.dataNodeScalarIndexVersions) == 0 {
+		return false
+	}
+	for _, version := range m.scalarIndexVersions {
+		if !indexEngineVersionSupports(version, targetVersion) {
+			return false
+		}
+	}
+	for _, version := range m.dataNodeScalarIndexVersions {
+		if !indexEngineVersionSupports(version, targetVersion) {
+			return false
+		}
+	}
+	return true
+}
+
+func indexEngineVersionSupports(version sessionutil.IndexEngineVersion, targetVersion int32) bool {
+	if version.CurrentIndexVersion <= 0 ||
+		version.MaximumIndexVersion <= 0 ||
+		version.CurrentIndexVersion > version.MaximumIndexVersion ||
+		version.MinimalIndexVersion > version.CurrentIndexVersion {
+		return false
+	}
+	return version.MinimalIndexVersion <= targetVersion && targetVersion <= version.MaximumIndexVersion
+}
+
+// GetDataNodeVectorIndexWriterVersionRange returns the intersection of vector
+// index versions writable by every online DataNode. DataNodes predating the
+// capability field report MaximumIndexVersion=0; missing nodes, missing fields,
+// and disjoint writer ranges fail closed instead of guessing from QueryNode
+// reader versions.
+func (m *versionManagerImpl) GetDataNodeVectorIndexWriterVersionRange() (int32, int32, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.dataNodeIndexVersions) == 0 {
+		return 0, 0, false
+	}
+	minimum := int32(0)
+	maximum := int32(math.MaxInt32)
+	for _, version := range m.dataNodeIndexVersions {
+		if version.CurrentIndexVersion <= 0 ||
+			version.MaximumIndexVersion <= 0 ||
+			version.CurrentIndexVersion > version.MaximumIndexVersion ||
+			version.MinimalIndexVersion > version.CurrentIndexVersion {
+			return 0, 0, false
+		}
+		minimum = max(minimum, version.MinimalIndexVersion)
+		maximum = min(maximum, version.MaximumIndexVersion)
+	}
+	if minimum > maximum {
+		return 0, 0, false
+	}
+	return minimum, maximum, true
 }
 
 func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {

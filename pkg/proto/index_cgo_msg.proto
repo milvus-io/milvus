@@ -112,6 +112,7 @@ message BuildIndexInfo {
   // External collection fields (empty for regular collections)
   string external_source = 33;
   string external_spec = 34;
+  int64 json_stats_data_format = 35;
 }
 
 message StoragePluginContext {
@@ -150,4 +151,5 @@ message LoadJsonKeyIndexInfo {
   int64 stats_size = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
   string base_path = 13;  // remote base path; files are relative to this path
+  int64 json_stats_data_format = 14;
 }

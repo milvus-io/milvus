@@ -508,6 +508,12 @@ func (s *Server) initServiceDiscovery() error {
 	mlog.Info(s.ctx, "DataCoord success to get DataNode sessions", mlog.Any("sessions", sessions))
 
 	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+		// The bound worker does not publish a DataNode session capability. Keep
+		// JSON path migration disabled instead of assuming that it writes the
+		// current artifact version.
+		if manager, ok := s.indexEngineVersionManager.(ScalarIndexMigrationVersionManager); ok {
+			manager.StartupDataNodes(nil)
+		}
 		mlog.Info(s.ctx, "initServiceDiscovery adding datanode with bind mode",
 			mlog.FieldNodeID(Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
 			mlog.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()))
@@ -572,7 +578,19 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		datanodes = append(datanodes, info)
 	}
 
+	manager, tracksMigrationVersions := s.indexEngineVersionManager.(ScalarIndexMigrationVersionManager)
+	if tracksMigrationVersions {
+		// Publish writer capabilities before the nodes become schedulable. This
+		// keeps migration eligibility from observing a new writer without its
+		// advertised range.
+		manager.StartupDataNodes(sessions)
+	}
 	if err := s.nodeManager.Startup(s.ctx, datanodes); err != nil {
+		if tracksMigrationVersions {
+			// Startup did not accept the rewatched writers, so retain no writer
+			// capability rather than enabling migration from stale state.
+			manager.StartupDataNodes(nil)
+		}
 		mlog.Warn(s.ctx, "DataCoord failed to add datanode", mlog.Err(err))
 		return err
 	}
@@ -873,8 +891,16 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 					mlog.String("event type", event.EventType.String()))
 				return nil
 			}
+			manager, tracksMigrationVersions := s.indexEngineVersionManager.(ScalarIndexMigrationVersionManager)
+			if tracksMigrationVersions {
+				// Register the writer range before the node can receive work.
+				manager.AddDataNode(event.Session)
+			}
 			err := s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
 			if err != nil {
+				if tracksMigrationVersions {
+					manager.RemoveDataNode(event.Session)
+				}
 				return err
 			}
 
@@ -895,10 +921,18 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return nil
 			}
 			s.nodeManager.RemoveNode(event.Session.ServerID)
+			if manager, ok := s.indexEngineVersionManager.(ScalarIndexMigrationVersionManager); ok {
+				manager.RemoveDataNode(event.Session)
+			}
 		case sessionutil.SessionUpdateEvent:
 			mlog.Info(ctx, "received datanode SessionUpdateEvent",
 				mlog.String("address", info.Address),
 				mlog.Int64("serverID", info.Version))
+			if !Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				if manager, ok := s.indexEngineVersionManager.(ScalarIndexMigrationVersionManager); ok {
+					manager.UpdateDataNode(event.Session)
+				}
+			}
 		default:
 			mlog.Warn(ctx, "receive unknown service event type",
 				mlog.Any("type", event.EventType))

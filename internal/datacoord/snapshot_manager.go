@@ -897,6 +897,9 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	if err := sm.checkSnapshotJSONArtifactVersions(snapshotData); err != nil {
+		return 0, err
+	}
 	snapshotFingerprint := ""
 	if external {
 		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
@@ -1966,6 +1969,53 @@ func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 				"JSON path index with %s requires scalar index engine version >= %d, "+
 					"current resolved version: %d; please complete the rolling upgrade first",
 				indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+		}
+	}
+	return nil
+}
+
+// Snapshot copy preserves artifact versions instead of rebuilding them. Check
+// readers before any collection or index DDL. The build-version override is not
+// a reader capability, and DataNode writers are not involved in reading copies.
+func (sm *snapshotManager) checkSnapshotJSONArtifactVersions(data *snapshotstorage.SnapshotData) error {
+	jsonIndexes := make(map[int64]bool)
+	for _, index := range data.Indexes {
+		params := funcutil.KeyValuePair2Map(index.GetIndexParams())
+		_, jsonIndexes[index.GetIndexID()] = params[common.JSONPathKey]
+	}
+	checkReader := func(required int32, segmentID int64, artifact string) error {
+		if sm.indexEngineVersionManager == nil {
+			return merr.WrapErrServiceNotReadyMsg("cannot restore %s on segment %d: QueryNode reader capabilities are unavailable", artifact, segmentID)
+		}
+		manager := sm.indexEngineVersionManager
+		if manager.GetCurrentScalarIndexEngineVersion() <= 0 ||
+			manager.GetMaximumScalarIndexEngineVersion() < required ||
+			manager.GetMinimalScalarIndexEngineVersion() > required {
+			return merr.WrapErrServiceNotReadyMsg("cannot restore %s on segment %d: QueryNodes do not support scalar index version %d", artifact, segmentID, required)
+		}
+		return nil
+	}
+	for _, segment := range data.Segments {
+		for _, index := range segment.GetIndexFiles() {
+			if jsonIndexes[index.GetIndexID()] && index.GetCurrentScalarIndexVersion() >= common.MinScalarIndexVersionForJsonPathPresence {
+				if err := checkReader(index.GetCurrentScalarIndexVersion(), segment.GetSegmentId(), "JSON path index"); err != nil {
+					return err
+				}
+			}
+		}
+		for _, stats := range segment.GetJsonKeyIndexFiles() {
+			version := stats.GetJsonKeyStatsDataFormat()
+			if version > common.JSONStatsDataFormatV4 {
+				return merr.Wrapf(merr.ErrServiceUnimplemented, "cannot restore JSON stats format %d on segment %d", version, segment.GetSegmentId())
+			}
+			if version == common.JSONStatsDataFormatV4 {
+				// V4 stats readers first ship with scalar engine V6. Until
+				// stats has its own advertised capability, use that release
+				// floor rather than allowing old QNs to skip copied sidecars.
+				if err := checkReader(common.MinScalarIndexVersionForJsonPathPresence, segment.GetSegmentId(), "V4 JSON stats"); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
