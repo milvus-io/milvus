@@ -25,17 +25,16 @@ func TestCompactionSegmentBinlogFieldsUsesChildFields(t *testing.T) {
 	require.NotContains(t, fields, int64(900))
 }
 
-func TestFilterCompactionFieldBinlogsKeepsChildFieldMatch(t *testing.T) {
+func TestFilterV1CompactionFieldBinlogs(t *testing.T) {
 	fieldBinlogs := []*datapb.FieldBinlog{
 		nil,
-		{FieldID: 900, ChildFields: []int64{102, 103}},
+		{FieldID: 102},
 		{FieldID: 200},
 	}
 
-	filtered := filterCompactionFieldBinlogs(fieldBinlogs, map[int64]struct{}{102: {}})
+	filtered := filterV1CompactionFieldBinlogs(fieldBinlogs, map[int64]struct{}{102: {}})
 	require.Len(t, filtered, 1)
-	require.EqualValues(t, 900, filtered[0].GetFieldID())
-	require.Equal(t, []int64{102, 103}, filtered[0].GetChildFields())
+	require.EqualValues(t, 102, filtered[0].GetFieldID())
 }
 
 func TestCompactionReadSchemaKeepsAbsentOrdinaryDropsMissingFunctionOutputs(t *testing.T) {
