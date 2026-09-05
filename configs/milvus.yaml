@@ -500,8 +500,17 @@ proxy:
     # cost. Disabling restores the old always-decode behavior.
     dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
-    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
-    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
+    # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout.
+    # Matches proxy.http.requestTimeoutMs: a client that never finishes sending a declared body is disconnected
+    # around the same time an in-budget request would already time out, instead of pinning a goroutine/connection/fd
+    # indefinitely. Raise this only if legitimate requests routinely need longer than requestTimeoutMs to upload their
+    # body on slow networks.
+    readTimeout: 30s
+    # HTTP server timeout for handling requests and writing responses. 0 disables this timeout.
+    # Kept comfortably above requestTimeoutMs + readTimeout so the graceful in-app timeout response
+    # (see timeoutMiddleware) always has a chance to be written before this raw, connection-level timeout
+    # would otherwise abort the connection.
+    writeTimeout: 60s
     idleTimeout: 300s # HTTP server keep-alive idle timeout
     maxHeaderBytes: 16777216 # Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
