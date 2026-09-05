@@ -867,6 +867,7 @@ dataCoord:
         maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
       expiredlog:
         maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
+    maxFragmentsPerGroup: 8 # maximum number of fragment segments allowed per channel-partition group before fragment-tier compaction triggers
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
