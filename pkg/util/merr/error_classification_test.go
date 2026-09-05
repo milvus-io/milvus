@@ -105,18 +105,19 @@ func TestErrorTypeMarker(t *testing.T) {
 func TestSentinelErrorTypeClassification(t *testing.T) {
 	// The request's own fault -> InputError (and therefore non-retriable).
 	inputSentinels := map[string]error{
-		"ParameterInvalid":          ErrParameterInvalid,
-		"ParameterMissing":          ErrParameterMissing,
-		"ParameterTooLarge":         ErrParameterTooLarge,
-		"CollectionLoaded":          ErrCollectionLoaded,
-		"ResourceGroupNotFound":     ErrResourceGroupNotFound,
-		"IndexDuplicate":            ErrIndexDuplicate,
-		"PrivilegeNotPermitted":     ErrPrivilegeNotPermitted,
-		"PrivilegeGroupInvalidName": ErrPrivilegeGroupInvalidName,
-		"NeedAuthenticate":          ErrNeedAuthenticate,
-		"IncorrectParameterFormat":  ErrIncorrectParameterFormat,
-		"MissingRequiredParameters": ErrMissingRequiredParameters,
-		"InvalidInsertData":         ErrInvalidInsertData,
+		"ParameterInvalid":           ErrParameterInvalid,
+		"ParameterMissing":           ErrParameterMissing,
+		"ParameterTooLarge":          ErrParameterTooLarge,
+		"CollectionLoaded":           ErrCollectionLoaded,
+		"AutoIDUpsertTargetNotFound": ErrAutoIDUpsertTargetNotFound,
+		"ResourceGroupNotFound":      ErrResourceGroupNotFound,
+		"IndexDuplicate":             ErrIndexDuplicate,
+		"PrivilegeNotPermitted":      ErrPrivilegeNotPermitted,
+		"PrivilegeGroupInvalidName":  ErrPrivilegeGroupInvalidName,
+		"NeedAuthenticate":           ErrNeedAuthenticate,
+		"IncorrectParameterFormat":   ErrIncorrectParameterFormat,
+		"MissingRequiredParameters":  ErrMissingRequiredParameters,
+		"InvalidInsertData":          ErrInvalidInsertData,
 	}
 	for name, err := range inputSentinels {
 		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
@@ -147,7 +148,8 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 	// cannot under-cover — adding or removing an InputError mark anywhere in
 	// errors.go fails here until the expected set is updated deliberately.
 	wantInputCodes := []int32{
-		102, 104, 105, 107, 108, 109, // Collection: num limit / loaded / illegal schema / vector clustering key / replicate mode / schema mismatch
+		// Collection input errors.
+		102, 104, 105, 107, 108, 109, 112,
 		300, 301, 302, 303, // ResourceGroup
 		702,      // IndexDuplicate
 		801, 802, // Database: num limit / invalid name

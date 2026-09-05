@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -229,11 +230,15 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
 	// start to repack insert data
+	if ut.insertPKs == nil {
+		return nil, merr.WrapErrServiceInternalMsg("upsert insert routing primary keys are unavailable")
+	}
+	routingResult := &milvuspb.MutationResult{IDs: ut.insertPKs}
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, routingResult, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, routingResult, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -244,12 +249,15 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
 		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels

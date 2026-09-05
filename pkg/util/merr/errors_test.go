@@ -197,6 +197,23 @@ func (s *ErrSuite) TestOldCode() {
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterMissing).GetErrorCode())
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterTooLarge).GetErrorCode())
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrParameterMissingMsg("collection names cannot be empty")).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrAutoIDUpsertTargetNotFound).GetErrorCode())
+}
+
+func TestAutoIDUpsertTargetNotFound(t *testing.T) {
+	err := WrapErrAutoIDUpsertTargetNotFound(2)
+	status := Status(err)
+
+	assert.ErrorIs(t, err, ErrAutoIDUpsertTargetNotFound)
+	assert.Equal(t, int32(112), Code(err))
+	assert.Equal(t, InputError, GetErrorType(err))
+	assert.False(t, IsRetryableErr(err))
+	assert.Equal(t, commonpb.ErrorCode_IllegalArgument, status.GetErrorCode())
+	assert.Equal(t, "true", status.GetExtraInfo()[InputErrorFlagKey])
+	assert.False(t, status.GetRetriable())
+	assert.Contains(t, err.Error(), "not_found_count=2")
+	assert.NotContains(t, err.Error(), "[")
+	assert.ErrorIs(t, Error(status), ErrAutoIDUpsertTargetNotFound)
 }
 
 func (s *ErrSuite) TestCombine() {

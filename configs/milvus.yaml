@@ -417,6 +417,7 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
+  autoIDUpsertInsertOnNotFound: true # whether a full AutoID upsert generates a new primary key and inserts the row when the supplied primary key is not found; when false, any missing lookup primary key rejects the entire request before ID allocation or WAL append
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
