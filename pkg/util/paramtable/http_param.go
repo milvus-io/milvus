@@ -174,19 +174,26 @@ cost. Disabling restores the old always-decode behavior.`,
 
 	p.ReadTimeout = ParamItem{
 		Key:          "proxy.http.readTimeout",
-		DefaultValue: "0s",
+		DefaultValue: "30s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for reading the entire request, including the body. 0 disables this timeout",
-		Export:       true,
+		Doc: `HTTP server timeout for reading the entire request, including the body. 0 disables this timeout.
+Matches proxy.http.requestTimeoutMs: a client that never finishes sending a declared body is disconnected
+around the same time an in-budget request would already time out, instead of pinning a goroutine/connection/fd
+indefinitely. Raise this only if legitimate requests routinely need longer than requestTimeoutMs to upload their
+body on slow networks.`,
+		Export: true,
 	}
 	p.ReadTimeout.Init(base.mgr)
 
 	p.WriteTimeout = ParamItem{
 		Key:          "proxy.http.writeTimeout",
-		DefaultValue: "0s",
+		DefaultValue: "60s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for handling requests and writing responses. 0 disables this timeout",
-		Export:       true,
+		Doc: `HTTP server timeout for handling requests and writing responses. 0 disables this timeout.
+Kept comfortably above requestTimeoutMs + readTimeout so the graceful in-app timeout response
+(see timeoutMiddleware) always has a chance to be written before this raw, connection-level timeout
+would otherwise abort the connection.`,
+		Export: true,
 	}
 	p.WriteTimeout.Init(base.mgr)
 
