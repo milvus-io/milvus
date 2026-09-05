@@ -594,6 +594,11 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 	}
 
 	resultData := make([]float64, 0, rowCount)
+	validData := make([]bool, rowCount)
+	hasNull := false
+
+	sumValidData := typeutil.GetFieldDataValidData(sumFieldData)
+	countValidData := typeutil.GetFieldDataValidData(countFieldData)
 
 	// Compute avg = sum / count for each row
 	switch sumType {
@@ -603,9 +608,13 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
 		}
 		for i := 0; i < rowCount; i++ {
-			if countData[i] == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
+			if countData[i] <= 0 || (len(countValidData) > 0 && !countValidData[i]) || (len(sumValidData) > 0 && !sumValidData[i]) {
+				hasNull = true
+				validData[i] = false
+				resultData = append(resultData, 0.0)
+				continue
 			}
+			validData[i] = true
 			resultData = append(resultData, float64(sumData[i])/float64(countData[i]))
 		}
 	case schemapb.DataType_Double:
@@ -614,9 +623,13 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
 		}
 		for i := 0; i < rowCount; i++ {
-			if countData[i] == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
+			if countData[i] <= 0 || (len(countValidData) > 0 && !countValidData[i]) || (len(sumValidData) > 0 && !sumValidData[i]) {
+				hasNull = true
+				validData[i] = false
+				resultData = append(resultData, 0.0)
+				continue
 			}
+			validData[i] = true
 			resultData = append(resultData, sumData[i]/float64(countData[i]))
 		}
 	default:
@@ -624,5 +637,8 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 	}
 
 	result.GetScalars().GetDoubleData().Data = resultData
+	if hasNull || len(sumValidData) > 0 || len(countValidData) > 0 {
+		typeutil.SetFieldDataValidData(result, validData)
+	}
 	return result, nil
 }
