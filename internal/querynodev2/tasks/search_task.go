@@ -35,21 +35,22 @@ var (
 )
 
 type SearchTask struct {
-	ctx              context.Context
-	collection       *segments.Collection
-	segmentManager   *segments.Manager
-	req              *querypb.SearchRequest
-	result           *internalpb.SearchResults
-	merged           bool
-	groupSize        int64
-	topk             int64
-	nq               int64
-	placeholderGroup []byte
-	originTopks      []int64
-	originNqs        []int64
-	others           []*SearchTask
-	notifier         chan error
-	serverID         int64
+	ctx                  context.Context
+	collection           *segments.Collection
+	segmentManager       *segments.Manager
+	req                  *querypb.SearchRequest
+	result               *internalpb.SearchResults
+	merged               bool
+	groupSize            int64
+	topk                 int64
+	nq                   int64
+	placeholderGroup     []byte
+	originTopks          []int64
+	originNqs            []int64
+	takeForOutputAllowed []bool
+	others               []*SearchTask
+	notifier             chan error
+	serverID             int64
 
 	tr           *timerecord.TimeRecorder
 	scheduleSpan trace.Span
@@ -158,6 +159,24 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 	defer searchReq.Delete()
+	t.takeForOutputAllowed = make([]bool, len(t.originNqs))
+	groupSize := searchReq.Plan().GetGroupSize()
+	// Use each original request's output topK. The optimizer may lower the
+	// C++ plan topK used for segment search without lowering the final output
+	// contract, and task merging must not turn several requests into one limit.
+	for i := range t.originNqs {
+		t.takeForOutputAllowed[i] = requestAllowsTakeForOutput(
+			searchTakeForOutputResultCount(
+				t.originNqs[i],
+				t.originTopks[i],
+				groupSize,
+			),
+		)
+	}
+	// A merged task carries one C++ plan but materializes each original
+	// request separately. Keep Take disabled until the corresponding request
+	// decision is installed immediately before late materialization.
+	searchReq.Plan().SetTakeForOutputAllowed(false)
 
 	var (
 		results          []*segments.SearchResult
