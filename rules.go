@@ -493,7 +493,7 @@ func fieldDataValidDataAccess(m dsl.Matcher) {
 	// method values are all rejected for both pointer and value receivers.
 	m.Match("$x.ValidData", "$x.GetValidData").
 		Where(isFieldDataType(m["x"])).
-		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+		Report("do not access protobuf valid_data directly; use the validity helpers in typeutil")
 
 	// A keyed composite literal bypasses selector matching, so reject setting
 	// ValidData while constructing any of the three protobuf message types too.
@@ -501,5 +501,5 @@ func fieldDataValidDataAccess(m dsl.Matcher) {
 		Where(m["x"].Type.Is("schemapb.FieldData") ||
 			m["x"].Type.Is("schemapb.ScalarField") ||
 			m["x"].Type.Is("schemapb.VectorField")).
-		Report("do not access protobuf valid_data directly; use typeutil.GetFieldDataValidData or typeutil.SetFieldDataValidData")
+		Report("do not access protobuf valid_data directly; use the validity helpers in typeutil")
 }

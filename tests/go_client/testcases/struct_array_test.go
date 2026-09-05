@@ -29,6 +29,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
@@ -204,6 +206,120 @@ func loadStructArrayMutationCollection(t *testing.T, ctx CtxT, mc MC, collName s
 	common.CheckErr(t, loadTask.Await(ctx), true)
 }
 
+type structArrayPathReplaceState struct {
+	embeddings []entity.FloatVector
+	labels     []string
+	scores     []float32
+}
+
+type fieldOpsOverrideUpsertOption struct {
+	client.UpsertOption
+	fieldOps []*schemapb.FieldPartialUpdateOp
+}
+
+func (opt fieldOpsOverrideUpsertOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
+	req, err := opt.UpsertOption.UpsertRequest(coll)
+	if err != nil {
+		return nil, err
+	}
+	req.PartialUpdate = true
+	req.FieldOps = opt.fieldOps
+	return req, nil
+}
+
+func setupStructArrayPathReplaceCollection(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	suffix string,
+) (string, *entity.StructSchema, structArrayPathReplaceState) {
+	t.Helper()
+
+	const dim = 4
+	collName := common.GenRandomString(hp.StructArrayPrefix+suffix, 6)
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeFloat))
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(100).WithStructSchema(structSchema))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+	seedEmbeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+		{0.9, 1.0, 1.1, 1.2},
+	}
+	seedLabels := []string{"first", "second", "third"}
+	seedScores := []float32{0.1, 0.2, 0.3}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithFloatVectorColumn("normal_vector", dim, [][]float32{{0.1, 0.2, 0.3, 0.4}}).
+		WithStructArrayColumn("clips", structSchema, []map[string]any{{
+			"embedding": seedEmbeddings,
+			"label":     seedLabels,
+			"score":     seedScores,
+		}}))
+	common.CheckErr(t, err, true)
+	loadStructArrayMutationCollection(t, ctx, mc, collName)
+
+	return collName, structSchema, structArrayPathReplaceState{
+		embeddings: []entity.FloatVector{
+			entity.FloatVector(seedEmbeddings[0]),
+			entity.FloatVector(seedEmbeddings[1]),
+			entity.FloatVector(seedEmbeddings[2]),
+		},
+		labels: append([]string(nil), seedLabels...),
+		scores: append([]float32(nil), seedScores...),
+	}
+}
+
+func queryStructArrayPathReplaceState(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	collName string,
+) structArrayPathReplaceState {
+	t.Helper()
+
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 0").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, result.ResultCount)
+	value, err := result.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	row := value.(map[string]any)
+	return structArrayPathReplaceState{
+		embeddings: row["embedding"].([]entity.FloatVector),
+		labels:     row["label"].([]string),
+		scores:     row["score"].([]float32),
+	}
+}
+
+func upsertStructArrayPathReplace(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	collName string,
+	operandSchema *entity.StructSchema,
+	operand map[string]any,
+	path string,
+) error {
+	t.Helper()
+
+	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithStructArrayColumn("clips", operandSchema, []map[string]any{operand}).
+		WithPathReplace("clips", path))
+	return err
+}
+
 func TestStructArrayVectorSliceAndRollbackRemainAppendable(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -266,6 +382,224 @@ func TestStructArrayVectorSliceAndRollbackRemainAppendable(t *testing.T) {
 		row := value.(map[string]any)
 		require.Equal(t, []string{wantLabels[id]}, row["label"])
 		require.Len(t, row["embedding"].([]entity.FloatVector), 1)
+	}
+}
+
+func TestStructArrayPathReplacePreservesOmittedChildren(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const dim = 4
+	collName := createStructArrayMutationCollection(t, ctx, mc, "_path_replace", dim, false)
+	seedEmbedding := [][]float32{{0.1, 0.2, 0.3, 0.4}, {0.5, 0.6, 0.7, 0.8}}
+	fullStructSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithFloatVectorColumn("normal_vector", dim, [][]float32{hp.RandFloatVector(dim)}).
+		WithStructArrayColumn("clips", fullStructSchema, []map[string]any{{
+			"embedding": seedEmbedding,
+			"label":     []string{"first", "second"},
+		}}))
+	common.CheckErr(t, err, true)
+	loadStructArrayMutationCollection(t, ctx, mc, collName)
+
+	labelOnlySchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithStructArrayColumn("clips", labelOnlySchema, []map[string]any{{
+			"label": []string{"updated"},
+		}}).
+		WithPathReplace("clips", "[1]"))
+	common.CheckErr(t, err, true)
+
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 0").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, result.ResultCount)
+	value, err := result.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	row := value.(map[string]any)
+	require.Equal(t, []string{"first", "updated"}, row["label"])
+	require.Equal(t, []entity.FloatVector{
+		entity.FloatVector(seedEmbedding[0]),
+		entity.FloatVector(seedEmbedding[1]),
+	}, row["embedding"])
+}
+
+func TestStructArrayPathReplaceVariants(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName, fullSchema, want := setupStructArrayPathReplaceCollection(t, ctx, mc, "_path_variants_")
+	labelSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	embeddingSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(4))
+	labelAndScoreSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeFloat))
+
+	err := upsertStructArrayPathReplace(t, ctx, mc, collName, labelSchema,
+		map[string]any{"label": []string{"scalar-child"}}, "[1][label]")
+	common.CheckErr(t, err, true)
+	want.labels[1] = "scalar-child"
+	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+
+	replacementVector := entity.FloatVector{9.1, 9.2, 9.3, 9.4}
+	err = upsertStructArrayPathReplace(t, ctx, mc, collName, embeddingSchema,
+		map[string]any{"embedding": [][]float32{replacementVector}}, "[0][embedding]")
+	common.CheckErr(t, err, true)
+	want.embeddings[0] = replacementVector
+	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+
+	err = upsertStructArrayPathReplace(t, ctx, mc, collName, labelAndScoreSchema,
+		map[string]any{"label": []string{"subset"}, "score": []float32{8.8}}, "[2]")
+	common.CheckErr(t, err, true)
+	want.labels[2] = "subset"
+	want.scores[2] = 8.8
+	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+
+	fullVector := entity.FloatVector{7.1, 7.2, 7.3, 7.4}
+	err = upsertStructArrayPathReplace(t, ctx, mc, collName, fullSchema, map[string]any{
+		"embedding": [][]float32{fullVector},
+		"label":     []string{"full-element"},
+		"score":     []float32{7.7},
+	}, "[1]")
+	common.CheckErr(t, err, true)
+	want.embeddings[1] = fullVector
+	want.labels[1] = "full-element"
+	want.scores[1] = 7.7
+	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+}
+
+func TestStructArrayPathReplaceRejectsInvalidRequestsWithoutMutation(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName, _, want := setupStructArrayPathReplaceCollection(t, ctx, mc, "_path_reject_")
+	labelSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	labelAndScoreSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeFloat))
+
+	tests := []struct {
+		name          string
+		operandSchema *entity.StructSchema
+		operand       map[string]any
+		path          string
+		contains      string
+	}{
+		{
+			name:          "unknown child",
+			operandSchema: labelSchema,
+			operand:       map[string]any{"label": []string{"unchanged"}},
+			path:          "[0][missing]",
+			contains:      "not found",
+		},
+		{
+			name:          "extra child for explicit path",
+			operandSchema: labelAndScoreSchema,
+			operand:       map[string]any{"label": []string{"unchanged"}, "score": []float32{9.9}},
+			path:          "[0][label]",
+			contains:      "requires exactly that child",
+		},
+		{
+			name:          "out of range",
+			operandSchema: labelSchema,
+			operand:       map[string]any{"label": []string{"unchanged"}},
+			path:          "[3][label]",
+			contains:      "out of range",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := upsertStructArrayPathReplace(t, ctx, mc, collName,
+				test.operandSchema, test.operand, test.path)
+			require.Error(t, err)
+			require.ErrorContains(t, err, test.contains)
+			require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+		})
+	}
+}
+
+func TestStructArrayPathReplaceRejectsOverlapMatrixWithoutMutation(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName, fullSchema, want := setupStructArrayPathReplaceCollection(t, ctx, mc, "_path_overlap_")
+	labelSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	pathOp := func(path string) *schemapb.FieldPartialUpdateOp {
+		return &schemapb.FieldPartialUpdateOp{
+			FieldName: "clips",
+			Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+			Path:      path,
+		}
+	}
+	fieldOp := func(op schemapb.FieldPartialUpdateOp_OpType) *schemapb.FieldPartialUpdateOp {
+		return &schemapb.FieldPartialUpdateOp{FieldName: "clips", Op: op}
+	}
+	tests := []struct {
+		name      string
+		ops       []*schemapb.FieldPartialUpdateOp
+		labelOnly bool
+	}{
+		{name: "whole replace and path", ops: []*schemapb.FieldPartialUpdateOp{
+			fieldOp(schemapb.FieldPartialUpdateOp_REPLACE), pathOp("[1]"),
+		}},
+		{name: "element and child", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1]"), pathOp("[1][label]"),
+		}},
+		{name: "same child twice", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1][label]"), pathOp("[1][label]"),
+		}, labelOnly: true},
+		{name: "different children", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1][label]"), pathOp("[1][score]"),
+		}, labelOnly: true},
+		{name: "different indexes", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1]"), pathOp("[2]"),
+		}},
+		{name: "same element twice", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1]"), pathOp("[1]"),
+		}},
+		{name: "append and path", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1]"), fieldOp(schemapb.FieldPartialUpdateOp_ARRAY_APPEND),
+		}},
+		{name: "remove and path", ops: []*schemapb.FieldPartialUpdateOp{
+			pathOp("[1]"), fieldOp(schemapb.FieldPartialUpdateOp_ARRAY_REMOVE),
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			operandSchema := fullSchema
+			operand := map[string]any{
+				"embedding": [][]float32{{9.1, 9.2, 9.3, 9.4}},
+				"label":     []string{"must-not-apply"},
+				"score":     []float32{9.9},
+			}
+			if test.labelOnly {
+				operandSchema = labelSchema
+				operand = map[string]any{"label": []string{"must-not-apply"}}
+			}
+			baseOption := client.NewColumnBasedInsertOption(collName).
+				WithInt64Column("id", []int64{0}).
+				WithStructArrayColumn("clips", operandSchema, []map[string]any{operand})
+			_, err := mc.Upsert(ctx, fieldOpsOverrideUpsertOption{
+				UpsertOption: baseOption,
+				fieldOps:     test.ops,
+			})
+			require.Error(t, err)
+			require.ErrorContains(t, err, "duplicate partial-update op")
+			require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
+		})
 	}
 }
 

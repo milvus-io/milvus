@@ -2792,7 +2792,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		for i := uint32(0); i < numRows; i++ {
 			errIndex[i] = i
 		}
-
 		return &milvuspb.MutationResult{
 			Status:   merr.Status(err),
 			ErrIndex: errIndex,
