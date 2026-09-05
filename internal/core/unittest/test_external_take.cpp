@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "common/ChunkWriter.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -44,6 +45,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -1029,6 +1031,58 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
                       int64_t segment_id = 1) {
     holder = CreateSealedSegment(schema, nullptr, segment_id);
     return dynamic_cast<ChunkedSegmentSealedImpl*>(holder.get());
+}
+
+std::shared_ptr<ChunkedColumnInterface>
+BuildExternalTextColumn(const FieldMeta& field_meta) {
+    arrow::BinaryBuilder builder;
+    EXPECT_TRUE(builder.Append("external text 0").ok());
+    EXPECT_TRUE(builder.AppendNull().ok());
+    EXPECT_TRUE(builder.Append("external text 2").ok());
+    auto array = builder.Finish().ValueOrDie();
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        create_chunk(field_meta, arrow::ArrayVector{std::move(array)}));
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{3}, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    return MakeChunkedColumnBase(DataType::TEXT, std::move(slot), field_meta);
+}
+
+void
+LoadExternalTextColumnForTesting(ChunkedSegmentSealedImpl* segment,
+                                 const SchemaPtr& schema,
+                                 FieldId field_id) {
+    auto current = segment->TestGetPublishedStateSnapshot();
+    auto runtime = segment->TestCloneMutableRuntimeResourceState();
+
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = current->schema;
+    initial_delta.load_info = current->load_info;
+    initial_delta.runtime = segment->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = segment->TestBuildNextPublishedState(current, initial_delta);
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = current->schema;
+    final_delta.load_info = current->load_info;
+    final_delta.commit_ts = current->commit_ts;
+
+    auto column = BuildExternalTextColumn(schema->operator[](field_id));
+    segment->TestStageLoadFieldDataThenPublish(field_id,
+                                               column,
+                                               3,
+                                               DataType::TEXT,
+                                               schema,
+                                               runtime,
+                                               staged.get(),
+                                               current,
+                                               final_delta,
+                                               [] {});
 }
 
 // Mock Reader that always returns an error from take().
@@ -2503,6 +2557,72 @@ TEST(ExternalTakeAccessMode, RetrieveRequestGateDisabledReturnsFalse) {
         plan.get(), results, &offset, 1, false, false);
     EXPECT_FALSE(ok);
     EXPECT_EQ(results->fields_data_size(), 0);
+}
+
+TEST(ExternalTakeAccessMode, RequestGateDisabledFallsBackForExternalText) {
+    auto info = BuildExternalSchema();
+    auto text_id = FieldId(109);
+    info.schema->AddField(FieldMeta(FieldName("text_col"),
+                                    text_id,
+                                    DataType::TEXT,
+                                    65535,
+                                    true,
+                                    std::nullopt,
+                                    "text_col"));
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetUseTakeForOutputForTesting(true);
+    LoadExternalTextColumnForTesting(segment, info.schema, text_id);
+
+    auto retrieve_plan = std::make_unique<query::RetrievePlan>(info.schema);
+    retrieve_plan->field_ids_ = {text_id};
+    retrieve_plan->take_for_output_allowed_ = false;
+
+    auto retrieve_results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    static_cast<SegmentInternalInterface*>(segment)->FillTargetEntry(
+        nullptr,
+        retrieve_plan.get(),
+        retrieve_results,
+        offsets.data(),
+        offsets.size(),
+        false,
+        false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    const auto& retrieved = retrieve_results->fields_data(0);
+    EXPECT_EQ(retrieved.field_id(), text_id.get());
+    const auto& retrieve_valid = GetFieldDataRowValidData(retrieved);
+    ASSERT_EQ(retrieve_valid.size(), offsets.size());
+    EXPECT_TRUE(retrieve_valid[0]);
+    EXPECT_FALSE(retrieve_valid[1]);
+    EXPECT_TRUE(retrieve_valid[2]);
+    const auto& retrieve_text = retrieved.scalars().string_data().data();
+    ASSERT_EQ(retrieve_text.size(), offsets.size());
+    EXPECT_EQ(retrieve_text[0], "external text 0");
+    EXPECT_TRUE(retrieve_text[1].empty());
+    EXPECT_EQ(retrieve_text[2], "external text 2");
+
+    auto search_plan = std::make_unique<query::Plan>(info.schema);
+    search_plan->target_entries_ = {text_id};
+    search_plan->take_for_output_allowed_ = false;
+    SearchResult search_results;
+    search_results.seg_offsets_ = offsets;
+    search_results.distances_.resize(offsets.size());
+    segment->TestFillTargetEntry(search_plan.get(), search_results);
+
+    const auto& searched = *search_results.output_fields_data_.at(text_id);
+    const auto& search_valid = GetFieldDataRowValidData(searched);
+    ASSERT_EQ(search_valid.size(), offsets.size());
+    EXPECT_TRUE(search_valid[0]);
+    EXPECT_FALSE(search_valid[1]);
+    EXPECT_TRUE(search_valid[2]);
+    const auto& search_text = searched.scalars().string_data().data();
+    ASSERT_EQ(search_text.size(), offsets.size());
+    EXPECT_EQ(search_text[0], "external text 0");
+    EXPECT_TRUE(search_text[1].empty());
+    EXPECT_EQ(search_text[2], "external text 2");
 }
 
 TEST(ExternalTakeAccessMode, RetrieveRejectRemoteVectorOutputReturnsFalse) {

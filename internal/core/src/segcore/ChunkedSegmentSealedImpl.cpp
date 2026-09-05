@@ -5878,7 +5878,19 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::TEXT: {
-            // TEXT type is only supported in StorageV3 with LOB files.
+            // External TEXT columns store their source values directly,
+            // while internal StorageV3 TEXT columns store encoded LOB refs.
+            if (field_meta.is_external_field()) {
+                bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                     column.get(),
+                                                     seg_offsets,
+                                                     count,
+                                                     ret->mutable_scalars()
+                                                         ->mutable_string_data()
+                                                         ->mutable_data());
+                break;
+            }
+
             auto runtime = snapshot->runtime != nullptr
                                ? snapshot->runtime
                                : BuildRuntimeResourceState();
