@@ -109,6 +109,17 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 	}
 }
 
+func UpdateTaskVersion(version int64) UpdateAction {
+	return func(t ImportTask) {
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).task.Load().TaskVersion = version
+		case ImportTaskType:
+			t.(*importTask).task.Load().TaskVersion = version
+		}
+	}
+}
+
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*preImportTask); ok {

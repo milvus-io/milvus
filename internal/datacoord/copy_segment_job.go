@@ -94,6 +94,12 @@ func UpdateCopyJobReason(reason string) UpdateCopySegmentJobAction {
 	}
 }
 
+func UpdateCopyJobPinID(pinID int64) UpdateCopySegmentJobAction {
+	return func(job CopySegmentJob) {
+		job.(*copySegmentJob).PinId = pinID
+	}
+}
+
 func UpdateCopyJobProgress(copied, total int64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
 		job.(*copySegmentJob).CopiedSegments = copied

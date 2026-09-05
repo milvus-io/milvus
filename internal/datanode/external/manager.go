@@ -18,9 +18,9 @@ package external
 
 import (
 	"context"
-	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -37,6 +37,14 @@ type TaskKey struct {
 	TaskID    int64
 }
 
+type taskAdmission uint8
+
+const (
+	taskAdmissionSaturated taskAdmission = iota
+	taskAdmissionDuplicate
+	taskAdmissionAccepted
+)
+
 // TaskInfo stores the mutable state of an external collection task.
 type TaskInfo struct {
 	Cancel          context.CancelFunc
@@ -45,6 +53,7 @@ type TaskInfo struct {
 	CollID          int64
 	KeptSegments    []int64
 	UpdatedSegments []*datapb.SegmentInfo
+	StartedAt       time.Time
 }
 
 // Clone creates a deep copy so callers can freely mutate the result.
@@ -56,6 +65,7 @@ func (t *TaskInfo) Clone() *TaskInfo {
 		CollID:          t.CollID,
 		KeptSegments:    cloneSegmentIDs(t.KeptSegments),
 		UpdatedSegments: cloneSegments(t.UpdatedSegments),
+		StartedAt:       t.StartedAt,
 	}
 }
 
@@ -107,30 +117,79 @@ func cloneSegments(src []*datapb.SegmentInfo) []*datapb.SegmentInfo {
 // ExternalCollectionManager supervises the lifecycle of external collection tasks
 // within a single datanode.
 type ExternalCollectionManager struct {
-	ctx       context.Context
-	mu        sync.RWMutex
-	tasks     map[TaskKey]*TaskInfo
-	pool      *conc.Pool[any]
-	closeOnce sync.Once
+	ctx   context.Context
+	mu    sync.RWMutex
+	tasks map[TaskKey]*TaskInfo
+	pool  *conc.Pool[any]
+	// slots mirrors the pool's capacity so SubmitTask can refuse work without
+	// blocking. pool.Submit parks the caller when every worker is busy, and the
+	// caller here is a DataCoord RPC handler: parking it past the RPC deadline
+	// makes DataCoord give up on a task this node will still run later. A full
+	// pool is normal operation (refreshes are long external scans), so the
+	// right answer is a retryable rejection, not a wait.
+	slots chan struct{}
+	// lifecycleMu closes the gap between checking whether the pool is closed
+	// and submitting work. Close must not release the pool in that gap, or the
+	// accepted task would keep its map entry and slot without ever running.
+	lifecycleMu sync.Mutex
+	closeOnce   sync.Once
 }
 
 // NewExternalCollectionManager constructs a manager with the provided worker pool size.
 func NewExternalCollectionManager(ctx context.Context, poolSize int) *ExternalCollectionManager {
-	return &ExternalCollectionManager{
+	manager := &ExternalCollectionManager{
 		ctx:   ctx,
 		tasks: make(map[TaskKey]*TaskInfo),
 		pool:  conc.NewPool[any](poolSize),
+		slots: make(chan struct{}, poolSize),
 	}
+	return manager
 }
 
 // Close releases all background resources.
 func (m *ExternalCollectionManager) Close() {
 	m.closeOnce.Do(func() {
+		m.lifecycleMu.Lock()
+		defer m.lifecycleMu.Unlock()
 		if m.pool != nil {
 			m.pool.Release()
 		}
 		mlog.Info(m.ctx, "external collection manager closed")
 	})
+}
+
+// RemoveExpiredTasks cancels and removes tasks older than cutoff.
+func (m *ExternalCollectionManager) RemoveExpiredTasks(ctx context.Context, cutoff time.Time) int {
+	type expiredTask struct {
+		key    TaskKey
+		state  indexpb.JobState
+		age    time.Duration
+		cancel context.CancelFunc
+	}
+	expired := make([]expiredTask, 0)
+	m.mu.Lock()
+	for key, info := range m.tasks {
+		if info.StartedAt.IsZero() || info.StartedAt.After(cutoff) {
+			continue
+		}
+		delete(m.tasks, key)
+		expired = append(expired, expiredTask{
+			key: key, state: info.State, age: time.Since(info.StartedAt), cancel: info.Cancel,
+		})
+	}
+	m.mu.Unlock()
+
+	for _, task := range expired {
+		if task.cancel != nil {
+			task.cancel()
+		}
+		mlog.Info(ctx, "reclaiming expired external collection task",
+			mlog.FieldTaskID(task.key.TaskID),
+			mlog.String("clusterID", task.key.ClusterID),
+			mlog.String("state", task.state.String()),
+			mlog.Duration("age", task.age))
+	}
+	return len(expired)
 }
 
 // LoadOrStore adds a task entry if absent and returns the existing entry if present.
@@ -140,6 +199,9 @@ func (m *ExternalCollectionManager) LoadOrStore(clusterID string, taskID int64, 
 	key := makeTaskKey(clusterID, taskID)
 	if oldInfo, ok := m.tasks[key]; ok {
 		return oldInfo
+	}
+	if info.StartedAt.IsZero() {
+		info.StartedAt = time.Now()
 	}
 	m.tasks[key] = info
 	return nil
@@ -168,6 +230,31 @@ func (m *ExternalCollectionManager) Delete(clusterID string, taskID int64) *Task
 	return nil
 }
 
+// tryAdmitTask makes duplicate detection, capacity reservation, and ownership
+// publication one atomic state transition. A SubmitTask attempt is never
+// visible in m.tasks unless it already owns a worker slot, so a concurrent
+// duplicate cannot observe an attempt that will subsequently be rejected for
+// saturation.
+func (m *ExternalCollectionManager) tryAdmitTask(clusterID string, taskID int64, info *TaskInfo) taskAdmission {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := makeTaskKey(clusterID, taskID)
+	if _, ok := m.tasks[key]; ok {
+		return taskAdmissionDuplicate
+	}
+
+	select {
+	case m.slots <- struct{}{}:
+		if info.StartedAt.IsZero() {
+			info.StartedAt = time.Now()
+		}
+		m.tasks[key] = info
+		return taskAdmissionAccepted
+	default:
+		return taskAdmissionSaturated
+	}
+}
+
 // UpdateState updates only the state/failReason fields.
 func (m *ExternalCollectionManager) UpdateState(clusterID string, taskID int64, state indexpb.JobState, failReason string) {
 	m.mu.Lock()
@@ -179,8 +266,17 @@ func (m *ExternalCollectionManager) UpdateState(clusterID string, taskID int64, 
 	}
 }
 
-// UpdateResult commits the latest state plus kept/updated segments atomically.
-func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
+// externalRefreshFailureState decides whether a failed refresh attempt is worth
+// another one. Input errors are permanent; system and unknown errors remain
+// retriable and consume the coordinator's attempt budget.
+func externalRefreshFailureState(err error) indexpb.JobState {
+	if merr.GetErrorType(err) == merr.InputError {
+		return indexpb.JobState_JobStateFailed
+	}
+	return indexpb.JobState_JobStateRetry
+}
+
+func (m *ExternalCollectionManager) updateResult(clusterID string, taskID int64,
 	state indexpb.JobState,
 	failReason string,
 	keptSegments []int64,
@@ -233,18 +329,41 @@ func (m *ExternalCollectionManager) SubmitTask(
 		UpdatedSegments: nil,
 	}
 
-	if oldInfo := m.LoadOrStore(clusterID, taskID, info); oldInfo != nil {
-		// Task already exists — this is a duplicate dispatch (e.g. from
-		// scheduler TOCTOU race between Enqueue dedup check and Push).
-		// Treat as idempotent success since the task is already running.
+	// Close, admission, and Submit form one lifecycle transition. Keeping them
+	// under one lock prevents both a rejected submission leak and a duplicate
+	// caller observing an admission that shutdown is about to roll back.
+	m.lifecycleMu.Lock()
+	if m.pool.IsClosed() {
+		m.lifecycleMu.Unlock()
+		cancel()
+		return merr.WrapErrServiceUnavailable("external collection worker pool is closed")
+	}
+
+	admission := m.tryAdmitTask(clusterID, taskID, info)
+	if admission == taskAdmissionDuplicate {
+		m.lifecycleMu.Unlock()
+		// A duplicate dispatch is idempotent: the registered task keeps its slot.
 		mlog.Info(m.ctx, "task already exists, treating as idempotent success",
 			mlog.FieldTaskID(taskID),
 			mlog.FieldCollectionID(req.GetCollectionID()))
+		cancel()
 		return nil
+	}
+
+	if admission == taskAdmissionSaturated {
+		m.lifecycleMu.Unlock()
+		cancel()
+		mlog.Info(m.ctx, "external collection worker pool saturated, refusing task",
+			mlog.FieldTaskID(taskID),
+			mlog.FieldCollectionID(req.GetCollectionID()),
+			mlog.Int("poolSize", cap(m.slots)))
+		return merr.WrapErrTooManyRequests(int32(cap(m.slots)),
+			"external collection worker pool saturated, retry later")
 	}
 
 	// Submit to pool
 	m.pool.Submit(func() (_ any, retErr error) {
+		defer func() { <-m.slots }()
 		defer cancel()
 		// Defense-in-depth: isolate panics in a single task so a buggy
 		// external source cannot crash the whole datanode process (e.g.
@@ -257,10 +376,13 @@ func (m *ExternalCollectionManager) SubmitTask(
 					mlog.FieldCollectionID(req.GetCollectionID()),
 					mlog.Any("panic", r),
 					mlog.ByteString("stack", stack))
-				reason := fmt.Sprintf("task panicked: %v", r)
-				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
-				// A recovered panic is a server-side failure, never caller input.
-				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
+				// A panic is a worker-side system failure, not proof that the
+				// request is invalid. Convert it to the same structured error used
+				// by ordinary task failures and let the existing classifier decide;
+				// DataCoord's attempt budget bounds repeated failures.
+				retErr = merr.WrapErrServiceInternalMsg("task panicked: %v", r)
+				state := externalRefreshFailureState(retErr)
+				m.updateResult(clusterID, taskID, state, retErr.Error(), info.KeptSegments, nil)
 			}
 		}()
 		mlog.Info(m.ctx, "executing external collection task in pool",
@@ -270,9 +392,11 @@ func (m *ExternalCollectionManager) SubmitTask(
 		// Execute the task
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
-			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
+			state := externalRefreshFailureState(err)
+			m.updateResult(clusterID, taskID, state, err.Error(), info.KeptSegments, nil)
 			mlog.Warn(m.ctx, "external collection task failed",
 				mlog.FieldTaskID(taskID),
+				mlog.String("state", state.String()),
 				mlog.Err(err))
 			return nil, err
 		}
@@ -283,11 +407,12 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
+		m.updateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
 		mlog.Info(m.ctx, "external collection task completed",
 			mlog.FieldTaskID(taskID))
 		return nil, nil
 	})
+	m.lifecycleMu.Unlock()
 
 	return nil
 }

@@ -873,6 +873,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, false, Params.EnableL0Import.GetAsBool())
 		assert.Equal(t, 4, Params.ImportFileNumPerSlot.GetAsInt())
 		assert.Equal(t, 160*1024*1024, Params.ImportMemoryLimitPerSlot.GetAsInt())
+		assert.Equal(t, int64(10), Params.ImportMaxAttempts.GetAsInt64())
+		params.Save(Params.ImportMaxAttempts.Key, "3")
+		assert.Equal(t, int64(3), Params.ImportMaxAttempts.GetAsInt64())
+		params.Reset(Params.ImportMaxAttempts.Key)
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
@@ -1284,6 +1288,8 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	assert.Equal(t, int64(1000000), params.DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64())
+	assert.Equal(t, time.Hour, params.DataNodeCfg.TaskSweepInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 24*time.Hour, params.DataNodeCfg.TaskRetention.GetAsDuration(time.Second))
 
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
@@ -1314,9 +1320,15 @@ func TestCachedParam(t *testing.T) {
 }
 
 func TestFallbackParam(t *testing.T) {
-	Init()
-	params := Get()
-	params.Save("common.chanNamePrefix.cluster", "foo")
+	manager := config.NewManager()
+	manager.SetConfig("common.chanNamePrefix.cluster", "foo")
+	param := &ParamItem{
+		Key:          "msgChannel.chanNamePrefix.cluster",
+		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
+		DefaultValue: "by-dev",
+		Forbidden:    true,
+	}
+	param.Init(manager)
 
-	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+	assert.Equal(t, "foo", param.GetValue())
 }

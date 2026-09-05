@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -871,6 +872,68 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	})
 }
 
+func (s *DataNodeServicesSuite) TestIndexAnalyzeFreshTaskIDIsolation() {
+	const clusterID = "fresh-task-id-cluster"
+
+	type taskCase struct {
+		name     string
+		taskType taskcommon.Type
+		oldID    int64
+		newID    int64
+		load     func(int64, context.CancelFunc)
+		get      func(int64) bool
+	}
+	cases := []taskCase{
+		{
+			name: "index", taskType: taskcommon.Index, oldID: 201, newID: 202,
+			load: func(id int64, cancel context.CancelFunc) {
+				s.node.taskManager.LoadOrStoreIndexTask(clusterID, id, &index.IndexTaskInfo{Cancel: cancel, State: commonpb.IndexState_InProgress})
+			},
+			get: func(id int64) bool { return s.node.taskManager.GetIndexTaskInfo(clusterID, id) != nil },
+		},
+		{
+			name: "analyze", taskType: taskcommon.Analyze, oldID: 203, newID: 204,
+			load: func(id int64, cancel context.CancelFunc) {
+				s.node.taskManager.LoadOrStoreAnalyzeTask(clusterID, id, &index.AnalyzeTaskInfo{Cancel: cancel, State: indexpb.JobState_JobStateInProgress})
+			},
+			get: func(id int64) bool { return s.node.taskManager.GetAnalyzeTaskInfo(clusterID, id) != nil },
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			oldCtx, oldCancel := context.WithCancel(s.ctx)
+			defer oldCancel()
+			newCtx, newCancel := context.WithCancel(s.ctx)
+			defer newCancel()
+			tc.load(tc.oldID, oldCancel)
+			tc.load(tc.newID, newCancel)
+
+			// Legacy task_version properties are accepted but no longer used for
+			// ownership. The fresh task ID is the only identity.
+			resp, err := s.node.QueryTask(s.ctx, &workerpb.QueryTaskRequest{Properties: map[string]string{
+				taskcommon.ClusterIDKey:   clusterID,
+				taskcommon.TypeKey:        tc.taskType,
+				taskcommon.TaskIDKey:      strconv.FormatInt(tc.newID, 10),
+				taskcommon.TaskVersionKey: "999",
+			}})
+			s.NoError(merr.CheckRPCCall(resp, err))
+
+			status, err := s.node.DropTask(s.ctx, &workerpb.DropTaskRequest{Properties: map[string]string{
+				taskcommon.ClusterIDKey:   clusterID,
+				taskcommon.TypeKey:        tc.taskType,
+				taskcommon.TaskIDKey:      strconv.FormatInt(tc.oldID, 10),
+				taskcommon.TaskVersionKey: "1",
+			}})
+			s.NoError(merr.CheckRPCCall(status, err))
+			s.False(tc.get(tc.oldID))
+			s.ErrorIs(oldCtx.Err(), context.Canceled)
+			s.True(tc.get(tc.newID))
+			s.NoError(newCtx.Err())
+		})
+	}
+}
+
 func (s *DataNodeServicesSuite) TestCopySegment() {
 	s.Run("unhealthy datanode", func() {
 		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -1381,20 +1444,13 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 	})
 }
 
-func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
-	s.Run("drop failed task logs cleanup attempt", func() {
-		// The test verifies that DropCopySegment checks task state
-		// and calls CleanupCopiedFiles on failed CopySegmentTask
-
-		// Note: We cannot easily mock the ChunkManager without changing DataNode internals,
-		// but we can verify that the logic path is executed by checking logs
-		// The unit tests in task_copy_segment_test.go thoroughly test the cleanup functionality itself
-
-		// This test mainly verifies integration: that DropCopySegment correctly:
-		// 1. Retrieves the task from the task manager
-		// 2. Checks if it's a CopySegmentTask
-		// 3. Checks if the state is Failed
-		// 4. Calls CleanupCopiedFiles() if conditions are met
+func (s *DataNodeServicesSuite) TestDropCopySegment_RemovesTaskWithoutTouchingObjects() {
+	s.Run("drop removes the task and deletes nothing", func() {
+		// Drop reclaims the worker-side record and nothing else. It must never
+		// delete the objects the attempt wrote: copy targets are a pure function
+		// of the target segment ID, so an abandoned attempt shares every key with
+		// the attempt that replaced it, and deleting "its own" files here would
+		// delete live restored data. DataCoord's GC reclaims them instead.
 
 		// Create a copy task that will be in pending state
 		createReq := &datapb.CopySegmentRequest{
@@ -1477,9 +1533,9 @@ func (s *DataNodeServicesSuite) TestImportStateV2ToCopySegmentTaskState() {
 			outputState: datapb.CopySegmentTaskState_CopySegmentTaskFailed,
 		},
 		{
-			name:        "Retry to Failed",
+			name:        "Retry to Retry",
 			inputState:  datapb.ImportTaskStateV2_Retry,
-			outputState: datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			outputState: datapb.CopySegmentTaskState_CopySegmentTaskRetry,
 		},
 	}
 

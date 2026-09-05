@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -920,7 +921,7 @@ func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRoll
 	}
 }
 
-func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+func TestCommitImportCallback_ReplicatedUncommittedToCommitting(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
@@ -929,6 +930,7 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 			JobID:      1,
 			State:      internalpb.ImportJobState_Uncommitted,
 			AutoCommit: false,
+			Vchannels:  []string{"ch0"},
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
@@ -941,7 +943,63 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 1)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState(),
+		"replicated CommitImport must enter the commit phase even though this replica did not initiate the broadcast")
+}
+
+func TestCommitImportCallback_NoVchannelsDoesNotEnterCommitting(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+	const jobID = int64(15)
+	err := importMeta.AddJob(ctx, &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      jobID,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	})
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, importMeta.GetJob(ctx, jobID).GetState())
+}
+
+func TestCommitImportCallback_AmbiguousWriteFailsStopWhileCallbackCanceled(t *testing.T) {
+	const jobID = int64(14)
+	callbackCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	writeErr := errors.New("ambiguous catalog response")
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Uncommitted,
+			Vchannels: []string{"ch0"},
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(job).Once()
+	importMeta.EXPECT().UpdateJob(mock.Anything, jobID, mock.Anything).Return(writeErr).Once()
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	callbacks := &DDLCallbacks{Server: &Server{
+		ctx:        context.Background(),
+		importMeta: importMeta,
+	}}
+	err := callbacks.commitImportV2AckCallback(callbackCtx, buildCommitImportBroadcastResult(jobID))
+	assert.ErrorIs(t, err, writeErr)
+	assert.True(t, fatalCalled, "callback cancellation must not suppress fail-stop while DataCoord is alive")
 }
 
 func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
@@ -984,6 +1042,7 @@ func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
 			JobID:      13,
 			State:      internalpb.ImportJobState_Uncommitted,
 			AutoCommit: false,
+			Vchannels:  []string{"ch0"},
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
@@ -1007,6 +1066,7 @@ func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
 			JobID:      12,
 			State:      internalpb.ImportJobState_Importing,
 			AutoCommit: false,
+			Vchannels:  []string{"ch0"},
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
@@ -1131,6 +1191,7 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 				JobID:      jobID,
 				State:      internalpb.ImportJobState_Uncommitted,
 				AutoCommit: false,
+				Vchannels:  []string{"ch0"},
 			},
 			tr: timerecord.NewTimeRecorder("race"),
 		})
@@ -1222,7 +1283,19 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 // IsControlChannel guard before reaching the CommitImport case, so the
 // message must reach data vchannels for HandleCommitVchannel to run.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
-	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+	ctx := context.Background()
+	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
+	capture := &captureBroadcastAPI{}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:        7,
+		CollectionID: 7,
+		Vchannels:    wantVchannels,
+	}}
+
+	err := appendCommitImportMessage(ctx, capture, job)
+	assert.NoError(t, err)
+	assert.NotNil(t, capture.captured)
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels)
 }
 
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
@@ -1251,7 +1324,7 @@ func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, cont
 }
 
 func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
-	testBroadcastRequiresVchannels(t, (*Server).broadcastCommitImportMessage)
+	testBroadcastRequiresVchannels(t, (*Server).commitImport)
 }
 
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {

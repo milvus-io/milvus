@@ -256,7 +256,15 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	}
 
 	if err := m.catalog.Update(ctx, action); err != nil {
-		return merr.Wrap(err, "publish segment manifest")
+		wrappedErr := merr.Wrap(err, "publish segment manifest")
+		// The catalog write may already be durable even when its response is
+		// lost. Keep the same fail-stop rule as the batched publication path so
+		// stale in-memory manifest state cannot publish another revision over it.
+		if m.ctx != nil && m.ctx.Err() == nil && ctx.Err() == nil {
+			mlog.Fatal(ctx, "segment manifest publication failed; terminating process",
+				mlog.FieldSegmentID(commit.SegmentID), mlog.Err(wrappedErr))
+		}
+		return wrappedErr
 	}
 	metricMutation.commit()
 	// Memory is installed only after the catalog write has succeeded while the
@@ -499,20 +507,35 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 // same transaction and must be pure catalog mutations: they must not advance a V3
 // manifest pointer (which would require its own per-segment manifest lock).
 func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
+	_, _, err := m.commitSegmentManifestsWithActions(ctx, commits, nil, extraOperators...)
+	return err
+}
+
+// commitSegmentManifestsWithActions is the internal completion form used when
+// segment publication and another existing metadata record must share the
+// final catalog transaction. Manifest generation still happens before that
+// transaction and outside segMu; extraActions are appended only to the final
+// catalog update.
+func (m *meta) commitSegmentManifestsWithActions(
+	ctx context.Context,
+	commits []SegmentManifestCommit,
+	extraActions []metastore.UpdateAction,
+	extraOperators ...UpdateOperator,
+) (*updateSegmentPack, []preparedSegmentManifest, error) {
 	idSet := make(map[int64]struct{}, len(commits))
 	for i := range commits {
 		commit := commits[i]
 		if commit.SegmentID == 0 {
-			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
+			return nil, nil, merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 		}
 		if err := validateExpectedManifestUsage(commit); err != nil {
-			return err
+			return nil, nil, err
 		}
 		if commit.CatalogMutation.NewSegment != nil {
-			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot create a new segment, segmentID=%d", commit.SegmentID)
+			return nil, nil, merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot create a new segment, segmentID=%d", commit.SegmentID)
 		}
 		if _, dup := idSet[commit.SegmentID]; dup {
-			return merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)
+			return nil, nil, merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)
 		}
 		idSet[commit.SegmentID] = struct{}{}
 	}
@@ -520,10 +543,11 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 	if len(commits) == 0 {
 		// A manifest-free batch still needs to publish the caller's operators, but
 		// those never touch a V3 pointer so they need no manifest lock.
-		if len(extraOperators) == 0 {
-			return nil
+		if len(extraOperators) == 0 && len(extraActions) == 0 {
+			return nil, nil, nil
 		}
-		return m.UpdateSegmentsInfo(ctx, extraOperators...)
+		updatePack, err := m.commitSegmentOperatorsWithActions(ctx, extraActions, extraOperators...)
+		return updatePack, nil, err
 	}
 
 	segmentIDs := make([]int64, 0, len(idSet))
@@ -536,7 +560,7 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 	locks := m.getSegmentManifestLocks()
 	lockStart := time.Now()
 	if err := acquireSegmentManifestLocks(ctx, locks, segmentIDs); err != nil {
-		return err
+		return nil, nil, err
 	}
 	lockWait := time.Since(lockStart)
 	holdStart := time.Now()
@@ -551,10 +575,10 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 	// Stage 2: generate every segment's manifest revision in parallel, off segMu.
 	prepared, err := m.prepareSegmentManifests(ctx, commits)
 	if err != nil {
-		return err
+		return nil, prepared, err
 	}
-	if len(prepared) == 0 && len(extraOperators) == 0 {
-		return nil
+	if len(prepared) == 0 && len(extraOperators) == 0 && len(extraActions) == 0 {
+		return nil, nil, nil
 	}
 
 	// Stage 3: publish all prepared pointers and the extra operators in one shot.
@@ -563,7 +587,37 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		operators = append(operators, m.publishSegmentManifestOperator(prepared[i]))
 	}
 	operators = append(operators, extraOperators...)
-	return m.UpdateSegmentsInfo(ctx, operators...)
+	updatePack, err := m.commitSegmentOperatorsWithActions(ctx, extraActions, operators...)
+	return updatePack, nil, err
+}
+
+func (m *meta) commitSegmentOperatorsWithActions(
+	ctx context.Context,
+	extraActions []metastore.UpdateAction,
+	operators ...UpdateOperator,
+) (*updateSegmentPack, error) {
+	if len(extraActions) == 0 {
+		return nil, m.UpdateSegmentsInfo(ctx, operators...)
+	}
+
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+	updatePack, err := m.prepareUpdateSegmentsInfo(ctx, false, operators...)
+	if err != nil {
+		return nil, err
+	}
+
+	actions := make([]metastore.UpdateAction, 0, len(extraActions)+len(updatePack.segments))
+	actions = append(actions, buildAlterSegmentActions(updatePack)...)
+	actions = append(actions, extraActions...)
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		if m.ctx != nil && m.ctx.Err() == nil && ctx.Err() == nil {
+			mlog.Fatal(ctx, "segment and task publication failed; terminating process", mlog.Err(err))
+		}
+		return nil, err
+	}
+	m.applyUpdateSegmentPack(updatePack)
+	return updatePack, nil
 }
 
 // acquireSegmentManifestLocks takes every segment's manifest lock in two phases.
@@ -631,8 +685,9 @@ func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64]
 // prepareSegmentManifests snapshots the target segments once, then generates each
 // segment's new manifest revision in parallel outside segMu. A segment that is gone
 // or unhealthy at snapshot time is skipped (nil result); any real generation failure
-// aborts the batch. The returned slice holds only the segments that produced a
-// revision, in unspecified order.
+// aborts publication of the batch. The returned slice still includes siblings
+// that produced a revision before another sibling failed, allowing a caller to
+// cache those unpublished object-store results for an exact-CAS retry.
 func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentManifestCommit) ([]preparedSegmentManifest, error) {
 	m.segMu.RLock()
 	snapshots := make(map[int64]*SegmentInfo, len(commits))
@@ -662,16 +717,15 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 			return prepareSegmentManifest(ctx, commit, snapshot)
 		}))
 	}
-	if err := conc.BlockOnAll(futures...); err != nil {
-		return nil, err
-	}
+	batchErr := conc.BlockOnAll(futures...)
 	prepared := make([]preparedSegmentManifest, 0, len(futures))
 	for _, future := range futures {
-		if result := future.Value(); result != nil {
+		result, err := future.Await()
+		if err == nil && result != nil {
 			prepared = append(prepared, *result)
 		}
 	}
-	return prepared, nil
+	return prepared, batchErr
 }
 
 // prepareSegmentManifest is the per-segment stage-2 worker: validate the snapshot and

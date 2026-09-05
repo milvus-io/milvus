@@ -96,6 +96,11 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Warn(ctx, "DataCoord context done, exit...")
 			return
 		case <-ticker.C:
+			// The index owner, not the global scheduler, drives retries. Retry is
+			// made dispatchable here and active records are re-enqueued
+			// idempotently, which also recovers a wrapper released after a local
+			// catalog/RPC failure.
+			i.enqueueActiveTasks(true)
 			segments := i.getUnIndexTaskSegments(ctx)
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -105,9 +110,14 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-i.notifyIndexChan:
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
-			isExternal := i.isExternalCollection(collectionID)
+			isExternal, err := i.isExternalCollection(ctx, collectionID)
+			if err != nil {
+				mlog.Warn(ctx, "resolve collection for index notification failed, wait for retry",
+					mlog.FieldCollectionID(collectionID), mlog.Err(err))
+				continue
+			}
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
+				return isFlush(info) && (isExternal || !segmentAwaitsSortBeforeIndex(info))
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -143,7 +153,13 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
+	// The sorted replacement is what gets indexed; indexing the original here
+	// would be wasted work racing its sort.
+	isExternal, err := i.isExternalCollection(ctx, segment.CollectionID)
+	if err != nil {
+		return err
+	}
+	if segmentAwaitsSortBeforeIndex(segment) && !isExternal {
 		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
 	}
@@ -171,10 +187,22 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 	return nil
 }
 
+// segmentAwaitsSortBeforeIndex keeps the index decision tied to persisted
+// segment state for imports. A sort-planned import origin is invisible; a
+// no-sort import origin is visible (while IsImporting still keeps it out of
+// service). After a restart the static sort setting may differ, but it must not
+// retroactively turn that visible no-sort origin into a sort-planned one.
+func segmentAwaitsSortBeforeIndex(segment *SegmentInfo) bool {
+	if segment.GetIsImporting() && !segment.GetIsInvisible() {
+		return false
+	}
+	return segmentAwaitsSort(segment)
+}
+
 // canCreateIndexForSegment reports whether the segment is ready to build the
-// index. The schema is resolved through the handler (lazy-loading on cache miss,
-// e.g. right after a datacoord restart); the check fails closed, deferring to
-// the next inspection round on an unresolvable or inconsistent view.
+// index. The schema is resolved from RootCoord through the handler; the check
+// fails closed, deferring to the next inspection round on an unresolvable or
+// inconsistent view.
 func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index) bool {
 	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
 	if err != nil || collection == nil || collection.Schema == nil {
@@ -193,7 +221,7 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 		return false
 	}
 	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
-		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
+		mlog.Warn(ctx, "indexed field not found in collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 		return false
 	}
@@ -259,34 +287,92 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	return nil
 }
 
-func (i *indexInspector) isExternalCollection(collectionID int64) bool {
-	coll := i.meta.GetCollection(collectionID)
-	return coll != nil && coll.IsExternal()
+func (i *indexInspector) isExternalCollection(ctx context.Context, collectionID int64) (bool, error) {
+	coll, err := i.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return false, err
+	}
+	return coll != nil && coll.IsExternal(), nil
 }
 
 func (i *indexInspector) reloadFromMeta() {
-	segments := i.meta.GetAllSegmentsUnsafe()
-	for _, segment := range segments {
-		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
-			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
-				segIndex.IndexState != commonpb.IndexState_Retry &&
-				segIndex.IndexState != commonpb.IndexState_InProgress) {
+	// Startup resumes work that was dispatchable or assigned. Retry waits for
+	// the first business inspection tick, preserving the retry interval.
+	i.enqueueActiveTasks(false)
+}
+
+// enqueueActiveTasks is the index business owner's scheduling/retry loop.
+// retry=true atomically replaces Retry with an Unissued task under a fresh
+// BuildID before enqueueing. InProgress is also offered every round so an
+// in-memory wrapper released after a transient local failure is recovered
+// without a DataCoord restart. Enqueue itself is idempotent while the scheduler
+// still owns the task.
+func (i *indexInspector) enqueueActiveTasks(retry bool) {
+	for buildID, snapshot := range i.meta.indexMeta.GetAllSegIndexes() {
+		if snapshot == nil || snapshot.IsDeleted {
+			continue
+		}
+
+		if snapshot.IndexState == commonpb.IndexState_Retry {
+			if !retry {
 				continue
 			}
-
-			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
-			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
-			fieldSize := segment.getFieldBinlogSize(fieldID)
-			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
-
-			i.scheduler.Enqueue(newIndexBuildTask(
-				model.CloneSegmentIndex(segIndex),
-				taskSlot,
-				i.meta,
-				i.handler,
-				i.storageCli,
-				i.indexEngineVersionManager,
-			))
+			newBuildID, err := i.allocator.AllocID(i.ctx)
+			if err != nil {
+				mlog.Warn(i.ctx, "failed to allocate replacement index build ID",
+					mlog.Int64("oldBuildID", buildID), mlog.Err(err))
+				continue
+			}
+			replacement, replaced, err := i.meta.indexMeta.ReplaceRetryTask(i.ctx, buildID, newBuildID)
+			if err != nil {
+				// The transaction response is ambiguous: the catalog may already
+				// contain the fresh identity while memory still contains the old
+				// one. Reload authoritative metadata before attempting another swap.
+				if i.ctx.Err() == nil {
+					mlog.Fatal(i.ctx, "index retry task replacement failed; terminating process", mlog.Err(err))
+				}
+				continue
+			}
+			if !replaced {
+				continue
+			}
+			// Usually the callback that exposed Retry already attempted this
+			// drop. If scheduler ownership is still present, make one final
+			// best-effort attempt before dispatching the fresh BuildID.
+			i.scheduler.AbortAndRemoveTask(buildID)
+			snapshot = replacement
 		}
+		if snapshot.IndexState != commonpb.IndexState_Unissued &&
+			snapshot.IndexState != commonpb.IndexState_InProgress {
+			continue
+		}
+
+		segment := i.meta.GetSegment(i.ctx, snapshot.SegmentID)
+		if !isSegmentHealthy(segment) || !i.meta.indexMeta.IsIndexExist(snapshot.CollectionID, snapshot.IndexID) {
+			// Persist the existing ownership check. Leaving this record Unissued
+			// would make GC skip it forever and every inspection round would try to
+			// reconstruct the same task again.
+			reason := "index task no longer has a live segment or index"
+			if err := i.meta.indexMeta.UpdateIndexState(snapshot.BuildID, commonpb.IndexState_Failed, reason); err != nil {
+				mlog.Warn(i.ctx, "failed to retire index task without a live owner",
+					mlog.FieldBuildID(snapshot.BuildID),
+					mlog.FieldSegmentID(snapshot.SegmentID),
+					mlog.FieldIndexID(snapshot.IndexID),
+					mlog.Err(err))
+			}
+			continue
+		}
+		fieldID := i.meta.indexMeta.GetFieldIDByIndexID(snapshot.CollectionID, snapshot.IndexID)
+		fieldSize := segment.getFieldBinlogSize(fieldID)
+		indexParams := i.meta.indexMeta.GetIndexParams(snapshot.CollectionID, snapshot.IndexID)
+		taskSlot := calculateIndexTaskSlot(fieldSize, snapshot.NumRows, indexParams)
+		i.scheduler.Enqueue(newIndexBuildTask(
+			model.CloneSegmentIndex(snapshot),
+			taskSlot,
+			i.meta,
+			i.handler,
+			i.storageCli,
+			i.indexEngineVersionManager,
+		))
 	}
 }

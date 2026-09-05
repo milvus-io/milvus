@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -57,6 +55,14 @@ type CopySegmentTaskSuite struct {
 
 type copySegmentClusterMock struct {
 	session.Cluster
+	droppedNodeID int64
+	droppedTaskID int64
+}
+
+func (c *copySegmentClusterMock) DropCopySegment(nodeID, taskID int64) error {
+	c.droppedNodeID = nodeID
+	c.droppedTaskID = taskID
+	return nil
 }
 
 func TestCopySegmentTask(t *testing.T) {
@@ -102,6 +108,8 @@ func (s *CopySegmentTaskSuite) TestCopySegmentTask_GettersAndSetters() {
 	s.Equal(int64(1001), task.GetTaskID())
 	s.Equal(taskcommon.CopySegment, task.GetTaskType())
 	s.Equal(taskcommon.FromCopySegmentState(datapb.CopySegmentTaskState_CopySegmentTaskPending), task.GetTaskState())
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskRetry
+	s.Equal(taskcommon.Retry, task.GetTaskState(), "CopySegment inspector owns Retry")
 	s.Equal(int64(1), task.GetTaskSlot())
 	s.Equal(int64(1), task.GetTaskVersion())
 }
@@ -545,7 +553,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTas
 	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
 }
 
-func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerReplansUnknownOutcomes() {
 	tests := []struct {
 		name     string
 		external bool
@@ -565,14 +573,16 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 
 	for _, test := range tests {
 		s.Run(test.name, func() {
+			ctx := context.Background()
 			task := createTestCopyTask(100, 2001).(*copySegmentTask)
 			task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
-			copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+			copyMeta, segmentMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9800)
 			task.copyMeta = copyMeta
+			s.Require().NoError(segmentMeta.AddSegment(ctx, newTestCopySegment(2001)))
 
 			job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
 			job.External = test.external
-			s.NoError(copyMeta.AddJob(context.Background(), job))
+			s.NoError(copyMeta.AddJob(ctx, job))
 
 			req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
 			assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
@@ -585,10 +595,15 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 
 			task.CreateTaskOnWorker(10, cluster)
 
-			updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
-			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
-			s.Empty(updatedTask.GetReason())
-			updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+			oldAttempt := copyMeta.GetTask(ctx, task.GetTaskId())
+			s.Require().NotNil(oldAttempt)
+			tasks := copyMeta.GetTasksByJobID(ctx, task.GetJobId())
+			s.Require().Len(tasks, 1)
+			s.Equal(task.GetTaskId(), tasks[0].GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskRetry, tasks[0].GetState())
+			s.EqualValues(10, cluster.droppedNodeID)
+			s.EqualValues(task.GetTaskId(), cluster.droppedTaskID)
+			updatedJob := copyMeta.GetJob(ctx, task.GetJobId())
 			s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 		})
 	}
@@ -604,156 +619,342 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NotCompletedKeepsTaskInProg
 		nil,
 	)
 
-	task := &copySegmentTask{
-		tr:    timerecord.NewTimeRecorder("test"),
-		times: taskcommon.NewTimes(),
-	}
-	task.task.Store(&datapb.CopySegmentTask{
-		TaskId:       1001,
-		JobId:        100,
-		CollectionId: 100,
-		NodeId:       10,
-		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-	})
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 
 	task.QueryTaskOnWorker(cluster)
 
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		copyMeta.GetTask(context.Background(), task.GetTaskId()).GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TransientRPCErrorKeepsInProgress() {
-	// A transient transport error (network blip, RPC timeout, node briefly not
-	// ready) must NOT fail the task or its parent job, and must NOT re-dispatch
-	// it either: the worker-side task may still be running, and re-dispatching
-	// would start a concurrent duplicate copy. The task stays InProgress on the
-	// same node and is simply queried again on the next check round.
-	transientErrs := []error{
-		errors.New("rpc failed"),
-		merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
-	}
-	for _, transientErr := range transientErrs {
-		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(nil, transientErr)
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_DiscardsResultAfterTaskRemoval() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			Reason: "late failure from retired attempt",
+		},
+		nil,
+	)
 
-		task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.Require().NoError(copyMeta.AddJob(ctx,
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	s.Require().NoError(copyMeta.RemoveTask(ctx, task.GetTaskId()))
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		copyMeta.GetJob(ctx, task.GetJobId()).GetState())
+}
+
+// A query round that produces no answer only records Retry. The copy inspector
+// later rebuilds the work under a fresh task ID and fresh target segment IDs.
+// The fresh identity is the whole point: a worker still copying under the old
+// IDs cannot write where the replacement writes, because every target object
+// key is a pure function of the target segment ID.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_UnansweredQueryReplansUnderFreshIdentity() {
+	unanswered := []error{
+		errors.New("rpc failed"),
+		context.DeadlineExceeded,
+		merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
+		merr.WrapErrNodeNotFound(10),
+		merr.Error(merr.Status(merr.WrapErrImportSysFailedMsg("cannot find import task with id %d", 1001))),
+	}
+	for i, queryErr := range unanswered {
+		ctx := context.Background()
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(nil, queryErr)
+		var dropErr error
+		if i == 0 {
+			dropErr = errors.New("drop failed")
+		}
+		cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(dropErr).Once()
+
+		oldTargetID := int64(2001 + i)
+		task := createTestCopyTask(100, oldTargetID).(*copySegmentTask)
 		task.task.Load().NodeId = 10
-		copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
-		// A parent job in Executing state must remain untouched by the retry.
-		s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+		copyMeta, segMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9000+int64(i)*10)
+		s.NoError(segMeta.AddSegment(ctx, newTestCopySegment(oldTargetID)))
+		s.NoError(copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 		task.QueryTaskOnWorker(cluster)
 
-		updatedTask := copyMeta.GetTask(context.Background(), 1001)
-		s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
-		s.EqualValues(10, updatedTask.GetNodeId())
-		s.Empty(updatedTask.GetReason())
-		// The parent job must NOT be failed - the task retries by polling.
+		sameAttempt := copyMeta.GetTask(ctx, 1001)
+		s.Require().NotNil(sameAttempt)
+		s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskRetry, sameAttempt.GetState(),
+			"the task callback only records retry debt")
+		s.Equal(commonpb.SegmentState_Importing, segMeta.GetSegment(ctx, oldTargetID).GetState(),
+			"the inspector has not replaced the attempt yet")
+
+		replacement, err := task.replaceRetryAttempt(ctx)
+		s.Require().NoError(err)
+		s.Require().NotNil(replacement)
+		if dropErr != nil {
+			s.EqualValues(10, sameAttempt.GetNodeId(),
+				"failed best-effort cleanup must not block fresh-ID replacement")
+		}
+		s.Nil(copyMeta.GetTask(ctx, 1001), "the attempt that was abandoned no longer claims the work")
+		replans := copyMeta.GetTasksByJobID(ctx, 100)
+		s.Require().Len(replans, 1, "the work is claimed by exactly one record")
+		replan := replans[0]
+		s.NotEqualValues(1001, replan.GetTaskId(), "a fresh task ID fences the DataNode task manager")
+		s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, replan.GetState())
+		s.EqualValues(NullNodeID, replan.GetNodeId())
+		s.EqualValues(1, replan.GetTaskVersion(), "the attempt counter advances or the cap never bites")
+
+		s.Require().Len(replan.GetIdMappings(), 1)
+		s.EqualValues(1, replan.GetIdMappings()[0].GetSourceSegmentId(), "the source side never moves")
+		newTargetID := replan.GetIdMappings()[0].GetTargetSegmentId()
+		s.NotEqual(oldTargetID, newTargetID, "a fresh target makes the object keys disjoint")
+		s.Equal(commonpb.SegmentState_Importing, segMeta.GetSegment(ctx, newTargetID).GetState())
+		s.EqualValues(100, segMeta.GetSegment(ctx, newTargetID).GetNumOfRows(),
+			"the replan carries the planned row count, it does not re-derive it")
+		s.Equal(commonpb.SegmentState_Dropped, segMeta.GetSegment(ctx, oldTargetID).GetState(),
+			"the abandoned target is dropped so GC reclaims it and anything written under it")
+
 		s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			copyMeta.GetJob(context.Background(), 100).GetState())
+			copyMeta.GetJob(ctx, 100).GetState(), "an abandoned attempt is not a failed job")
 	}
 }
 
-func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispatch() {
-	// Regression test at the global-scheduler level: a one-off transport error
-	// while querying an InProgress copy-segment task must NOT trigger a second
-	// CreateCopySegment dispatch. The task stays in runningTasks (InProgress on
-	// the same node) and is simply queried again on the next check tick.
+func (s *CopySegmentTaskSuite) TestCreateUnknownOutcomePersistsAssignmentThenReplansFreshIdentity() {
+	ctx := context.Background()
+	const oldTargetID = int64(2001)
+	task := createTestCopyTask(100, oldTargetID).(*copySegmentTask)
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+	copyMeta, segMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9700)
+	s.Require().NoError(segMeta.AddSegment(ctx, newTestCopySegment(oldTargetID)))
+	s.Require().NoError(copyMeta.AddJob(ctx,
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+
+	mockAssemble := mockey.Mock(AssembleCopySegmentRequest).Return(&datapb.CopySegmentRequest{
+		TaskID: task.GetTaskId(), JobID: task.GetJobId(), TaskSlot: task.GetTaskSlot(),
+	}, nil).Build()
+	defer mockAssemble.UnPatch()
+
 	cluster := session.NewMockCluster(s.T())
-	var queries atomic.Int32
-	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).RunAndReturn(
-		func(nodeID int64, req *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
-			s.EqualValues(10, nodeID)
-			if queries.Add(1) == 1 {
-				return nil, errors.New("one-off transport error")
-			}
-			return &datapb.QueryCopySegmentResponse{
-				TaskID: 1001,
-				State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-			}, nil
-		})
-	var creates atomic.Int32
-	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(int64, *datapb.CopySegmentRequest, int64, bool) error {
-			creates.Add(1)
-			return nil
-		}).Maybe()
-	// Only reached if the task is wrongly reset to Pending and re-scheduled.
-	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
-		10: {NodeID: 10, AvailableSlots: 16},
-	}).Maybe()
+	cluster.EXPECT().CreateCopySegment(int64(7), mock.MatchedBy(func(req *datapb.CopySegmentRequest) bool {
+		return req.GetTaskID() == task.GetTaskId()
+	}), task.GetCollectionId(), false).Run(func(_ int64, _ *datapb.CopySegmentRequest, _ int64, _ bool) {
+		assigned := copyMeta.GetTask(ctx, task.GetTaskId())
+		s.Require().NotNil(assigned)
+		s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, assigned.GetState(),
+			"assignment must be durable before the Create RPC")
+		s.EqualValues(7, assigned.GetNodeId())
+	}).Return(context.DeadlineExceeded).Once()
+	cluster.EXPECT().DropCopySegment(int64(7), task.GetTaskId()).Return(nil).Once()
 
-	copyTask := createTestCopyTask(100, 2001).(*copySegmentTask)
-	copyTask.task.Load().NodeId = 10
-	newCopySegmentTaskTestMeta(s.T(), copyTask)
+	task.CreateTaskOnWorker(7, cluster)
 
-	scheduler := task2.NewGlobalTaskScheduler(context.Background(), cluster)
-	scheduler.Enqueue(copyTask)
-	scheduler.Start()
-	defer scheduler.Stop()
+	sameAttempt := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Require().NotNil(sameAttempt)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskRetry, sameAttempt.GetState(),
+		"an ambiguous Create records retry debt for the business owner")
+	s.Equal(commonpb.SegmentState_Importing, segMeta.GetSegment(ctx, oldTargetID).GetState())
 
-	// The task must survive the transient error and keep being polled on the
-	// same node across multiple check ticks.
-	s.Eventually(func() bool { return queries.Load() >= 3 }, 10*time.Second, 20*time.Millisecond)
-	s.EqualValues(0, creates.Load())
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, copyTask.GetState())
-	s.EqualValues(10, copyTask.GetNodeId())
+	replacement, err := task.replaceRetryAttempt(ctx)
+	s.Require().NoError(err)
+	s.Require().NotNil(replacement)
+	s.Nil(copyMeta.GetTask(ctx, task.GetTaskId()),
+		"the inspector removes the old identity before the replacement is dispatchable")
+	replans := copyMeta.GetTasksByJobID(ctx, task.GetJobId())
+	s.Require().Len(replans, 1)
+	replacementMeta := replans[0]
+	s.Equal(replacement.GetTaskId(), replacementMeta.GetTaskId())
+	s.NotEqual(task.GetTaskId(), replacementMeta.GetTaskId())
+	s.Equal(task.GetTaskVersion()+1, replacementMeta.GetTaskVersion())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, replacementMeta.GetState())
+	s.Require().Len(replacementMeta.GetIdMappings(), 1)
+	s.NotEqual(oldTargetID, replacementMeta.GetIdMappings()[0].GetTargetSegmentId())
+	s.Equal(commonpb.SegmentState_Dropped, segMeta.GetSegment(ctx, oldTargetID).GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {
-	// Regression test for DataNode restart/replacement: the node manager
-	// returns NodeNotFound, surfaced as a query error. The worker-side task is
-	// confirmed lost, so the task must be reset to Pending with NullNodeID so
-	// the scheduler re-dispatches it to a live node rather than polling the
-	// dead node until the job-level timeout.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_RetriableWorkerFailureReplans() {
+	ctx := context.Background()
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskRetry,
+			Reason: "SlowDown: please reduce your request rate",
+		},
 		nil,
-		merr.WrapErrNodeNotFound(10),
+	)
+	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, segMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9500)
+	s.NoError(segMeta.AddSegment(ctx, newTestCopySegment(2001)))
+	s.NoError(copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, copyMeta.GetJob(ctx, 100).GetState(),
+		"a retriable worker failure must not fail the restore job")
+	s.Equal(taskcommon.Retry, task.GetTaskState(), "the callback hands Retry to the copy inspector")
+	replacement, err := task.replaceRetryAttempt(ctx)
+	s.Require().NoError(err)
+	s.Require().NotNil(replacement)
+	tasks := copyMeta.GetTasksByJobID(ctx, 100)
+	s.Require().Len(tasks, 1, "the old task is replaced by exactly one new task")
+	s.Equal(taskcommon.Failed, task.GetTaskState(), "the old scheduler wrapper retires in the inspector replacement round")
+	s.NotEqualValues(1001, tasks[0].GetTaskId(),
+		"the work is rebuilt under a fresh task ID, not re-sent under the old one")
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, tasks[0].GetState())
+}
+
+// A failure that blames the request cannot be fixed by another worker, so it
+// still fails the job immediately -- that is the point of keeping the two apart.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_PermanentWorkerFailureFailsJob() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			Reason: "no insert/delete binlogs for segment",
+		},
+		nil,
 	)
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
-	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
-	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	copyMeta, segMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9500)
+	s.NoError(segMeta.AddSegment(ctx, newTestCopySegment(2001)))
+	s.NoError(copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	task.QueryTaskOnWorker(cluster)
 
-	updatedTask := copyMeta.GetTask(context.Background(), 1001)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
-	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
-		copyMeta.GetJob(context.Background(), 100).GetState())
+	tasks := copyMeta.GetTasksByJobID(ctx, 100)
+	s.Require().Len(tasks, 1)
+	s.EqualValues(1001, tasks[0].GetTaskId(), "a permanent failure is not rebuilt")
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, tasks[0].GetState())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, copyMeta.GetJob(ctx, 100).GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TaskNotFoundOnWorkerResetsToPending() {
-	// Regression test for a DataNode that restarted but kept (or re-acquired)
-	// its session: the node is reachable, but its in-memory task manager no
-	// longer has the task, so QueryCopySegment surfaces the DataNode's
-	// task-not-found status (importv2.WrapTaskNotFoundError -> ErrImportSysFailed)
-	// as an error. The task is confirmed lost and must be reset to Pending with
-	// NullNodeID for re-dispatch instead of polling until the job-level timeout.
+// Without a cap a node that keeps failing would have the restore mint a task ID
+// and a target segment range forever.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_ReplanStopsAtAttemptCap() {
+	ctx := context.Background()
+	Params.Save(Params.DataCoordCfg.CopySegmentMaxAttempts.Key, "3")
+	defer Params.Reset(Params.DataCoordCfg.CopySegmentMaxAttempts.Key)
+
 	cluster := session.NewMockCluster(s.T())
-	// Round-trip the error through Status -> Error exactly like
-	// cluster.queryTask's merr.CheckRPCCall does with the DataNode's response
-	// status, so the test also covers the code-preservation assumption.
-	taskNotFoundErr := merr.Error(merr.Status(
-		merr.WrapErrImportSysFailedMsg("cannot find import task with id %d", 1001)))
-	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(nil, taskNotFoundErr)
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(nil, errors.New("rpc failed"))
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
-	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
-	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	// This is what a spent cap looks like: the next attempt would be the 3rd.
+	task.task.Load().TaskVersion = 2
+	copyMeta, segMeta := newCopySegmentTaskTestMetaWithAlloc(s.T(), task, 9500)
+	s.NoError(segMeta.AddSegment(ctx, newTestCopySegment(2001)))
+	s.NoError(copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	task.QueryTaskOnWorker(cluster)
 
-	updatedTask := copyMeta.GetTask(context.Background(), 1001)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
-	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
-	s.Empty(updatedTask.GetReason())
-	// The parent job must NOT be failed - the task is re-dispatched.
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
-		copyMeta.GetJob(context.Background(), 100).GetState())
+	tasks := copyMeta.GetTasksByJobID(ctx, 100)
+	s.Require().Len(tasks, 1, "a spent cap settles the attempt instead of rebuilding it")
+	s.EqualValues(1001, tasks[0].GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, tasks[0].GetState())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, copyMeta.GetJob(ctx, 100).GetState())
+}
+
+// A successful best-effort worker drop also clears a live task assignment.
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ReleasesAssignment() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(1), int64(1001)).Return(nil).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	task.DropTaskOnWorker(cluster)
+
+	s.EqualValues(NullNodeID, copyMeta.GetTask(ctx, 1001).GetNodeId(),
+		"a landed drop must release the assignment so GC can remove the record")
+}
+
+// A node that is no longer registered took its copy of the task with it, so
+// there is nothing left to hold the record back.
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeNotFoundReleasesAssignment() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(1), int64(1001)).
+		Return(merr.WrapErrNodeNotFound(1)).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	task.DropTaskOnWorker(cluster)
+
+	s.EqualValues(NullNodeID, copyMeta.GetTask(ctx, 1001).GetNodeId())
+}
+
+// A failed best-effort drop keeps the predecessor assignment for diagnostics;
+// it does not prevent the fresh-ID replacement from proceeding.
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_KeepsAssignmentWhenDropFails() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(1), int64(1001)).
+		Return(errors.New("connection refused")).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	task.DropTaskOnWorker(cluster)
+
+	s.EqualValues(1, copyMeta.GetTask(ctx, 1001).GetNodeId(),
+		"a failed drop must not pretend the predecessor was released")
+}
+
+// An unassigned task has no worker to tell. Sending the drop anyway would go to
+// node 0 or -1 and fail on every round.
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_SkipsUnassignedTask() {
+	cluster := session.NewMockCluster(s.T())
+	// DropCopySegment is deliberately not declared: the mock fails the test if
+	// the drop path reaches for it.
+
+	for _, nodeID := range []int64{NullNodeID, 0} {
+		task := createTestCopyTask(100, 2001).(*copySegmentTask)
+		task.task.Load().NodeId = nodeID
+		copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+		task.copyMeta = copyMeta
+
+		task.DropTaskOnWorker(cluster)
+	}
+}
+
+// The scheduler rechecks task state under its per-task lock before polling, so
+// an InProgress task without an assignment is inconsistent rather than a valid
+// race. Treat the unanswered query like every other lost worker attempt so the
+// inspector can replace it instead of preserving the inconsistency.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_ReplansUnassignedTask() {
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(int64(NullNodeID), mock.Anything).
+		Return(nil, merr.WrapErrNodeNotFound(NullNodeID)).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = NullNodeID
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	task.copyMeta = copyMeta
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskRetry,
+		copyMeta.GetTask(context.Background(), 1001).GetState(),
+		"an unassigned InProgress task must converge through the retry path")
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnWorkerFailure() {
@@ -797,13 +998,16 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_CompletedSyncsTask() {
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.Require().NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 	err := m.AddSegment(context.Background(), newTestCopySegment(2001))
 	s.NoError(err)
 
 	task.QueryTaskOnWorker(cluster)
 
 	segment := m.GetSegment(context.Background(), 2001)
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.True(segment.GetIsImporting())
 	s.Equal("manifest-path", segment.GetManifestPath())
 
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
@@ -814,6 +1018,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.Require().NoError(copyMeta.AddJob(ctx,
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	err := m.AddSegment(ctx, newTestCopySegment(2001))
 	s.NoError(err)
@@ -832,11 +1038,12 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 		},
 	}
 
-	err = SyncCopySegmentTask(task, resp, copyMeta, m)
+	err = SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m)
 	s.NoError(err)
 
 	segment := m.GetSegment(ctx, 2001)
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.True(segment.GetIsImporting())
 	s.Equal("manifest-path", segment.GetManifestPath())
 	s.Equal(insertBinlogs, segment.GetBinlogs())
 
@@ -845,12 +1052,103 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	s.NotZero(updatedTask.(*copySegmentTask).task.Load().GetCompleteTs())
 }
 
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_RejectsInvalidResultMappings() {
+	tests := []struct {
+		name        string
+		results     []*datapb.CopySegmentResult
+		errContains string
+	}{
+		{name: "missing", results: nil, errContains: "missing target segment"},
+		{name: "nil result", results: []*datapb.CopySegmentResult{nil}, errContains: "nil segment result"},
+		{
+			name: "extra",
+			results: []*datapb.CopySegmentResult{
+				{SegmentId: 2001, Binlogs: makeTestCopySegmentBinlogs()},
+				{SegmentId: 2999, Binlogs: makeTestCopySegmentBinlogs()},
+			},
+			errContains: "unexpected target segment",
+		},
+		{
+			name: "duplicate",
+			results: []*datapb.CopySegmentResult{
+				{SegmentId: 2001, Binlogs: makeTestCopySegmentBinlogs()},
+				{SegmentId: 2001, Binlogs: makeTestCopySegmentBinlogs()},
+			},
+			errContains: "duplicate target segment",
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			ctx := context.Background()
+			task := createTestCopyTask(100, 2001).(*copySegmentTask)
+			copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+			s.Require().NoError(copyMeta.AddJob(ctx,
+				newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+			s.Require().NoError(m.AddSegment(ctx, newTestCopySegment(2001)))
+
+			cluster := session.NewMockCluster(s.T())
+			cluster.EXPECT().QueryCopySegment(task.GetNodeId(), mock.Anything).Return(&datapb.QueryCopySegmentResponse{
+				TaskID:         task.GetTaskId(),
+				State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+				SegmentResults: test.results,
+			}, nil).Once()
+			task.QueryTaskOnWorker(cluster)
+
+			updatedTask := copyMeta.GetTask(ctx, task.GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+			s.Contains(updatedTask.GetReason(), test.errContains)
+			segment := m.GetSegment(ctx, 2001)
+			s.Empty(segment.GetBinlogs())
+			s.Empty(segment.GetManifestPath())
+		})
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_DoesNotOverwriteConcurrentFailure() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	// AddTask publishes InProgress, then the simulated checker publishes Failed.
+	// The final Completed CAS must not issue a third write.
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, nil, nil, nil)
+	s.Require().NoError(err)
+	s.Require().NoError(copyMeta.AddTask(ctx, task))
+
+	segmentCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	segmentCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, []*datapb.SegmentInfo, ...metastore.BinlogsIncrement) error {
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+				UpdateCopyTaskReason("job failed while result was being applied"))
+		}).Once()
+	m := &meta{ctx: ctx, catalog: segmentCatalog, segments: NewSegmentsInfo()}
+	m.segments.SetSegment(2001, newTestCopySegment(2001))
+
+	err = SyncCopySegmentTask(ctx, task, &datapb.QueryCopySegmentResponse{
+		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId: 2001,
+			Binlogs:   makeTestCopySegmentBinlogs(),
+		}},
+	}, copyMeta, m)
+	s.Require().NoError(err)
+
+	updated := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updated.GetState())
+	s.Equal("job failed while result was being applied", updated.GetReason())
+}
+
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_FailedResponseUpdatesTask() {
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 
-	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	err := SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
 		Reason: "worker failed",
@@ -867,7 +1165,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_DefaultStateNoop() {
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 
-	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	err := SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 	}, copyMeta, nil)
@@ -877,35 +1175,50 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_DefaultStateNoop() {
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMarksFailed() {
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_UpdateSegmentsInfoErrorMarksFailed() {
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
-	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
-	err := m.AddSegment(ctx, newTestCopySegment(2001))
-	s.NoError(err)
 
-	err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	syncErr := errors.New("failed to update segment metadata")
+	segmentCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	segmentCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).
+		Return(syncErr).Once()
+	m := &meta{ctx: ctx, catalog: segmentCatalog, segments: NewSegmentsInfo()}
+	m.segments.SetSegment(2001, newTestCopySegment(2001))
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	// AddTask plus the single outer markTaskAndJobFailed write. The sync helper
+	// must not write Failed itself and then make the outer path write it again.
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Twice()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, m, nil, nil)
+	s.Require().NoError(err)
+	s.Require().NoError(copyMeta.AddTask(ctx, task))
+	s.Require().NoError(copyMeta.AddJob(ctx,
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	task.copyMeta = copyMeta
+	task.meta = m
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(task.GetNodeId(), mock.Anything).Return(&datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{
 			{
 				SegmentId: 2001,
-				Binlogs: []*datapb.FieldBinlog{
-					{
-						FieldID: 100,
-						Binlogs: []*datapb.Binlog{
-							{LogID: 1, LogPath: "invalid-log-path"},
-						},
-					},
-				},
+				Binlogs:   makeTestCopySegmentBinlogs(),
 			},
 		},
-	}, copyMeta, m)
-	s.Error(err)
+	}, nil).Once()
+	task.QueryTaskOnWorker(cluster)
 
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "fieldBinlog no need to store logpath")
+	s.Contains(updatedTask.GetReason(), syncErr.Error())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		copyMeta.GetJob(ctx, task.GetJobId()).GetState())
 }
 
 // createTestIndexMeta creates an indexMeta with pre-registered index definitions for testing.
@@ -958,7 +1271,12 @@ func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
 		TaskId:       1001,
 		JobId:        100,
 		CollectionId: collectionID,
-		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		// An InProgress task always names its worker in production: the
+		// assignment is persisted before the Create RPC crosses the
+		// at-least-once boundary. A fixture without it would exercise the
+		// unassigned short-circuit instead of the path under test.
+		NodeId: 1,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 		IdMappings: []*datapb.CopySegmentIDMapping{
 			{SourceSegmentId: 1, TargetSegmentId: segmentID, PartitionId: 10},
 		},
@@ -987,6 +1305,38 @@ func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmen
 	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
 	assert.NoError(t, err)
 	assert.NoError(t, copyMeta.AddTask(ctx, task))
+	task.copyMeta = copyMeta
+	task.meta = m
+	return copyMeta, m
+}
+
+// newCopySegmentTaskTestMetaWithAlloc is newCopySegmentTaskTestMeta plus an
+// allocator that hands out IDs from idStart, so a replan's fresh task ID and
+// fresh target segment IDs are predictable.
+func newCopySegmentTaskTestMetaWithAlloc(t *testing.T, task *copySegmentTask, idStart int64) (CopySegmentMeta, *meta) {
+	ctx := context.Background()
+	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := &meta{
+		catalog:  catalog,
+		segments: NewSegmentsInfo(),
+	}
+	next := idStart
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		next++
+		return next, nil
+	}).Maybe()
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		begin := next + 1
+		next += n
+		return begin, next + 1, nil
+	}).Maybe()
+
+	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, alloc)
+	assert.NoError(t, err)
+	assert.NoError(t, copyMeta.AddTask(ctx, task))
+	task.copyMeta = copyMeta
+	task.meta = m
 	return copyMeta, m
 }
 
@@ -998,6 +1348,7 @@ func newTestCopySegment(segmentID int64) *SegmentInfo {
 		State:         commonpb.SegmentState_Importing,
 		NumOfRows:     100,
 		InsertChannel: "ch1",
+		IsImporting:   true,
 	})
 }
 
@@ -1018,7 +1369,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_EmptyResult() {
 		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{},
 	}
 	task := createTestCopyTask(1, 100)
-	err := syncVectorScalarIndexes(context.Background(), result, task, &meta{}, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, &meta{})
 	s.NoError(err)
 }
 
@@ -1053,7 +1404,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m)
 	s.NoError(err)
 
 	// Verify the segment index was added with target indexID and Finished state
@@ -1099,7 +1450,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m)
 	s.NoError(err)
 
 	segIdxV0, ok := im.segmentBuildInfo.Get(2001)
@@ -1157,7 +1508,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m)
 	s.NoError(err)
 
 	// All three indexes should be synced with correct target indexIDs
@@ -1193,7 +1544,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m)
 	s.NoError(err)
 
 	// Should not be added
@@ -1224,21 +1575,12 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	// Mock copyMeta for error path (UpdateTask and UpdateJobStateAndReleaseRef)
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
-	s.NoError(cmErr)
-
-	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta)
+	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m)
 	s.Error(syncErr)
 	s.Contains(syncErr.Error(), "catalog error")
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnCompletion() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_KeepsTargetHiddenUntilJobCompletion() {
 	collectionID := int64(1)
 	segmentID := int64(100)
 
@@ -1247,8 +1589,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 		s.Require().Len(segs, 1)
 		seg := segs[0]
 		assert.Equal(s.T(), segmentID, seg.GetID())
-		assert.Equal(s.T(), commonpb.SegmentState_Flushed, seg.GetState())
-		assert.False(s.T(), seg.GetIsImporting())
+		assert.Equal(s.T(), commonpb.SegmentState_Importing, seg.GetState())
+		assert.True(s.T(), seg.GetIsImporting())
 		return nil
 	}).Once()
 	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
@@ -1265,6 +1607,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
 	s.Require().NoError(err)
 
@@ -1279,16 +1622,21 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 		}},
 	}
 	task := createTestCopyTask(collectionID, segmentID)
+	// The completed-sync guard only commits results for a record that is still
+	// InProgress in copyMeta, so the task must actually be registered there.
+	s.Require().NoError(copyMeta.AddTask(context.Background(), task))
+	s.Require().NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestKeepsTargetHidden() {
 	collectionID := int64(1)
 	segmentID := int64(101)
 
@@ -1309,6 +1657,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
 	s.Require().NoError(err)
 
@@ -1324,17 +1673,22 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 		}},
 	}
 	task := createTestCopyTask(collectionID, segmentID)
+	// The completed-sync guard only commits results for a record that is still
+	// InProgress in copyMeta, so the task must actually be registered there.
+	s.Require().NoError(copyMeta.AddTask(context.Background(), task))
+	s.Require().NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 	s.Empty(updated.GetManifestPath())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateKeepsTargetHidden() {
 	collectionID := int64(1)
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
@@ -1358,6 +1712,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
 	s.Require().NoError(err)
 
@@ -1373,13 +1728,18 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 		}},
 	}
 	task := createTestCopyTask(collectionID, segmentID)
+	// The completed-sync guard only commits results for a record that is still
+	// InProgress in copyMeta, so the task must actually be registered there.
+	s.Require().NoError(copyMeta.AddTask(context.Background(), task))
+	s.Require().NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
 }
 
@@ -1416,8 +1776,13 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 		}},
 	}
 	task := createTestCopyTask(collectionID, segmentID)
+	// The completed-sync guard only commits results for a record that is still
+	// InProgress in copyMeta, so the task must actually be registered there.
+	s.Require().NoError(copyMeta.AddTask(context.Background(), task))
+	s.Require().NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt)
 	s.Require().Error(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)

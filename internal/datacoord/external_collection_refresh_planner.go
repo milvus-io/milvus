@@ -27,7 +27,16 @@ import (
 // externalRefreshOwnershipPlanVersion identifies the persisted task contract:
 // exclusive segment ownership with task results stored in object storage so
 // etcd metadata remains bounded.
-const externalRefreshOwnershipPlanVersion = int32(2)
+//
+// Version 3 adds the per-segment baseline manifests (base_manifests) consumed
+// as compare-and-swap inputs at finalization. A binary that does not know
+// field 24 must not apply version-3 records: without the CAS it would apply
+// stale worker results over newer segments as silent lost updates. Keep the
+// gate in isSupportedExternalRefreshOwnershipPlanVersion an exact match so an
+// older binary fails such records loudly instead of mis-applying them. An
+// in-flight version-2 job across the upgrade fails once with "retry refresh"
+// and is safe to resubmit.
+const externalRefreshOwnershipPlanVersion = int32(3)
 
 func isSupportedExternalRefreshOwnershipPlanVersion(version int32) bool {
 	return version == externalRefreshOwnershipPlanVersion

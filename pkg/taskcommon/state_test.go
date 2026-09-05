@@ -49,3 +49,10 @@ func TestFromCompactionState(t *testing.T) {
 		})
 	}
 }
+
+// A retrying compaction task is over as far as the scheduler is concerned, but
+// its real state remains visible to the business inspector that owns the next
+// attempt and interval.
+func TestRetryingCompactionStateLeavesTheScheduler(t *testing.T) {
+	assert.Equal(t, Retry, FromCompactionState(datapb.CompactionTaskState_retrying))
+}

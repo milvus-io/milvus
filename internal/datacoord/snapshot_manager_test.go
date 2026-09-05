@@ -1016,15 +1016,15 @@ func TestSnapshotManager_ListRestoreJobs_FilterByDbID(t *testing.T) {
 
 	testJobs := []CopySegmentJob{
 		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
-			JobId: 1, SnapshotName: "snap1", CollectionId: 100,
+			JobId: 1, SnapshotName: "snap1", CollectionId: 100, DbId: 1,
 			State: datapb.CopySegmentJobState_CopySegmentJobCompleted, TotalSegments: 10, CopiedSegments: 10,
 		}},
 		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
-			JobId: 2, SnapshotName: "snap2", CollectionId: 200,
+			JobId: 2, SnapshotName: "snap2", CollectionId: 200, DbId: 1,
 			State: datapb.CopySegmentJobState_CopySegmentJobPending, TotalSegments: 5, CopiedSegments: 0,
 		}},
 		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
-			JobId: 3, SnapshotName: "snap3", CollectionId: 300,
+			JobId: 3, SnapshotName: "snap3", CollectionId: 300, DbId: 2,
 			State: datapb.CopySegmentJobState_CopySegmentJobExecuting, TotalSegments: 8, CopiedSegments: 4,
 		}},
 	}
@@ -1034,15 +1034,7 @@ func TestSnapshotManager_ListRestoreJobs_FilterByDbID(t *testing.T) {
 	}).Build()
 	defer mockGetJobBy.UnPatch()
 
-	// Build meta with collections in different databases
-	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	m.collections.Insert(100, &collectionInfo{ID: 100, DatabaseID: 1})
-	m.collections.Insert(200, &collectionInfo{ID: 200, DatabaseID: 1})
-	m.collections.Insert(300, &collectionInfo{ID: 300, DatabaseID: 2})
-
-	sm := NewSnapshotManager(m, nil, &copySegmentMeta{}, nil, nil, nil, nil, nil)
+	sm := NewSnapshotManager(nil, nil, &copySegmentMeta{}, nil, nil, nil, nil, nil)
 
 	t.Run("dbID_filter", func(t *testing.T) {
 		// dbID=1 should return jobs for collections 100 and 200
@@ -1542,14 +1534,12 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	assert.Equal(t, 1, closeCalled)
 	// On success path, the pin ownership is transferred to the copy-segment
 	// job; the defer must NOT unpin. The job's terminal-transition hook will
-	// release the pin via UpdateJobStateAndReleaseRef.
+	// release the pin via UpdateJobStateAndReleasePin.
 	assert.Equal(t, 0, unpinCalls, "success path must not unpin — ownership transferred to job")
 }
 
-// TestRestoreSnapshot_PinTTLReadFromParamtable verifies that the restore pin TTL is
-// sourced from Params.DataCoordCfg.SnapshotRestorePinTTLSeconds, guarding against a
-// future regression where the TTL is hardcoded to 0 (which would disable the orphan-pin
-// safety net on crash-between-Pin-and-Broadcast).
+// TestRestoreSnapshot_PinTTLReadFromParamtable verifies that restore pins keep
+// a finite orphan-cleanup deadline before a durable job owns them.
 func TestRestoreSnapshot_PinTTLReadFromParamtable(t *testing.T) {
 	ctx := context.Background()
 
@@ -1588,8 +1578,13 @@ func TestRestoreSnapshot_PinTTLReadFromParamtable(t *testing.T) {
 	assert.Error(t, err)
 
 	expected := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
-	assert.Equal(t, expected, capturedTTL, "PinSnapshot must be invoked with TTL from paramtable")
-	assert.Greater(t, capturedTTL, int64(0), "default TTL must be > 0 to enable orphan-pin self-heal")
+	jobBound := int64((Params.DataCoordCfg.CopySegmentJobTimeout.GetAsDuration(time.Second) +
+		snapshotRestorePinSafetyMargin + time.Second - 1) / time.Second)
+	if jobBound > expected {
+		expected = jobBound
+	}
+	assert.Equal(t, expected, capturedTTL, "PinSnapshot must cover the full copy job timeout")
+	assert.Greater(t, capturedTTL, int64(0), "restore pins need an orphan cleanup deadline")
 }
 
 // TestRestoreSnapshot_FailurePathUnpinsWithCorrectPinID verifies that when restore
@@ -1644,6 +1639,51 @@ func TestRestoreSnapshot_FailurePathUnpinsWithCorrectPinID(t *testing.T) {
 	assert.Equal(t, int64(0), jobID)
 	// Defer unpinned exactly once with the exact pinID that PinSnapshot returned.
 	assert.Equal(t, []int64{expectedPinID}, unpinCalls, "failure path must unpin with the pinID from PinSnapshot")
+}
+
+func TestRestoreSnapshot_CanceledRequestStillReleasesPin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(8080), 1, nil).Build()
+	defer mPin.UnPatch()
+	mRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).To(
+		func(_ *snapshotMeta, _ context.Context, _ int64, _ string, _ bool) (*snapshotstorage.SnapshotData, error) {
+			cancel()
+			return nil, context.Canceled
+		}).Build()
+	defer mRead.UnPatch()
+
+	cleanupCtxWasLive := false
+	mUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+		func(_ *snapshotMeta, cleanupCtx context.Context, pinID int64) (int64, string, int, error) {
+			assert.Equal(t, int64(8080), pinID)
+			cleanupCtxWasLive = cleanupCtx.Err() == nil
+			return 100, "snap", 0, nil
+		}).Build()
+	defer mUnpin.UnPatch()
+
+	sm := &snapshotManager{
+		allocator:       allocator.NewMockAllocator(t),
+		snapshotMeta:    &snapshotMeta{},
+		copySegmentMeta: &copySegmentMeta{},
+	}
+	startRestoreLock := func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
+		return &mockBroadcastAPI{closeFn: func() {}}, nil
+	}
+	startBroadcaster := func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+		t.Fatal("not reached")
+		return nil, nil
+	}
+
+	_, err := sm.RestoreSnapshot(ctx, 100, "snap", "target", "default",
+		startRestoreLock,
+		startBroadcaster,
+		func(context.Context, string, string) error { return nil },
+		func(context.Context, int64, *snapshotstorage.SnapshotData) error { return nil },
+	)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.True(t, cleanupCtxWasLive, "pin cleanup must be detached from the canceled request context")
 }
 
 // TestRestoreSnapshot_PostPhase2FailurePathsUnpinAndRollback drives each phase
@@ -1805,7 +1845,7 @@ func TestRestoreSnapshot_AllocIDFailureUnpinsAndRollsBack(t *testing.T) {
 // TestCreateRestoreJob_PropagatesPinID is a direct unit test for createRestoreJob
 // (previously only exercised indirectly via mocked RestoreData paths). Verifies
 // that the pinID parameter is persisted into CopySegmentJob.PinId — critical for
-// the terminal-transition Unpin wiring in UpdateJobStateAndReleaseRef.
+// the terminal-transition Unpin wiring in UpdateJobStateAndReleasePin.
 func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	ctx := context.Background()
 	const expectedPinID int64 = 314159
@@ -1826,9 +1866,10 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	}, nil)
 
 	var captured *datapb.CopySegmentJob
-	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
-		func(_ *copySegmentMeta, _ context.Context, job CopySegmentJob) error {
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJobWithSegments).To(
+		func(_ *copySegmentMeta, _ context.Context, job CopySegmentJob, segments []*SegmentInfo) error {
 			captured = job.(*copySegmentJob).CopySegmentJob
+			assert.Empty(t, segments)
 			return nil
 		}).Build()
 	defer mAddJob.UnPatch()
@@ -1868,16 +1909,6 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	}
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg *datapb.SegmentInfo) error {
-		assert.Equal(t, int64(2001), seg.GetID())
-		assert.Equal(t, int64(200), seg.GetCollectionID())
-		assert.Equal(t, int64(20), seg.GetPartitionID())
-		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
-		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
-		assert.True(t, seg.GetIsImporting())
-		assert.Equal(t, int64(3), seg.GetStorageVersion())
-		return nil
-	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
 
 	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
@@ -1892,9 +1923,18 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{StartPositions: []*commonpb.KeyDataPair{{Key: "dst-ch", Data: []byte{1}}}}, nil)
 
 	addJobCalled := false
-	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
-		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJobWithSegments).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob, segments []*SegmentInfo) error {
 			addJobCalled = true
+			require.Len(t, segments, 1)
+			seg := segments[0]
+			assert.Equal(t, int64(2001), seg.GetID())
+			assert.Equal(t, int64(200), seg.GetCollectionID())
+			assert.Equal(t, int64(20), seg.GetPartitionID())
+			assert.Equal(t, "dst-ch", seg.GetInsertChannel())
+			assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
+			assert.True(t, seg.GetIsImporting())
+			assert.Equal(t, int64(3), seg.GetStorageVersion())
 			return nil
 		}).Build()
 	defer mAddJob.UnPatch()
@@ -1935,8 +1975,8 @@ func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLook
 	defer mUpdateCheckpoint.UnPatch()
 
 	var captured *datapb.CopySegmentJob
-	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
-		func(_ *copySegmentMeta, _ context.Context, job CopySegmentJob) error {
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJobWithSegments).To(
+		func(_ *copySegmentMeta, _ context.Context, job CopySegmentJob, _ []*SegmentInfo) error {
 			captured = job.(*copySegmentJob).CopySegmentJob
 			return nil
 		}).Build()
@@ -2000,8 +2040,8 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), errors.New("alloc segment IDs failed"))
 
 	addJobCalled := false
-	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
-		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJobWithSegments).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob, _ []*SegmentInfo) error {
 			addJobCalled = true
 			return nil
 		}).Build()
@@ -3437,7 +3477,7 @@ func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 		assert.Equal(t, job.GetTargetS3Path(), reloadedJob.GetTargetS3Path())
 	})
 
-	t.Run("persistence failure releases pin with live context", func(t *testing.T) {
+	t.Run("ambiguous persistence failure fails stop and keeps pin", func(t *testing.T) {
 		mockValidate := mockey.Mock(snapshotstorage.ValidateForeignStorageRequest).Return(nil).Build()
 		defer mockValidate.UnPatch()
 		mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).Return(
@@ -3445,15 +3485,18 @@ func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 		defer mockGetSnapshot.UnPatch()
 		mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(7001), 1, nil).Build()
 		defer mockPin.UnPatch()
-		cleanupCalled := false
+		unpinCalled := false
 		mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
-			func(_ *snapshotMeta, cleanupCtx context.Context, pinID int64) (int64, string, int, error) {
-				cleanupCalled = true
-				assert.NoError(t, cleanupCtx.Err())
-				assert.Equal(t, int64(7001), pinID)
+			func(_ *snapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
+				unpinCalled = true
 				return 100, "snapshot-1", 0, nil
 			}).Build()
 		defer mockUnpin.UnPatch()
+		fatalCalled := false
+		mockFatal := mockey.Mock(mlog.Fatal).
+			To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+			Build()
+		defer mockFatal.UnPatch()
 		allocatorTarget := &restoreAllocatorTarget{}
 		mockAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(typeutil.UniqueID(9001), nil).Build()
 		defer mockAlloc.UnPatch()
@@ -3475,9 +3518,10 @@ func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 			"",
 		)
 
-		require.Error(t, err)
+		require.ErrorIs(t, err, errSnapshotExportJobPersistence)
 		assert.Zero(t, jobID)
-		assert.True(t, cleanupCalled)
+		assert.True(t, fatalCalled)
+		assert.False(t, unpinCalled, "an ambiguous Save response must keep the pin for a possibly durable job")
 		_, ok := meta.GetJob(9001)
 		assert.False(t, ok)
 	})
@@ -3928,7 +3972,7 @@ func TestSnapshotExportManager_CompletesPublishingAfterOriginalDeadline(t *testi
 	assert.Equal(t, job.GetSnapshotMetadataUri(), completed.GetSnapshotMetadataUri())
 }
 
-func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailure(t *testing.T) {
+func TestSnapshotExportManager_FailStopsAndReplaysPublishingAfterRestart(t *testing.T) {
 	targetRoot := path.Join(t.TempDir(), "export-root")
 	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
 	job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9001)
@@ -3948,9 +3992,15 @@ func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailur
 			return nil, nil
 		}).Build()
 	defer mockRead.UnPatch()
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
 	catalog.saveErr = errors.New("catalog unavailable")
 	manager.wg.Add(1)
 	manager.runJob(context.Background(), job.GetJobId())
+	assert.True(t, fatalCalled)
 
 	publishing, ok := meta.GetJob(job.GetJobId())
 	require.True(t, ok)
@@ -3965,10 +4015,13 @@ func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailur
 	catalog.mu.Lock()
 	catalog.saveErr = nil
 	catalog.mu.Unlock()
-	manager.wg.Add(1)
-	manager.runJob(context.Background(), job.GetJobId())
+	reloadedMeta, err := newSnapshotExportMeta(context.Background(), catalog)
+	require.NoError(t, err)
+	recoveredManager := newSnapshotExportManager(context.Background(), reloadedMeta, nil)
+	recoveredManager.wg.Add(1)
+	recoveredManager.runJob(context.Background(), job.GetJobId())
 
-	completed, ok := meta.GetJob(job.GetJobId())
+	completed, ok := reloadedMeta.GetJob(job.GetJobId())
 	require.True(t, ok)
 	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted, completed.GetState())
 	assert.Equal(t, int32(100), completed.GetProgress())
@@ -4423,6 +4476,18 @@ func TestSnapshotExportManager_Observability(t *testing.T) {
 	})
 }
 
+func TestSnapshotExportManagerCloseBeforeStart(t *testing.T) {
+	manager := newSnapshotExportManager(context.Background(), nil, nil)
+	manager.Close()
+
+	// DataCoord may become Healthy immediately before a concurrent Stop. A
+	// delayed Start must remain a no-op after Close instead of launching an
+	// untracked first reconcile.
+	manager.Start()
+	manager.wg.Wait()
+	require.ErrorIs(t, manager.ctx.Err(), context.Canceled)
+}
+
 func TestSanitizeSnapshotExportReason(t *testing.T) {
 	secret := "SUPERSECRET"
 	sas := "sv=2024-08-04&sig=SECRETSAS&sp=r"
@@ -4512,7 +4577,7 @@ func TestSnapshotExportManager_SubmitFailurePaths(t *testing.T) {
 		assert.Zero(t, jobID)
 	})
 
-	t.Run("persistence failure reports cleanup failure", func(t *testing.T) {
+	t.Run("ambiguous persistence failure keeps source pin", func(t *testing.T) {
 		mockValidate := mockey.Mock(snapshotstorage.ValidateForeignStorageRequest).Return(nil).Build()
 		defer mockValidate.UnPatch()
 		mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).Return(&datapb.SnapshotInfo{Id: 1}, nil).Build()
@@ -4522,20 +4587,27 @@ func TestSnapshotExportManager_SubmitFailurePaths(t *testing.T) {
 		defer mockAlloc.UnPatch()
 		mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(7001), 1, nil).Build()
 		defer mockPin.UnPatch()
-		cleanupErr := errors.New("unpin unavailable")
-		mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).Return(int64(0), "", 0, cleanupErr).Build()
+		unpinCalled := false
+		mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+			func(_ *snapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
+				unpinCalled = true
+				return 0, "", 0, nil
+			}).Build()
 		defer mockUnpin.UnPatch()
 		catalog := newSnapshotExportCatalogFake()
 		catalog.saveErr = errors.New("catalog unavailable")
 		meta, err := newSnapshotExportMeta(context.Background(), catalog)
 		require.NoError(t, err)
-		manager := newSnapshotExportManager(context.Background(), meta, &snapshotManager{
+		managerCtx, cancel := context.WithCancel(context.Background())
+		cancel() // suppress the production Fatal path while exercising shutdown behavior
+		manager := newSnapshotExportManager(managerCtx, meta, &snapshotManager{
 			snapshotMeta: &snapshotMeta{},
 			allocator:    allocatorTarget,
 		})
 		jobID, err := manager.Submit(context.Background(), 100, "snapshot-1", "default", "collection-1", "target", "")
-		require.Error(t, err)
+		require.ErrorIs(t, err, errSnapshotExportJobPersistence)
 		assert.Zero(t, jobID)
+		assert.False(t, unpinCalled, "an ambiguous Save response must keep the pin for a possibly durable job")
 	})
 
 	t.Run("export deadline extends source pin ttl", func(t *testing.T) {
@@ -4962,10 +5034,16 @@ func TestSnapshotExportManager_ExecuteJobErrorBranches(t *testing.T) {
 				catalog.mu.Unlock()
 			}
 		}
+		fatalCalled := false
+		mockFatal := mockey.Mock(mlog.Fatal).
+			To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+			Build()
+		defer mockFatal.UnPatch()
 
 		err := manager.executeJob(context.Background(), job.GetJobId())
 		require.Error(t, err)
 		require.ErrorIs(t, err, errSnapshotExportJobPersistence)
+		assert.True(t, fatalCalled)
 	})
 
 	t.Run("metadata URI change blocks completion", func(t *testing.T) {
@@ -5128,7 +5206,13 @@ func TestSnapshotExportManager_PersistenceAndCleanupBranches(t *testing.T) {
 		meta, err = newSnapshotExportMeta(context.Background(), catalog)
 		require.NoError(t, err)
 		manager = newSnapshotExportManager(context.Background(), meta, nil)
+		fatalCalled := false
+		mockFatal := mockey.Mock(mlog.Fatal).
+			To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+			Build()
+		defer mockFatal.UnPatch()
 		assert.False(t, manager.failJob(pending.GetJobId(), "failed"))
+		assert.True(t, fatalCalled)
 	})
 
 	t.Run("terminal cleanup clears credentials and handles stale state", func(t *testing.T) {
@@ -5853,57 +5937,6 @@ func TestRestoreExternalSnapshot_SerializesSameTarget(t *testing.T) {
 	require.NoError(t, <-firstResult)
 	require.NoError(t, <-secondResult)
 	assert.Equal(t, int32(2), resolveCalls.Load())
-}
-
-// --- Test getDBCollectionIDs ---
-
-func TestSnapshotManager_getDBCollectionIDs(t *testing.T) {
-	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	m.collections.Insert(1, &collectionInfo{ID: 1, DatabaseID: 10})
-	m.collections.Insert(2, &collectionInfo{ID: 2, DatabaseID: 10})
-	m.collections.Insert(3, &collectionInfo{ID: 3, DatabaseID: 20})
-	m.collections.Insert(4, &collectionInfo{ID: 4, DatabaseID: 10})
-	m.collections.Insert(5, &collectionInfo{ID: 5, DatabaseID: 30})
-
-	sm := &snapshotManager{
-		meta: m,
-	}
-
-	// Filter for dbID=10, should get collections 1, 2, 4
-	result := sm.getDBCollectionIDs(10)
-	assert.Len(t, result, 3)
-	assert.Contains(t, result, int64(1))
-	assert.Contains(t, result, int64(2))
-	assert.Contains(t, result, int64(4))
-
-	// Filter for dbID=20, should get collection 3 only
-	result = sm.getDBCollectionIDs(20)
-	assert.Len(t, result, 1)
-	assert.Contains(t, result, int64(3))
-
-	// Filter for dbID=30, should get collection 5 only
-	result = sm.getDBCollectionIDs(30)
-	assert.Len(t, result, 1)
-	assert.Contains(t, result, int64(5))
-}
-
-func TestSnapshotManager_getDBCollectionIDs_EmptyResult(t *testing.T) {
-	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	m.collections.Insert(1, &collectionInfo{ID: 1, DatabaseID: 10})
-	m.collections.Insert(2, &collectionInfo{ID: 2, DatabaseID: 20})
-
-	sm := &snapshotManager{
-		meta: m,
-	}
-
-	// No collections for dbID=999
-	result := sm.getDBCollectionIDs(999)
-	assert.Empty(t, result)
-	assert.Len(t, result, 0)
 }
 
 // --- Test PinSnapshotData ---

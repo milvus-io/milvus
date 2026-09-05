@@ -76,6 +76,11 @@ func TestImportUtil_NewPreImportTasks(t *testing.T) {
 }
 
 func TestImportUtil_NewImportTasks(t *testing.T) {
+	oldCompaction := Params.DataCoordCfg.EnableCompaction.SwapTempValue("true")
+	t.Cleanup(func() {
+		Params.DataCoordCfg.EnableCompaction.SwapTempValue(oldCompaction)
+	})
+
 	dataSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	fileGroups := [][]*datapb.ImportFileStats{
 		{
@@ -104,6 +109,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 			JobID:        1,
 			CollectionID: 2,
 			Schema: &schemapb.CollectionSchema{
+				Version: 7,
 				Fields: []*schemapb.FieldSchema{
 					{
 						FieldID:      100,
@@ -116,18 +122,23 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		},
 	}
 	alloc := allocator.NewMockAllocator(t)
+	allocNCalls := 0
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		allocNCalls++
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
+	nextSegmentID := int64(1000)
+	alloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		nextSegmentID++
+		return nextSegmentID, nil
+	})
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -142,13 +153,104 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
-	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
+	sortPlanned, err := importSortPlannedForJob(context.TODO(), job, nil, meta)
+	assert.NoError(t, err)
+	assert.True(t, sortPlanned)
+	tasks, segments, err := NewImportTasks(context.TODO(), fileGroups, job, alloc, meta, nil,
+		1*1024*1024*1024, sortPlanned)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
+	segmentsByID := lo.SliceToMap(segments, func(segment *SegmentInfo) (int64, *SegmentInfo) {
+		return segment.GetID(), segment
+	})
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
 		assert.Equal(t, 3, len(segmentIDs))
+		assert.Empty(t, task.(*importTask).GetSortedSegmentIDs(), "sorted outputs are no longer preallocated")
+		for _, segmentID := range segmentIDs {
+			assert.Nil(t, meta.GetSegment(context.Background(), segmentID),
+				"planning must not publish a segment before its task")
+			assert.True(t, segmentsByID[segmentID].GetIsInvisible(),
+				"a sort-planned import origin must persist that it awaits its replacement")
+			assert.EqualValues(t, job.GetSchema().GetVersion(), segmentsByID[segmentID].GetSchemaVersion(),
+				"an imported segment already materializes the job schema and must not wait for schema-bump reconciliation")
+		}
 	}
+	assert.Equal(t, 1, allocNCalls, "only task IDs are preallocated, never sorted targets")
+
+	// Once the task and origins are published, IsInvisible preserves the plan
+	// even if compaction is disabled before a restart.
+	for _, segment := range segments {
+		meta.segments.SetSegment(segment.GetID(), segment)
+	}
+	Params.DataCoordCfg.EnableCompaction.SwapTempValue("false")
+	sortPlanned, err = importSortPlannedForJob(context.TODO(), job, tasks, meta)
+	assert.NoError(t, err)
+	assert.True(t, sortPlanned)
+	restartedImportMeta := NewMockImportMeta(t)
+
+	restartedTasks, restartedSegments, err := NewImportTasks(context.TODO(), fileGroups[:1], job, alloc, meta,
+		restartedImportMeta, 1*1024*1024*1024, sortPlanned)
+	assert.NoError(t, err)
+	restartedSegmentsByID := lo.SliceToMap(restartedSegments, func(segment *SegmentInfo) (int64, *SegmentInfo) {
+		return segment.GetID(), segment
+	})
+	if assert.Len(t, restartedTasks, 1) {
+		restartedTask := restartedTasks[0].(*importTask)
+		assert.Empty(t, restartedTask.GetSortedSegmentIDs())
+		for _, segmentID := range restartedTask.GetSegmentIDs() {
+			assert.Nil(t, meta.GetSegment(context.Background(), segmentID))
+			assert.True(t, restartedSegmentsByID[segmentID].GetIsInvisible())
+		}
+	}
+	assert.Equal(t, 2, allocNCalls)
+
+	// A genuinely new job created while compaction is disabled keeps its
+	// origins visible and skips the sort stage.
+	sortPlanned, err = importSortPlannedForJob(context.TODO(), job, nil, meta)
+	assert.NoError(t, err)
+	assert.False(t, sortPlanned)
+	unsortedTasks, unsortedSegments, err := NewImportTasks(context.TODO(), fileGroups[:1], job, alloc, meta, nil,
+		1*1024*1024*1024, sortPlanned)
+	assert.NoError(t, err)
+	if assert.Len(t, unsortedTasks, 1) {
+		for _, segment := range unsortedSegments {
+			assert.False(t, segment.GetIsInvisible())
+		}
+	}
+	assert.Equal(t, 3, allocNCalls)
+
+	// L0 imports never sort: their origins are the final segments and stay
+	// visible, regardless of any legacy sorted IDs older binaries wrote.
+	legacyL0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:        2,
+		CollectionID: job.GetCollectionID(),
+		Schema:       job.GetSchema(),
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		},
+	}}
+	legacyL0Meta := NewMockImportMeta(t)
+
+	l0Tasks, l0Segments, err := NewImportTasks(context.TODO(), fileGroups[:1], legacyL0Job, alloc, meta, legacyL0Meta, 1*1024*1024*1024, true)
+	assert.NoError(t, err)
+	l0SegmentsByID := lo.SliceToMap(l0Segments, func(segment *SegmentInfo) (int64, *SegmentInfo) {
+		return segment.GetID(), segment
+	})
+	if assert.Len(t, l0Tasks, 1) {
+		l0Task := l0Tasks[0].(*importTask)
+		assert.Empty(t, l0Task.GetSortedSegmentIDs(), "legacy sorted IDs must not turn an L0 job into a sort plan")
+		for _, segmentID := range l0Task.GetSegmentIDs() {
+			assert.Nil(t, meta.GetSegment(context.Background(), segmentID))
+			segment := l0SegmentsByID[segmentID]
+			if assert.NotNil(t, segment) {
+				assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
+				assert.False(t, segment.GetIsInvisible(), "L0 origins are the final imported segments")
+			}
+		}
+	}
+	assert.Equal(t, 4, allocNCalls,
+		"L0 recovery allocates task IDs only and must not allocate replacement segment IDs")
 }
 
 func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
@@ -204,7 +306,6 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -218,9 +319,10 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
-	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
+	tasks, segments, err := NewImportTasks(context.TODO(), fileGroups, job, alloc, meta, nil, 1*1024*1024*1024, true)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
+	assert.Len(t, segments, 6)
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
 		assert.Equal(t, 3, len(segmentIDs))
@@ -623,6 +725,11 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 
 	err = DropImportTask(task, cluster, importMeta)
 	assert.NoError(t, err)
+
+	// An already-unassigned task needs no worker RPC or metadata write.
+	unassigned := &importTask{}
+	unassigned.task.Store(&datapb.ImportTaskV2{TaskID: 2, NodeID: NullNodeID})
+	assert.NoError(t, DropImportTask(unassigned, session.NewMockCluster(t), NewMockImportMeta(t)))
 }
 
 func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
@@ -1495,4 +1602,113 @@ func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
 	// why the branch never fired.
 	assert.False(t, merr.IsNonRetryableErr(terminal))
 	assert.False(t, merr.IsNonRetryableErr(transient))
+}
+
+// A new import reads the compaction switch once. Persisted origin visibility
+// keeps that decision stable across config changes and retries.
+func TestImportSortPlanned(t *testing.T) {
+	ctx := context.Background()
+	segmentMeta := &meta{segments: NewSegmentsInfo()}
+	mk := func(taskID, segmentID int64, invisible bool) ImportTask {
+		task := &importTask{}
+		task.task.Store(&datapb.ImportTaskV2{TaskID: taskID, SegmentIDs: []int64{segmentID}})
+		segmentMeta.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:          segmentID,
+			IsInvisible: invisible,
+		}))
+		return task
+	}
+
+	oldCompaction := Params.DataCoordCfg.EnableCompaction.SwapTempValue("true")
+	t.Cleanup(func() {
+		Params.DataCoordCfg.EnableCompaction.SwapTempValue(oldCompaction)
+	})
+
+	normalJob := &importJob{ImportJob: &datapb.ImportJob{JobID: 1}}
+	planned, err := importSortPlannedForJob(ctx, normalJob, nil, segmentMeta)
+	assert.NoError(t, err)
+	assert.True(t, planned)
+
+	Params.DataCoordCfg.EnableCompaction.SwapTempValue("false")
+	planned, err = importSortPlannedForJob(ctx, normalJob, nil, segmentMeta)
+	assert.NoError(t, err)
+	assert.False(t, planned, "new imports must honor the compaction switch")
+
+	planned, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{mk(1, 10, true)}, segmentMeta)
+	assert.NoError(t, err)
+	assert.True(t, planned, "an existing invisible origin still owes its sort")
+
+	Params.DataCoordCfg.EnableCompaction.SwapTempValue("true")
+	planned, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{mk(2, 20, false)}, segmentMeta)
+	assert.NoError(t, err)
+	assert.False(t, planned, "an existing visible origin stays the final output")
+
+	legacy := mk(3, 30, false).(*importTask)
+	legacy.task.Load().SortedSegmentIDs = []int64{31}
+	planned, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{legacy}, segmentMeta)
+	assert.NoError(t, err)
+	assert.True(t, planned, "legacy preallocated sorted IDs preserve the old sort plan")
+	_, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{legacy, mk(9, 90, false)}, segmentMeta)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+
+	l0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:   4,
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+	}}
+	planned, err = importSortPlannedForJob(ctx, l0Job, []ImportTask{mk(4, 40, true)}, segmentMeta)
+	assert.NoError(t, err)
+	assert.False(t, planned, "L0 imports never sort")
+
+	_, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{
+		mk(5, 50, true),
+		mk(6, 60, false),
+	}, segmentMeta)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+
+	missing := &importTask{}
+	missing.task.Store(&datapb.ImportTaskV2{TaskID: 7, SegmentIDs: []int64{70}})
+	_, err = importSortPlannedForJob(ctx, normalJob, []ImportTask{missing}, segmentMeta)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+
+	t.Run("corrupt task values still fail closed", func(t *testing.T) {
+		var typedNil *importTask
+		wrongType := &preImportTask{}
+		wrongType.task.Store(&datapb.PreImportTask{TaskID: 8})
+		for name, corruptTask := range map[string]ImportTask{
+			"nil":        nil,
+			"typed nil":  typedNil,
+			"wrong type": wrongType,
+		} {
+			t.Run(name, func(t *testing.T) {
+				assert.NotPanics(t, func() {
+					_, err := importSortPlannedForJob(ctx, normalJob, []ImportTask{corruptTask}, segmentMeta)
+					assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+				})
+			})
+		}
+	})
+}
+
+func TestImportProgressIgnoresLegacyL0SortedIDs(t *testing.T) {
+	const jobID = int64(100)
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: jobID,
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		},
+	}}
+	task := &importTask{}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            jobID,
+		TaskID:           101,
+		SegmentIDs:       []int64{102},
+		SortedSegmentIDs: []int64{103},
+	})
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, jobID, mock.Anything).
+		Return([]ImportTask{task}).Once()
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(job).Twice()
+
+	assert.Equal(t, float32(1), getStatsProgress(context.Background(), jobID, importMeta, nil))
+	assert.Equal(t, float32(1), getIndexBuildingProgress(context.Background(), jobID, importMeta, nil))
 }

@@ -18,13 +18,16 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // externalCollectionRefreshChecker drives the external collection job state machine.
@@ -58,30 +61,23 @@ type externalCollectionRefreshChecker struct {
 	mt          *meta
 	refreshMeta *externalCollectionRefreshMeta
 	closeChan   chan struct{}
-	// onJobFinished is the manager-side callback that pushes the refreshed
-	// schema (ExternalSource/ExternalSpec) into RootCoord via the WAL
-	// broadcast. The manager holds a notifiedJobs dedup map so this callback
-	// is delivered exactly once per jobID even when called concurrently
-	// from the eager task path and the periodic checker tick.
-	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob)
-	// applyJobInfo is invoked exactly before a job is persisted as Finished.
-	// It performs the collection-global segment update from all finished task
-	// results so progress polls cannot observe Finished before segments are visible.
+	// updateJobSchema pushes ExternalSource/ExternalSpec into RootCoord through
+	// the WAL before the job is persisted as Finished. A failed delivery leaves
+	// the job non-terminal so the next checker pass retries it.
+	updateJobSchema func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
+	// applyJobInfo performs the collection-global segment update from all
+	// finished task results before the schema update and Finished transition.
 	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
 	// onJobFailed is the manager-side callback invoked when a job first
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
-	// without waiting for the retention-gated GC path. The callback itself
-	// is idempotent — the manager dedups on its own cleanup key so concurrent
-	// eager and periodic paths only fire one cleanup per jobID. That key is
-	// deliberately NOT the schema-publish key: a job that applied its
-	// segments and then failed still owes the publish.
+	// without waiting for the retention-gated GC path. The callback cleanup is
+	// idempotent; retention GC retries it.
 	onJobFailed func(jobID int64)
-	// onJobGC is invoked after the checker successfully drops a job during
-	// GC so the manager can release any per-job bookkeeping (the publish and
-	// cleanup dedup entries). Keeps those maps bounded across DataCoord
-	// lifetime.
-	onJobGC func(jobID int64)
+	// cleanupJobResources removes idempotent per-job resources before Finished is
+	// published and again before terminal metadata is dropped. Returning an error
+	// leaves the job as the retry anchor for the next checker pass.
+	cleanupJobResources func(jobID int64) error
 	// onInitJobPending is fired for jobs still in Init state with no tasks
 	// yet. This is the retry hook for the two-phase submission scheme: the
 	// WAL ack callback persists the Job record in Init state and kicks off
@@ -90,6 +86,10 @@ type externalCollectionRefreshChecker struct {
 	// MUST be non-blocking — the manager's implementation dedups concurrent
 	// invocations and runs the actual work in a background goroutine.
 	onInitJobPending func(jobID int64)
+	// dropJobTasks stops scheduler callbacks and confirms that every assigned
+	// worker task has accepted Drop before terminal metadata is removed. An error
+	// keeps the job and tasks as the next checker pass's retry anchor.
+	dropJobTasks func(jobID int64) error
 }
 
 func newRefreshChecker(
@@ -97,22 +97,22 @@ func newRefreshChecker(
 	mt *meta,
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
-	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
+	updateJobSchema func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error,
 	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error,
 	onJobFailed func(jobID int64),
-	onJobGC func(jobID int64),
+	cleanupJobResources func(jobID int64) error,
 	onInitJobPending func(jobID int64),
 ) *externalCollectionRefreshChecker {
 	return &externalCollectionRefreshChecker{
-		ctx:              ctx,
-		mt:               mt,
-		refreshMeta:      refreshMeta,
-		closeChan:        closeChan,
-		onJobFinished:    onJobFinished,
-		applyJobInfo:     applyJobInfo,
-		onJobFailed:      onJobFailed,
-		onJobGC:          onJobGC,
-		onInitJobPending: onInitJobPending,
+		ctx:                 ctx,
+		mt:                  mt,
+		refreshMeta:         refreshMeta,
+		closeChan:           closeChan,
+		updateJobSchema:     updateJobSchema,
+		applyJobInfo:        applyJobInfo,
+		onJobFailed:         onJobFailed,
+		cleanupJobResources: cleanupJobResources,
+		onInitJobPending:    onInitJobPending,
 	}
 }
 
@@ -154,11 +154,18 @@ func (c *externalCollectionRefreshChecker) processJobs() {
 }
 
 // processJob runs one inspection pass for a single job: state aggregation,
-// timeout check, finished-callback firing, and GC. Both the periodic loop
-// and the eager task path call this so the same code drives every job
-// state transition. Idempotent — repeated calls short-circuit on terminal
-// state and source/spec equality.
+// finalization, timeout check, and GC. The eager task path uses the same flow
+// through processJobEager but leaves retention GC to the periodic checker.
 func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollectionRefreshJob) {
+	c.processJobWithGC(job, true)
+}
+
+// processJobEager is the eager task path: same pass, minus GC.
+func (c *externalCollectionRefreshChecker) processJobEager(job *datapb.ExternalCollectionRefreshJob) {
+	c.processJobWithGC(job, false)
+}
+
+func (c *externalCollectionRefreshChecker) processJobWithGC(job *datapb.ExternalCollectionRefreshJob, runGC bool) {
 	// Retry Phase B task creation for jobs that are still in Init with no
 	// tasks (i.e. the async submission attempt did not land tasks yet).
 	// This is the safety-net retry path: the WAL ack callback already kicked
@@ -186,6 +193,19 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 		return
 	}
 
+	// Entering the optional index wait publishes the segment set before the
+	// job becomes terminal. Publish its matching external source/spec before
+	// any index build can be nudged, and keep the applied InProgress job as the
+	// retry anchor until that idempotent publication succeeds.
+	// Only an active wait can owe schema publication. Terminal jobs are kept
+	// for retention/inspection after that publication has already succeeded;
+	// replaying an old job here could overwrite a newer refresh's schema.
+	if latestJob.GetState() == indexpb.JobState_JobStateInProgress &&
+		latestJob.GetIndexWaitStartedTime() != 0 &&
+		!c.syncAppliedJobSchema(latestJob) {
+		return
+	}
+
 	// Check timeout for active jobs (Init, Retry, InProgress) using the
 	// freshly-read state, not the stale snapshot.
 	switch latestJob.GetState() {
@@ -193,14 +213,17 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 		c.tryTimeoutJob(latestJob)
 	}
 
-	// Fire the finished callback. ensureJobFinishedNotified is a no-op
-	// when the job isn't in Finished state, and the manager-side callback
-	// short-circuits when source/spec already match (so re-firing across
-	// cycles before GC is harmless).
-	c.ensureJobFinishedNotified(latestJob)
-
-	// Check GC for terminal states (Finished/Failed)
-	c.checkGC(latestJob)
+	if runGC {
+		// Check GC for terminal states (Finished/Failed).
+		//
+		// Only on the periodic tick. GC hands every task of the job back from
+		// the scheduler, and the eager caller is a worker callback that already
+		// holds one of those tasks' scheduler locks -- taking it again would
+		// deadlock on itself. Nothing here is latency-sensitive: GC only drops
+		// metadata for a job that already reached a terminal state, so waiting
+		// for the next tick costs nothing a caller can observe.
+		c.checkGC(latestJob)
+	}
 }
 
 // processJobByID looks up a job and runs one inspection pass for it
@@ -213,7 +236,7 @@ func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	if job == nil {
 		return
 	}
-	c.processJob(job)
+	c.processJobEager(job)
 }
 
 // indexWaitProgressFloor is what a job reports the moment it enters the index
@@ -229,10 +252,11 @@ func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 }
 
 // beginIndexWait applies the job's results and puts it into the index wait, in
-// one transition under the job lock - two catalog writes, ordered, not atomic;
-// see BeginIndexWait. The job stays InProgress; processJob fires the finished
-// callback right after aggregateJobState returns, which publishes the refreshed
-// source/spec exactly as the ungated path does.
+// one transition under the job lock. Segment adoption and task-result
+// consumption are atomic with each other; the following job-marker write is
+// ordered but separate (see BeginIndexWait). The job stays InProgress. Once the
+// marker is durable, this function synchronously publishes the refreshed
+// source/spec before any index build can be nudged.
 //
 // Reports whether THIS call is the one that entered the wait, so the caller
 // owns the follow-up exactly once.
@@ -243,14 +267,7 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 			return c.applyJobInfo(c.ctx, latestJob)
 		})
 	if err != nil {
-		mlog.Warn(c.ctx, "failed to apply external collection refresh result",
-			mlog.FieldJobID(job.GetJobId()),
-			mlog.Err(err))
-		// applied here means the failure was persisted as a terminal Failed
-		// state, exactly as on the ungated path.
-		if applied && c.onJobFailed != nil {
-			c.onJobFailed(job.GetJobId())
-		}
+		c.handleFinalizationError(job.GetJobId(), "apply refresh result before index wait", err)
 		return false
 	}
 	if !applied {
@@ -260,26 +277,25 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 		// side effects.
 		return false
 	}
-	// Release the task results now, not at the end of the wait. They are dead
-	// weight the moment the apply lands - the marker guarantees it is never
-	// replayed, and the state aggregate reads task states, never results - and
-	// they are not small: each carries a SegmentInfo per produced segment,
-	// inline in the task's catalog record plus a blob in the result store.
-	// Holding them for the length of an index build, and for the retention
-	// period on top of that when a job times out mid-wait, is a cost the
-	// ungated path never pays, because there the apply and Finished are the
-	// same transition and this clear follows immediately.
-	if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
-		// Not fatal: finishAfterIndexWait clears again, and DropJob sweeps the
-		// job prefix at GC.
-		mlog.Warn(c.ctx, "failed to clear external collection refresh task results on index wait entry",
-			mlog.FieldJobID(job.GetJobId()),
-			mlog.Err(err))
-	}
-
 	mlog.Info(c.ctx, "external collection refresh applied, waiting for its segments to be indexed",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.FieldCollectionID(job.GetCollectionId()))
+	entered := c.refreshMeta.GetJob(job.GetJobId())
+	return entered != nil && c.syncAppliedJobSchema(entered)
+}
+
+// syncAppliedJobSchema keeps the schema publication ordered after segment
+// adoption and before index dispatch. It stores no separate notification
+// state: collection metadata is authoritative, and updateJobSchema is
+// replay-safe because it skips an already-matching source/spec.
+func (c *externalCollectionRefreshChecker) syncAppliedJobSchema(job *datapb.ExternalCollectionRefreshJob) bool {
+	if c.updateJobSchema == nil {
+		return true
+	}
+	if err := c.updateJobSchema(c.ctx, job); err != nil {
+		c.handleFinalizationError(job.GetJobId(), "update collection schema", err)
+		return false
+	}
 	return true
 }
 
@@ -344,40 +360,23 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 }
 
 // nudgeIndexBuilds pushes unindexed segments into the build-acceleration
-// channel, exactly as importChecker.checkIndexBuildingJob does - but only once
-// DataCoord's collection meta already carries THIS refresh's source/spec.
+// channel, exactly as importChecker.checkIndexBuildingJob does. The caller
+// synchronizes the refreshed source/spec through RootCoord before reaching
+// this function, and index request preparation reads that authoritative owner.
 //
 // An index build resolves the external source/spec at DISPATCH time, not at
-// enqueue time: prepareJobRequest calls handler.GetCollection and copies
-// schema.GetExternalSource()/GetExternalSpec() into the CreateJobRequest, and
-// on the worker those drive the external filesystem endpoint, bucket and
-// credentials. The publish is a round trip (AlterCollection -> WAL ack ->
-// BroadcastAlteredCollection -> meta.AddCollection) while the scheduler ticks
-// every 100ms, so a nudge issued before the publish lands dispatches builds
-// against the PRE-refresh location. Those builds fail terminally, and nothing
-// retries them: createIndexesForSegment skips an index that already has a
-// segIndex record, and GetUnindexedSegments only counts Finished - so the
-// segment never becomes indexed and the wait burns the whole job timeout.
+// enqueue time: prepareJobRequest calls ServerHandler.GetCollection, which reads
+// authoritative RootCoord metadata, and copies the source/spec into the worker
+// request. syncAppliedJobSchema completes the RootCoord update before
+// indexWaitDone reaches this nudge; a failed update returns from the checker
+// before index debt is evaluated. A build accelerated here therefore observes
+// the refreshed endpoint and credentials from the same authoritative owner.
 //
-// The gate is authoritative because it reads the same place the dispatch will:
-// ServerHandler.GetCollection is a plain meta.GetCollection. A refresh that
-// does not change source/spec passes it immediately and loses no acceleration.
-// A collection missing from meta reads as "not yet" - the dispatch would resolve
-// it from RootCoord and be safe, but skipping one nudge only costs latency and
-// the periodic index inspector still creates the tasks either way.
-//
-// This narrows the window; it does not close it. The inspector's own 60s tick
-// scans every flushed segment and needs no notification, so a build can still
-// be created inside the window without this nudge. That hazard predates this
-// feature and is out of scope here - what this guarantees is that the wait does
-// not actively dispatch into it.
+// The periodic index inspector may independently discover a segment before the
+// refresh reaches this publication point. That pre-existing concurrency is out
+// of scope here; this path only guarantees that the refresh wait's own nudge is
+// ordered after schema publication.
 func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.ExternalCollectionRefreshJob, unindexed []int64) {
-	if !c.refreshedSchemaVisible(job) {
-		mlog.Debug(c.ctx, "refreshed external schema not visible yet, holding the index build nudge",
-			mlog.FieldJobID(job.GetJobId()),
-			mlog.FieldCollectionID(job.GetCollectionId()))
-		return
-	}
 	for _, segmentID := range unindexed {
 		select {
 		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
@@ -386,27 +385,22 @@ func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.External
 	}
 }
 
-// refreshedSchemaVisible reports whether DataCoord's collection meta already
-// carries this refresh's external source/spec - i.e. whether an index build
-// dispatched now would read the refreshed location rather than the previous one.
-func (c *externalCollectionRefreshChecker) refreshedSchemaVisible(job *datapb.ExternalCollectionRefreshJob) bool {
-	if c.mt == nil {
-		return false
+// finishJob removes planning resources, publishes Finished, and releases task
+// results. Cleanup runs first so observing Finished also means the Explore temp
+// directory is gone. A cleanup error leaves the non-terminal job for retry.
+func (c *externalCollectionRefreshChecker) finishJob(job *datapb.ExternalCollectionRefreshJob) {
+	if c.cleanupJobResources != nil {
+		if err := c.cleanupJobResources(job.GetJobId()); err != nil {
+			mlog.Warn(c.ctx, "failed to clean external collection refresh resources before finish, will retry",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Err(err))
+			return
+		}
 	}
-	collection := c.mt.GetCollection(job.GetCollectionId())
-	if collection == nil || collection.Schema == nil {
-		return false
-	}
-	return collection.Schema.GetExternalSource() == job.GetExternalSource() &&
-		collection.Schema.GetExternalSpec() == job.GetExternalSpec()
-}
 
-// finishAfterIndexWait completes a job whose wait is over. No pre-apply: the
-// segments were applied when the wait began.
-func (c *externalCollectionRefreshChecker) finishAfterIndexWait(job *datapb.ExternalCollectionRefreshJob) {
 	applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), indexpb.JobState_JobStateFinished, "")
 	if err != nil {
-		mlog.Warn(c.ctx, "failed to finish external collection refresh after the index wait",
+		mlog.Warn(c.ctx, "failed to finish external collection refresh",
 			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
 		return
 	}
@@ -418,7 +412,7 @@ func (c *externalCollectionRefreshChecker) finishAfterIndexWait(job *datapb.Exte
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.Err(err))
 	}
-	mlog.Info(c.ctx, "external collection refresh finished, its segments are indexed",
+	mlog.Info(c.ctx, "external collection refresh finished",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.FieldCollectionID(job.GetCollectionId()))
 }
@@ -460,24 +454,24 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	//
 	// Both sit ahead of that transition because while the wait is on, the
 	// aggregate says Finished and the job says InProgress on every tick - the
-	// generic path would replay the apply and finish the job immediately.
+	// generic path would leave the index-wait phase and finish immediately.
 
 	// A job that has already applied its segments belongs to this path for the
-	// rest of its life, whatever the parameter says NOW. This is the only exit
-	// that does not re-run the apply, so keying it on the parameter instead of
-	// the marker would make turning the parameter off mid-wait replay the
-	// apply - and applyExternalRefreshPatch clears TextStatsLogs/JsonKeyStats,
-	// so that replay would discard indexes built during the very wait it was
-	// disabling. Off now simply means release the job: finish it at once
-	// without waiting, which is what an operator disabling the hold wants.
+	// rest of its life, whatever the parameter says NOW. Keying this on the
+	// persisted marker preserves the phase boundary and avoids routing an
+	// already-applied job back through generic finalization. Off now simply
+	// means release the job: finish it at once without waiting, which is what
+	// an operator disabling the hold wants.
 	if state == indexpb.JobState_JobStateFinished && job.GetIndexWaitStartedTime() != 0 {
+		if !c.syncAppliedJobSchema(job) {
+			return
+		}
 		if c.indexWaitEnabled() && !c.indexWaitDone(job) {
 			return
 		}
-		// Finish WITHOUT a pre-apply: the segments were applied by
-		// BeginIndexWait, and replaying that here would be a second apply of
-		// the same results.
-		c.finishAfterIndexWait(job)
+		// Finish without pre-apply: BeginIndexWait already consumed and applied
+		// the segment results.
+		c.finishJob(job)
 		return
 	}
 	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
@@ -498,7 +492,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		if entered == nil || !c.indexWaitDone(entered) {
 			return
 		}
-		c.finishAfterIndexWait(entered)
+		c.finishJob(entered)
 		return
 	}
 
@@ -529,37 +523,31 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			}
 		}
 
-		if state == indexpb.JobState_JobStateFinished && c.applyJobInfo != nil {
-			applied, err := c.refreshMeta.UpdateJobStateWithPreApply(
-				job.GetJobId(),
-				state,
-				failReason,
-				func(latestJob *datapb.ExternalCollectionRefreshJob) error {
-					return c.applyJobInfo(c.ctx, latestJob)
-				})
-			if err != nil {
-				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
-					mlog.FieldJobID(job.GetJobId()),
-					mlog.Err(err))
-				if applied && c.onJobFailed != nil {
-					c.onJobFailed(job.GetJobId())
+		if state == indexpb.JobState_JobStateFinished {
+			latestJob := c.refreshMeta.GetJob(job.GetJobId())
+			if latestJob == nil || latestJob.GetState() == indexpb.JobState_JobStateFinished ||
+				latestJob.GetState() == indexpb.JobState_JobStateFailed {
+				return
+			}
+
+			// Concurrent or recovered finalizers may enter this block more than once.
+			// Segment publication is not replayed: its transaction consumes the task
+			// result references, so later calls observe that the result was applied.
+			// The schema publication remains independently idempotent.
+			if c.applyJobInfo != nil {
+				if err := c.applyJobInfo(c.ctx, latestJob); err != nil {
+					c.handleFinalizationError(job.GetJobId(), "apply refresh result", err)
+					return
 				}
-				return
 			}
-			if !applied {
-				// A concurrent path already drove the job into a terminal state
-				// and owns the one-time segment apply / callback side effects.
-				return
-			}
-
-			if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
-				mlog.Warn(c.ctx, "failed to clear external collection refresh task results",
-					mlog.FieldJobID(job.GetJobId()),
-					mlog.Err(err))
+			if c.updateJobSchema != nil {
+				if err := c.updateJobSchema(c.ctx, latestJob); err != nil {
+					c.handleFinalizationError(job.GetJobId(), "update collection schema", err)
+					return
+				}
 			}
 
-			// processJobs calls ensureJobFinishedNotified right after this
-			// function returns, so we don't fire the callback here.
+			c.finishJob(latestJob)
 			return
 		}
 
@@ -571,25 +559,17 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			return
 		}
 		if !applied {
-			// Terminal-state guard skipped the write — a concurrent path
-			// already drove the job to a terminal state. Do not fire any
-			// per-job side effects here; the path that actually persisted
-			// the transition owns the follow-up (onJobFinished or onJobFailed).
+			// A concurrent path already drove the job to a terminal state.
 			return
 		}
 
 		// Fire onJobFailed right after the state transition persists, so
 		// per-job resources (explore temp dir) get reclaimed immediately
 		// instead of waiting for the retention-gated GC path (default 24h).
-		// The manager dedups so concurrent eager + periodic paths only
-		// clean once per jobID.
+		// Cleanup is idempotent, so concurrent calls are harmless.
 		if state == indexpb.JobState_JobStateFailed && c.onJobFailed != nil {
 			c.onJobFailed(job.GetJobId())
 		}
-
-		// processJobs calls ensureJobFinishedNotified right after this
-		// function returns, so we don't fire the callback here — keeping
-		// the notification firing in exactly one place per cycle.
 
 		// For Finished state, UpdateJobState sets Progress=100
 		// For Failed state, progress was already persisted above
@@ -613,40 +593,64 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	}
 }
 
-// ensureJobFinishedNotified calls onJobFinished for a finished job. The checker
-// is the single processing path, so this fires once per job per cycle; the
-// callback itself is idempotent (the manager short-circuits when source/spec
-// already match), so re-firing on a later tick before GC is harmless.
-func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb.ExternalCollectionRefreshJob) {
-	if c.onJobFinished == nil {
+// handleFinalizationError terminates a job only when the error already carries
+// an existing permanent classification. Raw catalog/RPC errors and typed
+// retriable availability errors stay active for the next checker pass.
+func (c *externalCollectionRefreshChecker) handleFinalizationError(jobID int64, operation string, err error) {
+	var retryTask *externalRefreshRetryTaskError
+	if errors.As(err, &retryTask) {
+		applied, updateErr := c.refreshMeta.RetryFinishedTaskOnManifestConflict(retryTask)
+		if updateErr != nil {
+			mlog.Warn(c.ctx, "failed to persist external refresh manifest-conflict retry",
+				mlog.FieldJobID(jobID),
+				mlog.FieldTaskID(retryTask.taskID),
+				mlog.FieldSegmentID(retryTask.segmentID),
+				mlog.Err(updateErr))
+			return
+		}
+		if applied {
+			mlog.Info(c.ctx, "external refresh task will retry with a fresh task ID after manifest conflict",
+				mlog.FieldJobID(jobID),
+				mlog.FieldTaskID(retryTask.taskID),
+				mlog.FieldSegmentID(retryTask.segmentID))
+		}
 		return
 	}
-	// Re-read job from meta to get latest state (may have been updated eagerly)
-	latestJob := c.refreshMeta.GetJob(job.GetJobId())
-	if latestJob == nil {
+	if !isPermanentExternalRefreshFinalizationError(err) {
+		mlog.Warn(c.ctx, "external collection refresh finalization failed, will retry",
+			mlog.FieldJobID(jobID),
+			mlog.String("operation", operation),
+			mlog.Err(err))
 		return
 	}
-	// Finished, OR applied - waiting for indexes, or done waiting one way or
-	// the other. The callback publishes the refreshed source/spec and reclaims
-	// the explore temp dir, and both become due the moment the segments are
-	// applied - which with the index wait on happens before Finished. Waiting
-	// for Finished would hold the schema back for the whole wait, and index
-	// builds take the external source/spec from the collection schema.
-	// Publishing here narrows the window in which a build can read the previous
-	// source/spec; it does not close it, because the index inspector's own tick
-	// needs no notification. See nudgeIndexBuilds.
-	//
-	// The marker also holds for a job that FAILED after applying (it outran
-	// the job timeout mid-wait). Such a job still owes the publish: its
-	// segments are the collection's contents and are being served, so the
-	// schema must describe them - Failed only says the wait did not finish in
-	// budget. That is why the Failed path may not claim the publish dedup key;
-	// see handleJobFailed.
-	if latestJob.GetState() != indexpb.JobState_JobStateFinished &&
-		latestJob.GetIndexWaitStartedTime() == 0 {
+	applied, updateErr := c.refreshMeta.UpdateJobState(
+		jobID,
+		indexpb.JobState_JobStateFailed,
+		err.Error(),
+	)
+	if updateErr != nil {
+		mlog.Warn(c.ctx, "failed to persist permanent external refresh finalization failure, will retry",
+			mlog.FieldJobID(jobID),
+			mlog.String("operation", operation),
+			mlog.Err(updateErr))
 		return
 	}
-	c.onJobFinished(c.ctx, latestJob)
+	if !applied {
+		return
+	}
+	mlog.Warn(c.ctx, "external collection refresh finalization failed permanently",
+		mlog.FieldJobID(jobID),
+		mlog.String("operation", operation),
+		mlog.Err(err))
+	if c.onJobFailed != nil {
+		c.onJobFailed(jobID)
+	}
+}
+
+func isPermanentExternalRefreshFinalizationError(err error) bool {
+	return errors.Is(err, merr.ErrDataIntegrity) ||
+		merr.GetErrorType(err) == merr.InputError ||
+		merr.IsNonRetryableErr(err)
 }
 
 // logJobStats reports job statistics grouped by state.
@@ -722,16 +726,42 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 	age := time.Since(startTime)
 
 	if age > timeout {
+		// Once every worker task is Finished, the execution itself is done. A
+		// job outside the index wait is only replaying finalization. A job in
+		// the index wait may still time out while indexes are outstanding, but
+		// once that debt is clear it too is only retrying terminal cleanup.
+		// Neither finalization path may be overwritten by the execution timeout.
+		state, _, err := c.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
+		if err == nil && state == indexpb.JobState_JobStateFinished {
+			if job.GetIndexWaitStartedTime() == 0 ||
+				!c.indexWaitEnabled() ||
+				c.indexWaitDone(job) {
+				mlog.Debug(c.ctx, "skip timeout while finalizing external collection refresh job",
+					mlog.FieldJobID(job.GetJobId()))
+				return
+			}
+		}
+
 		mlog.Warn(c.ctx, "external collection job timeout",
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.FieldCollectionID(job.GetCollectionId()),
 			mlog.Duration("age", age),
 			mlog.Duration("timeout", timeout))
 
+		// Keep whatever the job last recorded. A job that timed out while
+		// retrying a transient explore failure carries the real cause (bad
+		// bucket, denied credential); reporting a bare "timeout" would throw
+		// away the only thing that tells an operator what to fix.
+		reason := timeoutFailReason(job)
+		if job.GetIndexWaitStartedTime() == 0 {
+			if last := job.GetFailReason(); last != "" {
+				reason = fmt.Sprintf("timeout, last failure: %s", last)
+			}
+		}
 		applied, err := c.refreshMeta.UpdateJobState(
 			job.GetJobId(),
 			indexpb.JobState_JobStateFailed,
-			timeoutFailReason(job))
+			reason)
 		if err != nil {
 			mlog.Warn(c.ctx, "failed to mark job as timed out",
 				mlog.FieldJobID(job.GetJobId()),
@@ -741,8 +771,8 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		if !applied {
 			// Terminal-state guard fired — while the checker was about to
 			// time out this job a concurrent eager path already transitioned
-			// it to Finished/Failed. Bail out and let the path that actually
-			// persisted the transition own the one-time side effects.
+			// it to Finished/Failed. Let the path that actually persisted the
+			// transition perform its terminal callback and task updates.
 			mlog.Info(c.ctx, "skip timeout fail path, job already in terminal state",
 				mlog.FieldJobID(job.GetJobId()))
 			return
@@ -760,7 +790,10 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			if task.GetState() == indexpb.JobState_JobStateInit ||
 				task.GetState() == indexpb.JobState_JobStateRetry ||
 				task.GetState() == indexpb.JobState_JobStateInProgress {
-				_ = c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout")
+				if err := c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout"); err != nil {
+					mlog.Warn(c.ctx, "failed to mark task failed on job timeout",
+						mlog.FieldTaskID(task.GetTaskId()), mlog.Err(err))
+				}
 			}
 		}
 
@@ -799,6 +832,26 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			mlog.Duration("age", age),
 			mlog.Duration("retention", retention))
 
+		// Clean external objects before dropping the durable job. If cleanup fails,
+		// retaining the job gives the next checker pass an authoritative retry anchor.
+		if c.cleanupJobResources != nil {
+			if err := c.cleanupJobResources(job.GetJobId()); err != nil {
+				mlog.Warn(c.ctx, "failed to clean external collection job resources during GC, will retry on next check",
+					mlog.FieldJobID(job.GetJobId()),
+					mlog.Err(err))
+				return
+			}
+		}
+
+		if c.dropJobTasks != nil {
+			if err := c.dropJobTasks(job.GetJobId()); err != nil {
+				mlog.Warn(c.ctx, "failed to drop external collection refresh tasks during GC, will retry on next check",
+					mlog.FieldJobID(job.GetJobId()),
+					mlog.Err(err))
+				return
+			}
+		}
+
 		// DropJob drops job and associated tasks. No in-loop retry: checkGC runs periodically,
 		// so the next tick will naturally retry if etcd was temporarily unavailable.
 		err := c.refreshMeta.DropJob(c.ctx, job.GetJobId())
@@ -809,10 +862,5 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			return
 		}
 		mlog.Info(c.ctx, "external collection job removed", mlog.FieldJobID(job.GetJobId()))
-		// Release per-job bookkeeping in the manager (the publish and cleanup
-		// dedup entries) so it stays bounded across DataCoord lifetime.
-		if c.onJobGC != nil {
-			c.onJobGC(job.GetJobId())
-		}
 	}
 }

@@ -210,6 +210,10 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
+  // Reserved for a post-upgrade cutover to V3 task-attempt subdirectories.
+  // Current DataCoords leave it false; older DataCoords also omit it and older
+  // DataNodes ignore the unknown field, so rolling upgrades keep the legacy path.
+  bool use_v3_stats_attempt_path = 33;
 }
 
 message CreateJobV2Request {

@@ -84,7 +84,10 @@ type RollbackFunc func(ctx context.Context, dbName, collectionName string) error
 // Used by RestoreSnapshot to validate snapshot, collection, partitions, and indexes.
 type ValidateResourcesFunc func(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error
 
-const snapshotPinCleanupTimeout = 5 * time.Second
+const (
+	snapshotPinCleanupTimeout      = 5 * time.Second
+	snapshotRestorePinSafetyMargin = 5 * time.Minute
+)
 
 // ============================================================================
 // Interface Definition
@@ -650,8 +653,8 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 //
 // Flow:
 //
-//	Phase 0: Acquire the full restore lock set and claim a restore reference
-//	         on the source snapshot. The lock + refcount together guarantee
+//	Phase 0: Acquire the full restore lock set and claim a persistent pin
+//	         on the source snapshot. The lock + pin together guarantee
 //	         that a concurrent DropSnapshot cannot delete the snapshot mid-flight.
 //	Phase 1: Read snapshot data.
 //	Phase 2: Restore collection and partitions.
@@ -690,17 +693,25 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// cascade / GC) observes and rejects against — pin checks already live in
 	// snapshotMeta.DropSnapshot, so no separate ref-count mechanism is needed.
 	//
-	// TTL acts as an orphan-pin safety net: if the job fails to persist, datacoord
-	// crashes between Pin and broadcast, or UnpinSnapshot fails at terminal state,
-	// the pin self-expires so DropSnapshot is not blocked indefinitely. The default
-	// is 24h (dataCoord.snapshot.restorePinTTLSeconds), well above the worst-case
-	// restore wall time since restore is a segment-level S3 object copy (no data
-	// rewrite) — even multi-TB restores complete in minutes.
+	// TTL is the orphan-pin safety net for crashes between Pin and broadcast/job
+	// persistence, and for a failed terminal Unpin. The durable restore owner
+	// normally releases the pin before the TTL expires.
+	//
+	// NOTE: The pin TTL starts here, while the copy-job timeout starts later when
+	// the WAL callback creates the job. If restore preparation takes longer than
+	// snapshotRestorePinSafetyMargin, the pin can therefore expire before the job
+	// reaches its timeout. This is an accepted best-effort boundary; the job's
+	// terminal path remains responsible for releasing the pin normally.
 	//
 	// PinSnapshot also does its own GetSnapshot under pinMu, which closes the
 	// TOCTOU against any DropSnapshot that committed between the proxy-level
 	// check and now — replacing the previous re-validation step.
 	pinTTLSeconds := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
+	jobTimeout := Params.DataCoordCfg.CopySegmentJobTimeout.GetAsDuration(time.Second)
+	restorePinTTLSeconds := int64((jobTimeout + snapshotRestorePinSafetyMargin + time.Second - 1) / time.Second)
+	if restorePinTTLSeconds > pinTTLSeconds {
+		pinTTLSeconds = restorePinTTLSeconds
+	}
 	pinID, activePins, err := sm.snapshotMeta.PinSnapshot(ctx, sourceCollectionID, snapshotName, pinTTLSeconds)
 	if err != nil {
 		phase0Lock.Close()
@@ -717,20 +728,22 @@ func (sm *snapshotManager) RestoreSnapshot(
 	pinOwned := true
 	defer func() {
 		if pinOwned {
-			collID, snapName, remaining, unpinErr := sm.snapshotMeta.UnpinSnapshot(ctx, pinID)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotPinCleanupTimeout)
+			defer cancel()
+			collID, snapName, remaining, unpinErr := sm.snapshotMeta.UnpinSnapshot(cleanupCtx, pinID)
 			if unpinErr != nil {
-				mlog.Warn(context.TODO(), "failed to release pin on failure path",
+				mlog.Warn(cleanupCtx, "failed to release pin on failure path",
 					mlog.Int64("pinID", pinID), mlog.Err(unpinErr))
 				return
 			}
 			if snapName != "" {
 				setSnapshotActivePinsGauge(collID, snapName, remaining)
 			}
-			mlog.Info(context.TODO(), "released pin on failure path", mlog.Int64("pinID", pinID))
+			mlog.Info(cleanupCtx, "released pin on failure path", mlog.Int64("pinID", pinID))
 		}
 	}()
 
-	// Phase 1: Read snapshot data (now protected by the refcount guard)
+	// Phase 1: Read snapshot data (now protected by the persistent pin)
 	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to read snapshot data")
@@ -777,7 +790,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	}
 	// Success path: transfer ownership of the pin to the copy segment job
 	// (job.PinId). The job's state machine will Unpin upon terminal transition
-	// via UpdateJobStateAndReleaseRef.
+	// via UpdateJobStateAndReleasePin.
 	pinOwned = false
 	return jobID, nil
 }
@@ -1616,10 +1629,10 @@ func (sm *snapshotManager) createRestoreJob(
 		return err
 	}
 
-	// Create ID mappings and pre-register target segments
+	// Create ID mappings and target segments
 	idMappings := make([]*datapb.CopySegmentIDMapping, 0, len(validSegments))
 	totalRows := int64(0)
-	targetSegments := make(map[int64]*SegmentInfo, len(validSegments))
+	targetSegments := make([]*SegmentInfo, 0, len(validSegments))
 	for i, segDesc := range validSegments {
 		sourceSegmentID := segDesc.GetSegmentId()
 		targetSegmentID := targetSegmentIDStart + int64(i)
@@ -1687,15 +1700,7 @@ func (sm *snapshotManager) createRestoreJob(
 			CommitTimestamp:     segDesc.GetCommitTimestamp(),
 			IsImporting:         true,
 		})
-		targetSegments[targetSegmentID] = newSegment
-	}
-
-	// Pre-register all target segments in meta to ensure they exist when copy tasks run
-	for _, targetSegment := range targetSegments {
-		if err := sm.meta.AddSegment(ctx, targetSegment); err != nil {
-			mlog.Error(context.TODO(), "failed to pre-register target segment", mlog.Err(err))
-			return err
-		}
+		targetSegments = append(targetSegments, newSegment)
 	}
 
 	// Pre-register channel's checkpoint
@@ -1743,14 +1748,14 @@ func (sm *snapshotManager) createRestoreJob(
 	// NOTE: The restore reference has already been claimed in Phase 0 of
 	// RestoreSnapshot (service layer) before any snapshot data was read. The
 	// reference is now transferred to this job and will be released by
-	// UpdateJobStateAndReleaseRef when the job reaches a terminal state.
+	// UpdateJobStateAndReleasePin when the job reaches a terminal state.
 	//
-	// Save job to metadata. If AddJob fails, the ack callback will retry
-	// (see ack_callback_scheduler) or eventually fail terminally; the
-	// ref-count release on terminal failure is the responsibility of WU-3
-	// (terminal error classification) in the broadcaster layer.
-	if err := sm.copySegmentMeta.AddJob(ctx, copyJob); err != nil {
-		mlog.Error(context.TODO(), "failed to save copy segment job",
+	// Publish the job and all of its target segments together. The job is the
+	// ownership anchor used by retry and GC; persisting either side alone would
+	// leave an Importing segment without a recovery path, or a job whose targets
+	// do not exist.
+	if err := sm.copySegmentMeta.AddJobWithSegments(ctx, copyJob, targetSegments); err != nil {
+		mlog.Error(ctx, "failed to publish copy segment job and target segments",
 			mlog.Int64("sourceCollectionID", snapshotData.SnapshotInfo.GetCollectionId()),
 			mlog.String("snapshot", snapshotData.SnapshotInfo.GetName()), mlog.Err(err))
 		return err
@@ -1801,22 +1806,14 @@ func (sm *snapshotManager) ListRestoreJobs(
 	// Get all jobs
 	jobs := sm.copySegmentMeta.GetJobBy(ctx)
 
-	// Build a set of collection IDs in the database for db-level filtering
-	var dbCollections map[int64]struct{}
-	if dbID != 0 && collectionIDFilter == 0 {
-		dbCollections = sm.getDBCollectionIDs(dbID)
-	}
-
 	// Filter by collection/database and build restore info list
 	restoreInfos := make([]*datapb.RestoreSnapshotInfo, 0)
 	for _, job := range jobs {
 		if collectionIDFilter != 0 && job.GetCollectionId() != collectionIDFilter {
 			continue
 		}
-		if dbCollections != nil {
-			if _, ok := dbCollections[job.GetCollectionId()]; !ok {
-				continue
-			}
+		if dbID != 0 && collectionIDFilter == 0 && job.GetDbId() != dbID {
+			continue
 		}
 
 		restoreInfos = append(restoreInfos, sm.buildRestoreInfo(job))
@@ -1879,18 +1876,6 @@ func (sm *snapshotManager) HasActivePins(ctx context.Context, collectionID int64
 // ============================================================================
 // Common Helper Functions (private)
 // ============================================================================
-
-// getDBCollectionIDs returns the set of collection IDs belonging to a database.
-// Used by ListSnapshots and ListRestoreJobs for database-level filtering.
-func (sm *snapshotManager) getDBCollectionIDs(dbID int64) map[int64]struct{} {
-	result := make(map[int64]struct{})
-	for _, coll := range sm.meta.GetCollections() {
-		if coll.DatabaseID == dbID {
-			result[coll.ID] = struct{}{}
-		}
-	}
-	return result
-}
 
 // buildRestoreInfo constructs a RestoreSnapshotInfo from a CopySegmentJob.
 // This centralizes the conversion logic to eliminate code duplication.

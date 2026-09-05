@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -2406,6 +2407,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsWithF
 		ExternalSource:         "s3://bucket/data/",
 		ExternalSpec:           `{"format":"parquet"}`,
 		Schema: &schemapb.CollectionSchema{
+			Version: 7,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
 				{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
@@ -2446,6 +2448,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsWithF
 	s.Require().Len(result, 1)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
 	s.Equal(int64(3000), result[0].GetID())
+	s.Equal(int32(7), result[0].GetSchemaVersion())
 	s.NotZero(result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
 }
 
@@ -3142,7 +3145,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 		}).Build()
 	defer m1.UnPatch()
 
-	cppErr := fmt.Errorf("Invalid: Column 'wrong_col_a' not found in schema. [path=data.parquet]")
+	cppErr := merr.SegcoreError(2042, "Invalid: Column 'wrong_col_a' not found in schema. [path=data.parquet]")
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, cppErr).Build()
 	defer m2.UnPatch()
 
@@ -3155,6 +3158,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 	s.Contains(err.Error(), "Column 'wrong_col_a' not found in schema")
 	// And emit actionable hint guiding the user to the real fix.
 	s.Contains(err.Error(), "external_field mappings")
+	s.Equal(merr.InputError, merr.GetErrorType(err),
+		"the permanent mapping error must remain InputError through task wrapping")
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SamplingTypeMismatchFails() {
@@ -3327,7 +3332,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 			idx := int(atomic.AddInt32(&callCount, 1)) - 1
 			switch idx {
 			case 0:
-				return nil, fmt.Errorf("transient sample failure")
+				return nil, merr.SegcoreError(2045, "transient sample failure")
 			case 1:
 				return map[string]int64{"text_col": 150}, nil
 			default:
@@ -3355,6 +3360,81 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	s.Equal(int64(150)*rowsPerFragment, result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize(), "segment 0 should be backfilled from fallbackAvg")
 	s.Equal(int64(150)*rowsPerFragment, result[1].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
 	s.Equal(int64(250)*rowsPerFragment, result[2].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerSegmentSampling_PermanentErrorDoesNotBackfill() {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	tests := []struct {
+		name       string
+		secondSize map[string]int64
+		secondErr  error
+		want       string
+	}{
+		{
+			name:      "invalid external field",
+			secondErr: merr.SegcoreError(2042, "Column 'text_col' not found in schema"),
+			want:      "Column 'text_col' not found in schema",
+		},
+		{
+			name:       "non-positive sampled size",
+			secondSize: map[string]int64{"text_col": 0},
+			want:       "sampled field sizes sum to 0",
+		},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			task := s.newTask(ctx, req)
+			task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+			task.nextAllocID = task.preallocatedIDRange.Begin
+			task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+			var callCount int32
+			m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+				To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+					if atomic.AddInt32(&callCount, 1) == 1 {
+						return map[string]int64{"text_col": 100}, nil
+					}
+					return test.secondSize, test.secondErr
+				}).Build()
+
+			rowsPerFragment := req.GetTargetRowsPerSegment() * 2
+			result, err := task.balanceFragmentsToSegments(context.Background(), []packed.Fragment{
+				{FragmentID: 1, RowCount: rowsPerFragment},
+				{FragmentID: 2, RowCount: rowsPerFragment},
+			})
+			m2.UnPatch()
+			s.Error(err)
+			s.Nil(result)
+			s.Equal(merr.InputError, merr.GetErrorType(err))
+			s.Contains(err.Error(), test.want)
+		})
+	}
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerSegmentSampling_AllFail() {

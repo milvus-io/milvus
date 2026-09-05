@@ -19,8 +19,11 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,16 +41,31 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+// refreshQueryLogRate caps the per-poll logs at one line per second per
+// process. Polls run on the scheduler round (100ms by default) and say the same
+// thing every time; the transitions they lead to are logged separately.
+const refreshQueryLogRate = rate.Limit(1)
+
 // refreshExternalCollectionTask wraps ExternalCollectionRefreshTask for scheduling.
 // This is used by the global task scheduler to dispatch refresh tasks to DataNodes.
 type refreshExternalCollectionTask struct {
 	*datapb.ExternalCollectionRefreshTask
+
+	// stateGuard makes the embedded proto readable by the scheduler without the
+	// per-task key lock. Callbacks replace the whole embedded pointer (meta
+	// re-reads) and mutate State under that key lock, but the scheduler's phase
+	// derivation and metrics pass read GetTaskID/GetTaskState lock-free on their
+	// own goroutines; see statsTask.stateGuard.
+	stateGuard sync.RWMutex
 
 	times *taskcommon.Times
 
 	refreshMeta *externalCollectionRefreshMeta
 	mt          *meta
 	allocator   allocator.Allocator
+	// collectionGetter reads RootCoord metadata for the current dispatch. The
+	// result is not retained across attempts.
+	collectionGetter func(context.Context, int64) (*collectionInfo, error)
 	// processFinishedJob is the per-job entry point on the refresh checker.
 	// The task calls it synchronously after transitioning to a terminal state
 	// so the finished-callback (schema update + WAL broadcast) fires before
@@ -76,6 +94,8 @@ func newRefreshExternalCollectionTask(
 }
 
 func (t *refreshExternalCollectionTask) GetTaskID() int64 {
+	t.stateGuard.RLock()
+	defer t.stateGuard.RUnlock()
 	return t.TaskId
 }
 
@@ -84,6 +104,8 @@ func (t *refreshExternalCollectionTask) GetTaskType() taskcommon.Type {
 }
 
 func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
+	t.stateGuard.RLock()
+	defer t.stateGuard.RUnlock()
 	// taskcommon.State is a type alias of indexpb.JobState, so this is type-safe.
 	return t.GetState()
 }
@@ -102,7 +124,126 @@ func (t *refreshExternalCollectionTask) GetTaskTime(timeType taskcommon.TimeType
 }
 
 func (t *refreshExternalCollectionTask) GetTaskVersion() int64 {
-	return t.GetVersion()
+	// A fresh task ID identifies every external refresh attempt. Keep the Task
+	// interface value at zero; the proto Version field is read-only compatibility
+	// data and is no longer used as a fence.
+	return 0
+}
+
+// swapTaskProto replaces the embedded proto after a meta re-read, under
+// stateGuard so the scheduler's lock-free readers never observe a torn pointer.
+func (t *refreshExternalCollectionTask) swapTaskProto(updated *datapb.ExternalCollectionRefreshTask) {
+	t.stateGuard.Lock()
+	t.ExternalCollectionRefreshTask = updated
+	t.stateGuard.Unlock()
+}
+
+// retryWorkerFailure records a worker failure that another attempt could still
+// get past, spending one of the task's attempts (issue #52445 tracked the
+// worker-lost-the-task case: the worker now reports that as JobStateRetry with
+// "task result not found", so it lands here and is re-dispatched rather than
+// being mistaken for the work itself failing).
+func (t *refreshExternalCollectionTask) retryWorkerFailure(reason string) error {
+	maxRetryTimes := paramtable.Get().DataCoordCfg.ExternalCollectionMaxRetryTimes.GetAsInt64()
+	if maxRetryTimes < 1 {
+		maxRetryTimes = 1
+	}
+	return t.recordWorkerFailure(reason, maxRetryTimes)
+}
+
+// handoffRetry publishes Retry before best-effort worker cleanup. The
+// inspector replaces this task with a fresh ID, so a failed or delayed Drop of
+// the predecessor cannot affect the replacement; a returned Drop error does
+// not revoke the Retry handoff.
+func (t *refreshExternalCollectionTask) handoffRetry(cluster session.Cluster, reason string) error {
+	previousState := t.GetTaskState()
+	if err := t.retryWorkerFailure(reason); err != nil {
+		return err
+	}
+	if previousState != taskcommon.Retry && t.GetTaskState() == taskcommon.Retry {
+		t.DropTaskOnWorker(cluster)
+	}
+	return nil
+}
+
+// failWorkerPermanently ends the attempt on the first report.
+//
+// A worker failure that blames the request -- zero total rows in the source, a
+// function field the schema does not have -- cannot be fixed by handing the
+// same request to another node. Spending the retry budget on it only delays the
+// RefreshFailed the caller is waiting for, which is what left permanent input
+// errors sitting in RefreshInProgress. The worker draws the line by reporting
+// Failed rather than Retry (see externalRefreshFailureState); a cap of one
+// attempt is how that decision is honored here.
+func (t *refreshExternalCollectionTask) failWorkerPermanently(reason string) error {
+	return t.recordWorkerFailure(reason, 1)
+}
+
+func (t *refreshExternalCollectionTask) recordWorkerFailure(reason string, maxRetryTimes int64) error {
+	updated, _, applied, err := t.refreshMeta.RecordTaskWorkerFailure(t.GetTaskId(), maxRetryTimes, reason)
+	if err != nil {
+		return err
+	}
+	if updated != nil {
+		t.swapTaskProto(updated)
+	}
+	if applied && updated.GetState() == indexpb.JobState_JobStateFailed && t.processFinishedJob != nil {
+		t.processFinishedJob(t.GetJobId())
+	}
+	return nil
+}
+
+func isTerminalExternalRefreshJob(job *datapb.ExternalCollectionRefreshJob) bool {
+	if job == nil {
+		return true
+	}
+	return job.GetState() == indexpb.JobState_JobStateFinished ||
+		job.GetState() == indexpb.JobState_JobStateFailed
+}
+
+// cancelForTerminalJob closes the scheduler tail race where a pending wrapper
+// has already been popped into an executor future just before GC drains the
+// scheduler maps. A missing or terminal job no longer owns worker work, so the
+// wrapper must become terminal locally even when its task metadata was already
+// removed and the best-effort state persistence cannot succeed.
+func (t *refreshExternalCollectionTask) cancelForTerminalJob(ctx context.Context, cluster session.Cluster) bool {
+	job := t.refreshMeta.GetJob(t.GetJobId())
+	if !isTerminalExternalRefreshJob(job) {
+		return false
+	}
+
+	reason := "job canceled"
+	if job != nil {
+		reason = fmt.Sprintf("job canceled in state %s", job.GetState().String())
+		if job.GetFailReason() != "" {
+			reason += ": " + job.GetFailReason()
+		}
+	}
+	if t.GetNodeId() != NullNodeID && t.GetNodeId() != 0 {
+		if err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId()); err != nil {
+			mlog.Warn(ctx, "failed to drop canceled external refresh task",
+				mlog.FieldTaskID(t.GetTaskId()),
+				mlog.Err(err))
+		}
+	}
+	if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+		mlog.Warn(ctx, "failed to persist external refresh cancellation; terminating scheduler wrapper locally",
+			mlog.FieldJobID(t.GetJobId()),
+			mlog.FieldTaskID(t.GetTaskId()),
+			mlog.Err(err))
+		t.SetState(indexpb.JobState_JobStateFailed, reason)
+	}
+	return true
+}
+
+// terminateIfOwnershipGone prevents a popped scheduler future from requeueing
+// itself when a concurrent composite DropJob won the metadata lock race after
+// the future's initial job check.
+func (t *refreshExternalCollectionTask) terminateIfOwnershipGone(reason string) {
+	job := t.refreshMeta.GetJob(t.GetJobId())
+	if isTerminalExternalRefreshJob(job) || t.refreshMeta.GetTask(t.GetTaskId()) == nil {
+		t.SetState(indexpb.JobState_JobStateFailed, reason)
+	}
 }
 
 // validateSource checks if this task's external source matches the current collection source
@@ -125,10 +266,12 @@ func (t *refreshExternalCollectionTask) validateSource() error {
 	taskSource := t.GetExternalSource()
 	taskSpec := t.GetExternalSpec()
 
-	if currentSource != taskSource || currentSpec != taskSpec {
+	sourceMismatch := currentSource != taskSource
+	specMismatch := currentSpec != taskSpec
+	if sourceMismatch || specMismatch {
 		return merr.WrapErrServiceInternalMsg(
-			"task source mismatch: task source=%s/%s, job source=%s/%s (task belongs to a different refresh job)",
-			taskSource, taskSpec, currentSource, currentSpec,
+			"task source mismatch: sourceMismatch=%t, specMismatch=%t (task belongs to a different refresh job)",
+			sourceMismatch, specMismatch,
 		)
 	}
 
@@ -136,6 +279,8 @@ func (t *refreshExternalCollectionTask) validateSource() error {
 }
 
 func (t *refreshExternalCollectionTask) SetState(state indexpb.JobState, failReason string) {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
 	t.State = state
 	t.FailReason = failReason
 }
@@ -214,14 +359,20 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 func applyExternalCollectionSegmentUpdateForBaseline(
 	ctx context.Context,
 	mt *meta,
+	collInfo *collectionInfo,
 	collectionID int64,
 	baselineSegmentIDs []int64,
+	baseManifests map[int64]string,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	taskActions []metastore.UpdateAction,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
+	}
+	if collInfo == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
 	}
 	mlog.Info(ctx, "processing external collection update response",
 		append(logFields,
@@ -239,16 +390,16 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	validUpdatedSegments := make([]*datapb.SegmentInfo, 0, len(updatedSegments))
 	for _, seg := range updatedSegments {
 		if seg == nil {
-			continue
+			return merr.WrapErrDataIntegrityMsg("external refresh result contains a nil updated segment")
 		}
 		if err := validateExternalRefreshUpdatedSegment(seg, collectionID); err != nil {
 			return err
 		}
 		if keptSegmentMap[seg.GetID()] {
-			return merr.WrapErrServiceInternalMsg("segment %d cannot be both kept and updated", seg.GetID())
+			return merr.WrapErrDataIntegrityMsg("segment %d cannot be both kept and updated", seg.GetID())
 		}
 		if _, ok := upsertSegmentMap[seg.GetID()]; ok {
-			return merr.WrapErrServiceInternalMsg("duplicate updated segment %d", seg.GetID())
+			return merr.WrapErrDataIntegrityMsg("duplicate updated segment %d", seg.GetID())
 		}
 		upsertSegmentMap[seg.GetID()] = seg
 		validUpdatedSegments = append(validUpdatedSegments, seg)
@@ -261,14 +412,14 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	baselineSegmentMap := make(map[int64]struct{}, len(baselineSegmentIDs))
 	for _, segmentID := range baselineSegmentIDs {
 		if _, ok := baselineSegmentMap[segmentID]; ok {
-			return merr.WrapErrServiceInternalMsg("duplicate baseline segment %d", segmentID)
+			return merr.WrapErrDataIntegrityMsg("duplicate baseline segment %d", segmentID)
 		}
 		baselineSegmentMap[segmentID] = struct{}{}
 	}
 
 	for segmentID := range keptSegmentMap {
 		if _, ok := baselineSegmentMap[segmentID]; !ok {
-			return merr.WrapErrServiceInternalMsg("kept segment %d is outside the refresh baseline", segmentID)
+			return merr.WrapErrDataIntegrityMsg("kept segment %d is outside the refresh baseline", segmentID)
 		}
 	}
 	for segmentID := range baselineSegmentMap {
@@ -302,7 +453,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			mlog.Int("baselineSegmentCount", baselineSegmentCount),
 			mlog.Int("keptSegments", len(keptSegmentMap)),
 			mlog.Int("updatedSegments", len(upsertSegmentMap)))
-		return merr.WrapErrServiceInternalMsg("safety check failed: refusing to drop all %d segments without replacement (keptSegments=%d, updatedSegments=%d)",
+		return merr.WrapErrDataIntegrityMsg("safety check failed: refusing to drop all %d segments without replacement (keptSegments=%d, updatedSegments=%d)",
 			baselineSegmentCount, len(keptSegmentMap), len(upsertSegmentMap))
 	}
 
@@ -322,17 +473,13 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		}
 	}
 
-	collInfo := mt.GetCollection(collectionID)
-	if collInfo == nil {
-		return merr.WrapErrServiceInternalMsg("collection %d not found in meta", collectionID)
-	}
 	// External collections are single-shard, single-partition (enforced at creation).
 	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
 	if len(collInfo.VChannelNames) != 1 {
-		return merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 VChannel, got %d", collectionID, len(collInfo.VChannelNames))
+		return merr.WrapErrDataIntegrityMsg("external collection %d expected exactly 1 VChannel, got %d", collectionID, len(collInfo.VChannelNames))
 	}
 	if len(collInfo.Partitions) != 1 {
-		return merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", collectionID, len(collInfo.Partitions))
+		return merr.WrapErrDataIntegrityMsg("external collection %d expected exactly 1 partition, got %d", collectionID, len(collInfo.Partitions))
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
@@ -351,6 +498,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	// segment written by an earlier apply, or a baseline patch already
 	// installed. Both are skipped by the upsert operators below.
 	alreadyAppliedSegments := make(map[int64]struct{})
+	var validationErr error
+	failValidation := func(modPack *updateSegmentPack, err error) bool {
+		validationErr = err
+		return modPack.fail(err)
+	}
 
 	validationOperator := func(modPack *updateSegmentPack) bool {
 		for segmentID := range baselineSegmentMap {
@@ -363,10 +515,10 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 					// A missing segment already satisfies the desired removal state.
 					continue
 				}
-				return modPack.fail(merr.WrapErrServiceInternalMsg("baseline segment %d not found", segmentID))
+				return failValidation(modPack, merr.WrapErrDataIntegrityMsg("baseline segment %d not found", segmentID))
 			}
 			if existing.GetCollectionID() != collectionID {
-				return modPack.fail(merr.WrapErrServiceInternalMsg(
+				return failValidation(modPack, merr.WrapErrDataIntegrityMsg(
 					"baseline segment %d belongs to collection %d, expected %d",
 					segmentID,
 					existing.GetCollectionID(),
@@ -375,7 +527,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			}
 			if kept {
 				if existing.GetState() == commonpb.SegmentState_Dropped {
-					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
+					return failValidation(modPack, merr.WrapErrDataIntegrityMsg("cannot keep dropped segment %d", segmentID))
 				}
 				continue
 			}
@@ -383,22 +535,23 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				// Dropped is the replay-safe terminal state for an inferred removal.
 				continue
 			}
-			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
-				alreadyAppliedSegments[segmentID] = struct{}{}
-				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
-					mlog.FieldSegmentID(segmentID))
-				continue
+			baseManifest, ok := baseManifests[segmentID]
+			if !ok || baseManifest == "" || existing.GetManifestPath() != baseManifest {
+				return failValidation(modPack, &externalRefreshManifestConflictError{
+					segmentID: segmentID,
+					base:      baseManifest,
+					current:   existing.GetManifestPath(),
+					result:    incoming.GetManifestPath(),
+				})
+			}
+			if err := validateExternalRefreshManifestSuccessor(baseManifest, incoming.GetManifestPath(), segmentID); err != nil {
+				return failValidation(modPack, err)
 			}
 			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
 				mlog.Warn(ctx, "invalid external refresh segment patch",
 					mlog.FieldSegmentID(incoming.GetID()),
 					mlog.Err(err))
-				return modPack.fail(err)
+				return failValidation(modPack, err)
 			}
 		}
 
@@ -416,7 +569,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 					mlog.FieldSegmentID(segmentID))
 				continue
 			}
-			return modPack.fail(merr.WrapErrServiceInternalMsg(
+			return failValidation(modPack, merr.WrapErrDataIntegrityMsg(
 				"new external refresh segment %d collides with existing metadata",
 				segmentID,
 			))
@@ -490,8 +643,32 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		operators = append(operators, upsertOperator)
 	}
 
-	// Execute all operators atomically
-	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	// Publish the segment changes and consume every task result in one catalog
+	// transaction. Emptying the durable result references is the recovery marker
+	// that tells the next DataCoord process this adoption already completed.
+	_, err := mt.commitSegmentOperatorsWithActions(ctx, taskActions, operators...)
+	if err != nil {
+		// validationOperator runs while holding segMu, but before any catalog
+		// write. Its errors are definitive and safe to return; only a catalog
+		// error has an ambiguous durable outcome that requires fail-stop below.
+		if validationErr != nil {
+			return err
+		}
+		var conflict *externalRefreshManifestConflictError
+		if errors.As(err, &conflict) {
+			return err
+		}
+		// AlterSegments may already be durable when its response is lost. Keep the
+		// process-local segment cache from serving as a stale base for a later
+		// full-record writer; restart reloads the authoritative catalog result.
+		// Production supplies taskActions, whose composite helper already
+		// fail-stops catalog errors while holding segMu. Preserve the standalone
+		// helper's fail-stop behavior for focused callers without extra actions.
+		if len(taskActions) == 0 && ctx != nil && ctx.Err() == nil && (mt.ctx == nil || mt.ctx.Err() == nil) {
+			mlog.Fatal(ctx, "external refresh segment publication failed; terminating process",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Err(err))
+		}
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
 	}
@@ -504,15 +681,18 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 }
 
 func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collectionID int64) error {
+	if incoming.GetID() <= 0 {
+		return merr.WrapErrDataIntegrityMsg("updated segment has invalid ID %d", incoming.GetID())
+	}
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
 	}
 	if incoming.GetManifestPath() == "" {
-		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
+		return merr.WrapErrDataIntegrityMsg("updated segment %d has empty manifest path", incoming.GetID())
 	}
 	if len(incoming.GetBinlogs()) == 0 {
-		return merr.WrapErrServiceInternalMsg("updated segment %d has empty fake binlogs", incoming.GetID())
+		return merr.WrapErrDataIntegrityMsg("updated segment %d has empty fake binlogs", incoming.GetID())
 	}
 	return nil
 }
@@ -535,25 +715,45 @@ func normalizeExternalRefreshUpdatedSegment(
 	return normalized
 }
 
-// externalRefreshManifestAlreadyApplied recognizes an idempotent replay by the
-// manifest a result would install. A manifest base path belongs to one segment,
-// and its versions move forward as that segment gains later manifest updates.
-// An equal or newer existing version therefore means the incoming refresh
-// result has already been applied or superseded and must not be written again.
-//
-// Anything it cannot compare - an unparseable path, a different base path -
-// reports false, so an unrecognized shape still takes the normal write path
-// and its own validation.
-//
-// Do not compare fake binlogs here: V3 catalog persistence intentionally strips
-// them, so their in-memory representation does not survive DataCoord restart.
-//
-// What this defends against is a replay by THIS binary: the pre-apply and the
-// job's state write are separate steps, so a pre-apply that succeeded and a
-// state write that then failed leaves the next tick to run the apply again. It
-// is NOT a defense against a downgrade - an older binary does not carry this
-// short-circuit for baseline patches at all.
-func externalRefreshManifestAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
+type externalRefreshManifestConflictError struct {
+	segmentID int64
+	base      string
+	current   string
+	result    string
+}
+
+func (e *externalRefreshManifestConflictError) Error() string {
+	return fmt.Sprintf(
+		"external refresh manifest changed for segment %d: base=%q current=%q result=%q",
+		e.segmentID,
+		e.base,
+		e.current,
+		e.result,
+	)
+}
+
+func validateExternalRefreshManifestSuccessor(base, result string, segmentID int64) error {
+	comparison, err := packed.CompareManifestPath(result, base)
+	if err != nil {
+		return merr.WrapErrDataIntegrityMsg(
+			"external refresh result manifest %q for segment %d is not comparable with base manifest %q",
+			result,
+			segmentID,
+			base,
+		)
+	}
+	if comparison < 0 {
+		return merr.WrapErrDataIntegrityMsg(
+			"external refresh result manifest %q for segment %d precedes base manifest %q",
+			result,
+			segmentID,
+			base,
+		)
+	}
+	return nil
+}
+
+func externalRefreshManifestAtLeast(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
 	if existing == nil || incoming == nil {
 		return false
 	}
@@ -574,7 +774,7 @@ func externalRefreshNewSegmentAlreadyApplied(existing *SegmentInfo, incoming *da
 		existing.GetPartitionID() != incoming.GetPartitionID() {
 		return false
 	}
-	return externalRefreshManifestAlreadyApplied(existing, incoming)
+	return externalRefreshManifestAtLeast(existing, incoming)
 }
 
 func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {
@@ -583,36 +783,36 @@ func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {
 
 func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo, collectionID int64) error {
 	if oldSeg == nil {
-		return merr.WrapErrServiceInternalMsg("existing segment is nil")
+		return merr.WrapErrDataIntegrityMsg("existing segment is nil")
 	}
 	if oldSeg.GetCollectionID() != collectionID {
-		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: existing %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("collection mismatch for segment %d: existing %d, want %d",
 			oldSeg.GetID(), oldSeg.GetCollectionID(), collectionID)
 	}
 	if oldSeg.GetState() == commonpb.SegmentState_Dropped {
-		return merr.WrapErrServiceInternalMsg("cannot patch dropped segment %d", oldSeg.GetID())
+		return merr.WrapErrDataIntegrityMsg("cannot patch dropped segment %d", oldSeg.GetID())
 	}
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
 	}
 	if incoming.GetNumOfRows() != oldSeg.GetNumOfRows() {
-		return merr.WrapErrServiceInternalMsg("row count changed for segment %d: got %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("row count changed for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetNumOfRows(), oldSeg.GetNumOfRows())
 	}
 	if incoming.GetStorageVersion() != 0 && incoming.GetStorageVersion() != oldSeg.GetStorageVersion() {
-		return merr.WrapErrServiceInternalMsg("storage version changed for segment %d: got %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("storage version changed for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetStorageVersion(), oldSeg.GetStorageVersion())
 	}
 	if incoming.GetSchemaVersion() < oldSeg.GetSchemaVersion() {
-		return merr.WrapErrServiceInternalMsg("schema version rollback for segment %d: got %d, want >= %d",
+		return merr.WrapErrDataIntegrityMsg("schema version rollback for segment %d: got %d, want >= %d",
 			incoming.GetID(), incoming.GetSchemaVersion(), oldSeg.GetSchemaVersion())
 	}
 	if incoming.GetManifestPath() == "" {
-		return merr.WrapErrServiceInternalMsg("patched segment %d has empty manifest path", incoming.GetID())
+		return merr.WrapErrDataIntegrityMsg("patched segment %d has empty manifest path", incoming.GetID())
 	}
 	if len(incoming.GetBinlogs()) == 0 {
-		return merr.WrapErrServiceInternalMsg("patched segment %d has empty fake binlogs", incoming.GetID())
+		return merr.WrapErrDataIntegrityMsg("patched segment %d has empty fake binlogs", incoming.GetID())
 	}
 	if err := validateExternalRefreshBinlogRowCount(incoming, oldSeg.GetNumOfRows()); err != nil {
 		return err
@@ -623,14 +823,14 @@ func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentI
 func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expectedRows int64) error {
 	binlogRows := segmentutil.CalcRowCountFromBinLog(segment)
 	if binlogRows == -1 {
-		return merr.WrapErrServiceInternalMsg("invalid binlog row count for segment %d", segment.GetID())
+		return merr.WrapErrDataIntegrityMsg("invalid binlog row count for segment %d", segment.GetID())
 	}
 	if expectedRows > 0 && binlogRows != expectedRows {
-		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, want %d",
+		return merr.WrapErrDataIntegrityMsg("binlog row count mismatch for segment %d: got %d, want %d",
 			segment.GetID(), binlogRows, expectedRows)
 	}
 	if binlogRows > 0 && binlogRows != segment.GetNumOfRows() {
-		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, segment rows %d",
+		return merr.WrapErrDataIntegrityMsg("binlog row count mismatch for segment %d: got %d, segment rows %d",
 			segment.GetID(), binlogRows, segment.GetNumOfRows())
 	}
 	return nil
@@ -673,80 +873,99 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		mlog.FieldCollectionID(t.GetCollectionId()),
 		mlog.FieldNodeID(nodeID),
 	)
-	var err error
-	defer func() {
-		if err != nil {
-			log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
-			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
-				log.Warn(ctx, "failed to persist Failed state after create error", mlog.Err(updateErr))
-			}
+	// A replacement reuses the same immutable manifest range and owned segments,
+	// so it cannot repair a malformed plan or invalid local metadata. Keep those
+	// failures terminal and separate from transient failures that happen before
+	// any worker RPC is sent.
+	failPermanent := func(cause error) {
+		log.Warn(ctx, "external refresh task is not dispatchable", mlog.Err(cause))
+		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, cause.Error()); updateErr != nil {
+			log.Warn(ctx, "failed to persist Failed state for an invalid refresh task", mlog.Err(updateErr))
+			t.terminateIfOwnershipGone(cause.Error())
 		}
-	}()
+	}
 
 	log.Info(ctx, "creating refresh task on worker",
 		mlog.Int64("fileIndexBegin", t.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.GetFileIndexEnd()),
 		mlog.Int64("fileCount", t.GetFileIndexEnd()-t.GetFileIndexBegin()),
 		mlog.Int("ownedSegments", len(t.GetOwnedSegmentIds())))
+	if t.cancelForTerminalJob(ctx, cluster) {
+		return
+	}
 
 	if t.mt == nil {
-		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
+		failPermanent(merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker"))
 		return
 	}
 	if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
-		err = merr.WrapErrServiceInternalMsg(
+		failPermanent(merr.WrapErrServiceInternalMsg(
 			"external refresh task %d has unsupported ownership plan version %d; retry refresh",
 			t.GetTaskId(),
 			t.GetOwnershipPlanVersion(),
-		)
+		))
 		return
 	}
-
-	// Persist task version and nodeID before dispatching to worker
-	if err = t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
-		log.Warn(ctx, "failed to update task version", mlog.Err(err))
+	if t.collectionGetter == nil {
+		failPermanent(merr.WrapErrServiceInternalMsg("collection getter is not configured"))
 		return
 	}
-
-	// Re-read task from meta to sync in-memory state (nodeID and version)
-	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
-	if updatedTask == nil {
-		err = merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId())
+	collInfo, err := t.collectionGetter(ctx, t.GetCollectionId())
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			failPermanent(err)
+			return
+		}
+		// Leave Init unchanged. The scheduler releases this wrapper and the
+		// inspector offers the same persisted task again on its next interval.
+		log.Warn(ctx, "failed to get collection for external refresh dispatch; retry later", mlog.Err(err))
 		return
 	}
-	t.ExternalCollectionRefreshTask = updatedTask
+	if collInfo == nil || collInfo.Schema == nil {
+		// An incomplete RootCoord/cache response does not blame the refresh
+		// request and can recover on the next owner-driven inspection round. Keep
+		// this attempt in Init, exactly like a transient collectionGetter error.
+		log.Warn(ctx, "collection metadata is incomplete; retry refresh dispatch later")
+		return
+	}
+	if len(collInfo.Partitions) != 1 {
+		failPermanent(merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions)))
+		return
+	}
 
 	ownedSegmentIDs := t.GetOwnedSegmentIds()
 	currentSegments := make([]*datapb.SegmentInfo, 0, len(ownedSegmentIDs))
 	seenOwnedSegments := make(map[int64]struct{}, len(t.GetOwnedSegmentIds()))
 	for _, segmentID := range ownedSegmentIDs {
 		if _, ok := seenOwnedSegments[segmentID]; ok {
-			err = merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID)
+			failPermanent(merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID))
 			return
 		}
 		seenOwnedSegments[segmentID] = struct{}{}
 	}
 
 	segmentSnapshots := getExternalRefreshSegmentSnapshots(t.mt, ownedSegmentIDs)
+	baseManifests := make(map[int64]string, len(ownedSegmentIDs))
 	for i, segmentID := range ownedSegmentIDs {
 		segment := segmentSnapshots[i]
 		if segment == nil {
-			err = merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId())
+			failPermanent(merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId()))
 			return
 		}
 		if segment.GetCollectionID() != t.GetCollectionId() {
-			err = merr.WrapErrServiceInternalMsg(
+			failPermanent(merr.WrapErrServiceInternalMsg(
 				"owned segment %d belongs to collection %d, expected %d",
 				segmentID,
 				segment.GetCollectionID(),
 				t.GetCollectionId(),
-			)
+			))
 			return
 		}
 		if !isSegmentHealthy(segment) {
-			err = merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID)
+			failPermanent(merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID))
 			return
 		}
+		baseManifests[segmentID] = segment.GetManifestPath()
 		currentSegments = append(currentSegments, segment.SegmentInfo)
 	}
 
@@ -757,7 +976,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
-		log.Warn(ctx, "failed to batch allocate segment IDs", mlog.Err(err))
+		// Allocation happens before dispatch. Retrying the same task is safe even
+		// if an allocator consumed a range before returning an ambiguous error:
+		// no worker can reference that range yet.
+		log.Warn(ctx, "failed to batch allocate segment IDs; keeping task Init for retry", mlog.Err(err))
 		return
 	}
 
@@ -778,15 +1000,6 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	// self-heal it through missing-column detection. Drop, rename, or type
 	// changes must reintroduce stronger schema coordination, such as a gate or
 	// lock, before they are supported.
-	collInfo := t.mt.GetCollection(t.GetCollectionId())
-	if collInfo == nil {
-		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
-		return
-	}
-	if len(collInfo.Partitions) != 1 {
-		err = merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
-		return
-	}
 	partitionID := collInfo.Partitions[0]
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
@@ -807,16 +1020,44 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		TargetRowsPerSegment:   paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64(),
 	}
 
-	// Submit task to worker via unified task system
-	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
-	if err != nil {
-		log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
+	// Everything needed for the request is ready. Persist the assignment, state,
+	// and exact baseline snapshot in one task write before crossing Create.
+	// An ambiguous Create response is then reconciled by polling this node,
+	// never by dispatching the same task ID again.
+	if err := t.refreshMeta.StartTaskAttempt(t.GetTaskId(), nodeID, baseManifests); err != nil {
+		log.Warn(ctx, "failed to persist refresh task attempt; owner will retry on its interval", mlog.Err(err))
+		t.terminateIfOwnershipGone(err.Error())
 		return
 	}
+	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
+	if updatedTask == nil {
+		failPermanent(merr.WrapErrServiceInternalMsg("task %d not found after node update", t.GetTaskId()))
+		return
+	}
+	t.swapTaskProto(updatedTask)
 
-	// Mark task as in progress - QueryTaskOnWorker will check completion
-	if err = t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(ctx, "failed to update task state to InProgress", mlog.Err(err))
+	// Submit task to worker via unified task system
+	if workerErr := cluster.CreateRefreshExternalCollectionTask(nodeID, req); workerErr != nil {
+		if errors.Is(workerErr, merr.ErrServiceTooManyRequests) {
+			// Admission rejection proves the worker did not accept the task. Return
+			// it to Init; the external-refresh inspector, not the scheduler loop,
+			// decides when it is enqueued again.
+			log.Info(ctx, "external collection worker has no free slot; returning task to business retry",
+				mlog.Err(workerErr))
+			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateInit, ""); updateErr != nil {
+				log.Warn(ctx, "failed to return admission-rejected refresh task to Init", mlog.Err(updateErr))
+			}
+			return
+		}
+		// The create RPC is an at-least-once dispatch boundary. Whether the
+		// worker accepted it and lost the response or failed before acceptance, a
+		// fresh dispatch is safe: only the result selected by DataCoord is
+		// committed, and unreferenced output files are reclaimed by orphan GC.
+		log.Warn(ctx, "failed to create refresh task on worker, recording worker failure", mlog.Err(workerErr))
+		if updateErr := t.handoffRetry(cluster, workerErr.Error()); updateErr != nil {
+			log.Warn(ctx, "failed to persist refresh task state after create error", mlog.Err(updateErr))
+			t.terminateIfOwnershipGone(workerErr.Error())
+		}
 		return
 	}
 
@@ -824,39 +1065,24 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 }
 
 func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	// Check if job has been canceled/superseded before querying worker
-	job := t.refreshMeta.GetJob(t.GetJobId())
-	if job == nil {
-		mlog.Info(context.TODO(), "job not found, task has been canceled")
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
-		}
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
-		}
+	// Check if job has been canceled/superseded before querying worker.
+	if t.cancelForTerminalJob(context.TODO(), cluster) {
 		return
 	}
-	if job.GetState() == indexpb.JobState_JobStateFailed {
-		mlog.Info(context.TODO(), "job has been marked as failed, canceling task",
-			mlog.String("jobFailReason", job.GetFailReason()))
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
-		}
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason()); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
-		}
-		return
-	}
+
+	// Every log below names the task: these are lifecycle-terminal events, and
+	// an event without an identity cannot be correlated with anything.
+	log := mlog.With(
+		mlog.FieldJobID(t.GetJobId()),
+		mlog.FieldTaskID(t.GetTaskId()),
+		mlog.FieldNodeID(t.GetNodeId()))
 
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
-		// If query fails, mark task as failed
-		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after query error", mlog.Err(updateErr))
+		log.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
+		if updateErr := t.handoffRetry(cluster, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state after query error", mlog.Err(updateErr))
 		}
 		return
 	}
@@ -864,7 +1090,11 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	state := resp.GetState()
 	failReason := resp.GetFailReason()
 
-	mlog.Info(context.TODO(), "queried refresh task status",
+	// Rated: this fires on every poll of every running task, and the poll runs
+	// on the scheduler round (100ms by default). The state changes below are
+	// logged at Info/Warn on their own; this one only reports that a poll
+	// happened.
+	log.RatedInfo(context.TODO(), refreshQueryLogRate, "queried refresh task status",
 		mlog.String("state", state.String()),
 		mlog.String("failReason", failReason))
 
@@ -873,8 +1103,10 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	case indexpb.JobState_JobStateFinished:
 		// Validate source before processing - check if task has been superseded
 		if err := t.validateSource(); err != nil {
-			mlog.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
-			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
+			log.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
+			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn(context.TODO(), "failed to persist superseded task state", mlog.Err(updateErr))
+			}
 			return
 		}
 
@@ -887,45 +1119,72 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			resp.GetKeptSegments(),
 			resp.GetUpdatedSegments(),
 		); err != nil {
-			mlog.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
+			// A record persisted by an older binary can never be consumed by
+			// this one. Give it the same one-shot verdict dispatch would have
+			// given instead of rejecting the identical result on every poll.
+			if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
+				if failErr := t.failWorkerPermanently(fmt.Sprintf(
+					"external refresh task %d has unsupported ownership plan version %d; retry refresh",
+					t.GetTaskId(), t.GetOwnershipPlanVersion())); failErr != nil {
+					log.Warn(context.TODO(), "failed to fail refresh task with unsupported ownership plan version", mlog.Err(failErr))
+				}
+				return
+			}
+			log.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
 			return
 		}
-		mlog.Info(context.TODO(), "refresh task completed successfully")
+		log.Info(context.TODO(), "refresh task completed successfully")
 
 	case indexpb.JobState_JobStateFailed:
-		// Task failed
-		if err := t.UpdateStateWithMeta(state, failReason); err != nil {
-			mlog.Warn(context.TODO(), "failed to update task state to Failed", mlog.Err(err))
+		// The worker calls this one permanent: the request itself is what it
+		// could not satisfy. Retrying it would only spend the budget that
+		// transient faults need.
+		if err := t.failWorkerPermanently(failReason); err != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state after worker failure", mlog.Err(err))
 			return
 		}
-		mlog.Warn(context.TODO(), "refresh task failed", mlog.String("reason", failReason))
+		log.Warn(context.TODO(), "refresh task failed permanently on worker", mlog.String("reason", failReason))
 
-	case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateNone, indexpb.JobState_JobStateInit:
+	case indexpb.JobState_JobStateNone:
+		// A successful query that cannot find the assigned task proves this
+		// attempt is gone. Hand retry debt to the business owner.
+		if err := t.handoffRetry(cluster, "assigned refresh task not found on worker"); err != nil {
+			log.Warn(context.TODO(), "failed to persist missing refresh task retry", mlog.Err(err))
+		}
+
+	case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateInit:
 		// Task still in progress or not yet picked up by scheduler, no action needed
-		mlog.Info(context.TODO(), "refresh task still in progress",
+		log.RatedInfo(context.TODO(), refreshQueryLogRate, "refresh task still in progress",
 			mlog.String("state", state.String()))
 
 	case indexpb.JobState_JobStateRetry:
-		// Task needs retry - mark as failed
-		mlog.Warn(context.TODO(), "refresh task in unexpected state, marking as failed",
-			mlog.String("state", state.String()))
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String())); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state for retry branch", mlog.Err(err))
+		// A transient fault on the worker. Spend an attempt.
+		if err := t.handoffRetry(cluster, failReason); err != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state requested by worker", mlog.Err(err))
 		}
 
 	default:
-		mlog.Warn(context.TODO(), "refresh task in unknown state",
+		log.Warn(context.TODO(), "refresh task in unknown state",
 			mlog.String("state", state.String()))
 	}
 }
 
 func (t *refreshExternalCollectionTask) DropTaskOnWorker(cluster session.Cluster) {
+	// A task that was never dispatched has no worker to tell. NullNodeID (-1)
+	// marks unassigned; legacy records may carry the proto default 0.
+	if t.GetNodeId() == NullNodeID || t.GetNodeId() == 0 {
+		return
+	}
+	log := mlog.With(
+		mlog.FieldJobID(t.GetJobId()),
+		mlog.FieldTaskID(t.GetTaskId()),
+		mlog.FieldNodeID(t.GetNodeId()))
 	// Drop task on worker to cancel execution and clean up resources
 	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to drop refresh task on worker", mlog.Err(err))
+		log.Warn(context.TODO(), "failed to drop refresh task on worker", mlog.Err(err))
 		return
 	}
 
-	mlog.Info(context.TODO(), "refresh task dropped successfully")
+	log.Info(context.TODO(), "refresh task dropped successfully")
 }

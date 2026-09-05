@@ -416,6 +416,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
+			Reason: err.Error(),
 		}, nil
 	}
 
@@ -425,6 +426,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
+			Reason: err.Error(),
 		}, nil
 	}
 
@@ -447,6 +449,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
+			Reason: err.Error(),
 		}, nil
 	}
 	sortSegmentCost := time.Since(stepStart)
@@ -466,6 +469,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
+			Reason: err.Error(),
 		}, nil
 	}
 
@@ -480,6 +484,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			return &datapb.CompactionPlanResult{
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
+				Reason: err.Error(),
 			}, nil
 		}
 		// For V3 segments, register text index stats in manifest.
@@ -495,6 +500,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				return &datapb.CompactionPlanResult{
 					PlanID: t.GetPlanID(),
 					State:  datapb.CompactionTaskState_failed,
+					Reason: mErr.Error(),
 				}, nil
 			}
 			resultSegment.Manifest = newManifest
@@ -523,8 +529,12 @@ func (t *sortCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *sortCompactionTask) Stop() {
+func (t *sortCompactionTask) Cancel() {
 	t.cancel()
+}
+
+func (t *sortCompactionTask) Stop() {
+	t.Cancel()
 	<-t.done
 }
 

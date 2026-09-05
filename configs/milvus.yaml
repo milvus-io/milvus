@@ -840,6 +840,14 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # How many times a compaction may be rebuilt before it is left to the periodic trigger.
+    # Every compaction that ends without succeeding -- a worker refusal or reported failure, a
+    # DataCoord-side error, or an outcome that could not be established -- is retried by rebuilding
+    # the work under a fresh plan ID, so that an execution which may still be running cannot collide
+    # with the retry. This caps that rebuilding for work which fails for a reason a fresh plan ID
+    # cannot fix, such as bad input data. Values below 1 are treated as 1: the original attempt
+    # always runs.
+    maxAttempts: 10
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
@@ -909,8 +917,6 @@ dataCoord:
     exportJobRetention: 10800 # Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.
     exportMaxConcurrentJobs: 1 # Maximum number of snapshot export jobs executed concurrently by DataCoord.
   enableActiveStandby: false
-  taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
-  taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
@@ -928,7 +934,20 @@ dataCoord:
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    # How many times one pre-import or import task may be attempted before its job fails.
+    # 
+    # The original task is attempt one. Every retry uses a fresh task ID; import retries
+    # also use fresh segment IDs. A persisted lineage counter advances only when the
+    # replacement is committed and enforces this limit.
+    maxAttempts: 10
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
+  # How many times one copy segment task may be attempted before its job fails.
+  # 
+  # Each attempt runs under a fresh task ID and a fresh set of target segment IDs, so an
+  # abandoned attempt can never write where its replacement writes. Past this count the
+  # work is settled as failed instead of being rebuilt again.
+  copySegmentMaxAttempts: 10
+  externalCollectionMaxRetryTimes: 10 # Maximum number of in-process worker create, query, or execution failures before an external collection refresh job is marked failed. Each retry replaces only the failed task and reuses its manifest, file range, and owned segments. The counter resets when DataCoord restarts.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -1021,6 +1040,9 @@ dataNode:
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
+  task:
+    sweepInterval: 3600 # How often, in seconds, DataNode scans its worker-side task entries (compaction/import/index/analyze/stats/external-refresh) for presumed orphans. Only takes effect on restart.
+    retention: 86400 # Worker-side task entries that started longer than this, in seconds, are canceled and removed as presumed orphans. The coordinator rebuilds the work under fresh identities, but a task that legitimately runs longer than this is canceled and rebuilt, so keep this well above the worst-case duration of an index build or import on this cluster. Values below 1 fall back to the default.
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:

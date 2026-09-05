@@ -50,20 +50,17 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // MetaReloadSuite tests meta reload & meta creation related logic
@@ -385,34 +382,6 @@ func (suite *MetaBasicSuite) SetupTest() {
 
 	suite.Require().NoError(err)
 	suite.meta = meta
-}
-
-func (suite *MetaBasicSuite) getCollectionInfo(partIDs ...int64) *collectionInfo {
-	testSchema := newTestSchema()
-	return &collectionInfo{
-		ID:             suite.collID,
-		Schema:         testSchema,
-		Partitions:     partIDs,
-		StartPositions: []*commonpb.KeyDataPair{},
-	}
-}
-
-func (suite *MetaBasicSuite) TestCollection() {
-	meta := suite.meta
-
-	info := suite.getCollectionInfo(suite.partIDs...)
-	meta.AddCollection(info)
-
-	collInfo := meta.GetCollection(suite.collID)
-	suite.Require().NotNil(collInfo)
-
-	// check partition info
-	suite.EqualValues(suite.collID, collInfo.ID)
-	suite.EqualValues(info.Schema, collInfo.Schema)
-	suite.EqualValues(len(suite.partIDs), len(collInfo.Partitions))
-	suite.ElementsMatch(info.Partitions, collInfo.Partitions)
-
-	suite.MetricsEqual(metrics.DataCoordNumCollections.WithLabelValues(), 1)
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
@@ -1128,7 +1097,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	// would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	var gotActions []metastore.UpdateAction
-	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
 			gotActions = actions
 			return nil
@@ -1143,9 +1112,10 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 	suite.NoError(err)
 
-	// One AddSegment for the compactTo segment, then one UpdateSegment per
-	// compactFrom segment (2). catalog.Update called exactly once (.Once()).
-	suite.Require().Len(gotActions, 3, "expected one add + two update actions")
+	// One AddSegment for the compactTo segment, one UpdateSegment per
+	// compactFrom segment (2), then the meta_saved task. catalog.Update is
+	// called exactly once (.Once()).
+	suite.Require().Len(gotActions, 4, "expected one add + two updates + one task action")
 
 	// The compactTo add comes first, so it is published before the compactFrom
 	// segments are retired in the fallback (chunked) ordering.
@@ -1155,13 +1125,19 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	suite.EqualValues(3, compactToEntry.Segment.GetID())
 
 	var compactFromIDs []int64
-	for _, a := range gotActions[1:] {
+	for _, a := range gotActions[1:3] {
 		se, ok := a.Entry.(metastore.SegmentEntry)
 		suite.Require().True(ok)
 		suite.Equal(metastore.ActionUpdate, a.Type)
 		compactFromIDs = append(compactFromIDs, se.Segment.GetID())
 	}
 	suite.ElementsMatch([]int64{1, 2}, compactFromIDs)
+
+	taskEntry, ok := gotActions[3].Entry.(metastore.CompactionTaskEntry)
+	suite.Require().True(ok)
+	suite.Equal(metastore.ActionAdd, gotActions[3].Type)
+	suite.Equal(datapb.CompactionTaskState_meta_saved, taskEntry.Task.GetState())
+	suite.Equal([]int64{3}, taskEntry.Task.GetResultSegments())
 }
 
 func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
@@ -3240,7 +3216,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		catalogErr := errors.New("catalog error")
 		metakv := mockkv.NewMetaKv(suite.T())
 		metakv.EXPECT().HasPrefix(mock.Anything, mock.Anything).Return(false, nil).Times(3)
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(catalogErr).Once()
+		metakv.EXPECT().MaxTxnOps().Return(128).Once()
+		metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(catalogErr).Once()
 		m := &meta{
 			catalog:  datacoord.NewCatalog(metakv, "", ""),
 			segments: makeSegments(1, commonpb.SegmentState_Flushed),
@@ -3570,28 +3547,12 @@ func TestMeta_Basic(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
-	testSchema := newTestSchema()
-
-	collInfo := &collectionInfo{
-		ID:             collID,
-		Schema:         testSchema,
-		Partitions:     []UniqueID{partID0, partID1},
-		StartPositions: []*commonpb.KeyDataPair{},
-		DatabaseName:   util.DefaultDBName,
-	}
-	collInfoWoPartition := &collectionInfo{
-		ID:         collID,
-		Schema:     testSchema,
-		Partitions: []UniqueID{},
-	}
-
 	count := atomic.Int64{}
 	AllocID := func() int64 {
 		return count.Add(1)
 	}
 
 	t.Run("Test Segment", func(t *testing.T) {
-		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0 := AllocID()
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
@@ -3737,29 +3698,6 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, 0, len(result))
 	})
 
-	t.Run("GetClonedCollectionInfo", func(t *testing.T) {
-		// collection does not exist
-		ret := meta.GetClonedCollectionInfo(-1)
-		assert.Nil(t, ret)
-
-		collInfo.Properties = map[string]string{
-			common.CollectionTTLConfigKey: "3600",
-		}
-		meta.AddCollection(collInfo)
-		ret = meta.GetClonedCollectionInfo(collInfo.ID)
-		equalCollectionInfo(t, collInfo, ret)
-
-		collInfo.StartPositions = []*commonpb.KeyDataPair{
-			{
-				Key:  "k",
-				Data: []byte("v"),
-			},
-		}
-		meta.AddCollection(collInfo)
-		ret = meta.GetClonedCollectionInfo(collInfo.ID)
-		equalCollectionInfo(t, collInfo, ret)
-	})
-
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
 		const size0 = 1024
 		const size1 = 2048
@@ -3779,13 +3717,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check TotalBinlogSize
-		quotaInfo := meta.GetQuotaInfo()
-		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
-
-		meta.collections.Insert(collID, collInfo)
-		quotaInfo = meta.GetQuotaInfo()
+		quotaInfo := meta.GetQuotaInfo(nil)
 		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
@@ -4044,13 +3976,10 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 	require.EqualValues(t, 1000, stats.GetDeltaTimestampTo())
 }
 
-// Regression for the L0 retry double-add: l0CompactionTask re-runs
-// saveSegmentMeta when the subsequent meta_saved task-state write fails, so the
-// SAME committed manifest and deltalogs re-enter apply. The committedV3Manifests
-// cache makes the manifest re-commit idempotent, but the delta Stats
-// accumulation must be idempotent too — otherwise for V3 (durable Stats) the
-// retry permanently over-counts deletes.
-func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
+// Applying the same already-committed L0 manifest result twice must remain
+// idempotent. The committedV3Manifests cache avoids another object-store
+// commit, and the segment update must not double-count durable V3 delta stats.
+func TestAddL0DeltalogsDuplicateApplyDoesNotDoubleCountDeltaStats(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/202"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -4093,8 +4022,7 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		202, deltalogs, &indexpb.StorageConfig{}, cache)))
 
-	// Retry with the SAME cache and deltalogs (meta_saved write failed after the
-	// first run persisted segment stats).
+	// Apply the same cached result and deltalogs again.
 	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		202, deltalogs, &indexpb.StorageConfig{}, cache)))
 
@@ -4104,6 +4032,103 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
 	require.Equal(t, 1, commitCalls, "manifest must be committed only once (cache idempotency)")
 	require.Len(t, meta.GetSegment(context.TODO(), 202).GetDeltalogs(), 1, "deltalog array must not duplicate")
+}
+
+func TestCompleteL0CompactionMutationRetriesOnlyUncommittedManifestsAndUsesOneCatalogUpdate(t *testing.T) {
+	const (
+		inputID   = int64(100)
+		targetOne = int64(200)
+		targetTwo = int64(201)
+	)
+	baseOne := "/tmp/milvus/insert_log/1/10/200"
+	baseTwo := "/tmp/milvus/insert_log/1/10/201"
+	oldOne := packed.MarshalManifestPath(baseOne, 7)
+	oldTwo := packed.MarshalManifestPath(baseTwo, 11)
+	newOne := packed.MarshalManifestPath(baseOne, 8)
+	newTwo := packed.MarshalManifestPath(baseTwo, 12)
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(inputID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: inputID, CollectionID: 1, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
+	}))
+	segments.SetSegment(targetOne, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: targetOne, CollectionID: 1, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
+		ManifestPath: oldOne,
+	}))
+	segments.SetSegment(targetTwo, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: targetTwo, CollectionID: 1, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
+		ManifestPath: oldTwo,
+	}))
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	meta := &meta{ctx: context.Background(), catalog: catalog, segments: segments}
+	task := &datapb.CompactionTask{
+		PlanID: 300, TriggerID: 301, Type: datapb.CompactionType_Level0DeleteCompaction,
+		State: datapb.CompactionTaskState_executing, InputSegments: []int64{inputID},
+	}
+	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{
+		{SegmentID: targetOne, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: baseOne + "/_delta/9001", EntriesNum: 3}}}}},
+		{SegmentID: targetTwo, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9002, LogPath: baseTwo + "/_delta/9002", EntriesNum: 5}}}}},
+	}}
+
+	var callsMu sync.Mutex
+	manifestCalls := make(map[string]int)
+	patch := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			callsMu.Lock()
+			defer callsMu.Unlock()
+			manifestPath := packed.MarshalManifestPath(basePath, version)
+			manifestCalls[manifestPath]++
+			switch manifestPath {
+			case oldOne:
+				return newOne, nil
+			case oldTwo:
+				if manifestCalls[manifestPath] == 1 {
+					return "", errors.New("second target manifest failed")
+				}
+				return newTwo, nil
+			default:
+				return "", errors.New("unexpected manifest path")
+			}
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	_, _, err := meta.CompleteCompactionMutation(context.Background(), task, result)
+	require.Error(t, err)
+	require.Equal(t, newOne, result.GetSegments()[0].GetManifest(),
+		"a successful manifest from the partial attempt must be returned to the task cache")
+	require.Empty(t, result.GetSegments()[1].GetManifest())
+
+	var gotActions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, actions ...metastore.UpdateAction) error {
+			gotActions = actions
+			return nil
+		},
+	).Once()
+
+	_, _, err = meta.CompleteCompactionMutation(context.Background(), task, result)
+	require.NoError(t, err)
+	callsMu.Lock()
+	require.Equal(t, 1, manifestCalls[oldOne], "the committed target must not issue another manifest transaction")
+	require.Equal(t, 2, manifestCalls[oldTwo], "only the failed target is retried")
+	callsMu.Unlock()
+
+	require.Len(t, gotActions, 4, "two targets + one L0 input + meta_saved must share one Catalog.Update")
+	for _, action := range gotActions[:3] {
+		_, ok := action.Entry.(metastore.SegmentEntry)
+		require.True(t, ok)
+	}
+	taskEntry, ok := gotActions[3].Entry.(metastore.CompactionTaskEntry)
+	require.True(t, ok)
+	require.Equal(t, datapb.CompactionTaskState_meta_saved, taskEntry.Task.GetState())
+	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(context.Background(), inputID).GetState())
+	require.Equal(t, newOne, meta.GetSegment(context.Background(), targetOne).GetManifestPath())
+	require.Equal(t, newTwo, meta.GetSegment(context.Background(), targetTwo).GetManifestPath())
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {
@@ -5606,14 +5631,6 @@ func TestMeta_isSegmentHealthy_issue17823_panic(t *testing.T) {
 	assert.False(t, isSegmentHealthy(seg))
 }
 
-func equalCollectionInfo(t *testing.T, a *collectionInfo, b *collectionInfo) {
-	assert.Equal(t, a.ID, b.ID)
-	assert.Equal(t, a.Partitions, b.Partitions)
-	assert.Equal(t, a.Schema, b.Schema)
-	assert.Equal(t, a.Properties, b.Properties)
-	assert.Equal(t, a.StartPositions, b.StartPositions)
-}
-
 func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing.T) {
 	const (
 		channel1 = "channel-1"
@@ -5637,11 +5654,10 @@ func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing
 		}).Once()
 
 	meta := &meta{
-		ctx:         context.Background(),
-		catalog:     catalog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
-		channelCPs:  newChannelCps(),
+		ctx:        context.Background(),
+		catalog:    catalog,
+		segments:   NewSegmentsInfo(),
+		channelCPs: newChannelCps(),
 	}
 	channel1Done := make(chan error, 1)
 	go func() {
@@ -5718,11 +5734,10 @@ func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *tes
 		}).Once()
 
 	meta := &meta{
-		ctx:         context.Background(),
-		catalog:     catalog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
-		channelCPs:  newChannelCps(),
+		ctx:        context.Background(),
+		catalog:    catalog,
+		segments:   NewSegmentsInfo(),
+		channelCPs: newChannelCps(),
 	}
 	batchDone := make(chan error, 1)
 	go func() {
@@ -5960,92 +5975,6 @@ func Test_meta_GcConfirm(t *testing.T) {
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
 }
 
-func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
-	t.Run("fail to list database", func(t *testing.T) {
-		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show collections", func(t *testing.T) {
-		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to describe collection", func(t *testing.T) {
-		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show partitions", func(t *testing.T) {
-		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID: 1000,
-		}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.NoError(t, err)
-		c := m.GetCollection(UniqueID(1000))
-		assert.NotNil(t, c)
-	})
-}
-
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	// Create a mock meta object
 	m := &meta{
@@ -6184,7 +6113,8 @@ func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		pos, err := meta.GetMinGrowingSegmentCheckpoint(context.Background(), mockVChannel)
+		assert.NoError(t, err)
 		assert.Nil(t, pos)
 	})
 
@@ -6192,16 +6122,15 @@ func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
-		// Register a TEXT collection so the checkpoint logic applies
-		meta.collections.Insert(1, &collectionInfo{
-			ID: 1,
-			Schema: &schemapb.CollectionSchema{
+		rootCoord := broker.NewMockBroker(t)
+		rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).
+			Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 					{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
 				},
-			},
-		})
+			}}, nil).Once()
+		meta.broker = rootCoord
 
 		// Growing L1 segment with T300
 		seg1 := &SegmentInfo{
@@ -6241,7 +6170,8 @@ func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), seg2)
 		assert.NoError(t, err)
 
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		pos, err := meta.GetMinGrowingSegmentCheckpoint(context.Background(), mockVChannel)
+		assert.NoError(t, err)
 		assert.NotNil(t, pos)
 		assert.Equal(t, uint64(300), pos.GetTimestamp())
 	})
@@ -6269,7 +6199,8 @@ func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), seg)
 		assert.NoError(t, err)
 
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		pos, err := meta.GetMinGrowingSegmentCheckpoint(context.Background(), mockVChannel)
+		assert.NoError(t, err)
 		assert.Nil(t, pos)
 	})
 
@@ -6296,7 +6227,8 @@ func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), seg)
 		assert.NoError(t, err)
 
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		pos, err := meta.GetMinGrowingSegmentCheckpoint(context.Background(), mockVChannel)
+		assert.NoError(t, err)
 		assert.Nil(t, pos)
 	})
 }
@@ -6307,16 +6239,15 @@ func TestUpdateChannelCheckpoint_ClampedByGrowing(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
-	// Register a TEXT collection so clamping is enabled
-	meta.collections.Insert(1, &collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
+	rootCoord := broker.NewMockBroker(t)
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).
+		Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
 			},
-		},
-	})
+		}}, nil).Once()
+	meta.broker = rootCoord
 
 	// Add a growing L1 segment at T300
 	seg := &SegmentInfo{
@@ -6356,16 +6287,15 @@ func TestUpdateChannelCheckpoint_NotClampedForNonTextCollection(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
-	// Register a non-TEXT collection — clamping should NOT apply
-	meta.collections.Insert(2, &collectionInfo{
-		ID: 2,
-		Schema: &schemapb.CollectionSchema{
+	rootCoord := broker.NewMockBroker(t)
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(2)).
+		Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "varchar_field", DataType: schemapb.DataType_VarChar},
 			},
-		},
-	})
+		}}, nil).Once()
+	meta.broker = rootCoord
 
 	// Add a growing L1 segment at T300 for the non-TEXT collection
 	seg := &SegmentInfo{
@@ -6405,16 +6335,15 @@ func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
-	// Register a TEXT collection so clamping is enabled
-	meta.collections.Insert(1, &collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
+	rootCoord := broker.NewMockBroker(t)
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).
+		Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
 			},
-		},
-	})
+		}}, nil).Once()
+	meta.broker = rootCoord
 
 	// Add a growing L1 segment at T300
 	seg := &SegmentInfo{
@@ -6938,10 +6867,17 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		SegmentIDs:    []int64{1000},
 	}
 
+	// No MultiRemove expectation, deliberately: CleanPartitionStatsInfo is on the
+	// compaction cleanup path and must only write metadata. Object removal belongs
+	// to garbage collection (recycleUnusedPartitionStatsFiles /
+	// recycleUnusedAnalyzeFiles), because cleanup is what returns a task's input
+	// segments and lifts the channel exclusion -- blocking either on object
+	// storage lets one bucket outage stall compaction on that channel for good.
+	// The mock fails the test on any unexpected call, so this absence is the
+	// assertion.
 	newTestChunkManager := func(t *testing.T) *mocks.ChunkManager {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root").Maybe()
-		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil).Once()
 		return cm
 	}
 
@@ -7146,5 +7082,72 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		// A failed composite write must not desync memory from disk.
 		assert.NotNil(t, am.GetTask(55))
 		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+	})
+}
+
+func TestMeta_SaveAnalyzeTaskAndCompactionTask(t *testing.T) {
+	newTestMeta := func(t *testing.T, ctx context.Context, catalog *mocks2.DataCoordCatalog) *meta {
+		catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
+		compactionMeta, err := newCompactionTaskMeta(ctx, catalog)
+		require.NoError(t, err)
+		return &meta{
+			ctx:     ctx,
+			catalog: catalog,
+			analyzeMeta: &analyzeMeta{
+				ctx:     ctx,
+				catalog: catalog,
+				tasks:   make(map[int64]*indexpb.AnalyzeTask),
+			},
+			compactionTaskMeta: compactionMeta,
+		}
+	}
+
+	analyzeTask := &indexpb.AnalyzeTask{
+		TaskID:       3001,
+		CollectionID: 1,
+		PartitionID:  2,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	compactionTask := &datapb.CompactionTask{
+		TriggerID: 7,
+		PlanID:    1001,
+		State:     datapb.CompactionTaskState_analyzing,
+	}
+
+	t.Run("one catalog update then both memory metas", func(t *testing.T) {
+		ctx := context.Background()
+		catalog := mocks2.NewDataCoordCatalog(t)
+		m := newTestMeta(t, ctx, catalog)
+
+		var gotActions []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				gotActions = actions
+				assert.Nil(t, m.analyzeMeta.tasks[analyzeTask.GetTaskID()])
+				assert.Empty(t, m.compactionTaskMeta.compactionTasks[compactionTask.GetTriggerID()])
+				return nil
+			}).Once()
+
+		require.NoError(t, m.saveAnalyzeTaskAndCompactionTask(ctx, analyzeTask, compactionTask))
+		require.Len(t, gotActions, 2)
+		assert.Equal(t, metastore.ActionAdd, gotActions[0].Type)
+		assert.Equal(t, metastore.AnalyzeTaskEntry{Task: analyzeTask}, gotActions[0].Entry)
+		assert.Equal(t, metastore.ActionAdd, gotActions[1].Type)
+		assert.Equal(t, metastore.CompactionTaskEntry{Task: compactionTask}, gotActions[1].Entry)
+		assert.Same(t, analyzeTask, m.analyzeMeta.GetTask(analyzeTask.GetTaskID()))
+		assert.Equal(t, []*datapb.CompactionTask{compactionTask},
+			m.compactionTaskMeta.GetCompactionTasksByTriggerID(compactionTask.GetTriggerID()))
+	})
+
+	t.Run("failed update leaves both memory metas untouched", func(t *testing.T) {
+		ctx := context.Background()
+		catalog := mocks2.NewDataCoordCatalog(t)
+		m := newTestMeta(t, ctx, catalog)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("update failed")).Once()
+
+		require.Error(t, m.saveAnalyzeTaskAndCompactionTask(ctx, analyzeTask, compactionTask))
+		assert.Nil(t, m.analyzeMeta.GetTask(analyzeTask.GetTaskID()))
+		assert.Empty(t, m.compactionTaskMeta.GetCompactionTasksByTriggerID(compactionTask.GetTriggerID()))
 	})
 }

@@ -604,8 +604,12 @@ func (t *mixCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *mixCompactionTask) Stop() {
+func (t *mixCompactionTask) Cancel() {
 	t.cancel()
+}
+
+func (t *mixCompactionTask) Stop() {
+	t.Cancel()
 	<-t.done
 }
 

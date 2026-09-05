@@ -5684,6 +5684,7 @@ type dataCoordConfig struct {
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionMaxAttempts                  ParamItem `refreshable:"true"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
@@ -5778,14 +5779,12 @@ type dataCoordConfig struct {
 	GCLOBSafetyWindow  ParamItem `refreshable:"true"`
 	GCLOBCheckInterval ParamItem `refreshable:"true"`
 
-	BindIndexNodeMode           ParamItem `refreshable:"false"`
-	IndexNodeAddress            ParamItem `refreshable:"false"`
-	WithCredential              ParamItem `refreshable:"false"`
-	IndexNodeID                 ParamItem `refreshable:"false"`
-	TaskScheduleInterval        ParamItem `refreshable:"false"`
-	TaskRetryBackoffInterval    ParamItem `refreshable:"true"`
-	TaskRetryBackoffMaxInterval ParamItem `refreshable:"true"`
-	TaskSlowThreshold           ParamItem `refreshable:"true"`
+	BindIndexNodeMode    ParamItem `refreshable:"false"`
+	IndexNodeAddress     ParamItem `refreshable:"false"`
+	WithCredential       ParamItem `refreshable:"false"`
+	IndexNodeID          ParamItem `refreshable:"false"`
+	TaskScheduleInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold    ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -5810,10 +5809,12 @@ type dataCoordConfig struct {
 	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	ImportMaxAttempts               ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
+	CopySegmentMaxAttempts          ParamItem `refreshable:"true"`
 
 	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
 	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
@@ -5822,6 +5823,7 @@ type dataCoordConfig struct {
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
 	RefreshWaitForIndex                ParamItem `refreshable:"true"`
+	ExternalCollectionMaxRetryTimes    ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6111,6 +6113,21 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionMaxAttempts = ParamItem{
+		Key:          "dataCoord.compaction.maxAttempts",
+		Version:      "2.6.0",
+		DefaultValue: "10",
+		Doc: `How many times a compaction may be rebuilt before it is left to the periodic trigger.
+Every compaction that ends without succeeding -- a worker refusal or reported failure, a
+DataCoord-side error, or an outcome that could not be established -- is retried by rebuilding
+the work under a fresh plan ID, so that an execution which may still be running cannot collide
+with the retry. This caps that rebuilding for work which fails for a reason a fresh plan ID
+cannot fix, such as bad input data. Values below 1 are treated as 1: the original attempt
+always runs.`,
+		Export: true,
+	}
+	p.CompactionMaxAttempts.Init(base.mgr)
 
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
@@ -6762,10 +6779,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Doc: "TTL (seconds) for pins claimed by snapshot restore jobs on the source snapshot. " +
 			"Acts as a safety-net reaper for orphan pins left behind by crashed datacoord / " +
 			"failed job creation. Default 86400 (24h) is sized well above the worst-case restore " +
-			"wall time — restore copies segments by S3 object reference (no data rewrite), so even " +
-			"multi-TB restores complete in minutes. Minimum enforced value is 300s — values ≤0 " +
-			"(which would create permanent pins with no admin recovery API) and values below 300s " +
-			"are coerced to the default.",
+			"wall time. Minimum enforced value is 300s — values <=0 (which would create permanent " +
+			"pins with no admin recovery API) and values below 300s are coerced to the default.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || parsed < 300 {
@@ -6935,25 +6950,6 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		DefaultValue: "100",
 	}
 	p.TaskScheduleInterval.Init(base.mgr)
-
-	p.TaskRetryBackoffInterval = ParamItem{
-		Key:          "dataCoord.taskRetryBackoffInterval",
-		Version:      "2.6.18",
-		DefaultValue: "1",
-		Doc: "Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; " +
-			"doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).",
-		Export: true,
-	}
-	p.TaskRetryBackoffInterval.Init(base.mgr)
-
-	p.TaskRetryBackoffMaxInterval = ParamItem{
-		Key:          "dataCoord.taskRetryBackoffMaxInterval",
-		Version:      "2.6.18",
-		DefaultValue: "60",
-		Doc:          "Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.",
-		Export:       true,
-	}
-	p.TaskRetryBackoffMaxInterval.Init(base.mgr)
 
 	p.TaskSlowThreshold = ParamItem{
 		Key:          "datacoord.scheduler.taskSlowThreshold",
@@ -7212,6 +7208,20 @@ raise this for files written with small row groups, many columns, or untruncated
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
 
+	p.ImportMaxAttempts = ParamItem{
+		Key:     "dataCoord.import.maxAttempts",
+		Version: "3.0.0",
+		Doc: `How many times one pre-import or import task may be attempted before its job fails.
+
+The original task is attempt one. Every retry uses a fresh task ID; import retries
+also use fresh segment IDs. A persisted lineage counter advances only when the
+replacement is committed and enforces this limit.`,
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportMaxAttempts.Init(base.mgr)
+
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
 		Version:      "2.5.0",
@@ -7249,6 +7259,20 @@ raise this for files written with small row groups, many columns, or untruncated
 	}
 	p.CopySegmentJobTimeout.Init(base.mgr)
 
+	p.CopySegmentMaxAttempts = ParamItem{
+		Key:     "dataCoord.copySegmentMaxAttempts",
+		Version: "2.6.8",
+		Doc: `How many times one copy segment task may be attempted before its job fails.
+
+Each attempt runs under a fresh task ID and a fresh set of target segment IDs, so an
+abandoned attempt can never write where its replacement writes. Past this count the
+work is settled as failed instead of being rebuilt again.`,
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.CopySegmentMaxAttempts.Init(base.mgr)
+
 	p.ExternalCollectionCheckInterval = ParamItem{
 		Key:          "dataCoord.externalCollectionCheckInterval",
 		Version:      "2.6.8",
@@ -7275,6 +7299,16 @@ raise this for files written with small row groups, many columns, or untruncated
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionJobRetention.Init(base.mgr)
+
+	p.ExternalCollectionMaxRetryTimes = ParamItem{
+		Key:          "dataCoord.externalCollectionMaxRetryTimes",
+		Version:      "2.6.8",
+		Doc:          "Maximum number of in-process worker create, query, or execution failures before an external collection refresh job is marked failed. Each retry replaces only the failed task and reuses its manifest, file range, and owned segments. The counter resets when DataCoord restarts.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ExternalCollectionMaxRetryTimes.Init(base.mgr)
 
 	p.ExternalCollectionDropRatioWarn = ParamItem{
 		Key:          "dataCoord.externalCollectionDropRatioWarn",
@@ -7489,7 +7523,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	p.StatsTaskPendingLimit = ParamItem{
 		Key:          "dataCoord.statsTaskPendingLimit",
 		Version:      "3.0.0",
-		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
+		Doc:          "skip submitting new stats tasks when persisted Init and Retry stats tasks reach this limit",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       false,
@@ -7519,10 +7553,17 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 
 	p.RequestTimeoutSeconds = ParamItem{
-		Key:          "dataCoord.requestTimeoutSeconds",
-		Version:      "2.5.5",
-		Doc:          "request timeout interval",
-		DefaultValue: "600",
+		Key:     "dataCoord.requestTimeoutSeconds",
+		Version: "2.5.5",
+		Doc: `Timeout for DataCoord's requests to a worker node.
+
+These are control-plane calls -- create/query/drop a task, query free slots --
+which a healthy node answers in microseconds: creating a task hands it to a
+background queue rather than running it. The timeout therefore only ever
+applies to a node that is already unwell, and there the useful behavior is to
+give up quickly and re-dispatch the task elsewhere. The previous 600s let one
+unresponsive node stall a whole scheduling round instead.`,
+		DefaultValue: "30",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
@@ -7662,6 +7703,10 @@ type dataNodeConfig struct {
 
 	// external collection
 	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
+
+	// worker-side task sweeper
+	TaskSweepInterval ParamItem `refreshable:"false"`
+	TaskRetention     ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -8239,6 +8284,30 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+
+	p.TaskSweepInterval = ParamItem{
+		Key:          "dataNode.task.sweepInterval",
+		Version:      "2.6.0",
+		DefaultValue: "3600",
+		Doc: "How often, in seconds, DataNode scans its worker-side task entries " +
+			"(compaction/import/index/analyze/stats/external-refresh) for presumed orphans. " +
+			"Only takes effect on restart.",
+		Export: true,
+	}
+	p.TaskSweepInterval.Init(base.mgr)
+
+	p.TaskRetention = ParamItem{
+		Key:          "dataNode.task.retention",
+		Version:      "2.6.0",
+		DefaultValue: "86400",
+		Doc: "Worker-side task entries that started longer than this, in seconds, are canceled " +
+			"and removed as presumed orphans. The coordinator rebuilds the work under fresh identities, " +
+			"but a task that legitimately runs longer than this is canceled and rebuilt, so keep this " +
+			"well above the worst-case duration of an index build or import on this cluster. " +
+			"Values below 1 fall back to the default.",
+		Export: true,
+	}
+	p.TaskRetention.Init(base.mgr)
 }
 
 type streamingConfig struct {

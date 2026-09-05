@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -29,9 +30,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	dcTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -47,6 +52,7 @@ type CopySegmentCheckerSuite struct {
 	broker   *broker.MockBroker
 	meta     *meta
 	copyMeta CopySegmentMeta
+	cluster  *session.MockCluster
 	checker  *copySegmentChecker
 }
 
@@ -77,20 +83,18 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
-		ID:     s.collectionID,
-		Schema: newTestSchema(),
-	})
-
 	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 
+	s.cluster = session.NewMockCluster(s.T())
 	s.checker = NewCopySegmentChecker(
 		context.TODO(),
 		s.meta,
 		s.broker,
 		s.alloc,
 		s.copyMeta,
+		s.cluster,
+		nil,
 	).(*copySegmentChecker)
 }
 
@@ -318,9 +322,12 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurr
 	// Concurrent failure path moves the cached job to Failed. The cached entry
 	// is replaced with a Failed clone; `staleJob` keeps its Pending state and
 	// plays the stale snapshot below.
-	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleasePin(context.TODO(), s.jobID,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("task failed concurrently")))
+		UpdateCopyJobReason("task failed concurrently"))
+	s.NoError(err)
+	s.True(applied)
 
 	s.checker.checkPendingJob(staleJob)
 
@@ -444,11 +451,11 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_MarkFailed() {
 }
 
 func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
-	// One call for AddJob, one for update progress, one for finishJob
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
+	// AddJob and progress are ordinary saves; final publication is one Update.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	// Create segments
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -456,6 +463,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
 		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
 		NumOfRows:     100,
 		InsertChannel: "ch1",
 	})
@@ -545,6 +553,49 @@ func (s *CopySegmentCheckerSuite) TestCheckFailedJob_MarkTasksFailed() {
 	updatedTask := s.copyMeta.GetTask(context.TODO(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
 	s.Equal("job failed", updatedTask.GetReason())
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckFailedJob_CleansTargetsWithoutTasks() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+
+	target := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 101, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	})
+	s.NoError(s.meta.AddSegment(context.Background(), target))
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: s.jobID, CollectionId: s.collectionID,
+			State:     datapb.CopySegmentJobState_CopySegmentJobFailed,
+			CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: 1, TargetSegmentId: target.GetID(), PartitionId: target.GetPartitionID(),
+			}},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.Background(), job))
+
+	// The failure can happen before the first task is created. The job mapping
+	// must still retire its target and keep the job as the cleanup owner.
+	s.checker.checkFailedJob(job)
+	retired := s.meta.GetSegment(context.Background(), target.GetID())
+	s.Require().NotNil(retired)
+	s.Equal(commonpb.SegmentState_Dropped, retired.GetState())
+	s.False(retired.GetIsImporting())
+	s.checker.checkGC(job)
+	s.NotNil(s.copyMeta.GetJob(context.Background(), job.GetJobId()))
+
+	// Once normal segment GC has removed the Dropped target, job GC may finish.
+	s.meta.segMu.Lock()
+	s.meta.segments.DropSegment(target.GetID())
+	s.meta.segMu.Unlock()
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetJob(context.Background(), job.GetJobId()))
 }
 
 func (s *CopySegmentCheckerSuite) TestTryTimeoutJob() {
@@ -671,6 +722,153 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 	s.Nil(removedTask)
 }
 
+func (s *CopySegmentCheckerSuite) TestCheckGC_RetriesPinReleaseBeforeRemovingJob() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, s.jobID).Return(nil).Once()
+
+	concrete := s.copyMeta.(*copySegmentMeta)
+	concrete.snapshotMeta = &snapshotMeta{}
+	unpinCalls := 0
+	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, pinID int64) (int64, string, int, error) {
+			unpinCalls++
+			s.Equal(int64(7001), pinID)
+			if unpinCalls == 1 {
+				return 0, "", 0, errors.New("catalog unavailable")
+			}
+			return s.collectionID, "snapshot", 0, nil
+		}).Build()
+	defer mockUnpin.UnPatch()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: s.jobID, CollectionId: s.collectionID,
+			State:     datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
+			PinId:     7001,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.Background(), job))
+
+	// A failed release retains both the terminal job and its durable PinId.
+	s.checker.checkGC(job)
+	retained := s.copyMeta.GetJob(context.Background(), s.jobID)
+	s.Require().NotNil(retained)
+	s.Equal(int64(7001), retained.GetPinId())
+
+	// The next checker round retries the idempotent unpin, clears PinId, then
+	// permits ordinary retention GC to remove the job.
+	s.checker.checkGC(retained)
+	s.Nil(s.copyMeta.GetJob(context.Background(), s.jobID))
+	s.Equal(2, unpinCalls)
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckGC_RetriesWorkerDropBeforeRemovingMetadata() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+
+	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			CleanupTs:    cleanupTs,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	for taskID, nodeID := range map[int64]int64{1001: 7, 1002: 8, 1003: 9} {
+		task := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId:       taskID,
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			NodeId:       nodeID,
+		})
+		s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+	}
+
+	// A transient failure keeps its task and job as durable retry evidence.
+	s.cluster.EXPECT().DropCopySegment(int64(7), int64(1001)).
+		Return(errors.New("connection refused")).Once()
+	// A successful drop and a node that is already gone both permit task removal.
+	s.cluster.EXPECT().DropCopySegment(int64(8), int64(1002)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(int64(9), int64(1003)).
+		Return(merr.WrapErrNodeNotFound(9)).Once()
+	s.checker.checkGC(job)
+	s.NotNil(s.copyMeta.GetTask(context.TODO(), 1001))
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1002))
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1003))
+	s.NotNil(s.copyMeta.GetJob(context.TODO(), s.jobID))
+
+	// The next GC round retries the retained task and closes the job after success.
+	s.cluster.EXPECT().DropCopySegment(int64(7), int64(1001)).Return(nil).Once()
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1001))
+	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID))
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckGC_FinalizeReloadsAssignedTask() {
+	const taskID int64 = 1001
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, taskID).Return(nil).Once()
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, s.jobID).Return(nil).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			CleanupTs:    tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	pending := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	pending.task.Store(&datapb.CopySegmentTask{
+		TaskId: taskID,
+		JobId:  s.jobID,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId: NullNodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), pending))
+
+	scheduler := dcTask.NewMockGlobalScheduler(s.T())
+	s.checker.scheduler = scheduler
+	scheduler.EXPECT().Finalize(taskID, mock.Anything).Run(func(_ int64, fn func()) {
+		// Simulate the Create callback publishing its assignment before Finalize
+		// acquires the task lock. GC must use this latest owner, not its old snapshot.
+		applied, err := s.copyMeta.UpdateTaskInState(context.TODO(), taskID,
+			datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			UpdateCopyTaskNodeID(11),
+			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
+		s.NoError(err)
+		s.True(applied)
+		fn()
+	}).Once()
+	s.cluster.EXPECT().DropCopySegment(int64(11), taskID).Return(nil).Once()
+
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), taskID))
+	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID))
+}
+
 func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 
@@ -771,18 +969,21 @@ func (s *CopySegmentCheckerSuite) TestLogTaskStats() {
 }
 
 func (s *CopySegmentCheckerSuite) TestClose() {
-	// Close should be idempotent
+	// Start owns both loops and Close waits for them. Close remains idempotent.
 	s.NotPanics(func() {
+		s.checker.Start()
 		s.checker.Close()
 		s.checker.Close()
 	})
+	s.True(s.checker.started)
+	s.True(s.checker.stopped)
 }
 
 func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	// Create target segments in Importing state
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -790,6 +991,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
 		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
 		NumOfRows:     100,
 		InsertChannel: "ch1",
 	})
@@ -831,11 +1033,12 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.NoError(err)
 
 	// Finish job
-	s.checker.finishJob(job, 100)
+	s.checker.finishJob(job, 100, []CopySegmentTask{task})
 
 	// Target segment should be in Flushed state
 	segment := s.meta.GetSegment(context.TODO(), 101)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.False(segment.GetIsImporting())
 
 	// Job should be completed
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -843,85 +1046,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.Equal(int64(100), updatedJob.GetTotalRows())
 }
 
-func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
-	snapshotName := "test_snapshot"
-	jobID := int64(100)
-
-	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       s.collectionID,
-			SourceCollectionId: s.collectionID,
-			SnapshotName:       snapshotName,
-			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
-		},
-		tr: timerecord.NewTimeRecorder("test job"),
-	}
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
-	s.copyMeta.AddJob(context.TODO(), job)
-
-	// Execute: Update job to Completed via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
-	s.NoError(err)
-
-	// Verify: Ref count is released
-}
-
-func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
-	snapshotName := "test_snapshot_fail"
-	jobID := int64(101)
-
-	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       s.collectionID,
-			SourceCollectionId: s.collectionID,
-			SnapshotName:       snapshotName,
-			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
-		},
-		tr: timerecord.NewTimeRecorder("test job"),
-	}
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
-	s.copyMeta.AddJob(context.TODO(), job)
-
-	// Execute: Update job to Failed via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
-	s.NoError(err)
-
-	// Verify: Ref count is released
-}
-
-func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
-	snapshotName := "test_snapshot_exec"
-	jobID := int64(102)
-
-	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       s.collectionID,
-			SourceCollectionId: s.collectionID,
-			SnapshotName:       snapshotName,
-			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
-		},
-		tr: timerecord.NewTimeRecorder("test job"),
-	}
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
-	s.copyMeta.AddJob(context.TODO(), job)
-
-	// Execute: Update job to Executing (non-terminal state) via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
-	s.NoError(err)
-
-	// Verify: Ref count is NOT released
-}
-
-func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesRef() {
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesPin() {
 	snapshotName := "test_snapshot_no_mappings"
 	jobID := int64(200)
 
@@ -948,15 +1073,15 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesRef() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
 }
 
-func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef() {
+func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesPin() {
 	snapshotName := "test_snapshot_copying_completed"
 	jobID := int64(400)
 
-	// Setup mocks: SaveCopySegmentJob is called once for AddJob, once for finishJob update
+	// Setup mocks: completion publishes the segment and job together.
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	// Setup: Create job in Executing state with all tasks completed
 	job := &copySegmentJob{
@@ -978,7 +1103,8 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            101,
-			State:         commonpb.SegmentState_Growing,
+			State:         commonpb.SegmentState_Importing,
+			IsImporting:   true,
 			NumOfRows:     100,
 			CollectionID:  s.collectionID,
 			InsertChannel: "ch1",
@@ -1011,7 +1137,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
 }
 
-func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
+func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesPin() {
 	snapshotName := "test_snapshot_task_failed"
 	jobID := int64(500)
 
@@ -1061,7 +1187,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
 }
 
-func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
+func (s *CopySegmentCheckerSuite) TestFinishJob_PublishFailureKeepsJobExecuting() {
 	snapshotName := "test_snapshot_flush_fail"
 	jobID := int64(600)
 
@@ -1069,8 +1195,9 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// AlterSegments returns error to simulate flush failure
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
+	// The atomic segment-and-job publish fails ambiguously; the checker must
+	// fail-stop without changing its process-local job or segment state.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
 
 	// Setup: Create job in Executing state
 	job := &copySegmentJob{
@@ -1093,6 +1220,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            101,
 			State:         commonpb.SegmentState_Growing,
+			IsImporting:   true,
 			NumOfRows:     100,
 			CollectionID:  s.collectionID,
 			InsertChannel: "ch1",
@@ -1117,13 +1245,21 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	task.task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
-	// Execute: Check copying job - flush will fail due to AlterSegments error
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
+
+	// Execute: Check copying job - atomic publish fails ambiguously.
 	s.checker.checkCopyingJob(job)
 
-	// Verify: Job marked as Failed (not Completed) due to flush failure
+	// Fatal does not return in production. With the test hook, verify the
+	// process-local state remains untouched after the fail-stop decision.
+	s.True(fatalCalled)
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
-	s.Contains(updatedJob.GetReason(), "failed to flush")
-
-	// Verify: Ref count is released even on failure
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+	updatedSegment := s.meta.GetSegment(context.TODO(), 101)
+	s.Equal(commonpb.SegmentState_Growing, updatedSegment.GetState())
+	s.True(updatedSegment.GetIsImporting())
 }
