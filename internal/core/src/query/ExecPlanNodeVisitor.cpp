@@ -49,8 +49,7 @@ ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
     tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("active_count",
-                                 query_context->get_active_count());
+    span.SetAttribute("active_count", query_context->get_active_count());
 
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),
@@ -104,9 +103,9 @@ ExecPlanNodeVisitor::ExecuteTask(
             ret = result;
         }
     }
-    span.GetSpan()->SetAttribute("total_rows", processed_num);
-    span.GetSpan()->SetAttribute("matched_rows",
-                                 ret ? processed_num - ret->nullCount() : 0);
+    span.SetAttribute("total_rows", processed_num);
+    span.SetAttribute("matched_rows",
+                      ret ? processed_num - ret->nullCount() : 0);
     return ret;
 }
 
