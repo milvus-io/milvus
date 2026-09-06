@@ -16,11 +16,13 @@ import (
 // must be shared by every expression in one request: the main predicate, each
 // hybrid sub-request predicate, and each function-scorer filter.
 //
-// Scope matters. proxy.maxMembershipFilterPlanSize is the per-request ceiling,
-// but plan construction parses one expression per sub-request plus one per
-// scorer. Threading one budget through the whole request rejects repeated blob
-// occurrences before materialization and avoids re-validating the same Roaring
-// template once per scorer or hybrid sub-request.
+// Scope matters. proxy.maxMembershipFilterPlanSize is the per-request ceiling
+// for both aggregate serialized membership-plan bytes and aggregate estimated
+// Roaring decoded bytes (checked independently), but plan construction parses
+// one expression per sub-request plus one per scorer. Threading one budget
+// through the whole request rejects repeated blob occurrences before
+// materialization and avoids re-validating the same Roaring template once per
+// scorer or hybrid sub-request.
 //
 // A nil *MembershipPreflightBudget is not shared state; callers that parse a
 // standalone expression can pass nil and get single-expression scope.
@@ -252,14 +254,15 @@ func preflightMembershipFilterValues(
 		}
 		occurrences := roaringOccurrenceCounts[template.name]
 		cost := validated.summary.EstimatedDecodedBytes
+		maxDecodedBytes := uint64(budget.maxPlanSize)
 		remaining := uint64(0)
-		if budget.aggregateDecodedBytes <= roaringfilter.MaxEstimatedDecodedBytes {
-			remaining = roaringfilter.MaxEstimatedDecodedBytes - budget.aggregateDecodedBytes
+		if budget.aggregateDecodedBytes <= maxDecodedBytes {
+			remaining = maxDecodedBytes - budget.aggregateDecodedBytes
 		}
 		if cost != 0 && occurrences > remaining/cost {
 			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"aggregate membership_match roaring estimated decoded size exceeds maximum before plan materialization: %d + %d*%d > %d bytes",
-				budget.aggregateDecodedBytes, occurrences, cost, roaringfilter.MaxEstimatedDecodedBytes))
+				"aggregate membership_match roaring estimated decoded size exceeds proxy.maxMembershipFilterPlanSize before plan materialization: %d + %d*%d > %d bytes",
+				budget.aggregateDecodedBytes, occurrences, cost, maxDecodedBytes))
 		}
 		budget.aggregateDecodedBytes += occurrences * cost
 		ctx.validatedRoaringBlobs[template.name] = validated
@@ -520,7 +523,13 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			}
 		}
 
+		if IsBytes(operand) {
+			return bytesTemplateValueError()
+		}
 		operandExpr := toValueExpr(operand)
+		if operandExpr == nil {
+			return merr.WrapErrQueryPlanMsg("unsupported arithmetic operand")
+		}
 		lDataType, rDataType := expr.GetColumnInfo().GetDataType(), operandExpr.dataType
 		if typeutil.IsArrayType(expr.GetColumnInfo().GetDataType()) {
 			lDataType = expr.GetColumnInfo().GetElementType()
