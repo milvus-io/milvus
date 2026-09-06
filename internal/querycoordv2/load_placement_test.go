@@ -18,6 +18,8 @@ package querycoordv2
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -129,6 +131,25 @@ func (stubBroadcaster) Broadcast(context.Context, message.BroadcastMutableMessag
 
 func (stubBroadcaster) Close() {}
 
+// capturedPlacement holds the parts of an AlterLoadConfigRequest these tests
+// assert on. The request itself is a local of the callback under test, and the
+// compiler is free to keep it on that callback's frame: escape analysis ran
+// against the real GenerateAlterLoadConfigMessage, which does not let the
+// argument outlive the call. A mock that stored the pointer would therefore be
+// reading a dead frame once the callback returned, so the mock copies out what
+// the test needs while the request is still alive.
+type capturedPlacement struct {
+	ExpectedReplicaNumber map[string]int
+	ScopedResourceGroups  []string
+}
+
+func capturePlacement(req *job.AlterLoadConfigRequest) *capturedPlacement {
+	return &capturedPlacement{
+		ExpectedReplicaNumber: maps.Clone(req.Expected.ExpectedReplicaNumber),
+		ScopedResourceGroups:  slices.Clone(req.ScopedResourceGroups),
+	}
+}
+
 func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 	paramtable.Init()
 	setForm(t, true)
@@ -138,7 +159,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a load naming one resource group carries the other's placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -146,7 +167,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_0")).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -159,7 +180,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 	})
 	require.NotNil(t, captured, "the broadcast request must have been built")
 	assert.Equal(t, map[string]int{"rg_0": 1, "rg_1": 1},
-		captured.Expected.ExpectedReplicaNumber,
+		captured.ExpectedReplicaNumber,
 		"the load path must broadcast the completed placement, not the one it asked for")
 }
 
@@ -244,7 +265,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a load naming no resource group states the whole placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -253,7 +274,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_a")).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -265,7 +286,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 	})
 	require.NotNil(t, captured, "the broadcast request must have been built")
 	assert.Equal(t, map[string]int{meta.DefaultResourceGroupName: 1},
-		captured.Expected.ExpectedReplicaNumber,
+		captured.ExpectedReplicaNumber,
 		"a bare load must not carry the replicas of a resource group it never named")
 }
 
@@ -286,7 +307,7 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 	current.Collection = &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
 	}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a bare load_partitions on a collection loaded elsewhere", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -295,7 +316,7 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(current).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(),
@@ -308,7 +329,7 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 	})
 	require.NotNil(t, captured, "the broadcast request must have been built")
 	assert.Equal(t, map[string]int{meta.DefaultResourceGroupName: 1},
-		captured.Expected.ExpectedReplicaNumber)
+		captured.ExpectedReplicaNumber)
 }
 
 // TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings pins the other
@@ -328,7 +349,7 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 	current.Collection = &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
 	}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a load_partitions naming one resource group carries the other's placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -336,7 +357,7 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(current).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(),
@@ -349,7 +370,7 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 		assert.NoError(t, err, "adding a group to a loaded collection is not a replica-number change for a form")
 	})
 	require.NotNil(t, captured)
-	assert.Equal(t, map[string]int{"rg_a": 1, "rg_b": 1}, captured.Expected.ExpectedReplicaNumber)
+	assert.Equal(t, map[string]int{"rg_a": 1, "rg_b": 1}, captured.ExpectedReplicaNumber)
 	assert.Equal(t, []string{"rg_b"}, captured.ScopedResourceGroups, "the scoping list travels with the request")
 }
 
@@ -379,7 +400,7 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a stock load naming one resource group states the whole placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -387,7 +408,7 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_0")).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -399,7 +420,7 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	require.NotNil(t, captured, "the broadcast request must have been built")
-	assert.Equal(t, map[string]int{"rg_1": 1}, captured.Expected.ExpectedReplicaNumber,
+	assert.Equal(t, map[string]int{"rg_1": 1}, captured.ExpectedReplicaNumber,
 		"a stock binary must not carry the replicas of a resource group the request left out")
 }
 
@@ -418,7 +439,7 @@ func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
 	current.Collection = &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
 	}
-	var captured *job.AlterLoadConfigRequest
+	var captured *capturedPlacement
 	mockey.PatchConvey("a stock load_partitions naming one resource group states the whole placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
@@ -426,7 +447,7 @@ func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(current).Build()
 		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
 			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = req
+				captured = capturePlacement(req)
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(),
@@ -439,5 +460,5 @@ func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
 		assert.NoError(t, err, "one replica for one replica is not a replica-number change")
 	})
 	require.NotNil(t, captured)
-	assert.Equal(t, map[string]int{"rg_b": 1}, captured.Expected.ExpectedReplicaNumber)
+	assert.Equal(t, map[string]int{"rg_b": 1}, captured.ExpectedReplicaNumber)
 }
