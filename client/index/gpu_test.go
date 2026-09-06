@@ -36,8 +36,10 @@ func TestGPUIndexTypes(t *testing.T) {
 
 	for _, tc := range []testCase{
 		{tag: "brute_force", idx: NewGPUBruteForceIndex(entity.L2), expect: GPUBruteForce},
-		{tag: "ivf_flat", idx: NewGPUIVPFlatIndex(entity.L2), expect: GPUIvfFlat},
-		{tag: "ivf_pq", idx: NewGPUIVPPQIndex(entity.L2), expect: GPUIvfPQ},
+		{tag: "ivf_flat", idx: NewGPUIVFFlatIndex(entity.L2), expect: GPUIvfFlat},
+		{tag: "ivf_pq", idx: NewGPUIVFPQIndex(entity.L2), expect: GPUIvfPQ},
+		{tag: "legacy_ivp_flat", idx: NewGPUIVPFlatIndex(entity.L2), expect: GPUIvfFlat},
+		{tag: "legacy_ivp_pq", idx: NewGPUIVPPQIndex(entity.L2), expect: GPUIvfPQ},
 		{tag: "cagra", idx: NewGPUCagraIndex(entity.L2, 128, 64), expect: GPUCagra},
 	} {
 		t.Run(tc.tag, func(t *testing.T) {
@@ -52,16 +54,16 @@ func TestGPUUnsetBuildParamsAreOmitted(t *testing.T) {
 	// nlist / m / nbits are unreachable through these constructors, so they sat
 	// at zero and were emitted as "0" — below every accepted range, which fails
 	// the build. An absent key lets the server apply its default instead.
-	flat := NewGPUIVPFlatIndex(entity.L2).Params()
+	flat := NewGPUIVFFlatIndex(entity.L2).Params()
 	assert.NotContains(t, flat, ivfNlistKey)
 
-	pq := NewGPUIVPPQIndex(entity.L2).Params()
+	pq := NewGPUIVFPQIndex(entity.L2).Params()
 	assert.NotContains(t, pq, ivfNlistKey)
 	assert.NotContains(t, pq, ivfPQMKey)
 	assert.NotContains(t, pq, ivfPQNbits)
 
 	// They remain reachable without changing the constructor signature.
-	withNlist := WithExtraIndexParams(NewGPUIVPFlatIndex(entity.L2), map[string]string{
+	withNlist := WithExtraIndexParams(NewGPUIVFFlatIndex(entity.L2), map[string]string{
 		ivfNlistKey: "1024",
 	}).Params()
 	assert.Equal(t, "1024", withNlist[ivfNlistKey])
