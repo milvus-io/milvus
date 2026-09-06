@@ -43,7 +43,13 @@ class ProtoParser {
     }
 
  public:
-    explicit ProtoParser(SchemaPtr schema) : schema(std::move(schema)) {
+    explicit ProtoParser(SchemaPtr schema)
+        : schema(std::move(schema)),
+          entity_ttl_field_id_(this->schema->get_ttl_field_id()) {
+    }
+
+    ProtoParser(SchemaPtr schema, std::optional<FieldId> entity_ttl_field_id)
+        : schema(std::move(schema)), entity_ttl_field_id_(entity_ttl_field_id) {
     }
 
     std::unique_ptr<VectorPlanNode>
@@ -141,6 +147,7 @@ class ProtoParser {
 
  private:
     const SchemaPtr schema;
+    const std::optional<FieldId> entity_ttl_field_id_;
 };
 
 }  // namespace milvus::query

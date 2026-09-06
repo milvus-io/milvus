@@ -144,14 +144,14 @@ func (suite *SearchSuite) SetupTest() {
 
 func (suite *SearchSuite) TearDownTest() {
 	ctx := context.Background()
-	if suite.sealed != nil {
-		suite.sealed.Release(ctx)
-		suite.sealed = nil
+	if suite.manager != nil {
+		suite.manager.Segment.Clear(ctx)
+		releaseAllTestCollections(suite.manager.Collection)
+		suite.manager = nil
 	}
-	if suite.collection != nil {
-		DeleteCollection(suite.collection)
-		suite.collection = nil
-	}
+	suite.sealed = nil
+	suite.growing = nil
+	suite.collection = nil
 	if suite.chunkManager != nil {
 		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 		suite.chunkManager = nil

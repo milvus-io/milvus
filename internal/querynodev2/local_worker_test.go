@@ -102,12 +102,13 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	collection, err := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
-	suite.NoError(err)
+	suite.Require().NoError(err)
 	loadMata := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 	}
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
+	suite.Require().NoError(suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata))
+	segments.DeleteCollection(collection)
 
 	suite.mockLoader = segments.NewMockLoader(suite.T())
 	suite.node.loader = suite.mockLoader
@@ -117,13 +118,17 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 
 func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 	suite.node.Stop()
+	for _, collectionID := range suite.node.manager.Collection.List() {
+		for !suite.node.manager.Collection.Unref(collectionID, 1) {
+		}
+	}
 	suite.etcdClient.Close()
 	suite.cancel()
 }
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	suite.mockLoader.EXPECT().
-		Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		LoadWithSchemaState(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return([]segments.Segment{}, nil).Once()
 
 	// load empty

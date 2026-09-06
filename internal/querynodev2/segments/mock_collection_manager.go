@@ -213,6 +213,67 @@ func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *sch
 	return _c
 }
 
+// PutOrRefWithSchemaState provides a mock function with given fields: collectionID, schema, meta, loadMeta
+func (_m *MockCollectionManager) PutOrRefWithSchemaState(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) (*CollectionSchemaState, error) {
+	ret := _m.Called(collectionID, schema, meta, loadMeta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutOrRefWithSchemaState")
+	}
+
+	var r0 *CollectionSchemaState
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) (*CollectionSchemaState, error)); ok {
+		return rf(collectionID, schema, meta, loadMeta)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) *CollectionSchemaState); ok {
+		r0 = rf(collectionID, schema, meta, loadMeta)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*CollectionSchemaState)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error); ok {
+		r1 = rf(collectionID, schema, meta, loadMeta)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCollectionManager_PutOrRefWithSchemaState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutOrRefWithSchemaState'
+type MockCollectionManager_PutOrRefWithSchemaState_Call struct {
+	*mock.Call
+}
+
+// PutOrRefWithSchemaState is a helper method to define mock.On call
+//   - collectionID int64
+//   - schema *schemapb.CollectionSchema
+//   - meta *segcorepb.CollectionIndexMeta
+//   - loadMeta *querypb.LoadMetaInfo
+func (_e *MockCollectionManager_Expecter) PutOrRefWithSchemaState(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_PutOrRefWithSchemaState_Call {
+	return &MockCollectionManager_PutOrRefWithSchemaState_Call{Call: _e.mock.On("PutOrRefWithSchemaState", collectionID, schema, meta, loadMeta)}
+}
+
+func (_c *MockCollectionManager_PutOrRefWithSchemaState_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRefWithSchemaState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_PutOrRefWithSchemaState_Call) Return(_a0 *CollectionSchemaState, _a1 error) *MockCollectionManager_PutOrRefWithSchemaState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCollectionManager_PutOrRefWithSchemaState_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) (*CollectionSchemaState, error)) *MockCollectionManager_PutOrRefWithSchemaState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Ref provides a mock function with given fields: collectionID, count
 func (_m *MockCollectionManager) Ref(collectionID int64, count uint32) bool {
 	ret := _m.Called(collectionID, count)

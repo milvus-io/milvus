@@ -7,6 +7,7 @@ import (
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	segments "github.com/milvus-io/milvus/internal/querynodev2/segments"
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -1510,6 +1511,52 @@ func (_c *MockShardDelegator_Version_Call) Return(_a0 int64) *MockShardDelegator
 }
 
 func (_c *MockShardDelegator_Version_Call) RunAndReturn(run func() int64) *MockShardDelegator_Version_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithInsertSchemaState provides a mock function with given fields: fn
+func (_m *MockShardDelegator) WithInsertSchemaState(fn func(*segments.CollectionSchemaState)) error {
+	ret := _m.Called(fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithInsertSchemaState")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(func(*segments.CollectionSchemaState)) error); ok {
+		r0 = rf(fn)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_WithInsertSchemaState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithInsertSchemaState'
+type MockShardDelegator_WithInsertSchemaState_Call struct {
+	*mock.Call
+}
+
+// WithInsertSchemaState is a helper method to define mock.On call
+//   - fn func(*segments.CollectionSchemaState)
+func (_e *MockShardDelegator_Expecter) WithInsertSchemaState(fn interface{}) *MockShardDelegator_WithInsertSchemaState_Call {
+	return &MockShardDelegator_WithInsertSchemaState_Call{Call: _e.mock.On("WithInsertSchemaState", fn)}
+}
+
+func (_c *MockShardDelegator_WithInsertSchemaState_Call) Run(run func(fn func(*segments.CollectionSchemaState))) *MockShardDelegator_WithInsertSchemaState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(func(*segments.CollectionSchemaState)))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_WithInsertSchemaState_Call) Return(_a0 error) *MockShardDelegator_WithInsertSchemaState_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_WithInsertSchemaState_Call) RunAndReturn(run func(func(*segments.CollectionSchemaState)) error) *MockShardDelegator_WithInsertSchemaState_Call {
 	_c.Call.Return(run)
 	return _c
 }

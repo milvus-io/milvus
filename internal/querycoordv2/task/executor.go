@@ -626,6 +626,8 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 	if err != nil {
 		return err
 	}
+	loadSchema := applyCollectionSettings(collectionInfo.GetSchema(), collectionInfo.GetProperties())
+	applyIndexWarmupSetting(loadInfo, loadSchema, collectionInfo.GetProperties())
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -634,7 +636,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 		),
 		CollectionID: task.collectionID,
 		Channel:      task.Shard(),
-		Schema:       collectionInfo.GetSchema(),
+		Schema:       loadSchema,
 		LoadMeta:     loadMeta,
 		ReplicaID:    task.ReplicaID(),
 		Actions: []*querypb.SyncAction{

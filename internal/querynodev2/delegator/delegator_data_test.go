@@ -287,6 +287,14 @@ func (s *DelegatorDataSuite) SetupTest() {
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
 	s.delegator = sd
+	setupManager := s.manager
+	setupDelegator := s.delegator
+	s.T().Cleanup(func() {
+		if !setupDelegator.Stopped() {
+			setupDelegator.Close()
+		}
+		cleanupDelegatorDataManager(setupManager)
+	})
 }
 
 func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
@@ -299,8 +307,22 @@ func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
 }
 
 func (s *DelegatorDataSuite) TearDownTest() {
+	if s.delegator != nil && !s.delegator.Stopped() {
+		s.delegator.Close()
+	}
+	cleanupDelegatorDataManager(s.manager)
 	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
 	function.GetManager().Release(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
+}
+
+func cleanupDelegatorDataManager(manager *segments.Manager) {
+	if manager == nil {
+		return
+	}
+	for _, collectionID := range manager.Collection.List() {
+		for !manager.Collection.Unref(collectionID, 1) {
+		}
+	}
 }
 
 func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
@@ -366,6 +388,7 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 			}))
 		s.Require().NoError(err)
 		sd := delegator.(*shardDelegator)
+		defer sd.Close()
 
 		insert := func() {
 			sd.ProcessInsert(map[int64]*InsertData{
@@ -413,10 +436,79 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestProcessInsertUpdatesExistingGrowingSchema() {
+	newInsert := func(fieldID int64, fieldValue int64) *InsertData {
+		fields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "id",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{fieldValue}}},
+				}},
+			},
+			{
+				Type:      schemapb.DataType_BinaryVector,
+				FieldName: "vector",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  128,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: make([]byte, 16)},
+				}},
+			},
+		}
+		if fieldID != 0 {
+			fields = append(fields, &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "added",
+				FieldId:   fieldID,
+				ValidData: []bool{true},
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{fieldValue}}},
+				}},
+			})
+		}
+		return &InsertData{
+			RowIDs:        []int64{fieldValue},
+			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(fieldValue)},
+			Timestamps:    []uint64{10},
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{},
+			InsertRecord:  &segcorepb.InsertRecord{FieldsData: fields, NumRows: 1},
+		}
+	}
+
+	const segmentID = 200
+	s.delegator.ProcessInsert(map[int64]*InsertData{segmentID: newInsert(0, 1)})
+	growing := s.manager.Segment.GetGrowing(segmentID)
+	s.Require().NotNil(growing)
+
+	nextSchema := proto.Clone(s.manager.Collection.Get(s.collectionID).Schema()).(*schemapb.CollectionSchema)
+	nextSchema.Version = 1
+	nextSchema.Fields = append(nextSchema.Fields, &schemapb.FieldSchema{
+		Name:     "added",
+		FieldID:  102,
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	s.Require().NoError(s.manager.Collection.UpdateSchema(s.collectionID, nextSchema, 100))
+	nextState, err := s.manager.Collection.Get(s.collectionID).CaptureSchemaState()
+	s.Require().NoError(err)
+	defer nextState.Release()
+
+	nextInsert := newInsert(102, 2)
+	nextInsert.SchemaState = nextState
+	s.NotPanics(func() {
+		s.delegator.ProcessInsert(map[int64]*InsertData{segmentID: nextInsert})
+	})
+	s.EqualValues(2, growing.RowNum())
+	s.True(growing.HasRawData(102))
+}
+
 func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
+		LoadWithSchemaState(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, schemaState *segments.CollectionSchemaState, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) segments.Segment {
 			ms := &segments.MockSegment{}
 			ms.EXPECT().ID().Return(info.GetSegmentID())
@@ -441,8 +533,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			return ms
 		})
 	}, nil)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
@@ -457,7 +549,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -699,7 +791,7 @@ func (s *DelegatorDataSuite) TestProcessDeleteBatchesPreservesBatchTsInDeleteBuf
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	s.genCollectionWithFunction()
 	mockSegment := segments.NewMockSegment(s.T())
-	s.loader.EXPECT().Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]segments.Segment{mockSegment}, nil)
+	s.loader.EXPECT().LoadWithSchemaState(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]segments.Segment{mockSegment}, nil)
 
 	mockSegment.EXPECT().Partition().Return(int64(111))
 	mockSegment.EXPECT().ID().Return(int64(111))
@@ -722,12 +814,12 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		}()
 
 		s.loader.EXPECT().GetChunkManager().Return(nil)
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -1049,12 +1141,12 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -1107,8 +1199,8 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 				bf := bloomfilter.NewBloomFilterWithType(
@@ -1124,7 +1216,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				bfs.AddHistoricalStats(pks)
 				return bfs
 			})
-		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -1209,10 +1301,11 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		growing0.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		growing1.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 
-		s.loader.EXPECT().Load(
+		s.loader.EXPECT().LoadWithSchemaState(
 			mock.Anything,
 			mock.Anything,
 			segments.SegmentTypeGrowing,
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -1256,7 +1349,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mocked error"))
 
 		workers := make(map[int64]*cluster.MockWorker)
@@ -1295,12 +1388,12 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			})
-		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 			return nil
 		})
 
@@ -1338,6 +1431,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
+	worker := cluster.NewMockWorker(s.T())
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).
+		Return(merr.Success(), nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 	s.Require().Nil(s.delegator.getIDFOracle())
 	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
@@ -1347,14 +1444,16 @@ func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
-	s.Require().NotNil(s.delegator.getIDFOracle())
+	s.Equal(uint64(0), s.delegator.schemaState.collection.Version())
+	s.Equal(uint64(0), s.delegator.schemaState.collection.BarrierTs())
+	s.Nil(s.delegator.getIDFOracle())
 
-	// The load path has already advanced the collection snapshot, so the DDL
-	// event is skipped as a no-op. The function runner key must still point at
-	// the schema installed by the load path.
+	// A forwarded load may advance the shared collection before this vchannel
+	// consumes its WAL event. The WAL event must still update this delegator.
 	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	s.Equal(uint64(1), s.delegator.schemaState.collection.Version())
+	s.Equal(uint64(1), s.delegator.schemaState.collection.BarrierTs())
+	s.Require().NotNil(s.delegator.getIDFOracle())
 	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
 		return nil
 	})
@@ -1362,17 +1461,30 @@ func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 	s.True(ok)
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
+func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoKeepsDelegatorSchema() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
 	schema.Version = 1
-	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
-	s.manager.Collection.Unref(s.collectionID, 1)
+	loadField := schema.GetFields()[0].GetFieldID()
 
-	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
+	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
+		CollectionID: s.collectionID,
+		Schema:       schema,
+		LoadMeta: &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+			LogicalSchema:   schema,
+			LoadFields:      []int64{loadField},
+		},
+	}))
+	s.Equal(uint64(0), s.delegator.schemaState.collection.Version())
+	s.Equal(uint64(0), s.delegator.schemaState.collection.BarrierTs())
+	state, err := s.delegator.collection.CaptureSchemaState()
+	s.Require().NoError(err)
+	defer state.Release()
+	s.Equal(uint64(1), state.Version())
+	s.Equal(uint64(100), state.BarrierTs())
+	s.Equal([]int64{loadField}, state.LoadFields())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
@@ -1384,12 +1496,12 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
 
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -1730,8 +1842,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 
 func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.loader.EXPECT().
-		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
+		LoadWithSchemaState(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, segmentType segments.SegmentType, version int64, schemaState *segments.CollectionSchemaState, infos ...*querypb.SegmentLoadInfo) []segments.Segment {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) segments.Segment {
 			ms := &segments.MockSegment{}
 			ms.EXPECT().ID().Return(info.GetSegmentID())
@@ -1748,8 +1860,8 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			return ms
 		})
 	}, nil)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -1765,7 +1877,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -1903,6 +2015,8 @@ func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	ctx := context.Background()
+	s.delegator.Close()
+	cleanupDelegatorDataManager(s.manager)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -1978,6 +2092,8 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff() {
 	ctx := context.Background()
+	s.delegator.Close()
+	cleanupDelegatorDataManager(s.manager)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -2032,6 +2148,8 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff()
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandoff() {
 	ctx := context.Background()
+	s.delegator.Close()
+	cleanupDelegatorDataManager(s.manager)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -2087,6 +2205,8 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandof
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
 	ctx := context.Background()
+	s.delegator.Close()
+	cleanupDelegatorDataManager(s.manager)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -2137,6 +2257,8 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceDroppedChannelWithoutPreparedHandoff() {
 	ctx := context.Background()
+	s.delegator.Close()
+	cleanupDelegatorDataManager(s.manager)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -2304,7 +2426,8 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
-	s.NoError(err)
+	s.Require().NoError(err)
+	defer segments.DeleteCollection(collection)
 
 	l0, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 1, &querypb.SegmentLoadInfo{
 		CollectionID:  1,
@@ -2386,8 +2509,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
 	}()
 
 	// Set up bloom filter that will match some deletes
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -2399,7 +2522,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -2508,8 +2631,8 @@ func (s *DelegatorDataSuite) TestLoadStreamDeletePhase3FlushStarvesProcessDelete
 	// BF matches only {10,20,30}, so Phase 3 forwards just a few rows — well under the 4MB
 	// ForwardBatchSize, guaranteeing worker.Delete is called ONLY in Phase 3's Flush (under
 	// RLock), never via a lock-free Phase 2 auto-sync.
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -2521,7 +2644,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeletePhase3FlushStarvesProcessDelete
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -2617,8 +2740,8 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpFlushDoesNotStarveProces
 
 	// BF matches {10,20,30}: small batches, so worker.Delete is reached only via
 	// explicit Flush, never a lock-free auto-sync over ForwardBatchSize.
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -2630,7 +2753,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpFlushDoesNotStarveProces
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 
@@ -2735,8 +2858,8 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpPastCapTerminatesWithFin
 		s.loader.ExpectedCalls = nil
 	}()
 
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
-		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+	s.loader.EXPECT().LoadBloomFilterSetWithSchema(mock.Anything, s.collectionID, mock.Anything, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 			bf := bloomfilter.NewBloomFilterWithType(
@@ -2748,7 +2871,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpPastCapTerminatesWithFin
 			bfs.AddHistoricalStats(pks)
 			return bfs
 		})
-	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+	}, func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) error {
 		return nil
 	})
 

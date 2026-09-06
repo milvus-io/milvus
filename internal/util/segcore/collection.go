@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"context"
+	"runtime"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -26,16 +27,15 @@ import (
 type CreateCCollectionRequest struct {
 	CollectionID  int64
 	Schema        *schemapb.CollectionSchema
+	SchemaRef     *SchemaRef
 	IndexMeta     *segcorepb.CollectionIndexMeta
 	LoadFieldList []int64
 }
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
 func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
-	schemaBlob, err := proto.Marshal(req.Schema)
-	if err != nil {
-		return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
-	}
+	defer runtime.KeepAlive(req.SchemaRef)
+	var err error
 	var indexMetaBlob []byte
 	if req.IndexMeta != nil {
 		indexMetaBlob, err = proto.Marshal(req.IndexMeta)
@@ -44,7 +44,22 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 		}
 	}
 	var ptr C.CCollection
-	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
+	var status C.CStatus
+	if req.SchemaRef != nil {
+		if req.SchemaRef.rawPointer() == nil {
+			return nil, merr.WrapErrServiceInternalMsg("schema reference is released")
+		}
+		status = C.NewCollectionWithSchema(req.SchemaRef.rawPointer(), &ptr)
+	} else {
+		schemaBlob, err := proto.Marshal(req.Schema)
+		if err != nil {
+			return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
+		}
+		if len(schemaBlob) == 0 {
+			return nil, merr.WrapErrSegcoreMsg("marshaled schema is empty")
+		}
+		status = C.NewCollection(unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), &ptr)
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
@@ -55,7 +70,9 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	if req.LoadFieldList != nil {
+	// Cached logical schemas are immutable. Effective load fields live in the
+	// separate load-schema handle passed to sealed segments and reopen.
+	if req.SchemaRef == nil && len(req.LoadFieldList) > 0 {
 		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
 			C.int64_t(len(req.LoadFieldList)))
 		if err := ConsumeCStatusIntoError(&status); err != nil {
@@ -116,7 +133,7 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	return nil
 }
 
-func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
+func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
@@ -126,8 +143,29 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return err
 	}
 
-	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
-	return ConsumeCStatusIntoError(&status)
+	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(sch.GetVersion()))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.schema = sch
+	return nil
+}
+
+func (c *CCollection) UpdateSchemaWithRef(sch *schemapb.CollectionSchema, schemaRef *SchemaRef) error {
+	defer runtime.KeepAlive(schemaRef)
+	if sch == nil {
+		return merr.WrapErrServiceInternal("update collection schema with nil")
+	}
+	if schemaRef == nil || schemaRef.rawPointer() == nil {
+		return merr.WrapErrServiceInternalMsg("schema reference is released")
+	}
+
+	status := C.UpdateSchemaWithHandle(c.ptr, schemaRef.rawPointer())
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.schema = sch
+	return nil
 }
 
 // Release releases the underlying collection

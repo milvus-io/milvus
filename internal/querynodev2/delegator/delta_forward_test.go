@@ -165,6 +165,15 @@ func (s *StreamingForwardSuite) SetupTest() {
 	s.delegator = sd
 }
 
+func (s *StreamingForwardSuite) TearDownTest() {
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	if s.manager != nil {
+		s.manager.Collection.Unref(s.collectionID, 1)
+	}
+}
+
 func (s *StreamingForwardSuite) TestBFStreamingForward() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.Key, StreamingForwardPolicyBF)
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.Key)
@@ -403,6 +412,15 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
 	s.delegator = sd
+}
+
+func (s *GrowingMergeL0Suite) TearDownTest() {
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	if s.manager != nil {
+		s.manager.Collection.Unref(s.collectionID, 1)
+	}
 }
 
 func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {

@@ -83,9 +83,15 @@ type IndexedFieldInfo struct {
 	IsLoaded    bool
 }
 
+type segmentSchemaSnapshot struct {
+	logicalSchema *schemapb.CollectionSchema
+	loadSchema    *schemapb.CollectionSchema
+}
+
 type baseSegment struct {
 	collection *Collection
 	version    *atomic.Int64
+	schema     *atomic.Pointer[segmentSchemaSnapshot]
 
 	segmentType   SegmentType
 	pkCandidate   pkoracle.Candidate // PK candidate: BloomFilterSet for regular collections, ExternalSegmentCandidate for external collections
@@ -98,7 +104,7 @@ type baseSegment struct {
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
 }
 
-func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) (baseSegment, error) {
+func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo, schemaState *CollectionSchemaState) (baseSegment, error) {
 	channel, err := metautil.ParseChannel(loadInfo.GetInsertChannel(), channelMapper)
 	if err != nil {
 		return baseSegment{}, err
@@ -115,7 +121,41 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
+	if schemaState != nil {
+		bs.schema = atomic.NewPointer(&segmentSchemaSnapshot{
+			logicalSchema: schemaState.Schema(),
+			loadSchema:    schemaState.LoadSchema(),
+		})
+	}
 	return bs, nil
+}
+
+func (s *baseSegment) logicalSchema() *schemapb.CollectionSchema {
+	if s.schema != nil {
+		if snapshot := s.schema.Load(); snapshot != nil {
+			return snapshot.logicalSchema
+		}
+	}
+	return s.collection.Schema()
+}
+
+func (s *baseSegment) effectiveLoadSchema() *schemapb.CollectionSchema {
+	if s.schema != nil {
+		if snapshot := s.schema.Load(); snapshot != nil && snapshot.loadSchema != nil {
+			return snapshot.loadSchema
+		}
+	}
+	return s.logicalSchema()
+}
+
+func (s *baseSegment) setSchemaState(schemaState *CollectionSchemaState) {
+	if s.schema == nil {
+		s.schema = atomic.NewPointer[segmentSchemaSnapshot](nil)
+	}
+	s.schema.Store(&segmentSchemaSnapshot{
+		logicalSchema: schemaState.Schema(),
+		loadSchema:    schemaState.LoadSchema(),
+	})
 }
 
 // ID returns the identity number.
@@ -220,7 +260,7 @@ func (s *baseSegment) compactLoadInfoForRuntime() {
 		return
 	}
 	loadInfo := s.LoadInfo()
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, resourceEstimateFactor{
+	usage, err := estimateLogicalResourceUsageOfSegment(s.effectiveLoadSchema(), loadInfo, resourceEstimateFactor{
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
@@ -395,7 +435,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
+	usage, err := estimateLogicalResourceUsageOfSegment(s.effectiveLoadSchema(), s.LoadInfo(), resourceEstimateFactor{
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
@@ -458,6 +498,28 @@ func NewSegment(ctx context.Context,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (Segment, error) {
+	schemaState, err := collection.CaptureSchemaState()
+	if err != nil {
+		return nil, err
+	}
+	defer schemaState.Release()
+	return NewSegmentWithSchemaState(ctx, collection, manager, segmentType, version, loadInfo, schemaState)
+}
+
+// NewSegmentWithSchemaState creates a segment from one already-captured
+// logical-schema/load-policy snapshot. Full-load callers reuse the same state
+// for every segment in the operation.
+func NewSegmentWithSchemaState(ctx context.Context,
+	collection *Collection,
+	manager SegmentManager,
+	segmentType SegmentType,
+	version int64,
+	loadInfo *querypb.SegmentLoadInfo,
+	schemaState *CollectionSchemaState,
+) (Segment, error) {
+	if schemaState == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("schema state is nil")
+	}
 	/*
 		CStatus
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
@@ -466,7 +528,7 @@ func NewSegment(ctx context.Context,
 		return NewL0Segment(collection, segmentType, version, loadInfo)
 	}
 
-	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo, schemaState)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +555,8 @@ func NewSegment(ctx context.Context,
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
 		csegment, err = collection.CreateCSegment(&segcore.CreateCSegmentRequest{
+			Schema:      schemaState.SchemaRef(),
+			LoadSchema:  schemaState.LoadSchemaRef(),
 			SegmentID:   loadInfo.GetSegmentID(),
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),
@@ -534,7 +598,7 @@ func NewSegment(ctx context.Context,
 func (s *LocalSegment) initializeSegment() error {
 	loadInfo := s.loadInfo.Load()
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
-	schemaHelper, _ := typeutil.CreateSchemaHelper(s.collection.Schema())
+	schemaHelper, _ := typeutil.CreateSchemaHelper(s.logicalSchema())
 
 	for _, info := range indexedFieldInfos {
 		fieldID := info.IndexInfo.FieldID
@@ -950,6 +1014,38 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	return nil
 }
 
+// UpdateGrowingSegmentSchema advances the native growing segment before an
+// insert prepared from a newer immutable schema snapshot.
+func UpdateGrowingSegmentSchema(segment Segment, schemaState *CollectionSchemaState) error {
+	s, ok := segment.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("unexpected growing segment implementation %T", segment)
+	}
+	return s.updateSchema(schemaState)
+}
+
+func (s *LocalSegment) updateSchema(schemaState *CollectionSchemaState) error {
+	if s.Type() != SegmentTypeGrowing {
+		return merr.WrapErrServiceInternalMsg("schema update before insert requires a growing segment")
+	}
+	if schemaState == nil || schemaState.SchemaRef() == nil {
+		return merr.WrapErrParameterInvalidMsg("schema state is nil")
+	}
+	if current := s.logicalSchema(); current != nil && uint64(current.GetVersion()) >= schemaState.Version() {
+		return nil
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	if err := segcore.UpdateSegmentSchema(s.csegment, schemaState.SchemaRef()); err != nil {
+		return err
+	}
+	s.setSchemaState(schemaState)
+	return nil
+}
+
 func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
 	/*
 		CStatus
@@ -1026,8 +1122,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	log.Info(ctx, "start loading field data for field")
 
 	// TODO retrieve_enable should be considered
-	collection := s.collection
-	fieldSchema, err := getFieldSchema(collection.Schema(), fieldID)
+	fieldSchema, err := getFieldSchema(s.effectiveLoadSchema(), fieldID)
 	if err != nil {
 		return err
 	}
@@ -1283,10 +1378,20 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	schemaState, err := s.collection.CaptureSchemaState()
+	if err != nil {
+		return err
+	}
+	defer schemaState.Release()
+	return s.reopenWithSchemaState(ctx, newLoadInfo, schemaState)
+}
+
+func (s *LocalSegment) reopenWithSchemaState(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schemaState *CollectionSchemaState) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
 	defer s.ptrLock.Unpin()
+	configureUseTakeForOutput(newLoadInfo, schemaState.Schema())
 
 	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
 	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
@@ -1295,12 +1400,16 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
-	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+	reopenRequest := &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: schemaVersion,
-	})
+		SchemaRef:     schemaState.SchemaRef(),
+		LoadSchemaRef: schemaState.LoadSchemaRef(),
+	}
+	if reopenRequest.SchemaRef == nil {
+		reopenRequest.Schema = schemaState.Schema()
+		reopenRequest.SchemaVersion = schemaState.Version()
+	}
+	err := s.csegment.Reopen(ctx, reopenRequest)
 	if err != nil {
 		return err
 	}
@@ -1309,6 +1418,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
 	}
 	s.loadInfo.Store(newLoadInfo)
+	s.setSchemaState(schemaState)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	s.compactLoadInfoForRuntime()
 	return nil

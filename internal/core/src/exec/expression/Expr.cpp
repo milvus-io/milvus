@@ -97,19 +97,19 @@ ExprSet::Eval(int32_t begin,
     }
 }
 
-// Create TTL field filtering expression if schema has TTL field configured
+// Create TTL field filtering expression if the query snapshot has TTL enabled.
 // Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
 // This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
-    auto segment = query_context->get_segment();
-    auto schema = segment->get_schema_snapshot();
-    if (!schema->get_ttl_field_id().has_value()) {
+    auto ttl_field_id = query_context->get_plan_options().entity_ttl_field_id;
+    if (!ttl_field_id.has_value()) {
         return nullptr;
     }
 
-    auto ttl_field_id = schema->get_ttl_field_id().value();
-    auto& ttl_field_meta = (*schema)[ttl_field_id];
+    auto segment = query_context->get_segment();
+    auto schema = segment->get_schema_snapshot();
+    auto& ttl_field_meta = (*schema)[ttl_field_id.value()];
 
     // Use entity_ttl_physical_time_us (already converted to physical microseconds in Go layer)
     // instead of query_timestamp (MVCC time) to ensure correct expiration judgment
@@ -117,7 +117,7 @@ CreateTTLFieldFilterExpression(QueryContext* query_context) {
     // without new writes, causing entity-level TTL to fail
     int64_t physical_us = query_context->get_entity_ttl_physical_time_us();
 
-    expr::ColumnInfo ttl_column_info(ttl_field_id,
+    expr::ColumnInfo ttl_column_info(ttl_field_id.value(),
                                      ttl_field_meta.get_data_type(),
                                      {},
                                      ttl_field_meta.is_nullable());

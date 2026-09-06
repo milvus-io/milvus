@@ -30,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -51,6 +53,8 @@ func (s *UtilsSuite) TestPackLoadMetaSchemaVersions() {
 
 	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{10}, 20)
 	s.Equal(uint64(200), loadMeta.GetSchemaBarrierTs())
+	s.Same(collectionInfoResp.GetSchema(), loadMeta.GetLogicalSchema())
+	s.Equal([]int64{10}, loadMeta.GetLoadFields())
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequest() {
@@ -69,7 +73,10 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	s.NoError(err)
 
 	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
+		CollectionID:    task.CollectionID(),
+		UpdateTimestamp: 200,
 		Schema: &schemapb.CollectionSchema{
+			Version: 3,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -86,14 +93,13 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 		},
 	}
 
+	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{100})
 	req := packLoadSegmentRequest(
 		task,
 		action,
 		collectionInfoResp.GetSchema(),
 		collectionInfoResp.GetProperties(),
-		&querypb.LoadMetaInfo{
-			LoadType: querypb.LoadType_LoadCollection,
-		},
+		loadMeta,
 		&querypb.SegmentLoadInfo{},
 		nil,
 	)
@@ -102,11 +108,58 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	s.Equal(task.CollectionID(), req.CollectionID)
 	s.Equal(task.ReplicaID(), req.ReplicaID)
 	s.Equal(action.Node(), req.GetDstNodeID())
+	s.Same(collectionInfoResp.GetSchema(), req.GetLoadMeta().GetLogicalSchema())
+	s.NotSame(collectionInfoResp.GetSchema(), req.GetSchema())
+	s.Equal([]int64{100}, req.GetLoadMeta().GetLoadFields())
+	_, rawHasMmapSetting := common.IsMmapDataEnabled(collectionInfoResp.GetSchema().GetFields()[0].GetTypeParams()...)
+	s.False(rawHasMmapSetting)
 	for _, field := range req.GetSchema().GetFields() {
 		mmapEnable, ok := common.IsMmapDataEnabled(field.GetTypeParams()...)
 		s.False(mmapEnable)
 		s.True(ok)
 	}
+}
+
+func (s *UtilsSuite) TestPackSubChannelRequestKeepsLogicalSchemaSeparate() {
+	ctx := context.Background()
+	action := NewChannelAction(1, ActionTypeGrow, "test-ch")
+	task, err := NewChannelTask(ctx, time.Second, nil, 1, newReplicaDefaultRG(10), action)
+	s.Require().NoError(err)
+
+	logicalSchema := &schemapb.CollectionSchema{
+		Version: 5,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	collectionInfo := &milvuspb.DescribeCollectionResponse{
+		Schema:       logicalSchema,
+		CollectionID: task.CollectionID(),
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.MmapEnabledKey, Value: "true"},
+		},
+	}
+	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfo, "rg", []int64{100})
+	req := packSubChannelRequest(
+		task,
+		action,
+		logicalSchema,
+		collectionInfo.GetProperties(),
+		loadMeta,
+		&meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: task.CollectionID(), ChannelName: "test-ch"}},
+		nil,
+		nil,
+		1,
+	)
+
+	s.Same(logicalSchema, req.GetLoadMeta().GetLogicalSchema())
+	s.NotSame(logicalSchema, req.GetSchema())
+	s.Equal([]int64{100}, req.GetLoadMeta().GetLoadFields())
+	_, rawHasMmapSetting := common.IsMmapDataEnabled(logicalSchema.GetFields()[0].GetTypeParams()...)
+	s.False(rawHasMmapSetting)
+	mmapEnabled, effectiveHasMmapSetting := common.IsMmapDataEnabled(req.GetSchema().GetFields()[0].GetTypeParams()...)
+	s.True(effectiveHasMmapSetting)
+	s.True(mmapEnabled)
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequestMmapDuplicateBug() {
@@ -725,7 +778,7 @@ func TestApplyCollectionWarmupSettingAutoWarmup(t *testing.T) {
 	})
 }
 
-func TestApplyCollectionSettingsAutoWarmupVectorIndexCarrier(t *testing.T) {
+func TestApplyCollectionSettingsAutoWarmupCarrier(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("autoWarmupForNonPKIsolationCollection carries vector index warmup on effective schema", func(t *testing.T) {
@@ -740,6 +793,9 @@ func TestApplyCollectionSettingsAutoWarmupVectorIndexCarrier(t *testing.T) {
 
 		result := applyCollectionSettings(schema, nil)
 
+		scalarWarmup, scalarExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, result.GetProperties()...)
+		assert.True(t, scalarExist)
+		assert.Equal(t, common.WarmupSync, scalarWarmup)
 		warmup, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
 		assert.True(t, exist)
 		assert.Equal(t, common.WarmupSync, warmup)
@@ -762,6 +818,9 @@ func TestApplyCollectionSettingsAutoWarmupVectorIndexCarrier(t *testing.T) {
 
 		result := applyCollectionSettings(schema, collectionProps)
 
+		scalarWarmup, scalarExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, result.GetProperties()...)
+		assert.True(t, scalarExist)
+		assert.Equal(t, common.WarmupSync, scalarWarmup)
 		warmup, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
 		assert.True(t, exist)
 		assert.Equal(t, common.WarmupDisable, warmup)
@@ -782,6 +841,8 @@ func TestApplyCollectionSettingsAutoWarmupVectorIndexCarrier(t *testing.T) {
 
 		result := applyCollectionSettings(schema, collectionProps)
 
+		_, scalarExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, result.GetProperties()...)
+		assert.False(t, scalarExist)
 		_, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, result.GetProperties()...)
 		assert.False(t, exist)
 	})

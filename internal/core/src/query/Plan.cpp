@@ -256,6 +256,17 @@ CreateSearchPlanByExpr(SchemaPtr schema,
 }
 
 std::unique_ptr<Plan>
+CreateSearchPlanByExpr(SchemaPtr schema,
+                       std::optional<FieldId> entity_ttl_field_id,
+                       const void* serialized_expr_plan,
+                       const int64_t size) {
+    proto::plan::PlanNode plan_node;
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
+    return ProtoParser(std::move(schema), entity_ttl_field_id)
+        .CreatePlan(plan_node);
+}
+
+std::unique_ptr<Plan>
 CreateSearchPlanFromPlanNode(SchemaPtr schema,
                              const proto::plan::PlanNode& plan_node) {
     return ProtoParser(std::move(schema)).CreatePlan(plan_node);
@@ -268,6 +279,17 @@ CreateRetrievePlanByExpr(SchemaPtr schema,
     proto::plan::PlanNode plan_node;
     ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
     return ProtoParser(std::move(schema)).CreateRetrievePlan(plan_node);
+}
+
+std::unique_ptr<RetrievePlan>
+CreateRetrievePlanByExpr(SchemaPtr schema,
+                         std::optional<FieldId> entity_ttl_field_id,
+                         const void* serialized_expr_plan,
+                         const int64_t size) {
+    proto::plan::PlanNode plan_node;
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
+    return ProtoParser(std::move(schema), entity_ttl_field_id)
+        .CreateRetrievePlan(plan_node);
 }
 
 int64_t

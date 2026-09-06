@@ -259,6 +259,8 @@ func (suite *SegmentLoaderSuite) TearDownTest() {
 	for i := 0; i < suite.segmentNum; i++ {
 		suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
 	}
+	suite.manager.Segment.Clear(ctx)
+	releaseAllTestCollections(suite.manager.Collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
@@ -746,6 +748,7 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
+	suite.schema.Version++
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	msgLength := 100
@@ -954,6 +957,12 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	state, err := suite.manager.Collection.Get(suite.collectionID).CaptureSchemaState()
+	suite.Require().NoError(err)
+	defer state.Release()
+	suite.Empty(state.Schema().GetExternalSource())
+	suite.Equal(suite.schema.GetExternalSource(), state.LoadSchema().GetExternalSource())
+	segment.(*LocalSegment).setSchemaState(state)
 
 	sourceDeltaPath := "s3://source-bucket/files/insert_log/1/_delta/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
@@ -1032,6 +1041,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
+	suite.schema.Version++
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	sourceDeltaPath := "s3://source-bucket/files/delta_log/1/2/3/100"
@@ -1106,6 +1116,8 @@ func TestReadExternalFiles(t *testing.T) {
 func (suite *SegmentLoaderSuite) makeExternalRealPKBFLoadInfo(ctx context.Context) (*querypb.SegmentLoadInfo, []string, []byte) {
 	suite.schema.ExternalSource = "s3://bucket/source"
 	suite.schema.ExternalSpec = `{"format":"milvus-table"}`
+	suite.schema.Version++
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 	pkField := GetPkField(suite.schema)
 
 	_, statsLogs, err := mock_segcore.SaveBinLog(ctx,
@@ -1568,6 +1580,24 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	suite.Require().NoError(suite.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, loadMeta))
 }
 
+func (suite *SegmentLoaderDetailSuite) TearDownTest() {
+	suite.cleanup()
+}
+
+func (suite *SegmentLoaderDetailSuite) cleanup() {
+	ctx := context.Background()
+	if suite.manager != nil {
+		suite.manager.Segment.Clear(ctx)
+		releaseAllTestCollections(suite.manager.Collection)
+		suite.manager = nil
+	}
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+		suite.chunkManager = nil
+	}
+	suite.loader = nil
+}
+
 func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_success", func() {
 		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
@@ -1587,6 +1617,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 
 	suite.Run("wait_failure", func() {
+		suite.cleanup()
 		suite.SetupTest()
 
 		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
@@ -1606,6 +1637,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 
 	suite.Run("wait_timeout", func() {
+		suite.cleanup()
 		suite.SetupTest()
 
 		suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{

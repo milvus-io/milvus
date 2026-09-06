@@ -135,7 +135,7 @@ func (t *QueryTask) Execute() error {
 		querySegments = append(querySegments, result.Segment)
 	}
 	reducedResult, err := segments.RunQNQueryPipeline(
-		t.ctx, t.req, t.collection.Schema(), t.plan,
+		t.ctx, t.req, retrievePlan.Schema(), t.plan,
 		reduceResults, querySegments, t.segmentManager, retrievePlan,
 	)
 

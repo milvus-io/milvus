@@ -127,6 +127,10 @@ struct LoadDiff {
     // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
     bool load_external_manifest = false;
 
+    // Existing external proxy columns must be replaced when the external
+    // storage location or format changes without changing the manifest path.
+    bool replace_external_manifest = false;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -147,7 +151,7 @@ struct LoadDiff {
                !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
                !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
                !text_indexes_to_create.empty() || manifest_updated ||
-               load_external_manifest;
+               load_external_manifest || replace_external_manifest;
     }
 
     [[nodiscard]] std::string
@@ -391,6 +395,9 @@ struct LoadDiff {
         if (load_external_manifest) {
             oss << ", load_external_manifest=true";
         }
+        if (replace_external_manifest) {
+            oss << ", replace_external_manifest=true";
+        }
 
         oss << "}";
         return oss.str();
@@ -415,8 +422,12 @@ class SegmentLoadInfo {
      * @brief Construct from a protobuf SegmentLoadInfo (copy)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
-        : info_(info), schema_(std::move(schema)) {
+    explicit SegmentLoadInfo(const ProtoType& info,
+                             SchemaPtr schema,
+                             SchemaPtr load_schema = nullptr)
+        : info_(info),
+          schema_(std::move(schema)),
+          load_schema_(std::move(load_schema)) {
         BuildCache();
     }
 
@@ -424,8 +435,12 @@ class SegmentLoadInfo {
      * @brief Construct from a protobuf SegmentLoadInfo (move)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
-        : info_(std::move(info)), schema_(std::move(schema)) {
+    explicit SegmentLoadInfo(ProtoType&& info,
+                             SchemaPtr schema,
+                             SchemaPtr load_schema = nullptr)
+        : info_(std::move(info)),
+          schema_(std::move(schema)),
+          load_schema_(std::move(load_schema)) {
         BuildCache();
     }
 
@@ -437,6 +452,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
+          load_schema_(other.load_schema_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
           json_index_path_cache_(other.json_index_path_cache_),
@@ -453,6 +469,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
           schema_(std::move(other.schema_)),
+          load_schema_(std::move(other.load_schema_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
           field_index_id_cache_(std::move(other.field_index_id_cache_)),
@@ -475,6 +492,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            load_schema_ = other.load_schema_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
             json_index_path_cache_ = other.json_index_path_cache_;
@@ -495,6 +513,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = std::move(other.info_);
             schema_ = std::move(other.schema_);
+            load_schema_ = std::move(other.load_schema_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
             field_index_id_cache_ = std::move(other.field_index_id_cache_);
@@ -514,9 +533,12 @@ class SegmentLoadInfo {
      * @brief Set from protobuf (copy)
      */
     void
-    Set(const ProtoType& info, SchemaPtr schema) {
+    Set(const ProtoType& info,
+        SchemaPtr schema,
+        SchemaPtr load_schema = nullptr) {
         info_ = info;
         schema_ = std::move(schema);
+        load_schema_ = std::move(load_schema);
         BuildCache();
     }
 
@@ -524,9 +546,10 @@ class SegmentLoadInfo {
      * @brief Set from protobuf (move)
      */
     void
-    Set(ProtoType&& info, SchemaPtr schema) {
+    Set(ProtoType&& info, SchemaPtr schema, SchemaPtr load_schema = nullptr) {
         info_ = std::move(info);
         schema_ = std::move(schema);
+        load_schema_ = std::move(load_schema);
         BuildCache();
     }
 
@@ -607,6 +630,59 @@ class SegmentLoadInfo {
         return field_id.get() < START_USER_FIELDID ||
                schema_->get_fields().find(field_id) !=
                    schema_->get_fields().end();
+    }
+
+    [[nodiscard]] bool
+    ShouldLoadField(FieldId field_id) const {
+        // The logical schema owns semantic exclusions such as BM25 function
+        // outputs and fields that do not require physical loading.
+        if (!schema_->ShouldLoadField(field_id)) {
+            return false;
+        }
+        return load_schema_ == nullptr ||
+               load_schema_->ShouldLoadField(field_id);
+    }
+
+    [[nodiscard]] std::pair<bool, bool>
+    MmapEnabled(FieldId field_id) const {
+        if (load_schema_ != nullptr && load_schema_->has_field(field_id)) {
+            return load_schema_->MmapEnabled(field_id);
+        }
+        auto logical_policy = schema_->MmapEnabled(field_id);
+        if (logical_policy.first || load_schema_ == nullptr) {
+            return logical_policy;
+        }
+        return load_schema_->MmapEnabled(field_id);
+    }
+
+    [[nodiscard]] std::pair<bool, std::string>
+    WarmupPolicy(FieldId field_id, bool is_vector, bool is_index) const {
+        if (load_schema_ != nullptr && load_schema_->has_field(field_id)) {
+            return load_schema_->WarmupPolicy(field_id, is_vector, is_index);
+        }
+        auto logical_policy =
+            schema_->WarmupPolicy(field_id, is_vector, is_index);
+        if (logical_policy.first || load_schema_ == nullptr) {
+            return logical_policy;
+        }
+        return load_schema_->CollectionWarmupPolicy(is_vector, is_index);
+    }
+
+    [[nodiscard]] std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const {
+        if (load_schema_ != nullptr) {
+            return load_schema_->CollectionWarmupPolicy(is_vector, is_index);
+        }
+        return schema_->CollectionWarmupPolicy(is_vector, is_index);
+    }
+
+    // Storage-facing properties such as external_source/external_spec and
+    // mmap/warmup policy belong to the load snapshot. They may change without
+    // changing the logical schema version, so storage paths must not read them
+    // from the process-wide logical schema cache.
+    [[nodiscard]] const SchemaPtr&
+    GetStorageSchema() const {
+        return load_schema_ != nullptr ? load_schema_ : schema_;
     }
 
     [[nodiscard]] int64_t
@@ -1241,6 +1317,7 @@ class SegmentLoadInfo {
     ProtoType info_;
 
     SchemaPtr schema_;
+    SchemaPtr load_schema_;
 
     // Cache for quick field -> converted LoadIndexInfo lookup
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>

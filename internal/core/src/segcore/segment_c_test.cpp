@@ -990,25 +990,29 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 }
 
 TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
-    auto schema = std::make_shared<Schema>();
+    auto storage_schema = std::make_shared<Schema>();
     auto pk_field = FieldId(100);
     auto missing_field = FieldId(101);
-    schema->AddField(FieldMeta(FieldName("pk"),
-                               pk_field,
-                               DataType::INT64,
-                               false,
-                               std::nullopt,
-                               "pk_col"));
-    schema->AddField(FieldMeta(FieldName("new_field"),
-                               missing_field,
-                               DataType::INT64,
-                               false,
-                               std::nullopt,
-                               "new_col"));
-    schema->set_primary_field_id(pk_field);
-    schema->set_external_source("s3://bucket/table");
+    storage_schema->AddField(FieldMeta(FieldName("pk"),
+                                       pk_field,
+                                       DataType::INT64,
+                                       false,
+                                       std::nullopt,
+                                       "pk_col"));
+    storage_schema->set_primary_field_id(pk_field);
+    storage_schema->set_external_source("s3://bucket/table");
+    storage_schema->set_schema_version(1);
 
-    auto segment = CreateSealedSegment(schema);
+    auto plan_schema = Schema::ParseFrom(storage_schema->ToProto());
+    plan_schema->AddField(FieldMeta(FieldName("new_field"),
+                                    missing_field,
+                                    DataType::INT64,
+                                    false,
+                                    std::nullopt,
+                                    "new_col"));
+    plan_schema->set_schema_version(2);
+
+    auto segment = CreateSealedSegment(storage_schema);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
@@ -1016,9 +1020,9 @@ TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
     load_info.set_segmentid(1);
     load_info.set_num_of_rows(1);
     load_info.set_manifest_path("/manifest/v1");
-    sealed->SetLoadInfo(load_info);
+    sealed->SetLoadInfo(load_info, storage_schema);
 
-    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    auto plan = std::make_unique<query::RetrievePlan>(plan_schema);
     plan->field_ids_ = {missing_field};
     plan->access_entries_ = {missing_field};
 

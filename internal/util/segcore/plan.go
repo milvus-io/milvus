@@ -27,9 +27,11 @@ package segcore
 import "C"
 
 import (
+	"runtime"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -51,6 +53,29 @@ func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) 
 	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, merr.Wrap(err, "Create Plan by expr failed")
+	}
+	return &SearchPlan{cSearchPlan: cPlan}, nil
+}
+
+func createSearchPlanByExprWithSchema(col *CCollection, schema *SchemaRef, entityTTLFieldID int64, expr []byte) (*SearchPlan, error) {
+	defer runtime.KeepAlive(schema)
+	if len(expr) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("empty expression plan")
+	}
+	if schema == nil || schema.rawPointer() == nil {
+		return nil, merr.WrapErrServiceInternalMsg("schema reference is released")
+	}
+	var cPlan C.CSearchPlan
+	status := C.CreateSearchPlanByExprWithSchema(
+		col.rawPointer(),
+		schema.rawPointer(),
+		C.int64_t(entityTTLFieldID),
+		unsafe.Pointer(&expr[0]),
+		C.int64_t(len(expr)),
+		&cPlan,
+	)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, merr.Wrap(err, "Create Plan by expr failed")
 	}
@@ -85,6 +110,7 @@ func (plan *SearchPlan) delete() {
 
 type SearchRequest struct {
 	plan                  *SearchPlan
+	schema                *schemapb.CollectionSchema
 	cPlaceholderGroup     C.CPlaceholderGroup
 	msgID                 int64
 	searchFieldID         int64
@@ -97,9 +123,23 @@ type SearchRequest struct {
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
+	return newSearchRequest(collection, nil, nil, -1, req, placeholderGrp)
+}
+
+func NewSearchRequestWithSchema(collection *CCollection, schemaRef *SchemaRef, schema *schemapb.CollectionSchema, entityTTLFieldID int64, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
+	return newSearchRequest(collection, schemaRef, schema, entityTTLFieldID, req, placeholderGrp)
+}
+
+func newSearchRequest(collection *CCollection, schemaRef *SchemaRef, schema *schemapb.CollectionSchema, entityTTLFieldID int64, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err := createSearchPlanByExpr(collection, expr)
+	var plan *SearchPlan
+	var err error
+	if schemaRef != nil {
+		plan, err = createSearchPlanByExprWithSchema(collection, schemaRef, entityTTLFieldID, expr)
+	} else {
+		plan, err = createSearchPlanByExpr(collection, expr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +175,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 
 	return &SearchRequest{
 		plan:                  plan,
+		schema:                schema,
 		cPlaceholderGroup:     cPlaceholderGroup,
 		msgID:                 req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:         int64(fieldID),
@@ -145,6 +186,10 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		filterOnly:            req.GetFilterOnly(),
 		enableExprCache:       req.GetEnableExprCache(),
 	}, nil
+}
+
+func (req *SearchRequest) Schema() *schemapb.CollectionSchema {
+	return req.schema
 }
 
 func (req *SearchRequest) GetNumOfQuery() int64 {
@@ -186,6 +231,7 @@ func (req *SearchRequest) Delete() {
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
 	cRetrievePlan         C.CRetrievePlan
+	schema                *schemapb.CollectionSchema
 	Timestamp             typeutil.Timestamp
 	msgID                 int64 // only used to debug.
 	maxLimitSize          int64
@@ -203,17 +249,58 @@ func NewRetrievePlan(col *CCollection,
 	collectionTTL typeutil.Timestamp,
 	entityTTLPhysicalTime typeutil.Timestamp,
 ) (*RetrievePlan, error) {
+	return newRetrievePlan(col, nil, nil, -1, expr, timestamp, msgID, consistencylevel, collectionTTL, entityTTLPhysicalTime)
+}
+
+func NewRetrievePlanWithSchema(col *CCollection,
+	schemaRef *SchemaRef,
+	schema *schemapb.CollectionSchema,
+	entityTTLFieldID int64,
+	expr []byte,
+	timestamp typeutil.Timestamp,
+	msgID int64,
+	consistencylevel commonpb.ConsistencyLevel,
+	collectionTTL typeutil.Timestamp,
+	entityTTLPhysicalTime typeutil.Timestamp,
+) (*RetrievePlan, error) {
+	return newRetrievePlan(col, schemaRef, schema, entityTTLFieldID, expr, timestamp, msgID, consistencylevel, collectionTTL, entityTTLPhysicalTime)
+}
+
+func newRetrievePlan(col *CCollection,
+	schemaRef *SchemaRef,
+	schema *schemapb.CollectionSchema,
+	entityTTLFieldID int64,
+	expr []byte,
+	timestamp typeutil.Timestamp,
+	msgID int64,
+	consistencylevel commonpb.ConsistencyLevel,
+	collectionTTL typeutil.Timestamp,
+	entityTTLPhysicalTime typeutil.Timestamp,
+) (*RetrievePlan, error) {
+	defer runtime.KeepAlive(schemaRef)
 	if col.rawPointer() == nil {
 		return nil, merr.WrapErrServiceInternalMsg("collection is released")
 	}
+	if len(expr) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("empty expression plan")
+	}
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	var status C.CStatus
+	if schemaRef != nil {
+		if schemaRef.rawPointer() == nil {
+			return nil, merr.WrapErrServiceInternalMsg("schema reference is released")
+		}
+		status = C.CreateRetrievePlanByExprWithSchema(col.rawPointer(), schemaRef.rawPointer(), C.int64_t(entityTTLFieldID), unsafe.Pointer(&expr[0]), C.int64_t(len(expr)), &cPlan)
+	} else {
+		status = C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), C.int64_t(len(expr)), &cPlan)
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, merr.Wrap(err, "Create retrieve plan by expr failed")
 	}
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	return &RetrievePlan{
 		cRetrievePlan:         cPlan,
+		schema:                schema,
 		Timestamp:             timestamp,
 		msgID:                 msgID,
 		maxLimitSize:          maxLimitSize,
@@ -221,6 +308,10 @@ func NewRetrievePlan(col *CCollection,
 		collectionTTL:         collectionTTL,
 		entityTTLPhysicalTime: entityTTLPhysicalTime,
 	}, nil
+}
+
+func (plan *RetrievePlan) Schema() *schemapb.CollectionSchema {
+	return plan.schema
 }
 
 func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {

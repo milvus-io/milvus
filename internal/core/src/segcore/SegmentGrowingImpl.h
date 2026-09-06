@@ -164,7 +164,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-           SchemaPtr new_schema) override;
+           SchemaPtr new_schema,
+           SchemaPtr load_schema = nullptr) override;
 
     void
     LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
@@ -211,15 +212,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Timestamp
     get_max_timestamp() const override {
         return insert_record_.timestamp_index_.get_max_timestamp();
-    }
-
-    const Schema&
-    get_schema() const override {
-        // Compatibility path for the legacy reference API; readers should keep
-        // a SchemaPtr from get_schema_snapshot() when they need lifetime safety.
-        thread_local SchemaPtr schema_snapshot;
-        schema_snapshot = get_schema_snapshot();
-        return *schema_snapshot;
     }
 
     SchemaPtr

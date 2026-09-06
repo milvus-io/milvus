@@ -183,12 +183,15 @@ class SegmentInterface {
     virtual int64_t
     get_row_count() const = 0;
 
-    virtual const Schema&
-    get_schema() const = 0;
-
     virtual SchemaPtr
-    get_schema_snapshot() const {
-        return std::make_shared<Schema>(get_schema());
+    get_schema_snapshot() const = 0;
+
+    // Physical storage properties can be refreshed independently from the
+    // logical schema version. Segment types without separate load state use
+    // their logical schema for both views.
+    virtual SchemaPtr
+    get_storage_schema_snapshot() const {
+        return get_schema_snapshot();
     }
 
     virtual int64_t
@@ -341,10 +344,12 @@ class SegmentInterface {
     virtual void
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-           SchemaPtr new_schema) = 0;
+           SchemaPtr new_schema,
+           SchemaPtr load_schema = nullptr) = 0;
 
     virtual void
-    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info,
+                SchemaPtr load_schema = nullptr) = 0;
 
     virtual void
     SetCommitTimestamp(uint64_t ts) {
@@ -666,7 +671,8 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
     void
-    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info,
+                [[maybe_unused]] SchemaPtr load_schema = nullptr) override {
         load_info_ = std::move(load_info);
     }
 

@@ -18,8 +18,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
 #include "query/Plan.h"
 #include "query/PlanProto.h"
 
@@ -124,6 +127,21 @@ BuildSearchPlanNode(float search_topk_ratio,
     query_info->set_refine_topk_ratio(refine_topk_ratio);
 
     return plan_node;
+}
+
+bool
+ContainsPlanNode(const std::shared_ptr<milvus::plan::PlanNode>& node,
+                 std::string_view name) {
+    if (node == nullptr) {
+        return false;
+    }
+    if (node->name() == name) {
+        return true;
+    }
+    auto sources = node->sources();
+    return std::any_of(sources.begin(), sources.end(), [&](const auto& source) {
+        return ContainsPlanNode(source, name);
+    });
 }
 
 }  // namespace
@@ -443,4 +461,82 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
     EXPECT_EQ(
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
+}
+
+TEST(PlanProto, RuntimeTTLOverridesCachedSchemaTTL) {
+    using namespace milvus;
+
+    auto schema = BuildSchema();
+    auto old_ttl_field =
+        schema->AddDebugField("old_ttl", DataType::TIMESTAMPTZ, true);
+    auto new_ttl_field =
+        schema->AddDebugField("new_ttl", DataType::TIMESTAMPTZ, true);
+    schema->set_ttl_field_id(old_ttl_field);
+    auto vector_field = schema->get_field_id(FieldName("fakevec"));
+    auto plan_node = BuildSearchPlanNode(0.0f, 0.0f, vector_field);
+
+    auto legacy_plan = query::ProtoParser(schema).CreatePlan(plan_node);
+    ASSERT_TRUE(
+        legacy_plan->plan_node_->plan_options_.entity_ttl_field_id.has_value());
+    EXPECT_EQ(
+        legacy_plan->plan_node_->plan_options_.entity_ttl_field_id.value(),
+        old_ttl_field);
+    EXPECT_TRUE(
+        ContainsPlanNode(legacy_plan->plan_node_->plannodes_, "FilterBits"));
+    EXPECT_NE(std::find(legacy_plan->access_entries_.begin(),
+                        legacy_plan->access_entries_.end(),
+                        old_ttl_field),
+              legacy_plan->access_entries_.end());
+
+    auto removed_plan =
+        query::ProtoParser(schema, std::nullopt).CreatePlan(plan_node);
+    EXPECT_FALSE(removed_plan->plan_node_->plan_options_.entity_ttl_field_id
+                     .has_value());
+    EXPECT_FALSE(
+        ContainsPlanNode(removed_plan->plan_node_->plannodes_, "FilterBits"));
+    EXPECT_EQ(std::find(removed_plan->access_entries_.begin(),
+                        removed_plan->access_entries_.end(),
+                        old_ttl_field),
+              removed_plan->access_entries_.end());
+
+    auto switched_plan =
+        query::ProtoParser(schema, new_ttl_field).CreatePlan(plan_node);
+    ASSERT_TRUE(switched_plan->plan_node_->plan_options_.entity_ttl_field_id
+                    .has_value());
+    EXPECT_EQ(
+        switched_plan->plan_node_->plan_options_.entity_ttl_field_id.value(),
+        new_ttl_field);
+    EXPECT_TRUE(
+        ContainsPlanNode(switched_plan->plan_node_->plannodes_, "FilterBits"));
+    EXPECT_EQ(std::find(switched_plan->access_entries_.begin(),
+                        switched_plan->access_entries_.end(),
+                        old_ttl_field),
+              switched_plan->access_entries_.end());
+    EXPECT_NE(std::find(switched_plan->access_entries_.begin(),
+                        switched_plan->access_entries_.end(),
+                        new_ttl_field),
+              switched_plan->access_entries_.end());
+
+    proto::plan::PlanNode retrieve_node;
+    retrieve_node.mutable_query()->set_limit(10);
+    auto removed_retrieve = query::ProtoParser(schema, std::nullopt)
+                                .CreateRetrievePlan(retrieve_node);
+    EXPECT_FALSE(removed_retrieve->plan_node_->plan_options_.entity_ttl_field_id
+                     .has_value());
+    EXPECT_FALSE(ContainsPlanNode(removed_retrieve->plan_node_->plannodes_,
+                                  "FilterBits"));
+
+    auto switched_retrieve = query::ProtoParser(schema, new_ttl_field)
+                                 .CreateRetrievePlan(retrieve_node);
+    ASSERT_TRUE(switched_retrieve->plan_node_->plan_options_.entity_ttl_field_id
+                    .has_value());
+    EXPECT_EQ(switched_retrieve->plan_node_->plan_options_.entity_ttl_field_id
+                  .value(),
+              new_ttl_field);
+    EXPECT_TRUE(ContainsPlanNode(switched_retrieve->plan_node_->plannodes_,
+                                 "FilterBits"));
+    EXPECT_NE(std::find(switched_retrieve->access_entries_.begin(),
+                        switched_retrieve->access_entries_.end(),
+                        new_ttl_field),
+              switched_retrieve->access_entries_.end());
 }

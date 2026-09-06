@@ -204,8 +204,11 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
                  uint64_t timestamp) {
     auto plan_fragment = plan::PlanFragment(plannode);
 
+    query::PlanOptions plan_options;
+    plan_options.entity_ttl_field_id =
+        segment->get_schema_snapshot()->get_ttl_field_id();
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, segment, active_count, timestamp);
+        DEAFULT_QUERY_ID, segment, active_count, timestamp, 0, 0, plan_options);
     auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
     AssertInfo(row != nullptr,
                "ExecuteTask returned null row vector for query expression");
@@ -229,6 +232,9 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
                  int64_t entity_ttl_physical_time_us) {
     auto plan_fragment = plan::PlanFragment(plannode);
 
+    query::PlanOptions plan_options;
+    plan_options.entity_ttl_field_id =
+        segment->get_schema_snapshot()->get_ttl_field_id();
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID,
         segment,
@@ -236,7 +242,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
         timestamp,
         0,
         0,
-        milvus::query::PlanOptions(),
+        plan_options,
         std::make_shared<milvus::exec::QueryConfig>(),
         nullptr,
         std::unordered_map<std::string,

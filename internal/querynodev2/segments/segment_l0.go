@@ -58,7 +58,7 @@ func NewL0Segment(collection *Collection,
 		mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 		mlog.String("segmentType", segmentType.String()))
 
-	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo, nil)
 	if err != nil {
 		return nil, err
 	}

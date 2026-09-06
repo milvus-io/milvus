@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "common/common_type_c.h"
+#include "segcore/schema_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,10 +28,16 @@ NewCollection(const void* schema_proto_blob,
               CCollection* collection);
 
 CStatus
+NewCollectionWithSchema(CSchemaHandle schema_handle, CCollection* collection);
+
+CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,
              const uint64_t version);
+
+CStatus
+UpdateSchemaWithHandle(CCollection collection, CSchemaHandle schema_handle);
 
 CStatus
 UpdateLoadFields(CCollection collection,

@@ -456,13 +456,30 @@ Schema::IsExternalDataField(FieldId field_id) const {
 
 bool
 Schema::IsExternalManifestStoredField(FieldId field_id) const {
+    return IsExternalManifestStoredField(*this, field_id);
+}
+
+bool
+Schema::IsExternalManifestStoredField(const Schema& field_schema,
+                                      FieldId field_id) const {
     if (!is_external_collection()) {
         return false;
     }
     if (field_id == TimestampFieldID && RequiresSourceInsertTimestamps()) {
         return true;
     }
-    return IsExternalDataField(field_id) || is_function_output(field_id);
+    if (!field_schema.has_field(field_id)) {
+        return false;
+    }
+    const auto& meta = field_schema[field_id];
+    if (is_milvus_table_external_collection()) {
+        return field_schema.is_function_output(field_id) ||
+               IsMilvusTableExternalDataField(field_id,
+                                              meta.get_name().get(),
+                                              /*is_function_output=*/false);
+    }
+    return meta.is_external_field() ||
+           field_schema.is_function_output(field_id);
 }
 
 bool
@@ -474,9 +491,16 @@ Schema::RequiresSourceInsertTimestamps() const {
 
 std::string
 Schema::GetPhysicalColumnName(FieldId field_id) const {
-    const auto& meta = (*this)[field_id];
+    return GetPhysicalColumnName(*this, field_id);
+}
+
+std::string
+Schema::GetPhysicalColumnName(const Schema& field_schema,
+                              FieldId field_id) const {
+    const auto& meta = field_schema[field_id];
     if (is_milvus_table_external_collection() &&
-        IsExternalDataField(field_id)) {
+        IsExternalManifestStoredField(field_schema, field_id) &&
+        !field_schema.is_function_output(field_id)) {
         return std::to_string(field_id.get());
     }
     if (meta.is_external_field()) {

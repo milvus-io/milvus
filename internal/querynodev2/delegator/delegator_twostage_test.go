@@ -141,6 +141,9 @@ func (s *TwoStageSearchSuite) TearDownTest() {
 		s.delegator.Close()
 		s.delegator = nil
 	}
+	if s.manager != nil {
+		s.manager.Collection.Unref(s.collectionID, 1)
+	}
 }
 
 func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {

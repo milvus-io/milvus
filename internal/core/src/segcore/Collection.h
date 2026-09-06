@@ -16,6 +16,8 @@
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
@@ -25,6 +27,7 @@ namespace milvus::segcore {
 
 class Collection {
  public:
+    explicit Collection(SchemaPtr schema);
     explicit Collection(const milvus::proto::schema::CollectionSchema* schema);
     explicit Collection(const std::string_view schema_proto);
     explicit Collection(const void* collection_proto, const int64_t length);
@@ -51,16 +54,19 @@ class Collection {
     }
 
     void
-    set_schema(SchemaPtr& new_schema) {
+    set_schema(SchemaPtr new_schema) {
         std::unique_lock lock(schema_mutex_);
-        auto old_schema = schema_;
         if (new_schema->get_schema_version() > schema_->get_schema_version()) {
-            schema_ = new_schema;
+            schema_ = std::move(new_schema);
         }
+    }
 
-        if (old_schema) {
-            schema_->UpdateLoadFields(old_schema->load_fields());
-        }
+    void
+    update_load_fields(const std::vector<int64_t>& field_ids) {
+        std::unique_lock lock(schema_mutex_);
+        auto schema = std::make_shared<Schema>(*schema_);
+        schema->UpdateLoadFields(field_ids);
+        schema_ = std::move(schema);
     }
 
     IndexMetaPtr

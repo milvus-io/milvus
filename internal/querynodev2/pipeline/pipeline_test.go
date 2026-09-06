@@ -104,6 +104,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	suite.Require().NoError(err)
+	defer segments.DeleteCollection(collection)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	//  mock mq factory
@@ -114,6 +115,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
 	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
 	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
+	expectInsertSchemaState(suite.T(), suite.delegator, collection)
 
 	suite.delegator.EXPECT().ProcessInsert(mock.Anything).Run(
 		func(insertRecords map[int64]*delegator.InsertData) {

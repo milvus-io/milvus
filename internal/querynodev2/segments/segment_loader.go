@@ -79,6 +79,7 @@ type Loader interface {
 	// Load loads binlogs, and spawn segments,
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
+	LoadWithSchemaState(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, schemaState *CollectionSchemaState, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
@@ -86,6 +87,7 @@ type Loader interface {
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
+	LoadBloomFilterSetWithSchema(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
@@ -94,6 +96,7 @@ type Loader interface {
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
+	ReopenSegmentsWithSchemaState(ctx context.Context, schemaState *CollectionSchemaState, loadInfos []*querypb.SegmentLoadInfo) error
 }
 
 type ResourceEstimate struct {
@@ -248,7 +251,34 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		mlog.Info(context.TODO(), "no segment to load")
 		return nil, nil
 	}
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		mlog.Warn(context.TODO(), "failed to get collection", mlog.Err(err))
+		return nil, err
+	}
+	schemaState, err := collection.CaptureSchemaState()
+	if err != nil {
+		return nil, err
+	}
+	defer schemaState.Release()
+	return loader.LoadWithSchemaState(ctx, collectionID, segmentType, version, schemaState, segments...)
+}
 
+func (loader *segmentLoader) LoadWithSchemaState(ctx context.Context,
+	collectionID int64,
+	segmentType SegmentType,
+	version int64,
+	schemaState *CollectionSchemaState,
+	segments ...*querypb.SegmentLoadInfo,
+) ([]Segment, error) {
+	if len(segments) == 0 {
+		mlog.Info(context.TODO(), "no segment to load")
+		return nil, nil
+	}
+	if schemaState == nil || schemaState.Schema() == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("schema state is nil")
+	}
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
@@ -256,7 +286,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, err
 	}
 	for _, segment := range segments {
-		configureUseTakeForOutput(segment, collection.Schema())
+		configureUseTakeForOutput(segment, schemaState.LoadSchema())
 	}
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
@@ -270,7 +300,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	// Check memory & storage limit
 	// no need to check resource for lazy load here
-	requestResourceResult, err = loader.requestResource(ctx, infos...)
+	requestResourceResult, err = loader.requestResourceWithSchema(ctx, schemaState.LoadSchema(), infos...)
 	if err != nil {
 		mlog.Warn(context.TODO(), "request resource failed", mlog.Err(err))
 		return nil, err
@@ -297,13 +327,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return nil, err
 		}
 
-		segment, err := NewSegment(
+		segment, err := NewSegmentWithSchemaState(
 			ctx,
 			collection,
 			loader.manager.Segment,
 			segmentType,
 			version,
 			loadInfo,
+			schemaState,
 		)
 		if err != nil {
 			mlog.Warn(context.TODO(), "load segment failed when create new segment",
@@ -348,7 +379,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return merr.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		schema := collection.Schema()
+		schema := schemaState.LoadSchema()
 		isExternalCollection := typeutil.IsExternalCollection(schema)
 		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 			HasExternalPrimaryKey(schema)
@@ -357,7 +388,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			if isExternalCollection {
 				var candidate pkoracle.Candidate
 				if isMilvusTableRealPK {
-					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+					bfs, err := loader.loadSingleBloomFilterSetWithSchema(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type(), schema)
 					if err != nil {
 						return merr.Wrap(err, "At LoadBloomFilter")
 					}
@@ -395,7 +426,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 					}
 				}
 			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+				bfs, err := loader.loadSingleBloomFilterSetWithSchema(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type(), schema)
 				if err != nil {
 					return merr.Wrap(err, "At LoadBloomFilter")
 				}
@@ -504,6 +535,10 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+	return loader.requestResourceWithSchema(ctx, nil, infos...)
+}
+
+func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -518,7 +553,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		mlog.Int64s("segmentIDs", segmentIDs),
 	)
 
-	loadingUsage, maxSegmentSize, err := loader.estimateSegmentLoadingResourceUsage(ctx, infos...)
+	loadingUsage, maxSegmentSize, err := loader.estimateSegmentLoadingResourceUsageWithSchema(ctx, schema, infos...)
 	if err != nil {
 		logger.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
 		return requestResourceResult{}, err
@@ -649,6 +684,16 @@ func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
 
 // load single bloom filter
 func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
+		return nil, err
+	}
+	return loader.loadSingleBloomFilterSetWithSchema(ctx, collectionID, loadInfo, segtype, collection.Schema())
+}
+
+func (loader *segmentLoader) loadSingleBloomFilterSetWithSchema(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType, schema *schemapb.CollectionSchema) (*pkoracle.BloomFilterSet, error) {
 	partitionID := loadInfo.PartitionID
 	segmentID := loadInfo.SegmentID
 	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
@@ -662,7 +707,9 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 
 	mlog.Info(context.TODO(), "start loading remote...", mlog.Int("segmentNum", 1))
 
-	schema := collection.Schema()
+	if schema == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("schema is nil")
+	}
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 		HasExternalPrimaryKey(schema)
@@ -681,7 +728,7 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	if err != nil {
 		return nil, err
 	}
-	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, loader.bloomFilterDownloader(collection, isMilvusTableRealPK))
+	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, loader.bloomFilterDownloader(collection, isMilvusTableRealPK, schema))
 	if err != nil {
 		mlog.Warn(context.TODO(), "load remote segment bloom filter failed",
 			mlog.Int64("partitionID", partitionID),
@@ -698,6 +745,17 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 }
 
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+	if len(infos) == 0 {
+		return nil, nil
+	}
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return loader.LoadBloomFilterSetWithSchema(ctx, collectionID, collection.Schema(), infos...)
+}
+
+func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	segmentNum := len(infos)
 	if segmentNum == 0 {
 		mlog.Info(context.TODO(), "no segment to load")
@@ -719,7 +777,9 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 
-	schema := collection.Schema()
+	if schema == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("schema is nil")
+	}
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 		HasExternalPrimaryKey(schema)
@@ -784,7 +844,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		if err != nil {
 			return err
 		}
-		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs, loader.bloomFilterDownloader(collection, isMilvusTableRealPK))
+		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs, loader.bloomFilterDownloader(collection, isMilvusTableRealPK, schema))
 		if err != nil {
 			mlog.Warn(context.TODO(), "load remote segment bloom filter failed",
 				mlog.Int64("partitionID", bfs.Partition()),
@@ -1060,8 +1120,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		stateLockGuard.Done(err)
 	}()
 
-	collection := segment.GetCollection()
-	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, _ := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, _ := separateLoadInfoV2(loadInfo, segment.effectiveLoadSchema())
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
 	mlog.Info(context.TODO(), "Start loading fields...",
@@ -1123,7 +1182,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
 		return err
 	}
-	pkField := GetPkField(collection.Schema())
+	pkField := GetPkField(segment.logicalSchema())
 
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
@@ -1249,11 +1308,11 @@ func (loader *segmentLoader) loadBloomFilter(
 func (loader *segmentLoader) bloomFilterDownloader(
 	collection *Collection,
 	useExternalSpec bool,
+	schema *schemapb.CollectionSchema,
 ) func(context.Context, []string) ([][]byte, error) {
 	if !useExternalSpec {
 		return loader.cm.MultiRead
 	}
-	schema := collection.Schema()
 	extfs := packed.ExternalSpecContext{
 		CollectionID: collection.ID(),
 		Source:       schema.GetExternalSource(),
@@ -1311,6 +1370,20 @@ func (loader *segmentLoader) loadBloomFilterWithDownloader(
 // loadDeltalogs performs the internal actions of `LoadDeltaLogs`
 // this function does not perform resource check and is meant be used among other load APIs.
 func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	collection := loader.manager.Collection.Get(segment.Collection())
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(segment.Collection())
+	}
+	schema := collection.Schema()
+	if provider, ok := segment.(interface {
+		effectiveLoadSchema() *schemapb.CollectionSchema
+	}); ok {
+		schema = provider.effectiveLoadSchema()
+	}
+	if schema == nil {
+		return merr.WrapErrParameterInvalidMsg("schema is nil")
+	}
+
 	deltaLogs := loadInfo.GetDeltalogs()
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadDeltalogs-%d", segment.ID()))
 	defer sp.End()
@@ -1331,9 +1404,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		})
 	}
 
-	collection := loader.manager.Collection.Get(segment.Collection())
-
-	helper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+	helper, _ := typeutil.CreateSchemaHelper(schema)
 	pkField, _ := helper.GetPrimaryKeyField()
 	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, pkField.DataType)
 	if err != nil {
@@ -1369,7 +1440,6 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	schema := collection.Schema()
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	resolver := typeutil.NewStorageColumnResolver(schema)
 	if isExternalCollection && !resolver.IsMilvusTable() {
@@ -1776,6 +1846,10 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 }
 
 func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Context, segmentLoadInfos ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
+	return loader.estimateSegmentLoadingResourceUsageWithSchema(ctx, nil, segmentLoadInfos...)
+}
+
+func (loader *segmentLoader) estimateSegmentLoadingResourceUsageWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, segmentLoadInfos ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
 	if len(segmentLoadInfos) == 0 {
 		return &ResourceUsage{}, 0, nil
 	}
@@ -1801,8 +1875,12 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Con
 	var predictGpuMemUsage []uint64
 	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
-		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
-		loadingUsage, err := estimateLoadingResourceUsageOfSegment(collection.Schema(), loadInfo, maxFactor)
+		loadSchema := schema
+		if loadSchema == nil {
+			collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
+			loadSchema = collection.Schema()
+		}
+		loadingUsage, err := estimateLoadingResourceUsageOfSegment(loadSchema, loadInfo, maxFactor)
 		if err != nil {
 			logger.Warn(ctx, "failed to estimate max resource usage of segment",
 				mlog.Int64("collectionID", loadInfo.GetCollectionID()),
@@ -2522,14 +2600,47 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	if len(loadInfos) == 0 {
+		return nil
+	}
+	collectionID := loadInfos[0].GetCollectionID()
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	schemaState, err := collection.CaptureSchemaState()
+	if err != nil {
+		return err
+	}
+	defer schemaState.Release()
+	return loader.ReopenSegmentsWithSchemaState(ctx, schemaState, loadInfos)
+}
+
+func (loader *segmentLoader) ReopenSegmentsWithSchemaState(ctx context.Context,
+	schemaState *CollectionSchemaState,
+	loadInfos []*querypb.SegmentLoadInfo,
+) error {
+	if len(loadInfos) == 0 {
+		return nil
+	}
+	if schemaState == nil || schemaState.Schema() == nil {
+		return merr.WrapErrParameterInvalidMsg("schema state is nil")
+	}
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
 
+	for _, info := range infos {
+		collectionID := info.GetCollectionID()
+		if collectionID != loadInfos[0].GetCollectionID() {
+			return merr.WrapErrParameterInvalidMsg("reopen request contains multiple collections")
+		}
+	}
+
 	// use full resource in case of whole segment reopen
 	// TODO use calculated resource from segcore after supported
-	requestResourceResult, err := loader.requestResource(ctx, infos...)
+	requestResourceResult, err := loader.requestResourceWithSchema(ctx, schemaState.LoadSchema(), infos...)
 	if err != nil {
 		mlog.Warn(context.TODO(), "reopen segment request resource failed", mlog.Err(err))
 		return err
@@ -2542,12 +2653,12 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			mlog.Warn(context.TODO(), "failed to reopen segment, segment not loaded", mlog.Int64("segmentID", info.GetSegmentID()))
 			continue
 		}
-		collection := loader.manager.Collection.Get(info.GetCollectionID())
-		if collection != nil {
-			configureUseTakeForOutput(info, collection.Schema())
+		var err error
+		if localSegment, ok := segment.(*LocalSegment); ok {
+			err = localSegment.reopenWithSchemaState(ctx, info, schemaState)
+		} else {
+			err = segment.Reopen(ctx, info)
 		}
-
-		err := segment.Reopen(ctx, info)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err

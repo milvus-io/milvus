@@ -300,13 +300,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-           SchemaPtr new_schema) override;
+           SchemaPtr new_schema,
+           SchemaPtr load_schema = nullptr) override;
 
     void
     LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
-    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info,
+                SchemaPtr load_schema = nullptr) override;
 
     void
     SetCommitTimestamp(uint64_t ts) override;
@@ -442,12 +444,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    : 0;
     }
 
-    const Schema&
-    get_schema() const override;
-
     SchemaPtr
     get_schema_snapshot() const override {
         return CaptureSchemaSnapshot();
+    }
+
+    SchemaPtr
+    get_storage_schema_snapshot() const override {
+        auto state = CapturePublishedState();
+        if (state->load_info != nullptr) {
+            return state->load_info->GetStorageSchema();
+        }
+        return state->schema;
     }
 
     void
@@ -1968,7 +1976,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Load external collection column groups from staged segment load info.
     void
     LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
-                     const SchemaPtr& schema_snapshot,
                      milvus::OpContext* op_ctx,
                      bool is_replace,
                      StagedStateCommitter& committer);

@@ -183,10 +183,12 @@ func (suite *RetrieveSuite) SetupTest() {
 }
 
 func (suite *RetrieveSuite) TearDownTest() {
-	suite.sealed.Release(context.Background())
-	suite.growing.Release(context.Background())
-	DeleteCollection(suite.collection)
 	ctx := context.Background()
+	suite.manager.Segment.Clear(ctx)
+	releaseAllTestCollections(suite.manager.Collection)
+	suite.sealed = nil
+	suite.growing = nil
+	suite.collection = nil
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 

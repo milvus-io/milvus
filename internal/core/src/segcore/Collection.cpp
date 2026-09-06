@@ -21,6 +21,10 @@
 
 namespace milvus::segcore {
 
+Collection::Collection(SchemaPtr schema) : schema_(std::move(schema)) {
+    AssertInfo(schema_ != nullptr, "schema is null");
+}
+
 Collection::Collection(const milvus::proto::schema::CollectionSchema* schema) {
     Assert(schema != nullptr);
     collection_name_ = schema->name();
@@ -84,7 +88,7 @@ Collection::parse_schema(const void* schema_proto_blob,
 
     auto new_schema = Schema::ParseFrom(collection_schema);
     new_schema->set_schema_version(version);
-    set_schema(new_schema);
+    set_schema(std::move(new_schema));
 }
 
 }  // namespace milvus::segcore

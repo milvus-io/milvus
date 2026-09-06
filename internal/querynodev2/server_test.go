@@ -236,6 +236,7 @@ func (suite *QueryNodeSuite) TestStop() {
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	suite.Require().NoError(err)
+	defer segments.DeleteCollection(collection)
 	segment, err := segments.NewSegment(
 		context.Background(),
 		collection,
@@ -356,6 +357,7 @@ func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	suite.Require().NoError(err)
+	defer segments.DeleteCollection(collection)
 	segment, err := segments.NewSegment(
 		context.Background(),
 		collection,

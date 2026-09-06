@@ -22,7 +22,9 @@
 
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "expr/ITypeExpr.h"
 #include "exec/operator/FilterBitsNode.h"
+#include "plan/PlanNode.h"
 
 namespace milvus {
 namespace exec {
@@ -114,6 +116,41 @@ TEST(FilterBitsNodeTest, PredicateConversionFiltersOutInvalidResults) {
     EXPECT_FALSE(used_all_valid_fast_path);
     EXPECT_EQ(ToVector(data), (std::vector<bool>{false, true, true, true}));
     EXPECT_TRUE(valid.all());
+}
+
+TEST(FilterBitsNodeTest, ExprCacheKeyIncludesRuntimeTTLState) {
+    auto filter = plan::FilterBitsNode(
+        DEFAULT_PLANNODE_ID, std::make_shared<expr::AlwaysTrueExpr>());
+    auto make_key = [&](std::optional<FieldId> ttl_field_id,
+                        int64_t physical_time_us) {
+        query::PlanOptions options;
+        options.entity_ttl_field_id = ttl_field_id;
+        QueryContext context(
+            "test",
+            nullptr,
+            0,
+            1,
+            0,
+            0,
+            options,
+            std::make_shared<QueryConfig>(),
+            nullptr,
+            std::unordered_map<std::string, std::shared_ptr<BaseConfig>>(),
+            physical_time_us);
+        return BuildExprCacheKey(filter, &context);
+    };
+
+    const auto field_a_at_t1 = make_key(FieldId(100), 1000);
+    const auto field_b_at_t1 = make_key(FieldId(101), 1000);
+    const auto field_a_at_t2 = make_key(FieldId(100), 2000);
+    const auto no_ttl = make_key(std::nullopt, 1000);
+
+    EXPECT_NE(field_a_at_t1, field_b_at_t1);
+    EXPECT_NE(field_a_at_t1, field_a_at_t2);
+    EXPECT_NE(field_a_at_t1, no_ttl);
+    EXPECT_NE(field_a_at_t1.find("entity_ttl_field_id:100"), std::string::npos);
+    EXPECT_NE(field_a_at_t1.find("entity_ttl_physical_time_us:1000"),
+              std::string::npos);
 }
 
 }  // namespace

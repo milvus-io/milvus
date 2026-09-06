@@ -31,19 +31,22 @@
 #include "query/SearchBruteForce.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
+#include "segcore/schema_handle.h"
 
-// Note: serialized_expr_plan is of binary format
+namespace {
+
 CStatus
-CreateSearchPlanByExpr(CCollection c_col,
-                       const void* serialized_expr_plan,
-                       const int64_t size,
-                       CSearchPlan* res_plan) {
+CreateSearchPlanByExprImpl(CCollection c_col,
+                           milvus::SchemaPtr schema,
+                           std::optional<milvus::FieldId> entity_ttl_field_id,
+                           const void* serialized_expr_plan,
+                           const int64_t size,
+                           CSearchPlan* res_plan) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
-    auto schema = col->get_schema();
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
-            schema, serialized_expr_plan, size);
+            schema, entity_ttl_field_id, serialized_expr_plan, size);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
         AssertInfo(col_index_meta != nullptr, "index meta not exist");
@@ -86,6 +89,78 @@ CreateSearchPlanByExpr(CCollection c_col,
         status.error_msg = strdup(e.what());
         *res_plan = nullptr;
         return status;
+    }
+}
+
+CStatus
+CreateRetrievePlanByExprImpl(milvus::SchemaPtr schema,
+                             std::optional<milvus::FieldId> entity_ttl_field_id,
+                             const void* serialized_expr_plan,
+                             const int64_t size,
+                             CRetrievePlan* res_plan) {
+    try {
+        auto res = milvus::query::CreateRetrievePlanByExpr(
+            std::move(schema), entity_ttl_field_id, serialized_expr_plan, size);
+
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        auto plan = (CRetrievePlan)res.release();
+        *res_plan = plan;
+        return status;
+    } catch (milvus::SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
+        return status;
+    }
+}
+
+}  // namespace
+
+// Note: serialized_expr_plan is of binary format
+CStatus
+CreateSearchPlanByExpr(CCollection c_col,
+                       const void* serialized_expr_plan,
+                       const int64_t size,
+                       CSearchPlan* res_plan) {
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
+    auto schema = col->get_schema();
+    return CreateSearchPlanByExprImpl(c_col,
+                                      schema,
+                                      schema->get_ttl_field_id(),
+                                      serialized_expr_plan,
+                                      size,
+                                      res_plan);
+}
+
+CStatus
+CreateSearchPlanByExprWithSchema(CCollection c_col,
+                                 CSchemaHandle schema_handle,
+                                 int64_t entity_ttl_field_id,
+                                 const void* serialized_expr_plan,
+                                 const int64_t size,
+                                 CSearchPlan* res_plan) {
+    try {
+        return CreateSearchPlanByExprImpl(
+            c_col,
+            milvus::segcore::CloneSchemaPtrFromC(schema_handle),
+            entity_ttl_field_id >= 0
+                ? std::make_optional(milvus::FieldId(entity_ttl_field_id))
+                : std::nullopt,
+            serialized_expr_plan,
+            size,
+            res_plan);
+    } catch (std::exception& e) {
+        *res_plan = nullptr;
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -180,29 +255,33 @@ CreateRetrievePlanByExpr(CCollection c_col,
                          const int64_t size,
                          CRetrievePlan* res_plan) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
+    auto schema = col->get_schema();
+    return CreateRetrievePlanByExprImpl(schema,
+                                        schema->get_ttl_field_id(),
+                                        serialized_expr_plan,
+                                        size,
+                                        res_plan);
+}
 
+CStatus
+CreateRetrievePlanByExprWithSchema(CCollection c_col,
+                                   CSchemaHandle schema_handle,
+                                   int64_t entity_ttl_field_id,
+                                   const void* serialized_expr_plan,
+                                   const int64_t size,
+                                   CRetrievePlan* res_plan) {
     try {
-        auto res = milvus::query::CreateRetrievePlanByExpr(
-            col->get_schema(), serialized_expr_plan, size);
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        auto plan = (CRetrievePlan)res.release();
-        *res_plan = plan;
-        return status;
-    } catch (milvus::SegcoreError& e) {
-        auto status = CStatus();
-        status.error_code = e.get_error_code();
-        status.error_msg = strdup(e.what());
-        *res_plan = nullptr;
-        return status;
+        return CreateRetrievePlanByExprImpl(
+            milvus::segcore::CloneSchemaPtrFromC(schema_handle),
+            entity_ttl_field_id >= 0
+                ? std::make_optional(milvus::FieldId(entity_ttl_field_id))
+                : std::nullopt,
+            serialized_expr_plan,
+            size,
+            res_plan);
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_plan = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
     }
 }
 
