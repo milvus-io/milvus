@@ -27,6 +27,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | ManualFlush | Single VChannel | Yes (VChannel) | — |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
+| AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
+| DropRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | RefreshExternalCollection | Broadcast: CChannel | No | — |
 
@@ -45,12 +47,16 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
+- **AlterRLSMetadata**: Persists a complete row-policy or principal-tag post-image in the ACK callback. CChannel-only and serialized with collection/schema DDL.
+- **DropRLSMetadata**: Drops a row policy or principal-tag record by stable logical identity in the ACK callback. A policy name resolves through RootCoord's collection metadata to its internal policy ID, allowing the callback to remove the single ID-keyed etcd record without a prefix scan. CChannel-only and serialized with collection/schema DDL.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
 
 ## Replication Compatibility
 
 Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, and RefreshExternalCollection. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
+
+`AlterRLSMetadata` and `DropRLSMetadata` do not set `_ur`. They are eligible for the generic CDC path: the secondary rebuilds the replicated broadcast task and invokes the same idempotent ACK callback to apply the complete post-image or stable drop identity. Dedicated end-to-end RLS CDC validation is tracked separately.
 
 ## Data Lifecycle Ordering Invariants
 

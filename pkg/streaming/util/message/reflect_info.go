@@ -76,6 +76,8 @@ const (
 	MessageTypeAlterWAL                  MessageType = MessageType(messagespb.MessageType_AlterWAL)
 	MessageTypeBatchUpdateManifest       MessageType = MessageType(messagespb.MessageType_BatchUpdateManifest)
 	MessageTypeRefreshExternalCollection MessageType = MessageType(messagespb.MessageType_RefreshExternalCollection)
+	MessageTypeAlterRLSMetadata          MessageType = MessageType(messagespb.MessageType_AlterRLSMetadata)
+	MessageTypeDropRLSMetadata           MessageType = MessageType(messagespb.MessageType_DropRLSMetadata)
 )
 
 // Export extra message type
@@ -198,6 +200,10 @@ type (
 	BatchUpdateManifestMessageBody         = messagespb.BatchUpdateManifestMessageBody
 	RefreshExternalCollectionMessageHeader = messagespb.RefreshExternalCollectionMessageHeader
 	RefreshExternalCollectionMessageBody   = messagespb.RefreshExternalCollectionMessageBody
+	AlterRLSMetadataMessageHeader          = messagespb.AlterRLSMetadataMessageHeader
+	AlterRLSMetadataMessageBody            = messagespb.AlterRLSMetadataMessageBody
+	DropRLSMetadataMessageHeader           = messagespb.DropRLSMetadataMessageHeader
+	DropRLSMetadataMessageBody             = messagespb.DropRLSMetadataMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -2363,6 +2369,90 @@ var MustAsBroadcastRefreshExternalCollectionMessageV2 = MustAsSpecializedBroadca
 // NewRefreshExternalCollectionMessageBuilderV2 creates a new message builder for RefreshExternalCollectionMessageV2
 var NewRefreshExternalCollectionMessageBuilderV2 = newMutableMessageBuilder[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
 
+// Type aliases for AlterRLSMetadataMessageV2
+type (
+	MutableAlterRLSMetadataMessageV2         = specializedMutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+	ImmutableAlterRLSMetadataMessageV2       = SpecializedImmutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+	BroadcastAlterRLSMetadataMessageV2       = SpecializedBroadcastMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+	BroadcastResultAlterRLSMetadataMessageV2 = BroadcastResult[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+	AckResultAlterRLSMetadataMessageV2       = AckResult[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+)
+
+// MessageTypeWithVersion for AlterRLSMetadataMessageV2
+var MessageTypeAlterRLSMetadataV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterRLSMetadata,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for AlterRLSMetadataMessageV2
+var SpecializedTypeAlterRLSMetadataV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterRLSMetadataMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterRLSMetadataMessageHeader)(nil)),
+}
+
+// AsMutableAlterRLSMetadataMessageV2 converts a BasicMessage to MutableAlterRLSMetadataMessageV2
+var AsMutableAlterRLSMetadataMessageV2 = asSpecializedMutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// MustAsMutableAlterRLSMetadataMessageV2 converts a BasicMessage to MutableAlterRLSMetadataMessageV2, panics on error
+var MustAsMutableAlterRLSMetadataMessageV2 = mustAsSpecializedMutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// AsImmutableAlterRLSMetadataMessageV2 converts an ImmutableMessage to ImmutableAlterRLSMetadataMessageV2
+var AsImmutableAlterRLSMetadataMessageV2 = asSpecializedImmutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// MustAsImmutableAlterRLSMetadataMessageV2 converts an ImmutableMessage to ImmutableAlterRLSMetadataMessageV2, panics on error
+var MustAsImmutableAlterRLSMetadataMessageV2 = MustAsSpecializedImmutableMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// AsBroadcastAlterRLSMetadataMessageV2 converts a BasicMessage to BroadcastAlterRLSMetadataMessageV2
+var AsBroadcastAlterRLSMetadataMessageV2 = asSpecializedBroadcastMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// MustAsBroadcastAlterRLSMetadataMessageV2 converts a BasicMessage to BroadcastAlterRLSMetadataMessageV2, panics on error
+var MustAsBroadcastAlterRLSMetadataMessageV2 = MustAsSpecializedBroadcastMessage[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// NewAlterRLSMetadataMessageBuilderV2 creates a new message builder for AlterRLSMetadataMessageV2
+var NewAlterRLSMetadataMessageBuilderV2 = newMutableMessageBuilder[*AlterRLSMetadataMessageHeader, *AlterRLSMetadataMessageBody]
+
+// Type aliases for DropRLSMetadataMessageV2
+type (
+	MutableDropRLSMetadataMessageV2         = specializedMutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+	ImmutableDropRLSMetadataMessageV2       = SpecializedImmutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+	BroadcastDropRLSMetadataMessageV2       = SpecializedBroadcastMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+	BroadcastResultDropRLSMetadataMessageV2 = BroadcastResult[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+	AckResultDropRLSMetadataMessageV2       = AckResult[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+)
+
+// MessageTypeWithVersion for DropRLSMetadataMessageV2
+var MessageTypeDropRLSMetadataV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeDropRLSMetadata,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for DropRLSMetadataMessageV2
+var SpecializedTypeDropRLSMetadataV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*DropRLSMetadataMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*DropRLSMetadataMessageHeader)(nil)),
+}
+
+// AsMutableDropRLSMetadataMessageV2 converts a BasicMessage to MutableDropRLSMetadataMessageV2
+var AsMutableDropRLSMetadataMessageV2 = asSpecializedMutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// MustAsMutableDropRLSMetadataMessageV2 converts a BasicMessage to MutableDropRLSMetadataMessageV2, panics on error
+var MustAsMutableDropRLSMetadataMessageV2 = mustAsSpecializedMutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// AsImmutableDropRLSMetadataMessageV2 converts an ImmutableMessage to ImmutableDropRLSMetadataMessageV2
+var AsImmutableDropRLSMetadataMessageV2 = asSpecializedImmutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// MustAsImmutableDropRLSMetadataMessageV2 converts an ImmutableMessage to ImmutableDropRLSMetadataMessageV2, panics on error
+var MustAsImmutableDropRLSMetadataMessageV2 = MustAsSpecializedImmutableMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// AsBroadcastDropRLSMetadataMessageV2 converts a BasicMessage to BroadcastDropRLSMetadataMessageV2
+var AsBroadcastDropRLSMetadataMessageV2 = asSpecializedBroadcastMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// MustAsBroadcastDropRLSMetadataMessageV2 converts a BasicMessage to BroadcastDropRLSMetadataMessageV2, panics on error
+var MustAsBroadcastDropRLSMetadataMessageV2 = MustAsSpecializedBroadcastMessage[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
+// NewDropRLSMetadataMessageBuilderV2 creates a new message builder for DropRLSMetadataMessageV2
+var NewDropRLSMetadataMessageBuilderV2 = newMutableMessageBuilder[*DropRLSMetadataMessageHeader, *DropRLSMetadataMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):                MessageTypeAlterAlias,
@@ -2372,6 +2462,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterLoadConfigMessageHeader{}):           MessageTypeAlterLoadConfig,
 	reflect.TypeOf(&messagespb.AlterPrivilegeGroupMessageHeader{}):       MessageTypeAlterPrivilegeGroup,
 	reflect.TypeOf(&messagespb.AlterPrivilegeMessageHeader{}):            MessageTypeAlterPrivilege,
+	reflect.TypeOf(&messagespb.AlterRLSMetadataMessageHeader{}):          MessageTypeAlterRLSMetadata,
 	reflect.TypeOf(&messagespb.AlterReplicateConfigMessageHeader{}):      MessageTypeAlterReplicateConfig,
 	reflect.TypeOf(&messagespb.AlterResourceGroupMessageHeader{}):        MessageTypeAlterResourceGroup,
 	reflect.TypeOf(&messagespb.AlterRoleMessageHeader{}):                 MessageTypeAlterRole,
@@ -2397,6 +2488,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.DropPartitionMessageHeader{}):             MessageTypeDropPartition,
 	reflect.TypeOf(&messagespb.DropPrivilegeGroupMessageHeader{}):        MessageTypeDropPrivilegeGroup,
 	reflect.TypeOf(&messagespb.DropPrivilegeMessageHeader{}):             MessageTypeDropPrivilege,
+	reflect.TypeOf(&messagespb.DropRLSMetadataMessageHeader{}):           MessageTypeDropRLSMetadata,
 	reflect.TypeOf(&messagespb.DropResourceGroupMessageHeader{}):         MessageTypeDropResourceGroup,
 	reflect.TypeOf(&messagespb.DropRoleMessageHeader{}):                  MessageTypeDropRole,
 	reflect.TypeOf(&messagespb.DropSnapshotMessageHeader{}):              MessageTypeDropSnapshot,
@@ -2444,6 +2536,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeAlterLoadConfigV2:           SpecializedTypeAlterLoadConfigV2,
 	MessageTypeAlterPrivilegeGroupV2:       SpecializedTypeAlterPrivilegeGroupV2,
 	MessageTypeAlterPrivilegeV2:            SpecializedTypeAlterPrivilegeV2,
+	MessageTypeAlterRLSMetadataV2:          SpecializedTypeAlterRLSMetadataV2,
 	MessageTypeAlterReplicateConfigV2:      SpecializedTypeAlterReplicateConfigV2,
 	MessageTypeAlterResourceGroupV2:        SpecializedTypeAlterResourceGroupV2,
 	MessageTypeAlterRoleV2:                 SpecializedTypeAlterRoleV2,
@@ -2469,6 +2562,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeDropPartitionV1:             SpecializedTypeDropPartitionV1,
 	MessageTypeDropPrivilegeGroupV2:        SpecializedTypeDropPrivilegeGroupV2,
 	MessageTypeDropPrivilegeV2:             SpecializedTypeDropPrivilegeV2,
+	MessageTypeDropRLSMetadataV2:           SpecializedTypeDropRLSMetadataV2,
 	MessageTypeDropResourceGroupV2:         SpecializedTypeDropResourceGroupV2,
 	MessageTypeDropRoleV2:                  SpecializedTypeDropRoleV2,
 	MessageTypeDropSnapshotV2:              SpecializedTypeDropSnapshotV2,
@@ -2500,6 +2594,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeAlterLoadConfigV2:           MessageTypeAlterLoadConfigV2,
 	SpecializedTypeAlterPrivilegeGroupV2:       MessageTypeAlterPrivilegeGroupV2,
 	SpecializedTypeAlterPrivilegeV2:            MessageTypeAlterPrivilegeV2,
+	SpecializedTypeAlterRLSMetadataV2:          MessageTypeAlterRLSMetadataV2,
 	SpecializedTypeAlterReplicateConfigV2:      MessageTypeAlterReplicateConfigV2,
 	SpecializedTypeAlterResourceGroupV2:        MessageTypeAlterResourceGroupV2,
 	SpecializedTypeAlterRoleV2:                 MessageTypeAlterRoleV2,
@@ -2525,6 +2620,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeDropPartitionV1:             MessageTypeDropPartitionV1,
 	SpecializedTypeDropPrivilegeGroupV2:        MessageTypeDropPrivilegeGroupV2,
 	SpecializedTypeDropPrivilegeV2:             MessageTypeDropPrivilegeV2,
+	SpecializedTypeDropRLSMetadataV2:           MessageTypeDropRLSMetadataV2,
 	SpecializedTypeDropResourceGroupV2:         MessageTypeDropResourceGroupV2,
 	SpecializedTypeDropRoleV2:                  MessageTypeDropRoleV2,
 	SpecializedTypeDropSnapshotV2:              MessageTypeDropSnapshotV2,
