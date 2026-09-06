@@ -113,7 +113,38 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+	return bm.newBroadcasterWithRK(ctx, guards, startLockInstant)
+}
 
+// TryWithResourceKeys is the fail-fast variant of WithResourceKeys; see the
+// Broadcaster interface for the semantics. A few short retries absorb
+// millisecond-scale contention and the known spurious TryLock failure (#45285)
+// without reintroducing an unbounded wait.
+func (bm *broadcastTaskManager) TryWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	startLockInstant := time.Now()
+	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
+	var guards *lockGuards
+	var err error
+	for attempt := 0; ; attempt++ {
+		guards, err = bm.resourceKeyLocker.FastLockExclusive(resourceKeys...)
+		if err == nil || attempt >= 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return bm.newBroadcasterWithRK(ctx, guards, startLockInstant)
+}
+
+// newBroadcasterWithRK wraps the acquired lock guards into a BroadcastAPI,
+// releasing them on any failure.
+func (bm *broadcastTaskManager) newBroadcasterWithRK(ctx context.Context, guards *lockGuards, startLockInstant time.Time) (BroadcastAPI, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		guards.Unlock()

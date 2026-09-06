@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -391,7 +392,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return nil, errors.New("failed to acquire resource lock")
 		}).Build()
@@ -443,7 +444,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
@@ -481,6 +482,330 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	s.True(errors.Is(err, merr.ErrCollectionNotFound))
 }
 
+func (s *ImportCallbacksSuite) TestBroadcastImport_StaleSchemaSnapshotRejected() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// The collection schema advanced to version 2 (a DDL completed between the
+	// proxy snapshot and this broadcast); the job snapshot is still version 1.
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 2},
+	}, nil).Times(2)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection", Version: 1},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportBusy))
+	s.False(mockBroadcastAPI.broadcastCalled.Load(), "stale snapshot must be rejected before the import message is broadcast")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_RenamedCollectionRejected() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// The collection is renamed between the pre-lock describe (locks old_name)
+	// and the post-lock describe (returns new_name).
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "old_name",
+	}, nil).Once()
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "new_name",
+		Schema:         &schemapb.CollectionSchema{Name: "new_name"},
+	}, nil).Once()
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"old_name",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "old_name"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportBusy))
+	s.False(mockBroadcastAPI.broadcastCalled.Load(), "renamed collection must be rejected before the import message is broadcast")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_ForeignSchemaSnapshotRejected() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// An alias repoint between the proxy's two cache reads paired this
+	// collection's ID with another collection's schema; versions match (0==0).
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
+	}, nil).Times(2)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "other_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportBusy))
+	s.False(mockBroadcastAPI.broadcastCalled.Load(), "foreign schema snapshot must be rejected before the import message is broadcast")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_AutoIDPrecheckRejectsBeforeSizingAndReservation() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	sized := false
+	mockSizing := mockey.Mock(computeFileRowUpperBounds).To(
+		func(_ context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, _ []*internalpb.ImportFile) ([]fileSizing, error) {
+			sized = true
+			return nil, nil
+		}).Build()
+	defer mockSizing.UnPatch()
+
+	// The collection schema already advanced past the snapshot: the precheck
+	// must reject before any per-file sizing I/O or id reservation happens.
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 2},
+	}, nil).Once()
+
+	// No expectations: any AllocN call fails the test.
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+		allocator:  allocator.NewMockAllocator(s.T()),
+	}
+
+	autoIDSchema := &schemapb.CollectionSchema{
+		Name:    "test_collection",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		},
+	}
+	err := server.broadcastImport(
+		ctx,
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		autoIDSchema,
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportBusy))
+	s.False(sized, "stale snapshot must be rejected before per-file sizing")
+}
+
+func (s *ImportCallbacksSuite) TestFirstInFlightImportJob() {
+	ctx := context.Background()
+	server := &Server{importMeta: &importMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	inFlight := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return []ImportJob{&importJob{ImportJob: &datapb.ImportJob{
+			JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_Sorting,
+		}}}
+	}).Build()
+	jobID, state, found, err := server.FirstInFlightImportJob(ctx, 100)
+	inFlight.UnPatch()
+	s.NoError(err)
+	s.True(found)
+	s.EqualValues(7, jobID)
+	s.Equal(internalpb.ImportJobState_Sorting, state)
+
+	empty := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return nil
+	}).Build()
+	_, _, found, err = server.FirstInFlightImportJob(ctx, 100)
+	empty.UnPatch()
+	s.NoError(err)
+	s.False(found)
+
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
+	_, _, _, err = server.FirstInFlightImportJob(ctx, 100)
+	s.Error(err)
+}
+
+func (s *ImportCallbacksSuite) TestTryStartBroadcastLockBusyClassification() {
+	ctx := context.Background()
+
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return nil, merr.Wrapf(broadcaster.ErrFastLockFailed, "fast lock failed at resource key coll")
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Times(2)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	// An in-flight import job on the collection: the non-retriable conflict.
+	inFlight := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return []ImportJob{&importJob{ImportJob: &datapb.ImportJob{
+			JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_Importing,
+		}}}
+	}).Build()
+	_, _, err := server.tryStartBroadcastWithCollectionID(ctx, 100)
+	inFlight.UnPatch()
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportConflict))
+
+	// No import job: the retriable transient.
+	empty := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return nil
+	}).Build()
+	_, _, err = server.tryStartBroadcastWithCollectionID(ctx, 100)
+	empty.UnPatch()
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportBusy))
+}
+
 func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() {
 	ctx := context.Background()
 
@@ -507,7 +832,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcastAPI.broadcastErr = errors.New("broadcast failed")
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
@@ -567,7 +892,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+	mockBroadcast := mockey.Mock(broadcast.TryStartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
@@ -634,6 +959,7 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	broadcastCalled atomic.Bool
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -649,6 +975,7 @@ func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
 }
 
 func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	m.broadcastCalled.Store(true)
 	// Add operations to ensure the function is long enough for mockey
 	if ctx == nil {
 		return nil, errors.New("context is nil")

@@ -12,6 +12,58 @@ import (
 )
 
 func TestResourceKeyLocker(t *testing.T) {
+	t.Run("fast lock contention is classifiable", func(t *testing.T) {
+		locker := newResourceKeyLocker()
+		key := message.NewExclusiveCollectionNameResourceKey("db", "coll")
+		guards, err := locker.FastLock(key)
+		assert.NoError(t, err)
+		assert.False(t, IsFastLockFailed(err))
+
+		_, err = locker.FastLock(key)
+		assert.Error(t, err)
+		assert.True(t, IsFastLockFailed(err))
+
+		guards.Unlock()
+		guards, err = locker.FastLock(key)
+		assert.NoError(t, err)
+		guards.Unlock()
+	})
+
+	t.Run("fast lock exclusive fails fast only on exclusive keys", func(t *testing.T) {
+		locker := newResourceKeyLocker()
+		collKey := message.NewExclusiveCollectionNameResourceKey("db", "coll")
+		dbKey := message.NewSharedDBNameResourceKey("db")
+
+		// exclusive contention fails fast.
+		holder, err := locker.FastLockExclusive(collKey)
+		assert.NoError(t, err)
+		_, err = locker.FastLockExclusive(dbKey, collKey)
+		assert.True(t, IsFastLockFailed(err))
+		holder.Unlock()
+
+		// a held exclusive DB key blocks the shared acquisition instead of failing.
+		exclusiveDB := message.NewExclusiveDBNameResourceKey("db")
+		dbHolder := locker.Lock(exclusiveDB)
+		acquired := make(chan *lockGuards, 1)
+		go func() {
+			g, gerr := locker.FastLockExclusive(dbKey, collKey)
+			assert.NoError(t, gerr)
+			acquired <- g
+		}()
+		select {
+		case <-acquired:
+			t.Fatal("shared key acquisition must block while the exclusive DB key is held")
+		case <-time.After(50 * time.Millisecond):
+		}
+		dbHolder.Unlock()
+		select {
+		case g := <-acquired:
+			g.Unlock()
+		case <-time.After(time.Second):
+			t.Fatal("shared key acquisition must proceed after the exclusive DB key is released")
+		}
+	})
+
 	t.Run("concurrent lock/unlock", func(t *testing.T) {
 		locker := newResourceKeyLocker()
 		const numGoroutines = 10

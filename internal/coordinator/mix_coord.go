@@ -1217,6 +1217,13 @@ func (s *mixCoordImpl) ListImports(ctx context.Context, req *internalpb.ListImpo
 	return s.datacoordServer.ListImports(ctx, req)
 }
 
+// FirstInFlightImportJob is the state-only import lookup used by the rootcoord
+// DDL/import mutual exclusion; discovered via interface assertion on
+// types.MixCoord (in-process only, no RPC surface).
+func (s *mixCoordImpl) FirstInFlightImportJob(ctx context.Context, collectionID int64) (int64, internalpb.ImportJobState, bool, error) {
+	return s.datacoordServer.FirstInFlightImportJob(ctx, collectionID)
+}
+
 func (s *mixCoordImpl) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
 	return s.datacoordServer.CommitImport(ctx, req)
 }

@@ -192,5 +192,13 @@ func (c *Core) startBroadcastWithAliasOrCollectionLock(ctx context.Context, dbNa
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get collection by name")
 	}
-	return c.startBroadcastWithCollectionLock(ctx, dbName, coll.Name)
+	api, err := c.startBroadcastWithCollectionLock(ctx, dbName, coll.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkLockedCollectionName(ctx, dbName, collectionNameOrAlias, coll.Name); err != nil {
+		api.Close()
+		return nil, err
+	}
+	return api, nil
 }

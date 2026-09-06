@@ -205,7 +205,8 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
 				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion,
+				job.GetSchema().GetVersion())
 			if err != nil {
 				return err
 			}
@@ -253,6 +254,7 @@ func AllocImportSegment(ctx context.Context,
 	dataTimestamp uint64,
 	level datapb.SegmentLevel,
 	storageVersion int64,
+	schemaVersion int32,
 ) (*SegmentInfo, error) {
 	id, err := alloc.AllocID(ctx)
 	if err != nil {
@@ -277,6 +279,9 @@ func AllocImportSegment(ctx context.Context,
 		Level:          level,
 		LastExpireTime: math.MaxUint64,
 		StorageVersion: storageVersion,
+		// Job snapshot version: the import materializes data (function outputs
+		// included) per its snapshot, never a newer schema.
+		SchemaVersion: schemaVersion,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
@@ -293,6 +298,40 @@ func AllocImportSegment(ctx context.Context,
 		mlog.String("level", level.String()))
 
 	return segment, nil
+}
+
+// migrateImportSegmentSchemaVersions backfills SchemaVersion on import segments
+// persisted by a binary that predates alloc-time stamping: recovery restores a
+// non-terminal job's segments without re-running AssignSegments, and an
+// unstamped (0) segment on a versioned collection wedges behind the
+// schema-version index gate (#52154). The job snapshot version is the truthful
+// value — the import materializes data per that snapshot.
+func migrateImportSegmentSchemaVersions(ctx context.Context, importMeta ImportMeta, meta *meta) {
+	jobs := importMeta.GetJobBy(ctx,
+		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	for _, job := range jobs {
+		version := job.GetSchema().GetVersion()
+		if version == 0 {
+			continue
+		}
+		for _, task := range importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(ImportTaskType)) {
+			segmentIDs := append(task.(*importTask).GetSegmentIDs(), task.(*importTask).GetSortedSegmentIDs()...)
+			for _, segmentID := range segmentIDs {
+				segment := meta.GetSegment(ctx, segmentID)
+				if segment == nil || segment.GetSchemaVersion() != 0 {
+					continue
+				}
+				if err := meta.UpdateSegment(segmentID, SetSchemaVersion(version)); err != nil {
+					mlog.Warn(ctx, "failed to backfill schema version on recovered import segment",
+						mlog.FieldJobID(job.GetJobID()), mlog.FieldSegmentID(segmentID), mlog.Err(err))
+					continue
+				}
+				mlog.Info(ctx, "backfilled schema version on recovered import segment",
+					mlog.FieldJobID(job.GetJobID()), mlog.FieldSegmentID(segmentID),
+					mlog.Int32("schemaVersion", version))
+			}
+		}
+	}
 }
 
 func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {

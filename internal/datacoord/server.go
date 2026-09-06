@@ -318,6 +318,7 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+	migrateImportSegmentSchemaVersions(s.ctx, s.importMeta, s.meta)
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 

@@ -2169,6 +2169,22 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	return resp, nil
 }
 
+// FirstInFlightImportJob returns one non-terminal import job on the collection,
+// reading raw job states only — no progress materialization — so the rootcoord
+// DDL/import mutual exclusion can run it while holding the collection resource
+// key without doing work proportional to the job history.
+func (s *Server) FirstInFlightImportJob(ctx context.Context, collectionID int64) (jobID int64, state internalpb.ImportJobState, found bool, err error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return 0, internalpb.ImportJobState_None, false, err
+	}
+	jobs := s.importMeta.GetJobBy(ctx, WithCollectionID(collectionID),
+		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	if len(jobs) == 0 {
+		return 0, internalpb.ImportJobState_None, false, nil
+	}
+	return jobs[0].GetJobID(), jobs[0].GetState(), true, nil
+}
+
 // NotifyDropPartition notifies DataCoord to drop segments of specified partition
 func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {

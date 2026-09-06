@@ -20,7 +20,7 @@ import (
 
 // broadcastAlterCollectionForAddField broadcasts the put collection message for add field.
 func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -29,6 +29,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	// check if the collection is created.
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
 		return err
 	}
 
@@ -73,7 +76,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	schema := coll.ToCollectionSchemaPB()
 	// assign a new field id.
 	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	schema.Fields = append(schema.Fields, fieldSchema)
 	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
 	schema.Properties = properties

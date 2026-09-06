@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -80,6 +81,44 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 		return nil, err
 	}
 	return broadcaster, nil
+}
+
+// tryStartBroadcastWithCollectionID is the fail-fast variant of
+// startBroadcastWithCollectionID for the import side of the DDL/import mutual
+// exclusion (issue #52154); see Broadcaster.TryWithResourceKeys. It returns the
+// collection name the lock was taken on so the caller can reject when the
+// collection got renamed between the describe and the lock.
+func (s *Server) tryStartBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, string, error) {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, "", err
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+	b, err := broadcast.TryStartBroadcastWithResourceKeys(ctx, message.NewSharedDBNameResourceKey(dbName), message.NewExclusiveCollectionNameResourceKey(dbName, collectionName))
+	if err != nil {
+		if broadcaster.IsFastLockFailed(err) {
+			return nil, "", s.classifyCollectionLockBusy(ctx, collectionID, collectionName)
+		}
+		return nil, "", err
+	}
+	return b, collectionName, nil
+}
+
+// classifyCollectionLockBusy distinguishes why the collection broadcast lock
+// is contended: an in-flight import job yields the non-retriable conflict,
+// anything else (a DDL broadcast, a peer import whose job is not yet visible)
+// is a retriable transient.
+func (s *Server) classifyCollectionLockBusy(ctx context.Context, collectionID int64, collectionName string) error {
+	jobs := s.importMeta.GetJobBy(ctx, WithCollectionID(collectionID),
+		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	if len(jobs) > 0 {
+		return merr.WrapErrCollectionDDLImportConflict(collectionName,
+			"import job %d in state %s is in flight, retry after it finishes",
+			jobs[0].GetJobID(), jobs[0].GetState().String())
+	}
+	return merr.WrapErrCollectionDDLImportBusy(collectionName,
+		"another broadcast holds the collection lock, retry later")
 }
 
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
