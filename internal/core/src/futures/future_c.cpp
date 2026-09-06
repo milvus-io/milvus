@@ -33,10 +33,10 @@ future_is_ready(CFuture* future) {
 
 extern "C" void
 future_register_ready_callback(CFuture* future,
-                               CUnlockGoMutexFn unlockFn,
-                               CLockedGoMutex* mutex) {
+                               CFutureReadyCallbackFn callback,
+                               CFutureCallbackToken token) {
     static_cast<milvus::futures::IFuture*>(static_cast<void*>(future))
-        ->registerReadyCallback(unlockFn, mutex);
+        ->registerReadyCallback(callback, token);
 }
 
 extern "C" CStatus

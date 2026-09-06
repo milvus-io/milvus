@@ -248,8 +248,10 @@ TEST(DriverTest, AsyncConsumePreservesSegcoreErrorCode) {
 
     folly::Baton<> baton;
     future->registerReadyCallback(
-        [](CLockedGoMutex* b) { reinterpret_cast<folly::Baton<>*>(b)->post(); },
-        reinterpret_cast<CLockedGoMutex*>(&baton));
+        [](CFutureCallbackToken token) {
+            reinterpret_cast<folly::Baton<>*>(token)->post();
+        },
+        reinterpret_cast<CFutureCallbackToken>(&baton));
     baton.wait();
     ASSERT_TRUE(future->isReady());
 
@@ -312,10 +314,10 @@ TEST(DriverTest, AsyncDriverCancellationCountsDuringMetric) {
 
         folly::Baton<> baton;
         future->registerReadyCallback(
-            [](CLockedGoMutex* b) {
-                reinterpret_cast<folly::Baton<>*>(b)->post();
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<folly::Baton<>*>(token)->post();
             },
-            reinterpret_cast<CLockedGoMutex*>(&baton));
+            reinterpret_cast<CFutureCallbackToken>(&baton));
         baton.wait();
         auto [r, s] = future->leakyGet();
         EXPECT_EQ(r, nullptr);
