@@ -126,6 +126,11 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
 	},
+	MessageTypeRecoveryBarrier: {
+		LogLevel:       mlog.InfoLevel,
+		IsSystem:       true,
+		SelfControlled: true,
+	},
 }
 
 // String implements fmt.Stringer interface.

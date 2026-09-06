@@ -26,16 +26,27 @@ import (
 // TODO: should be removed in future after common.MessageID is removed
 // Deprecated
 func MustGetMQWrapperIDFromMessage(messageID message.MessageID) common.MessageID {
-	if id, ok := messageID.(interface{ PulsarID() pulsar.MessageID }); ok {
-		return mqpulsar.NewPulsarID(id.PulsarID())
-	} else if id, ok := messageID.(interface{ RmqID() int64 }); ok {
-		return &server.RmqID{MessageID: id.RmqID()}
-	} else if id, ok := messageID.(interface{ KafkaID() rawKafka.Offset }); ok {
-		return mqkafka.NewKafkaID(int64(id.KafkaID()))
-	} else if id, ok := messageID.(interface{ WoodpeckerID() *rawWP.LogMessageId }); ok {
-		return mqwoodpecker.NewWoodpeckerID(id.WoodpeckerID())
+	id, ok := TryGetMQWrapperIDFromMessage(messageID)
+	if !ok {
+		panic("unsupported now")
 	}
-	panic("unsupported now")
+	return id
+}
+
+// TryGetMQWrapperIDFromMessage converts message.MessageID to common.MessageID
+// without panicking on unsupported implementations; ok is false when the
+// message ID type has no MQ wrapper counterpart (e.g. test-only IDs).
+func TryGetMQWrapperIDFromMessage(messageID message.MessageID) (common.MessageID, bool) {
+	if id, ok := messageID.(interface{ PulsarID() pulsar.MessageID }); ok {
+		return mqpulsar.NewPulsarID(id.PulsarID()), true
+	} else if id, ok := messageID.(interface{ RmqID() int64 }); ok {
+		return &server.RmqID{MessageID: id.RmqID()}, true
+	} else if id, ok := messageID.(interface{ KafkaID() rawKafka.Offset }); ok {
+		return mqkafka.NewKafkaID(int64(id.KafkaID())), true
+	} else if id, ok := messageID.(interface{ WoodpeckerID() *rawWP.LogMessageId }); ok {
+		return mqwoodpecker.NewWoodpeckerID(id.WoodpeckerID()), true
+	}
+	return nil, false
 }
 
 func MustGetMQWrapperIDAndWALNameFromMessage(messageID message.MessageID) (common.MessageID, commonpb.WALName) {
