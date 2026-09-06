@@ -124,6 +124,9 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
+	if err := validateRLSPoliciesWithSchema(coll.RLSPolicies, schema); err != nil {
+		return err
+	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
