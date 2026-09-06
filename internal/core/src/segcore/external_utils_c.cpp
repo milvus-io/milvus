@@ -39,6 +39,7 @@
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_internal/bridge.h"
+#include "milvus-storage/format/format_reader.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "nlohmann/json.hpp"
@@ -97,6 +98,75 @@ struct ManifestGuard {
     ManifestGuard&
     operator=(const ManifestGuard&) = delete;
 };
+
+struct SampleField {
+    milvus::FieldMeta field_meta;
+    std::string column_name;
+};
+
+std::optional<std::string>
+FindMissingSampleColumn(
+    const std::shared_ptr<milvus_storage::api::ColumnGroups>& cgs,
+    const milvus_storage::api::Properties& properties,
+    const std::vector<SampleField>& sample_fields,
+    int64_t sample_rows) {
+    std::vector<bool> assigned(sample_fields.size(), false);
+    for (const auto& column_group : *cgs) {
+        if (column_group == nullptr) {
+            return std::nullopt;
+        }
+
+        std::vector<size_t> field_indices;
+        for (size_t i = 0; i < sample_fields.size(); ++i) {
+            if (assigned[i]) {
+                continue;
+            }
+            const auto& column_name = sample_fields[i].column_name;
+            if (std::find(column_group->columns.begin(),
+                          column_group->columns.end(),
+                          column_name) != column_group->columns.end()) {
+                assigned[i] = true;
+                field_indices.push_back(i);
+            }
+        }
+        if (field_indices.empty()) {
+            continue;
+        }
+
+        int64_t remaining_rows = sample_rows;
+        for (const auto& file : column_group->files) {
+            if (remaining_rows <= 0) {
+                break;
+            }
+            const auto rows_in_file = file.end_index - file.start_index;
+            if (rows_in_file <= 0) {
+                return std::nullopt;
+            }
+
+            auto reader = milvus_storage::FormatReader::create(
+                nullptr, column_group->format, file, properties, {}, nullptr);
+            if (!reader.ok()) {
+                // Keep the original read error. A corrupt footer or failed
+                // object-store read is not evidence that the user's mapping is
+                // wrong.
+                return std::nullopt;
+            }
+            const auto& physical_schema = reader.ValueOrDie()->get_schema();
+            if (physical_schema == nullptr) {
+                return std::nullopt;
+            }
+            for (auto field_index : field_indices) {
+                const auto& column_name =
+                    sample_fields[field_index].column_name;
+                if (physical_schema->GetFieldIndex(column_name) < 0) {
+                    return column_name;
+                }
+            }
+            remaining_rows -= std::min(remaining_rows, rows_in_file);
+        }
+    }
+    return std::nullopt;
+}
 
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 ReadManifestColumnGroupsWithFFI(const char* manifest_path,
@@ -187,29 +257,6 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             return MakeCStatusError("no rows available for sampling");
         }
 
-        // 4. Create schemaless Reader (nullptr schema → types from file)
-        auto reader = milvus_storage::api::Reader::create(
-            cgs, nullptr, nullptr, *properties);
-
-        // 5. Take sample rows [0, 1, ..., actual-1]
-        std::vector<int64_t> indices(actual);
-        std::iota(indices.begin(), indices.end(), 0);
-
-        auto result = reader->take(indices, 1);
-        if (!result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(result.status());
-            return milvus::FailureCStatus(&error);
-        }
-        auto table = result.ValueOrDie();
-        auto num_rows = table->num_rows();
-        if (num_rows == 0) {
-            return MakeCStatusError("sample returned 0 rows");
-        }
-
-        struct SampleField {
-            milvus::FieldMeta field_meta;
-            std::string column_name;
-        };
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
             collection_schema.proto_size > 0) {
@@ -257,6 +304,35 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             }
         }
 
+        // 4. Create schemaless Reader (nullptr schema → types from file)
+        auto reader = milvus_storage::api::Reader::create(
+            cgs, nullptr, nullptr, *properties);
+
+        // 5. Take sample rows [0, 1, ..., actual-1]
+        std::vector<int64_t> indices(actual);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto result = reader->take(indices, 1);
+        if (!result.ok()) {
+            if (result.status().IsInvalid()) {
+                auto missing_column = FindMissingSampleColumn(
+                    cgs, *properties, external_fields, actual);
+                if (missing_column.has_value()) {
+                    return milvus::FailureCStatus(
+                        milvus::InvalidParameter,
+                        fmt::format("Column '{}' not found in schema",
+                                    missing_column.value()));
+                }
+            }
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto table = result.ValueOrDie();
+        auto num_rows = table->num_rows();
+        if (num_rows == 0) {
+            return MakeCStatusError("sample returned 0 rows");
+        }
+
         // 6. Calculate per-column Arrow buffer size (recursive for nested types)
         std::function<int64_t(const std::shared_ptr<arrow::ArrayData>&)>
             calcArrayDataSize =
@@ -291,10 +367,10 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
                 if (chunked == nullptr) {
-                    return MakeCStatusError(
+                    return milvus::FailureCStatus(
+                        milvus::InvalidParameter,
                         fmt::format("Column '{}' not found in schema",
-                                    column_name)
-                            .c_str());
+                                    column_name));
                 }
 
                 int64_t col_bytes = 0;
