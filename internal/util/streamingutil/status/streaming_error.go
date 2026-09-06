@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -27,6 +28,34 @@ func (e *StreamingError) Error() string {
 // AsPBError convert StreamingError to streamingpb.StreamingError.
 func (e *StreamingError) AsPBError() *streamingpb.StreamingError {
 	return (*streamingpb.StreamingError)(e)
+}
+
+// NewFromPBError converts a streamingpb.StreamingError back into a
+// *StreamingError, carrying the WHOLE message rather than (code, cause).
+//
+// Rebuilding the error field by field is the mistake this exists to prevent:
+// some codes attach a payload the caller acts on -- SHARD_FENCED carries
+// T_switch in FencedTimeTick -- and dropping it silently zeroes a value the
+// caller then reads as "no fence time tick recorded". It only shows up across a
+// process boundary, because an in-process append hands back the *StreamingError
+// itself and keeps the payload, so a same-process test cannot see the loss.
+//
+// The message is cloned: the pb it comes from belongs to a response the
+// transport may reuse or mutate after this returns.
+func NewFromPBError(pb *streamingpb.StreamingError) *StreamingError {
+	if pb == nil {
+		// Never nil: every caller reaches this because the peer reported a
+		// failure, and the methods on *StreamingError have pointer receivers
+		// that dereference Code -- handing back nil turns an empty error body
+		// into a panic on the next line rather than an error the caller can
+		// report. A server should not send one; if one arrives, say so.
+		return New(streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, "empty streaming error message")
+	}
+	cloned, ok := proto.Clone(pb).(*streamingpb.StreamingError)
+	if !ok {
+		return New(pb.GetCode(), "%s", pb.GetCause())
+	}
+	return (*StreamingError)(cloned)
 }
 
 // IsWrongStreamingNode returns true if the error is caused by wrong streamingnode.
@@ -58,7 +87,26 @@ func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
 		e.IsInvalidArgument() ||
 		e.IsReplicateViolation() ||
-		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
+		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch() ||
+		e.IsShardFenced() || e.IsRoutingStale()
+}
+
+// IsShardFenced returns true if the error is caused by the vchannel fenced by shard split.
+// Retrying on the same vchannel never succeeds; the caller should refresh
+// the routing table and redispatch the messages to the new shards.
+func (e *StreamingError) IsShardFenced() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED
+}
+
+// IsRoutingStale returns true if the error is caused by a stale client routing version.
+// The caller should refresh the routing table and retry.
+//
+// Reserved, not yet wired: the routing_version negotiation scheme it belongs to
+// was dropped; the write switch relies purely on the permanent source fence
+// (SHARD_FENCED) + cache invalidation. No producer emits ROUTING_STALE today; it
+// is kept for a possible later routing-version fast path (design #50465 §3.3).
+func (e *StreamingError) IsRoutingStale() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE
 }
 
 // IsReplicateViolation returns true if the error is caused by replicate violation.
@@ -201,6 +249,26 @@ func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 // NewPartialUpdateRetryable creates a retryable partial update CAS error.
 func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE, format, args...)
+}
+
+// NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
+// fencedTimeTick is T_switch (the time tick the vchannel was fenced at); it is 0
+// when unknown. The split coordinator reads it back from an already-fenced
+// re-fence to recover T_switch after a crash that lost the recorded value.
+func NewShardFenced(vchannel string, fencedTimeTick uint64, fencedSplitTaskID int64) *StreamingError {
+	err := New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
+	err.FencedTimeTick = fencedTimeTick
+	err.FencedSplitTaskId = fencedSplitTaskID
+	return err
+}
+
+// NewRoutingStale creates a new StreamingError with code STREAMING_CODE_ROUTING_STALE.
+//
+// Reserved, not yet wired: no producer emits ROUTING_STALE today (the
+// routing_version negotiation was dropped in favor of the SHARD_FENCED
+// reject-refetch loop); kept for a possible later routing-version fast path.
+func NewRoutingStale(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

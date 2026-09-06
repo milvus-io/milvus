@@ -55,15 +55,98 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
-	FileResourceIds      []int64
-	ExternalSource       string
-	ExternalSpec         string
+	// RoutingModulus is the modulus every shard's residues are taken against.
+	// Zero on a collection that has never been split, which routes by
+	// hash % ShardsNum.
+	RoutingModulus uint64
+	// ShardBy is the routing-key expression, "hash(<field>)". Empty means it was
+	// never declared, and the legacy key choice applies.
+	ShardBy         string
+	FileResourceIds []int64
+	ExternalSource  string
+	ExternalSpec    string
 }
 
 type ShardInfo struct {
-	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
-	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
-	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+	PChannelName         string              // the pchannel name of the shard, it is the same with the physical channel name.
+	VChannelName         string              // the vchannel name of the shard, it is the same with the virtual channel name.
+	LastTruncateTimeTick uint64              // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+	State                schemapb.ShardState // the lifecycle state during shard split, ShardNormal by default.
+	// Buckets are the residues the shard owns, taken against the collection's
+	// RoutingModulus: it owns the keys whose hash % RoutingModulus is one of
+	// them.
+	//
+	// Empty on a collection that has never been split, which keeps routing on the
+	// legacy "hash % shardNum" rule. Once ANY shard of a collection carries
+	// residues, every routable shard must, or the derived table has a hole and
+	// the write path cannot be built — so a split commits the residues of the
+	// untouched shards along with its own.
+	Buckets []uint64
+}
+
+// IsRoutable reports whether a key can currently be routed to this shard. It is
+// the single definition of the rule; everything that counts a collection's
+// shards asks it, so no two counts can drift apart.
+//
+// A split source stops being routable from the moment it is fenced: it is
+// Splitting (and later Dropped) and owns no key range, so it is no longer one of
+// the collection's shards even though its vchannel lingers until its data has
+// been moved.
+func (s *ShardInfo) IsRoutable() bool {
+	return shardStateIsRoutable(s.State)
+}
+
+func shardStateIsRoutable(state schemapb.ShardState) bool {
+	switch state {
+	case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+		return true
+	default:
+		return false
+	}
+}
+
+// routableShardCount counts the shards a key can currently be routed to, which
+// is what a collection's shard count means to a user.
+//
+// Counting vchannels instead would report N+M during a rehash — every source and
+// every target at once — which is a number the collection never actually has.
+func routableShardCount(infos []*schemapb.CollectionShardInfo) int32 {
+	var count int32
+	for _, info := range infos {
+		if shardStateIsRoutable(info.GetState()) {
+			count++
+		}
+	}
+	return count
+}
+
+// ToPB builds the schemapb.CollectionShardInfo of a shard. The routing oneof is
+// left unset when the shard owns no residues — a shard of a collection that has
+// never been split, or a fenced/dropped split source.
+func (s *ShardInfo) ToPB() *schemapb.CollectionShardInfo {
+	si := &schemapb.CollectionShardInfo{
+		LastTruncateTimeTick: s.LastTruncateTimeTick,
+		State:                s.State,
+		VchannelName:         s.VChannelName,
+	}
+	if len(s.Buckets) > 0 {
+		si.Routing = &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: slices.Clone(s.Buckets)},
+		}
+	}
+	return si
+}
+
+// shardInfoFromPB builds the model ShardInfo of one shard from its persisted /
+// wire form.
+func shardInfoFromPB(vchannel, pchannel string, si *schemapb.CollectionShardInfo) *ShardInfo {
+	return &ShardInfo{
+		VChannelName:         vchannel,
+		PChannelName:         pchannel,
+		LastTruncateTimeTick: si.GetLastTruncateTimeTick(),
+		State:                si.GetState(),
+		Buckets:              slices.Clone(si.GetHashRouting().GetBuckets()),
+	}
 }
 
 func (c *Collection) Available() bool {
@@ -97,6 +180,8 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
+		RoutingModulus:       c.RoutingModulus,
+		ShardBy:              c.ShardBy,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -110,6 +195,8 @@ func (c *Collection) Clone() *Collection {
 			VChannelName:         channelName,
 			PChannelName:         shardInfo.PChannelName,
 			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
+			State:                shardInfo.State,
+			Buckets:              slices.Clone(shardInfo.Buckets),
 		}
 	}
 	return &Collection{
@@ -138,6 +225,8 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       c.RoutingModulus,
+		ShardBy:              c.ShardBy,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -232,6 +321,36 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			if v := updates.Schema.GetExternalSpec(); v != "" {
 				c.ExternalSpec = v
 			}
+		case message.FieldMaskCollectionShardSplitRouting:
+			// A shard split commits the whole new routing topology atomically:
+			// the grown vchannel list, the collection's routing modulus, and every
+			// shard's residues and lifecycle state. The channel and shard-info
+			// arrays are parallel, so the ShardInfos map is rebuilt from them in
+			// lockstep.
+			//
+			// shard_by is the exception: it is written only when the commit carries
+			// one, because only a first split has anything to back-fill. Clearing
+			// it on every later commit would drop the expression clients route by.
+			c.VirtualChannelNames = updates.VirtualChannelNames
+			c.PhysicalChannelNames = updates.PhysicalChannelNames
+			c.RoutingModulus = updates.RoutingModulus
+			if updates.ShardBy != "" {
+				c.ShardBy = updates.ShardBy
+			}
+			shardInfos := make(map[string]*ShardInfo, len(updates.VirtualChannelNames))
+			for i, vchannel := range updates.VirtualChannelNames {
+				var pchannel string
+				if i < len(updates.PhysicalChannelNames) {
+					pchannel = updates.PhysicalChannelNames[i]
+				}
+				var si *schemapb.CollectionShardInfo
+				if i < len(updates.ShardInfos) {
+					si = updates.ShardInfos[i]
+				}
+				shardInfos[vchannel] = shardInfoFromPB(vchannel, pchannel, si)
+			}
+			c.ShardInfos = shardInfos
+			c.ShardsNum = routableShardCount(updates.ShardInfos)
 		}
 	}
 }
@@ -252,19 +371,20 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 	}
 	shardInfos := make(map[string]*ShardInfo, len(coll.VirtualChannelNames))
 	for idx, channelName := range coll.VirtualChannelNames {
-		if len(coll.ShardInfos) == 0 {
-			shardInfos[channelName] = &ShardInfo{
-				VChannelName:         channelName,
-				PChannelName:         coll.PhysicalChannelNames[idx],
-				LastTruncateTimeTick: 0,
-			}
-		} else {
-			shardInfos[channelName] = &ShardInfo{
-				VChannelName:         channelName,
-				PChannelName:         coll.PhysicalChannelNames[idx],
-				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
-			}
+		var si *schemapb.CollectionShardInfo
+		if idx < len(coll.ShardInfos) {
+			si = coll.ShardInfos[idx]
 		}
+		// Guard the physical index the way ApplyUpdates does. The two lists are
+		// written in lockstep and a mismatch would be a bug upstream, but this runs
+		// on every meta load, so reading past the end would turn one malformed
+		// record into a rootcoord that panics on every start and cannot be started
+		// to repair it.
+		var pchannel string
+		if idx < len(coll.PhysicalChannelNames) {
+			pchannel = coll.PhysicalChannelNames[idx]
+		}
+		shardInfos[channelName] = shardInfoFromPB(channelName, pchannel, si)
 	}
 
 	return &Collection{
@@ -290,6 +410,8 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       coll.RoutingModulus,
+		ShardBy:              coll.ShardBy,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
@@ -360,16 +482,14 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
-	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))
+	// size by the index domain (vchannel positions), not the map length: the
+	// loop below indexes shardInfos[idx] by VirtualChannelNames position.
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.VirtualChannelNames))
 	for idx, channelName := range coll.VirtualChannelNames {
 		if shard, ok := coll.ShardInfos[channelName]; ok {
-			shardInfos[idx] = &pb.CollectionShardInfo{
-				LastTruncateTimeTick: shard.LastTruncateTimeTick,
-			}
+			shardInfos[idx] = shard.ToPB()
 		} else {
-			shardInfos[idx] = &pb.CollectionShardInfo{
-				LastTruncateTimeTick: 0,
-			}
+			shardInfos[idx] = &schemapb.CollectionShardInfo{}
 		}
 	}
 	collectionPb := &pb.CollectionInfo{
@@ -386,6 +506,8 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Properties:           coll.Properties,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       coll.RoutingModulus,
+		ShardBy:              coll.ShardBy,
 	}
 
 	if c.withPartitions {

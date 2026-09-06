@@ -12,13 +12,14 @@ import (
 
 // Export consts
 const (
-	FieldMaskCollectionConsistencyLevel = "consistency_level"
-	FieldMaskCollectionDescription      = "description"
-	FieldMaskCollectionExternalSpec     = "external_spec"
-	FieldMaskCollectionName             = "collection_name"
-	FieldMaskCollectionProperties       = "properties"
-	FieldMaskCollectionSchema           = "schema"
-	FieldMaskDB                         = "db"
+	FieldMaskCollectionConsistencyLevel  = "consistency_level"
+	FieldMaskCollectionDescription       = "description"
+	FieldMaskCollectionExternalSpec      = "external_spec"
+	FieldMaskCollectionName              = "collection_name"
+	FieldMaskCollectionProperties        = "properties"
+	FieldMaskCollectionSchema            = "schema"
+	FieldMaskCollectionShardSplitRouting = "shard_split_routing"
+	FieldMaskDB                          = "db"
 )
 
 // Export message types
@@ -35,6 +36,9 @@ const (
 	MessageTypeImport                    MessageType = MessageType(messagespb.MessageType_Import)
 	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
 	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
+	MessageTypeSplitShard                MessageType = MessageType(messagespb.MessageType_SplitShard)
+	MessageTypeCreateVChannel            MessageType = MessageType(messagespb.MessageType_CreateVChannel)
+	MessageTypeDropVChannel              MessageType = MessageType(messagespb.MessageType_DropVChannel)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
 	MessageTypeManualFlush               MessageType = MessageType(messagespb.MessageType_ManualFlush)
@@ -90,6 +94,7 @@ type (
 	CacheExpirations                 = messagespb.CacheExpirations
 	CacheExpiration                  = messagespb.CacheExpiration
 	LegacyProxyCollectionMetaCache   = messagespb.LegacyProxyCollectionMetaCache
+	SplitShardTarget                 = messagespb.SplitShardTarget
 )
 
 // Export message header and body types
@@ -116,6 +121,11 @@ type (
 	CommitImportMessageBody                = messagespb.CommitImportMessageBody
 	RollbackImportMessageHeader            = messagespb.RollbackImportMessageHeader
 	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
+	SplitShardMessageHeader                = messagespb.SplitShardMessageHeader
+	SplitShardMessageBody                  = messagespb.SplitShardMessageBody
+	CreateVChannelMessageHeader            = messagespb.CreateVChannelMessageHeader
+	DropVChannelMessageHeader              = messagespb.DropVChannelMessageHeader
+	DropVChannelMessageBody                = messagespb.DropVChannelMessageBody
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
 	CreateSegmentMessageBody               = messagespb.CreateSegmentMessageBody
 	FlushMessageHeader                     = messagespb.FlushMessageHeader
@@ -661,6 +671,132 @@ var MustAsBroadcastRollbackImportMessageV2 = MustAsSpecializedBroadcastMessage[*
 
 // NewRollbackImportMessageBuilderV2 creates a new message builder for RollbackImportMessageV2
 var NewRollbackImportMessageBuilderV2 = newMutableMessageBuilder[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// Type aliases for SplitShardMessageV2
+type (
+	MutableSplitShardMessageV2         = specializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	ImmutableSplitShardMessageV2       = SpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	BroadcastSplitShardMessageV2       = SpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	BroadcastResultSplitShardMessageV2 = BroadcastResult[*SplitShardMessageHeader, *SplitShardMessageBody]
+	AckResultSplitShardMessageV2       = AckResult[*SplitShardMessageHeader, *SplitShardMessageBody]
+)
+
+// MessageTypeWithVersion for SplitShardMessageV2
+var MessageTypeSplitShardV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeSplitShard,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for SplitShardMessageV2
+var SpecializedTypeSplitShardV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*SplitShardMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*SplitShardMessageHeader)(nil)),
+}
+
+// AsMutableSplitShardMessageV2 converts a BasicMessage to MutableSplitShardMessageV2
+var AsMutableSplitShardMessageV2 = asSpecializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsMutableSplitShardMessageV2 converts a BasicMessage to MutableSplitShardMessageV2, panics on error
+var MustAsMutableSplitShardMessageV2 = mustAsSpecializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// AsImmutableSplitShardMessageV2 converts an ImmutableMessage to ImmutableSplitShardMessageV2
+var AsImmutableSplitShardMessageV2 = asSpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsImmutableSplitShardMessageV2 converts an ImmutableMessage to ImmutableSplitShardMessageV2, panics on error
+var MustAsImmutableSplitShardMessageV2 = MustAsSpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// AsBroadcastSplitShardMessageV2 converts a BasicMessage to BroadcastSplitShardMessageV2
+var AsBroadcastSplitShardMessageV2 = asSpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsBroadcastSplitShardMessageV2 converts a BasicMessage to BroadcastSplitShardMessageV2, panics on error
+var MustAsBroadcastSplitShardMessageV2 = MustAsSpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// NewSplitShardMessageBuilderV2 creates a new message builder for SplitShardMessageV2
+var NewSplitShardMessageBuilderV2 = newMutableMessageBuilder[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// Type aliases for CreateVChannelMessageV2
+type (
+	MutableCreateVChannelMessageV2         = specializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	ImmutableCreateVChannelMessageV2       = SpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	BroadcastCreateVChannelMessageV2       = SpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	BroadcastResultCreateVChannelMessageV2 = BroadcastResult[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+	AckResultCreateVChannelMessageV2       = AckResult[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+)
+
+// MessageTypeWithVersion for CreateVChannelMessageV2
+var MessageTypeCreateVChannelV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeCreateVChannel,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for CreateVChannelMessageV2
+var SpecializedTypeCreateVChannelV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*CreateCollectionRequest)(nil)),
+	HeaderType: reflect.TypeOf((*CreateVChannelMessageHeader)(nil)),
+}
+
+// AsMutableCreateVChannelMessageV2 converts a BasicMessage to MutableCreateVChannelMessageV2
+var AsMutableCreateVChannelMessageV2 = asSpecializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsMutableCreateVChannelMessageV2 converts a BasicMessage to MutableCreateVChannelMessageV2, panics on error
+var MustAsMutableCreateVChannelMessageV2 = mustAsSpecializedMutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// AsImmutableCreateVChannelMessageV2 converts an ImmutableMessage to ImmutableCreateVChannelMessageV2
+var AsImmutableCreateVChannelMessageV2 = asSpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsImmutableCreateVChannelMessageV2 converts an ImmutableMessage to ImmutableCreateVChannelMessageV2, panics on error
+var MustAsImmutableCreateVChannelMessageV2 = MustAsSpecializedImmutableMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// AsBroadcastCreateVChannelMessageV2 converts a BasicMessage to BroadcastCreateVChannelMessageV2
+var AsBroadcastCreateVChannelMessageV2 = asSpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// MustAsBroadcastCreateVChannelMessageV2 converts a BasicMessage to BroadcastCreateVChannelMessageV2, panics on error
+var MustAsBroadcastCreateVChannelMessageV2 = MustAsSpecializedBroadcastMessage[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// NewCreateVChannelMessageBuilderV2 creates a new message builder for CreateVChannelMessageV2
+var NewCreateVChannelMessageBuilderV2 = newMutableMessageBuilder[*CreateVChannelMessageHeader, *CreateCollectionRequest]
+
+// Type aliases for DropVChannelMessageV2
+type (
+	MutableDropVChannelMessageV2         = specializedMutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+	ImmutableDropVChannelMessageV2       = SpecializedImmutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+	BroadcastDropVChannelMessageV2       = SpecializedBroadcastMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+	BroadcastResultDropVChannelMessageV2 = BroadcastResult[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+	AckResultDropVChannelMessageV2       = AckResult[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+)
+
+// MessageTypeWithVersion for DropVChannelMessageV2
+var MessageTypeDropVChannelV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeDropVChannel,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for DropVChannelMessageV2
+var SpecializedTypeDropVChannelV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*DropVChannelMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*DropVChannelMessageHeader)(nil)),
+}
+
+// AsMutableDropVChannelMessageV2 converts a BasicMessage to MutableDropVChannelMessageV2
+var AsMutableDropVChannelMessageV2 = asSpecializedMutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// MustAsMutableDropVChannelMessageV2 converts a BasicMessage to MutableDropVChannelMessageV2, panics on error
+var MustAsMutableDropVChannelMessageV2 = mustAsSpecializedMutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// AsImmutableDropVChannelMessageV2 converts an ImmutableMessage to ImmutableDropVChannelMessageV2
+var AsImmutableDropVChannelMessageV2 = asSpecializedImmutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// MustAsImmutableDropVChannelMessageV2 converts an ImmutableMessage to ImmutableDropVChannelMessageV2, panics on error
+var MustAsImmutableDropVChannelMessageV2 = MustAsSpecializedImmutableMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// AsBroadcastDropVChannelMessageV2 converts a BasicMessage to BroadcastDropVChannelMessageV2
+var AsBroadcastDropVChannelMessageV2 = asSpecializedBroadcastMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// MustAsBroadcastDropVChannelMessageV2 converts a BasicMessage to BroadcastDropVChannelMessageV2, panics on error
+var MustAsBroadcastDropVChannelMessageV2 = MustAsSpecializedBroadcastMessage[*DropVChannelMessageHeader, *DropVChannelMessageBody]
+
+// NewDropVChannelMessageBuilderV2 creates a new message builder for DropVChannelMessageV2
+var NewDropVChannelMessageBuilderV2 = newMutableMessageBuilder[*DropVChannelMessageHeader, *DropVChannelMessageBody]
 
 // Type aliases for CreateSegmentMessageV2
 type (
@@ -2388,6 +2524,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.CreatePartitionMessageHeader{}):           MessageTypeCreatePartition,
 	reflect.TypeOf(&messagespb.CreateSegmentMessageHeader{}):             MessageTypeCreateSegment,
 	reflect.TypeOf(&messagespb.CreateSnapshotMessageHeader{}):            MessageTypeCreateSnapshot,
+	reflect.TypeOf(&messagespb.CreateVChannelMessageHeader{}):            MessageTypeCreateVChannel,
 	reflect.TypeOf(&messagespb.DeleteMessageHeader{}):                    MessageTypeDelete,
 	reflect.TypeOf(&messagespb.DropAliasMessageHeader{}):                 MessageTypeDropAlias,
 	reflect.TypeOf(&messagespb.DropCollectionMessageHeader{}):            MessageTypeDropCollection,
@@ -2403,6 +2540,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.DropSnapshotsByCollectionMessageHeader{}): MessageTypeDropSnapshotsByCollection,
 	reflect.TypeOf(&messagespb.DropUserMessageHeader{}):                  MessageTypeDropUser,
 	reflect.TypeOf(&messagespb.DropUserRoleMessageHeader{}):              MessageTypeDropUserRole,
+	reflect.TypeOf(&messagespb.DropVChannelMessageHeader{}):              MessageTypeDropVChannel,
 	reflect.TypeOf(&messagespb.FlushAllMessageHeader{}):                  MessageTypeFlushAll,
 	reflect.TypeOf(&messagespb.FlushMessageHeader{}):                     MessageTypeFlush,
 	reflect.TypeOf(&messagespb.ImportMessageHeader{}):                    MessageTypeImport,
@@ -2414,6 +2552,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.RollbackImportMessageHeader{}):            MessageTypeRollbackImport,
 	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):               MessageTypeRollbackTxn,
 	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):              MessageTypeSchemaChange,
+	reflect.TypeOf(&messagespb.SplitShardMessageHeader{}):                MessageTypeSplitShard,
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):                  MessageTypeTimeTick,
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
@@ -2460,6 +2599,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeCreatePartitionV1:           SpecializedTypeCreatePartitionV1,
 	MessageTypeCreateSegmentV2:             SpecializedTypeCreateSegmentV2,
 	MessageTypeCreateSnapshotV2:            SpecializedTypeCreateSnapshotV2,
+	MessageTypeCreateVChannelV2:            SpecializedTypeCreateVChannelV2,
 	MessageTypeDeleteV1:                    SpecializedTypeDeleteV1,
 	MessageTypeDropAliasV2:                 SpecializedTypeDropAliasV2,
 	MessageTypeDropCollectionV1:            SpecializedTypeDropCollectionV1,
@@ -2475,6 +2615,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeDropSnapshotsByCollectionV2: SpecializedTypeDropSnapshotsByCollectionV2,
 	MessageTypeDropUserRoleV2:              SpecializedTypeDropUserRoleV2,
 	MessageTypeDropUserV2:                  SpecializedTypeDropUserV2,
+	MessageTypeDropVChannelV2:              SpecializedTypeDropVChannelV2,
 	MessageTypeFlushAllV2:                  SpecializedTypeFlushAllV2,
 	MessageTypeFlushV2:                     SpecializedTypeFlushV2,
 	MessageTypeImportV1:                    SpecializedTypeImportV1,
@@ -2486,6 +2627,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeRollbackImportV2:            SpecializedTypeRollbackImportV2,
 	MessageTypeRollbackTxnV2:               SpecializedTypeRollbackTxnV2,
 	MessageTypeSchemaChangeV2:              SpecializedTypeSchemaChangeV2,
+	MessageTypeSplitShardV2:                SpecializedTypeSplitShardV2,
 	MessageTypeTimeTickV1:                  SpecializedTypeTimeTickV1,
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
@@ -2516,6 +2658,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeCreatePartitionV1:           MessageTypeCreatePartitionV1,
 	SpecializedTypeCreateSegmentV2:             MessageTypeCreateSegmentV2,
 	SpecializedTypeCreateSnapshotV2:            MessageTypeCreateSnapshotV2,
+	SpecializedTypeCreateVChannelV2:            MessageTypeCreateVChannelV2,
 	SpecializedTypeDeleteV1:                    MessageTypeDeleteV1,
 	SpecializedTypeDropAliasV2:                 MessageTypeDropAliasV2,
 	SpecializedTypeDropCollectionV1:            MessageTypeDropCollectionV1,
@@ -2531,6 +2674,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeDropSnapshotsByCollectionV2: MessageTypeDropSnapshotsByCollectionV2,
 	SpecializedTypeDropUserRoleV2:              MessageTypeDropUserRoleV2,
 	SpecializedTypeDropUserV2:                  MessageTypeDropUserV2,
+	SpecializedTypeDropVChannelV2:              MessageTypeDropVChannelV2,
 	SpecializedTypeFlushAllV2:                  MessageTypeFlushAllV2,
 	SpecializedTypeFlushV2:                     MessageTypeFlushV2,
 	SpecializedTypeImportV1:                    MessageTypeImportV1,
@@ -2542,6 +2686,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeRollbackImportV2:            MessageTypeRollbackImportV2,
 	SpecializedTypeRollbackTxnV2:               MessageTypeRollbackTxnV2,
 	SpecializedTypeSchemaChangeV2:              MessageTypeSchemaChangeV2,
+	SpecializedTypeSplitShardV2:                MessageTypeSplitShardV2,
 	SpecializedTypeTimeTickV1:                  MessageTypeTimeTickV1,
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,

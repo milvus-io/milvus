@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -3707,4 +3708,67 @@ func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
 	require.NoError(t, err)
 	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	require.Equal(t, "105", props[common.MaxFieldIDKey])
+}
+
+// TestMetaTableAlterCollectionKeepsTopologyCountersInStep covers the two
+// counters that are maintained incrementally rather than recomputed, and so go
+// wrong when an alter moves a collection's shard topology.
+func TestMetaTableAlterCollectionKeepsTopologyCountersInStep(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	partitions := []*model.Partition{
+		{PartitionID: 10, PartitionName: "_default", State: pb.PartitionState_PartitionCreated},
+		{PartitionID: 11, PartitionName: "p1", State: pb.PartitionState_PartitionCreated},
+	}
+	// One shard, two partitions: what the collection contributed when it was
+	// created.
+	oldColl := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            1,
+		VirtualChannelNames:  []string{"by-dev-rootcoord-dml_0_100v0"},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_0"},
+		Partitions:           partitions,
+	}
+	// A split fences that shard and creates two targets: the count of routable
+	// shards goes to 2 and the vchannel list grows to three.
+	newColl := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            2,
+		VirtualChannelNames:  []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_100v1", "by-dev-rootcoord-dml_2_100v2"},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		Partitions:           partitions,
+	}
+
+	// The state AddCollection would have left behind for oldColl.
+	mt := &MetaTable{generalCnt: oldColl.GetPartitionNum(true) * int(oldColl.ShardsNum)}
+	channel.StaticPChannelStatsManager.MustGet().AddVChannel(oldColl.VirtualChannelNames...)
+
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
+
+	// generalCnt now reflects the post-split shape, so the drop that later
+	// subtracts the current shape brings it back to zero instead of below it.
+	assert.Equal(t, newColl.GetPartitionNum(true)*int(newColl.ShardsNum), mt.generalCnt)
+	mt.generalCnt -= newColl.GetPartitionNum(true) * int(newColl.ShardsNum)
+	assert.Equal(t, 0, mt.generalCnt)
+
+	// The split targets are registered on their own pchannels; the fenced source
+	// stays registered because its vchannel is still in the list.
+	stats := channel.StaticPChannelStatsManager.MustGet()
+	for _, pchannel := range newColl.PhysicalChannelNames {
+		assert.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: pchannel}).VChannelCount(), pchannel)
+	}
+
+	// Retiring the source's vchannel deregisters it, and nothing else.
+	retired := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            2,
+		VirtualChannelNames:  newColl.VirtualChannelNames[1:],
+		PhysicalChannelNames: newColl.PhysicalChannelNames[1:],
+		Partitions:           partitions,
+	}
+	mt.applyAlterCollectionTopologyLocked(newColl, retired)
+	assert.Equal(t, 0, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_0"}).VChannelCount())
+	assert.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_1"}).VChannelCount())
 }

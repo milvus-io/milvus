@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -680,4 +681,86 @@ func getInsertMsgWithChannel(segmentID typeutil.UniqueID, ts typeutil.Timestamp,
 
 type mockFactory struct {
 	msgstream.Factory
+}
+
+// TestFlowGraph_DDNode_OperateSplitShard pins the one hand-off that makes a
+// shard split's fence mean anything downstream.
+//
+// The fence carries the ids of the growing segments the source streamingnode
+// sealed at T_switch, and it is their ONLY record: the split appends no
+// ManualFlush, and the WAL-side FlushAndFenceSegmentUntil emits no Flush
+// message. If this node has no case for SplitShard the message is dropped by
+// the switch without a trace -- the ids never reach the write buffer, the
+// source shard's last rows are never sealed, never flushed, never reported to
+// DataCoord, and are discarded when the retired vchannel's data sync service is
+// closed. Nothing fails; the rows simply stop existing.
+func TestFlowGraph_DDNode_OperateSplitShard(t *testing.T) {
+	h := mock_util.NewMockMsgHandler(t)
+
+	var sealed message.ImmutableSplitShardMessageV2
+	h.EXPECT().HandleSplitShard(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			sealed = msg
+			return nil
+		}).Once()
+
+	ddn := ddNode{
+		ctx:          context.Background(),
+		collectionID: 1,
+		vChannelName: "v1",
+		msgHandler:   h,
+	}
+
+	splitShardMsg, err := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:      1,
+			SplitTaskId:       100,
+			FlushedSegmentIds: []int64{7, 8},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	require.NoError(t, err)
+	immutableSplitShardMsg := splitShardMsg.WithTimeTick(5).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
+	tsMsg, err := adaptor.NewSplitShardMessageBody(immutableSplitShardMsg)
+	require.NoError(t, err)
+
+	var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{tsMsg}, 0, 0, nil, nil)
+	outputMsgs := ddn.Operate([]Msg{msgStreamMsg})
+	assert.NotNil(t, outputMsgs)
+
+	require.NotNil(t, sealed, "the fence must reach the msg handler, or its sealed segments are lost")
+	assert.Equal(t, []int64{7, 8}, sealed.Header().GetFlushedSegmentIds())
+	assert.Equal(t, "v1", sealed.VChannel())
+}
+
+// TestFlowGraph_DDNode_OperateSplitShardHandlerFailure: a handler failure must
+// be logged and swallowed like every other handler in this node -- the flow
+// graph keeps advancing, and the WAL replay is what retries.
+func TestFlowGraph_DDNode_OperateSplitShardHandlerFailure(t *testing.T) {
+	h := mock_util.NewMockMsgHandler(t)
+	h.EXPECT().HandleSplitShard(mock.Anything, mock.Anything).Return(errors.New("mock seal error")).Once()
+
+	ddn := ddNode{
+		ctx:          context.Background(),
+		collectionID: 1,
+		vChannelName: "v1",
+		msgHandler:   h,
+	}
+
+	splitShardMsg, err := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1, FlushedSegmentIds: []int64{7}}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	require.NoError(t, err)
+	tsMsg, err := adaptor.NewSplitShardMessageBody(
+		splitShardMsg.WithTimeTick(5).IntoImmutableMessage(mock_message.NewMockMessageID(t)))
+	require.NoError(t, err)
+
+	var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{tsMsg}, 0, 0, nil, nil)
+	assert.NotPanics(t, func() {
+		assert.NotNil(t, ddn.Operate([]Msg{msgStreamMsg}))
+	})
 }

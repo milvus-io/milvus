@@ -1145,6 +1145,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	if dbChanged && oldColl.Available() && newColl.Available() {
 		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
 	}
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
 	mt.collID2Meta[header.CollectionId] = newColl
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
@@ -1159,6 +1160,45 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		mlog.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil
+}
+
+// applyAlterCollectionTopologyLocked keeps the two counters that are maintained
+// INCREMENTALLY, rather than recomputed, in step with a collection whose shard
+// topology an alter has changed.
+//
+// Both were written when a collection's shard count and vchannel list were fixed
+// from creation to drop, so adding at creation and subtracting at drop was exact.
+// A shard split moves both while the collection lives, and neither counter is
+// derived from the meta on read, so an alter that does not adjust them leaves
+// them permanently wrong:
+//
+//   - generalCnt is the cluster capacity check's running total of
+//     partitions x shards. Drop subtracts the CURRENT shard count, so a
+//     collection created with 2 shards, split to 4 and then dropped subtracts
+//     more than it ever added and drives the total below zero -- after which the
+//     capacity limit silently stops rejecting anything.
+//   - the pchannel stats manager tracks which vchannels sit on each pchannel and
+//     the balancer places new collections by those counts. A split's target
+//     vchannels would never be registered at all.
+//
+// A no-op for every alter that leaves the topology alone, which is all of them
+// today except the shard-split routing commit.
+func (mt *MetaTable) applyAlterCollectionTopologyLocked(oldColl *model.Collection, newColl *model.Collection) {
+	if oldColl.ShardsNum != newColl.ShardsNum {
+		// Use the OLD partition count for the subtraction and the NEW one for the
+		// addition, exactly as create/drop do, so the two are symmetric even if a
+		// single alter were ever to move both numbers.
+		mt.generalCnt -= oldColl.GetPartitionNum(true) * int(oldColl.ShardsNum)
+		mt.generalCnt += newColl.GetPartitionNum(true) * int(newColl.ShardsNum)
+	}
+
+	added, removed := lo.Difference(newColl.VirtualChannelNames, oldColl.VirtualChannelNames)
+	if len(added) > 0 {
+		channel.StaticPChannelStatsManager.MustGet().AddVChannel(added...)
+	}
+	if len(removed) > 0 {
+		channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(removed...)
+	}
 }
 
 func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error {

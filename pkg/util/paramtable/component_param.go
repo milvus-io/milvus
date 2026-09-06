@@ -2397,6 +2397,7 @@ type proxyConfig struct {
 	PartitionNameRegexp               ParamItem `refreshable:"true"`
 	MustUsePartitionKey               ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	EnableRoutingTable                ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
@@ -2931,6 +2932,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
 	}
 	p.SkipAutoIDCheck.Init(base.mgr)
+
+	p.EnableRoutingTable = ParamItem{
+		Key:          "proxy.enableRoutingTable",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "kill-switch for shard-split routing abstraction; when false, fall back to legacy HashPK2Channels",
+		Export:       false,
+	}
+	p.EnableRoutingTable.Init(base.mgr)
 
 	p.SkipPartitionKeyCheck = ParamItem{
 		Key:          "proxy.skipPartitionKeyCheck",
@@ -5655,26 +5665,39 @@ type dataCoordConfig struct {
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
-	SegmentMaxSize                 ParamItem `refreshable:"false"`
-	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
-	SegmentSealProportion          ParamItem `refreshable:"false"`
-	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
-	SegAssignmentExpiration        ParamItem `refreshable:"false"`
-	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
-	SegmentMaxLifetime             ParamItem `refreshable:"false"`
-	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
-	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
-	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
-	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
-	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
-	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
-	TargetVecIndexVersion          ParamItem `refreshable:"true"`
-	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
-	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
-	SegmentFlushInterval           ParamItem `refreshable:"true"`
-	BlockingL0EntryNum             ParamItem `refreshable:"true"`
-	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
-	DVForceAllIndexReady           ParamItem `refreshable:"true"`
+	SegmentMaxSize     ParamItem `refreshable:"false"`
+	DiskSegmentMaxSize ParamItem `refreshable:"true"`
+
+	// shard split
+	ShardSplitEnable                  ParamItem `refreshable:"true"`
+	ShardSplitAutoTriggerEnable       ParamItem `refreshable:"true"`
+	ShardSplitCheckInterval           ParamItem `refreshable:"true"`
+	ShardSplitMaxShardSize            ParamItem `refreshable:"true"`
+	ShardSplitMinSiblingRatio         ParamItem `refreshable:"true"`
+	ShardSplitMaxShardRows            ParamItem `refreshable:"true"`
+	ShardSplitMaxNamespaceCount       ParamItem `refreshable:"true"`
+	ShardSplitMaxConcurrentTasks      ParamItem `refreshable:"true"`
+	ShardSplitRelabelBatchSize        ParamItem `refreshable:"true"`
+	ShardSplitRehashMaxCollectionSize ParamItem `refreshable:"true"`
+	ShardSplitTaskRetention           ParamItem `refreshable:"true"`
+	SegmentSealProportion             ParamItem `refreshable:"false"`
+	SegmentSealProportionJitter       ParamItem `refreshable:"true"`
+	SegAssignmentExpiration           ParamItem `refreshable:"false"`
+	AllocLatestExpireAttempt          ParamItem `refreshable:"true"`
+	SegmentMaxLifetime                ParamItem `refreshable:"false"`
+	SegmentMaxIdleTime                ParamItem `refreshable:"false"`
+	SegmentMinSizeFromIdleToSealed    ParamItem `refreshable:"false"`
+	SegmentMaxBinlogFileNumber        ParamItem `refreshable:"false"`
+	GrowingSegmentsMemSizeInMB        ParamItem `refreshable:"true"`
+	AutoUpgradeSegmentIndex           ParamItem `refreshable:"true"`
+	ForceRebuildSegmentIndex          ParamItem `refreshable:"true"`
+	TargetVecIndexVersion             ParamItem `refreshable:"true"`
+	ForceRebuildScalarSegmentIndex    ParamItem `refreshable:"true"`
+	TargetScalarIndexVersion          ParamItem `refreshable:"true"`
+	SegmentFlushInterval              ParamItem `refreshable:"true"`
+	BlockingL0EntryNum                ParamItem `refreshable:"true"`
+	BlockingL0SizeInMB                ParamItem `refreshable:"true"`
+	DVForceAllIndexReady              ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
@@ -6045,6 +6068,123 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		Export: true,
 	}
 	p.EnableCompaction.Init(base.mgr)
+
+	p.ShardSplitEnable = ParamItem{
+		Key:          "dataCoord.shardSplit.enable",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Master switch of online shard split. It gates the split trigger (automatic and manual);
+disabling it stops new split tasks but never interrupts a task already past the write fence.`,
+		Export: true,
+	}
+	p.ShardSplitEnable.Init(base.mgr)
+
+	p.ShardSplitAutoTriggerEnable = ParamItem{
+		Key:          "dataCoord.shardSplit.autoTriggerEnable",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether the cluster sizes its shards AUTOMATICALLY. It selects a mode, and the two modes
+are mutually exclusive:
+  true  - the size trigger splits over-loaded shards on its own, and a user request to change a
+          collection's shard count is REJECTED. Letting both act would have them fence the same
+          shards from two directions.
+  false - the size trigger is off and the shard count is the user's to set, through the
+          collection.shardNum property of AlterCollection.
+Has no effect unless dataCoord.shardSplit.enable is on.`,
+		Export: true,
+	}
+	p.ShardSplitAutoTriggerEnable.Init(base.mgr)
+
+	p.ShardSplitCheckInterval = ParamItem{
+		Key:          "dataCoord.shardSplit.checkInterval",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		Doc:          "The interval in seconds the shard split trigger inspects the per-shard statistics.",
+		Export:       true,
+	}
+	p.ShardSplitCheckInterval.Init(base.mgr)
+
+	p.ShardSplitMaxShardSize = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardSize",
+		Version:      "3.0.0",
+		DefaultValue: "2048",
+		Doc:          "The data size of one shard that triggers a split, unit: GB.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardSize.Init(base.mgr)
+
+	p.ShardSplitMinSiblingRatio = ParamItem{
+		Key:          "dataCoord.shardSplit.minSiblingRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.05",
+		Doc: `Guard against re-splitting a shard that a previous doubling did not relieve.
+A doubling cuts a shard's keys on the next hash bit, so its two halves should end up
+comparable in size. They do not if one primary key is inserted enough times to dominate
+the shard: every copy hashes the same, one half takes everything, and splitting it again
+burns a full rewrite for nothing. The trigger refuses to double a shard whose sibling
+half is smaller than this fraction of it, and warns instead. Set to 0 to disable.`,
+		Export: false,
+	}
+	p.ShardSplitMinSiblingRatio.Init(base.mgr)
+
+	p.ShardSplitMaxShardRows = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardRows",
+		Version:      "3.0.0",
+		DefaultValue: "500000000",
+		Doc:          "The row count of one shard that triggers a split.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardRows.Init(base.mgr)
+
+	p.ShardSplitMaxNamespaceCount = ParamItem{
+		Key:          "dataCoord.shardSplit.maxNamespaceCount",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Doc:          "The namespace (partition) count of one shard that triggers a split.",
+		Export:       true,
+	}
+	p.ShardSplitMaxNamespaceCount.Init(base.mgr)
+
+	p.ShardSplitMaxConcurrentTasks = ParamItem{
+		Key:          "dataCoord.shardSplit.maxConcurrentTasks",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Doc:          "The cluster-wide maximum number of concurrent shard split tasks.",
+		Export:       true,
+	}
+	p.ShardSplitMaxConcurrentTasks.Init(base.mgr)
+
+	p.ShardSplitRelabelBatchSize = ParamItem{
+		Key:          "dataCoord.shardSplit.relabelBatchSize",
+		Version:      "3.0.0",
+		DefaultValue: "256",
+		Doc:          "The number of segments relabeled to the target shards in one batch during shard split redistribution.",
+		Export:       true,
+	}
+	p.ShardSplitRelabelBatchSize.Init(base.mgr)
+
+	p.ShardSplitRehashMaxCollectionSize = ParamItem{
+		Key:          "dataCoord.shardSplit.rehashMaxCollectionSize",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `The largest collection, in GB, whose shard count may be changed by hand. 0 disables the check.
+
+A rehash rewrites every shard at once, and the pre-split copy of a shard cannot be dropped until the
+rewrite is adopted -- until then it is the only readable copy -- so the collection is resident TWICE
+for the length of the rewrite. An automatic doubling costs one shard's worth of that; a rehash costs
+the whole collection. Set this to the largest collection your query nodes can hold twice.`,
+		Export: true,
+	}
+	p.ShardSplitRehashMaxCollectionSize.Init(base.mgr)
+
+	p.ShardSplitTaskRetention = ParamItem{
+		Key:          "dataCoord.shardSplit.taskRetention",
+		Version:      "3.0.0",
+		DefaultValue: "1800",
+		Doc:          "The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.",
+		Export:       true,
+	}
+	p.ShardSplitTaskRetention.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",

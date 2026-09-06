@@ -718,3 +718,62 @@ func TestWKTWKBConversion(t *testing.T) {
 		})
 	}
 }
+
+func TestParseShardSplitMode(t *testing.T) {
+	kv := func(k, v string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: k, Value: v}}
+	}
+
+	t.Run("absent means auto, and says so", func(t *testing.T) {
+		mode, exist, err := ParseShardSplitMode(kv("some.other.key", "manual"))
+		assert.NoError(t, err)
+		assert.False(t, exist, "a collection that never says anything did not set the property")
+		assert.Equal(t, ShardSplitModeAuto, mode, "absent is managed for the user")
+	})
+
+	t.Run("canonicalises case and surrounding space", func(t *testing.T) {
+		for _, raw := range []string{"auto", "AUTO", "  Auto ", "\tauto\n"} {
+			mode, exist, err := ParseShardSplitMode(kv(CollectionShardSplitMode, raw))
+			assert.NoError(t, err, raw)
+			assert.True(t, exist, raw)
+			assert.Equal(t, ShardSplitModeAuto, mode, raw)
+		}
+		for _, raw := range []string{"manual", "Manual", " MANUAL "} {
+			mode, exist, err := ParseShardSplitMode(kv(CollectionShardSplitMode, raw))
+			assert.NoError(t, err, raw)
+			assert.True(t, exist, raw)
+			assert.Equal(t, ShardSplitModeManual, mode, raw)
+		}
+	})
+
+	// A typo that silently meant "auto" would hand the size trigger a collection
+	// the operator believes they size by hand, so it has to be refused.
+	t.Run("an unrecognized value is refused, not defaulted", func(t *testing.T) {
+		mode, exist, err := ParseShardSplitMode(kv(CollectionShardSplitMode, "atuo"))
+		assert.Error(t, err)
+		assert.True(t, exist, "the property was set, it was just wrong")
+		assert.Empty(t, mode, "no mode is reported when the value is refused")
+
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid,
+			"callers classify this as a parameter error, so it must carry the code")
+		assert.Contains(t, err.Error(), CollectionShardSplitMode, "the message names the property")
+		assert.Contains(t, err.Error(), "must be", "the message names the accepted values")
+		assert.Contains(t, err.Error(), "atuo", "the message echoes what was actually given")
+	})
+
+	t.Run("an empty value is refused too", func(t *testing.T) {
+		_, exist, err := ParseShardSplitMode(kv(CollectionShardSplitMode, ""))
+		assert.Error(t, err)
+		assert.True(t, exist)
+	})
+
+	t.Run("the first matching key wins over later noise", func(t *testing.T) {
+		mode, exist, err := ParseShardSplitMode([]*commonpb.KeyValuePair{
+			{Key: "unrelated", Value: "nonsense"},
+			{Key: CollectionShardSplitMode, Value: ShardSplitModeManual},
+		})
+		assert.NoError(t, err)
+		assert.True(t, exist)
+		assert.Equal(t, ShardSplitModeManual, mode)
+	})
+}
