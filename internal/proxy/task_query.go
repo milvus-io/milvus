@@ -9,7 +9,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -544,7 +543,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, exprTemplateValues)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+		return nil, wrapPlanCreationError(err, "failed to create query plan")
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -564,7 +563,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.SchemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+			return wrapPlanCreationError(err, "failed to create query plan")
 		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
@@ -854,7 +853,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-	t.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
 		return err
 	}

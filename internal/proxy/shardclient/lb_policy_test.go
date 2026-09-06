@@ -493,7 +493,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.True(merr.IsCanceledOrTimeout(err))
 }
 
-func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry() {
+func (s *LBPolicySuite) TestExecuteWithRetryFieldNotLoadedUsesRequestLevelRetry() {
 	ctx := context.Background()
 	channel := s.channels[0]
 	nodes := []NodeInfo{
@@ -524,7 +524,11 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry(
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 			executedNodes = append(executedNodes, nodeID)
 			if len(executedNodes) <= len(nodes) {
-				return errors.Wrapf(merr.ErrServiceUnavailable, "fail on QueryNode %d", nodeID)
+				// C++ FieldNotLoaded(2027) is projected through merr as a
+				// retriable system error. It must exclude the node only for this
+				// request, never add the healthy node to the cross-request channel
+				// blacklist.
+				return merr.SegcoreError(2027, "bloom_match field is not loaded")
 			}
 			return nil
 		},

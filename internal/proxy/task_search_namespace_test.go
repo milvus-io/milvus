@@ -44,7 +44,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Capture plan to verify namespace by mocking tryGeneratePlan
 		var capturedPlan *planpb.PlanNode
-		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue, _ *planparserv2.MembershipPreflightBudget) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 			capturedPlan = &planpb.PlanNode{}
 			qi := &planpb.QueryInfo{Topk: 10, MetricType: "L2", QueryFieldId: 101, GroupByFieldId: -1}
 			return capturedPlan, qi, 0, false, nil, internalpb.SearchType_DEFAULT, nil
@@ -90,7 +90,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
 		mockey.Mock((*searchTask).checkNq).Return(int64(1), nil).Build()
-		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue, _ *planparserv2.MembershipPreflightBudget) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 			plan := &planpb.PlanNode{
 				Node: &planpb.PlanNode_VectorAnns{
 					VectorAnns: &planpb.VectorANNS{

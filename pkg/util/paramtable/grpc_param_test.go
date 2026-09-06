@@ -70,6 +70,21 @@ func TestGrpcServerParams(t *testing.T) {
 	assert.Equal(t, serverConfig.GracefulStopTimeout.GetAsInt(), 3)
 }
 
+func TestProxyGrpcRecvLimitCoversMembershipFilter(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	grpcConfig := GrpcServerConfig{}
+	grpcConfig.Init(typeutil.ProxyRole, base)
+
+	const membershipEnvelopeHeaderSize = 32
+	recvLimit := grpcConfig.ServerMaxRecvSize.GetAsInt64()
+	filterLimit := params.MaxMembershipFilterSize.GetAsInt64()
+
+	assert.Equal(t, int64(128*1024*1024), recvLimit)
+	assert.Greater(t, recvLimit, filterLimit+membershipEnvelopeHeaderSize)
+}
+
 func TestGrpcClientParams(t *testing.T) {
 	role := typeutil.DataNodeRole
 	base := ComponentParam{}

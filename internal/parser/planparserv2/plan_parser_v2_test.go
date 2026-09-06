@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -2912,6 +2913,14 @@ func Test_ArrayLength(t *testing.T) {
 		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
+
+	t.Run("struct sub-field shorthand is rejected by the 3.0 grammar", func(t *testing.T) {
+		expr := `array_length($[sub_int]) == 1`
+		_, err := ParseExpr(schema, expr, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "line 1:")
+		require.NotContains(t, err.Error(), "unsupported expression")
+	})
 }
 
 // Test randome sample with all other predicate expressions.
@@ -3009,6 +3018,58 @@ func Test_SegmentScorers(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, plan)
 		assert.Equal(t, 2, len(plan.Scorers))
+	})
+
+	t.Run("ok - membership scorer filters", func(t *testing.T) {
+		roaringBlob, err := clientroaring.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		bloomTemplate, _ := bloomBytesTemplate(t, 0.01, 1, 2, 3)
+
+		for _, tc := range []struct {
+			name   string
+			filter string
+			values map[string]*schemapb.TemplateValue
+			kind   string
+		}{
+			{
+				name:   "bloom",
+				filter: "membership_match(Int64Field, {bf}, type=bloom)",
+				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
+				kind:   "bloom",
+			},
+			{
+				name:   "roaring",
+				filter: "membership_match(Int64Field, {rb}, type=roaring)",
+				values: map[string]*schemapb.TemplateValue{
+					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
+				},
+				kind: "roaring",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fs := &schemapb.FunctionScore{
+					Functions: []*schemapb.FunctionSchema{
+						makeBoostRanker(tc.filter, "1.0"),
+					},
+				}
+				plan, err := CreateSearchPlan(
+					schema,
+					"",
+					"FloatVectorField",
+					&planpb.QueryInfo{GroupByFieldId: -1},
+					tc.values,
+					fs,
+				)
+				require.NoError(t, err)
+				require.Len(t, plan.GetScorers(), 1)
+				filter := plan.GetScorers()[0].GetFilter()
+				if tc.kind == "bloom" {
+					assert.NotNil(t, filter.GetBloomFilterExpr())
+				} else {
+					assert.NotNil(t, filter.GetRoaringFilterExpr())
+				}
+			})
+		}
 	})
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {

@@ -14,6 +14,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -616,6 +618,39 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		s.Error(dr.Init(context.Background()))
 	})
 
+	s.Run("delete with bloom_match expression rejected", func() {
+		// bloom_match takes a client pre-built blob as a {template} bytes param;
+		// build a valid SBBF blob so the plan PARSES successfully and the delete
+		// guard (not the arg validator) is what rejects it.
+		builder, err := sbbf.NewBuilder(3, 0.001)
+		s.Require().NoError(err)
+		builder.AddInt64(1)
+		builder.AddInt64(2)
+		builder.AddInt64(3)
+		blob := builder.Marshal()
+
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Expr:           "membership_match(pk, {bf}, type=bloom)",
+				ExprTemplateValues: map[string]*schemapb.TemplateValue{
+					"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+				},
+			},
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
+			Return(s.schema, nil)
+
+		dr.metaCache = s.mockCache
+		err = dr.Init(context.Background())
+		s.Error(err)
+		s.ErrorContains(err, "approximate bloom filter blob")
+		s.ErrorContains(err, "cannot be used in delete expressions")
+	})
+
 	s.Run("partition key mode but delete with partition name", func() {
 		dr := deleteRunner{req: &milvuspb.DeleteRequest{
 			CollectionName: s.collectionName,
@@ -849,6 +884,35 @@ func TestDeleteRunner_Run(t *testing.T) {
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+	})
+
+	t.Run("complex delete budgets and marshals before shard fanout", func(t *testing.T) {
+		blob, err := roaringfilter.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(
+			schema.SchemaHelper,
+			"membership_match(pk, {rb}, type=roaring)",
+			map[string]*schemapb.TemplateValue{
+				"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+			})
+		require.NoError(t, err)
+
+		pt := paramtable.Get()
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, "1")
+		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
+		dr := deleteRunner{
+			schema:       schema,
+			collectionID: collectionID,
+			lb:           shardclient.NewMockLBPolicy(t),
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				DbName:         dbName,
+			},
+		}
+		err = dr.complexDelete(ctx, plan)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.NotEmpty(t, plan.GetOutputFieldIds(),
+			"output fields must be finalized before the one-time marshal")
 	})
 
 	t.Run("complex delete query failed", func(t *testing.T) {

@@ -343,12 +343,22 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+		return merr.WrapErrAsInputError(wrapPlanCreationError(err, "failed to create delete plan"))
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
 	if planparserv2.IsAlwaysTruePlan(dr.plan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
+	}
+
+	// Approximate membership_match filters carrying an MBF1 blob must not drive
+	// deletes: a false positive would
+	// remove rows outside the user's set (design doc
+	// 20260707-bloom-filter-expression). Exact Roaring/MRB1 kinds are
+	// allowed; anything whose kind cannot be proven exact is rejected.
+	if planparserv2.PlanContainsMembershipFilterUnsafeForDelete(dr.plan) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"membership_match with an approximate bloom filter blob cannot be used in delete expressions"))
 	}
 
 	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
@@ -455,25 +465,19 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 	return dt, nil
 }
 
-// getStreamingQueryAndDelteFunc return query function used by LBPolicy
-// make sure it concurrent safe
-func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) shardclient.ExecuteFunc {
+// getStreamingQueryAndDelteFunc returns the query function used by LBPolicy.
+// serializedPlan and outputFieldIDs are prepared once before fan-out and are
+// immutable for every shard callback and retry.
+func (dr *deleteRunner) getStreamingQueryAndDelteFunc(
+	serializedPlan []byte,
+	outputFieldIDs []int64,
+) shardclient.ExecuteFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 		log := mlog.With(
 			mlog.FieldCollectionID(dr.collectionID),
 			mlog.Int64s("partitionIDs", dr.partitionIDs),
 			mlog.String("channel", channel),
 			mlog.FieldNodeID(nodeID))
-
-		// set plan
-		_, outputFieldIDs := translatePkOutputFields(dr.schema.CollectionSchema)
-		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-		plan.OutputFieldIds = outputFieldIDs
-
-		serializedPlan, err := proto.Marshal(plan)
-		if err != nil {
-			return err
-		}
 
 		queryReq := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
@@ -595,6 +599,19 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 	var err error
 
+	_, outputFieldIDs := translatePkOutputFields(dr.schema.CollectionSchema)
+	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
+	plan.OutputFieldIds = outputFieldIDs
+
+	// Budget and marshal once before LB fan-out. A roaring plan can be tens of
+	// MiB; marshaling inside each concurrent shard callback would multiply that
+	// transient buffer by shard count and repeat it on retries.
+	serializedPlan, _, err := marshalPlanWithMembershipFilterSizeLimit(plan, 0)
+	if err != nil {
+		return err
+	}
+	exec := dr.getStreamingQueryAndDelteFunc(serializedPlan, outputFieldIDs)
+
 	dr.msgID, err = dr.idAllocator.AllocOne()
 	if err != nil {
 		return err
@@ -616,7 +633,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 			CollectionID:   dr.collectionID,
 			Channel:        channelName,
 			Nq:             1,
-			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+			Exec:           exec,
 		})
 	} else {
 		err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
@@ -624,7 +641,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 			CollectionName: dr.req.GetCollectionName(),
 			CollectionID:   dr.collectionID,
 			Nq:             1,
-			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+			Exec:           exec,
 		})
 	}
 	dr.result.DeleteCnt = dr.count.Load()

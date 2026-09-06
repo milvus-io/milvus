@@ -614,6 +614,14 @@ mmap-migration:
     		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
     		-tags dynamic -o $(INSTALL_PATH)/mmap-migration $(MMAP_MIGRATION_PATH)/main.go 1>/dev/null
 
+# Wire-format limits that segcore and Go both enforce are one contract with two
+# compilers, and nothing else in the build links them. Generating segcore's copy
+# from the Go one removes the second copy rather than checking it; the checked-in
+# header is what C++ compiles against, so it has to be committed.
+generate-cpp-constants:
+	@echo "Generating segcore's copy of the MRB1 limits from the Go constants"
+	@source $(PWD)/scripts/setenv.sh && $(GO) run $(PWD)/cmd/tools/genmrb1limits
+
 generate-parser:
 	@echo "Updating milvus expression parser"
 	@(cd $(PWD)/internal/parser/planparserv2 && env bash generate.sh)

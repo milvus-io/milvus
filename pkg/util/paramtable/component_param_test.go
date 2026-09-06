@@ -98,6 +98,87 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestMembershipFilterConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	params := proxyConfig{}
+	params.init(base)
+
+	assert.Equal(t, 64*1024*1024, params.MaxMembershipFilterSize.GetAsInt())
+	base.Save(params.MaxMembershipFilterSize.Key, "1048576")
+	assert.Equal(t, 1048576, params.MaxMembershipFilterSize.GetAsInt())
+	base.Reset(params.MaxMembershipFilterSize.Key)
+
+	assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), params.MaxMembershipFilterPlanSize.GetAsInt64())
+	base.Save(params.MaxMembershipFilterPlanSize.Key, "1048576")
+	assert.Equal(t, int64(1048576), params.MaxMembershipFilterPlanSize.GetAsInt64())
+	for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+		base.Save(params.MaxMembershipFilterPlanSize.Key, invalid)
+		assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), params.MaxMembershipFilterPlanSize.GetAsInt64(), invalid)
+	}
+	base.Reset(params.MaxMembershipFilterPlanSize.Key)
+
+	t.Run("legacy bloom filter keys remain fallbacks", func(t *testing.T) {
+		legacySizeKey := params.MaxMembershipFilterSize.FallbackKeys[0]
+		base.Save(legacySizeKey, "2097152")
+		base.Reset(params.MaxMembershipFilterSize.Key)
+		assert.Equal(t, 2*1024*1024, params.MaxMembershipFilterSize.GetAsInt())
+		base.Reset(legacySizeKey)
+		base.Reset(params.MaxMembershipFilterSize.Key)
+
+		legacyPlanKey := params.MaxMembershipFilterPlanSize.FallbackKeys[0]
+		base.Save(legacyPlanKey, "4194304")
+		base.Reset(params.MaxMembershipFilterPlanSize.Key)
+		assert.Equal(t, int64(4*1024*1024), params.MaxMembershipFilterPlanSize.GetAsInt64())
+		base.Reset(legacyPlanKey)
+		base.Reset(params.MaxMembershipFilterPlanSize.Key)
+	})
+}
+
+// TestMembershipFilterSizeFallbackKeys pins the upgrade path for deployments
+// tuned under the pre-unification per-kind keys: with the new
+// proxy.maxMembershipFilterSize unset, the first fallback key that is
+// explicitly set (bloom-first order) supplies the value; an explicitly set new
+// key always wins over any fallback.
+func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
+	Init()
+	params := Get()
+
+	t.Run("old bloom key feeds the unified param", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterSize", "1048576")
+		defer params.Reset("proxy.maxBloomFilterSize")
+		assert.Equal(t, int64(1048576), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("explicit new key wins over fallbacks", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "2097152")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterSize", "1048576")
+		defer params.Reset("proxy.maxBloomFilterSize")
+		params.Save("proxy.maxRoaringFilterSize", "3145728")
+		defer params.Reset("proxy.maxRoaringFilterSize")
+		assert.Equal(t, int64(2097152), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("roaring key is used when bloom key is absent", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxRoaringFilterSize", "4194304")
+		defer params.Reset("proxy.maxRoaringFilterSize")
+		assert.Equal(t, int64(4194304), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("legacy plan key does not widen the per-blob limit", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterPlanSize", "134217728")
+		defer params.Reset("proxy.maxBloomFilterPlanSize")
+		assert.Equal(t, int64(64*1024*1024), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+		assert.Equal(t, int64(128*1024*1024), params.ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64())
+	})
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -329,6 +410,15 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxVectorFieldNum: %d", Params.MaxVectorFieldNum.GetAsInt64())
 
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum.GetAsInt64())
+
+		assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), Params.MaxMembershipFilterPlanSize.GetAsInt64())
+		params.Save(Params.MaxMembershipFilterPlanSize.Key, "1048576")
+		assert.Equal(t, int64(1048576), Params.MaxMembershipFilterPlanSize.GetAsInt64())
+		for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+			params.Save(Params.MaxMembershipFilterPlanSize.Key, invalid)
+			assert.Equal(t, int64(DefaultMaxMembershipFilterPlanSize), Params.MaxMembershipFilterPlanSize.GetAsInt64(), invalid)
+		}
+		params.Reset(Params.MaxMembershipFilterPlanSize.Key)
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 
