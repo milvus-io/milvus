@@ -1791,8 +1791,10 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	case parser.PlanParserBNOT:
 		// Rewrite ~x into (x ^ -1): identical in two's complement, and it reuses
 		// the BitXor execution path (scalar / JSON / array-element) with no new
-		// executor support. Nested arithmetic (e.g. (~x) & 3) is unsupported,
-		// consistent with the other bitwise / arithmetic operators.
+		// executor support. This produces an ordinary BinaryArithExpr node, so it
+		// composes with one further level of nesting like any other arithmetic
+		// op, e.g. (~x) & 3 and ~(x >> 2) are both depth-2 chains; depth-3+ is
+		// still rejected.
 		if childExpr.expr.GetIsTemplate() {
 			return merr.WrapErrParameterInvalidMsg("bitnot cannot be applied on placeholder: %s", ctx.GetText())
 		}

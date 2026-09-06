@@ -1386,7 +1386,9 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
         expr_pb.op(),
         expr_pb.arith_op(),
         expr_pb.value(),
-        expr_pb.right_operand());
+        expr_pb.right_operand(),
+        expr_pb.arith_op2(),
+        expr_pb.right_operand2());
 }
 
 expr::TypedExprPtr

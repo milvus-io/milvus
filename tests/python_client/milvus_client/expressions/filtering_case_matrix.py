@@ -526,6 +526,16 @@ NEGATIVE_FILTER_ERROR_CASES = [
         "i64 ** 2 == 9",
         "power can only apply on constants",
     ),
+    (
+        "nested_arithmetic_depth3_rejected",
+        "((i64 >> 1) & 1) | 1 == 1",
+        "complicated arithmetic operations are not supported",
+    ),
+    (
+        "nested_arithmetic_cross_field_rejected",
+        "((i64 + i32) >> 1) == 4",
+        "not supported to do arithmetic operations between multiple fields",
+    ),
 ]
 
 NEGATIVE_FILTER_ERROR_PENDING_CASES = []
