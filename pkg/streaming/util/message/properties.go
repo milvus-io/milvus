@@ -17,6 +17,7 @@ const (
 	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
 	messagePChannelLevel                    = "_pcl" // mark the message as pchannel level message.
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
+	messageIdempotencyKey                   = "_ik"  // scoped idempotency key of an idempotent write, see `IdempotencyKey`.
 )
 
 var (
