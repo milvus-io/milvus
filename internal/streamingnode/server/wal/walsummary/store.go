@@ -162,27 +162,17 @@ func (s *Store) WriteChunk(
 	if bytes.Equal(existingPayload, payload) {
 		return footer, uint64(len(payload)), nil
 	}
-	// Same generation, different bytes. Either this owner is retrying its own
-	// write, or another writer produced this chunk. The Exist->Write above is
-	// not atomic, so under split-brain both owners can pass the absence check
-	// and the last write would silently win. Arbitrate on the decoded footer:
-	// the newer term is the current owner, the older term is fenced.
+	// Same key, different bytes. The key carries this store's term and the
+	// footer is marshaled from that same term, so a split-brain owner writes a
+	// different key and cannot land here: the only writer of this object is
+	// this term, retrying. Byte inequality alone therefore does not prove a
+	// conflict, because the payload encoding is not guaranteed to be
+	// byte-stable across proto library versions. Compare what the chunk
+	// actually contains instead, so an identical rewrite stays idempotent and
+	// only genuinely different content is corruption.
 	if existingRecords, existingFooter, decodeErr := unmarshalChunk(existingPayload); decodeErr == nil {
-		if existingFooter.GetTerm() > s.term {
-			return nil, 0, storeFencedf("summary chunk %s already written by term %d, own term %d", key, existingFooter.GetTerm(), s.term)
-		}
-		if existingFooter.GetTerm() < s.term {
-			if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-				return nil, 0, errors.Wrapf(err, "failed to overwrite fenced summary chunk %s", key)
-			}
-			return footer, uint64(len(payload)), nil
-		}
-		// Same term: this is our own chunk. Byte inequality alone does not prove
-		// a conflict, because the payload encoding is not guaranteed to be
-		// byte-stable across proto library versions. Compare what the chunk
-		// actually contains instead, so an identical rewrite stays idempotent
-		// and only genuinely different content is corruption.
 		if existingFooter.GetGeneration() == footer.GetGeneration() &&
+			existingFooter.GetTerm() == footer.GetTerm() &&
 			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
 			return footer, uint64(len(payload)), nil
 		}
