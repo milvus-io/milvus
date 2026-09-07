@@ -174,7 +174,6 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 					NodeInfo:          types.NewStreamingNodeInfoFromProto(assignment.Node),
 					Channels:          channels,
 					SecondaryChannels: secondaryChannels,
-					ShardAssignment:   types.NewShardAssignmentInfoFromProto(assignment.ShardAssignment),
 				}
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
