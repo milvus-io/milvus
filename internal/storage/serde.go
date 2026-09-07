@@ -58,17 +58,17 @@ type (
 
 func validateVectorArrayElementCount(payloadLength int, elementsPerVector int) (int, error) {
 	if elementsPerVector <= 0 {
-		return 0, merr.WrapErrStorageMsg("invalid vector width %d for ArrayOfVector", elementsPerVector)
+		return 0, merr.WrapErrServiceInternalMsg("invalid vector width %d for ArrayOfVector", elementsPerVector)
 	}
 	if payloadLength%elementsPerVector != 0 {
-		return 0, merr.WrapErrStorageMsg("ArrayOfVector payload length %d is not divisible by vector width %d", payloadLength, elementsPerVector)
+		return 0, merr.WrapErrServiceInternalMsg("ArrayOfVector payload length %d is not divisible by vector width %d", payloadLength, elementsPerVector)
 	}
 	return payloadLength / elementsPerVector, nil
 }
 
 func validateNonElementNullableVectorArrayValidity(elementValidData []bool) error {
 	if len(elementValidData) > 0 {
-		return merr.WrapErrStorageMsg("non-element-nullable ArrayOfVector row cannot carry element valid_data")
+		return merr.WrapErrServiceInternalMsg("non-element-nullable ArrayOfVector row cannot carry element valid_data")
 	}
 	return nil
 }
@@ -76,7 +76,7 @@ func validateNonElementNullableVectorArrayValidity(elementValidData []bool) erro
 func validateElementNullableVectorArrayValidity(elementValidData []bool, physicalVectors int) error {
 	if len(elementValidData) == 0 {
 		if physicalVectors > 0 {
-			return merr.WrapErrStorageMsg("element-nullable ArrayOfVector row with %d physical vectors requires element valid_data", physicalVectors)
+			return merr.WrapErrServiceInternalMsg("element-nullable ArrayOfVector row with %d physical vectors requires element valid_data", physicalVectors)
 		}
 		return nil
 	}
@@ -88,7 +88,7 @@ func validateElementNullableVectorArrayValidity(elementValidData []bool, physica
 		}
 	}
 	if validVectors != physicalVectors {
-		return merr.WrapErrStorageMsg(
+		return merr.WrapErrServiceInternalMsg(
 			"ArrayOfVector element valid_data has %d valid vectors, but compact physical payload has %d vectors",
 			validVectors,
 			physicalVectors,
@@ -155,7 +155,7 @@ type serdeEntry struct {
 	//	null is deserialized to nil without checking the type nullability.
 	//	if shouldCopy is true, the returned value is copied rather than referenced from arrow array.
 	//	elementType is only used for ArrayOfVector
-	//	elementNullable is only used for Array and ArrayOfVector
+	//	elementNullable is only used for ArrayOfVector
 	deserialize func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error)
 	// serialize serializes the value to the builder, returns error.
 	// 	nil is serialized to null without checking the type nullability.
@@ -171,7 +171,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.FixedWidthTypes.Boolean
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -199,7 +199,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Int8
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -227,7 +227,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Int16
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -255,7 +255,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Int32
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -283,7 +283,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -311,7 +311,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Float32
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -339,7 +339,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Float64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -367,7 +367,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -395,7 +395,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.BinaryTypes.String
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -428,7 +428,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m[schemapb.DataType_String] = stringEntry
 	m[schemapb.DataType_Text] = serdeEntry{
 		arrowType: stringEntry.arrowType,
-		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -479,7 +479,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -518,7 +518,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -648,7 +648,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(dim int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: dim}
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -700,7 +700,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(dim int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: dim * 4}
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, elementNullable bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -979,7 +979,7 @@ func serializeNonElementNullableArrayOfVector(
 
 	valueBuilder, ok := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 	if !ok {
-		return merr.WrapErrStorageMsg(
+		return merr.WrapErrServiceInternalMsg(
 			"non-element-nullable ArrayOfVector requires FixedSizeBinary child storage, got %T",
 			builder.ValueBuilder(),
 		)
@@ -1067,7 +1067,7 @@ func serializeElementNullableArrayOfVector(
 ) error {
 	valueBuilder, ok := builder.ValueBuilder().(*array.BinaryBuilder)
 	if !ok {
-		return merr.WrapErrStorageMsg(
+		return merr.WrapErrServiceInternalMsg(
 			"element-nullable ArrayOfVector requires Binary child storage, got %T",
 			builder.ValueBuilder(),
 		)
@@ -1235,14 +1235,14 @@ func deserializeNonElementNullableArrayOfVector(
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
-		return nil, merr.WrapErrStorageMsg(
+		return nil, merr.WrapErrDataIntegrityMsg(
 			"non-element-nullable ArrayOfVector requires FixedSizeBinary child storage, got %T",
 			valuesArray,
 		)
 	}
 	storedByteWidth := binaryArray.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
 	if storedByteWidth != byteWidth {
-		return nil, merr.WrapErrStorageMsg(
+		return nil, merr.WrapErrDataIntegrityMsg(
 			"ArrayOfVector child byte width %d does not match expected width %d",
 			storedByteWidth,
 			byteWidth,
@@ -1251,7 +1251,7 @@ func deserializeNonElementNullableArrayOfVector(
 	if binaryArray.NullN() > 0 {
 		for j := start; j < end; j++ {
 			if binaryArray.IsNull(int(j)) {
-				return nil, merr.WrapErrStorageMsg(
+				return nil, merr.WrapErrDataIntegrityMsg(
 					"non-element-nullable ArrayOfVector contains null child at logical element %d",
 					j-start,
 				)
@@ -1321,14 +1321,27 @@ func deserializeElementNullableArrayOfVector(
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.Binary)
 	if !ok {
-		return nil, merr.WrapErrStorageMsg(
+		return nil, merr.WrapErrDataIntegrityMsg(
 			"element-nullable ArrayOfVector requires Binary child storage, got %T",
 			valuesArray,
 		)
 	}
 
+	totalBytes := 0
+	if start < end {
+		offsets := binaryArray.ValueOffsets()
+		totalBytes = int(offsets[end] - offsets[start])
+	}
+	isFloatVector := elementType == schemapb.DataType_FloatVector
+	var floatData []float32
+	var byteData []byte
+	// The byte span is only a capacity hint; null children are never copied.
+	if isFloatVector {
+		floatData = make([]float32, 0, totalBytes/4)
+	} else {
+		byteData = make([]byte, 0, totalBytes)
+	}
 	validData := make([]bool, 0, int(end-start))
-	validElements := 0
 	for j := start; j < end; j++ {
 		idx := int(j)
 		valid := !binaryArray.IsNull(idx)
@@ -1336,40 +1349,25 @@ func deserializeElementNullableArrayOfVector(
 		if !valid {
 			continue
 		}
-		if actualByteWidth := len(binaryArray.Value(idx)); actualByteWidth != byteWidth {
-			return nil, merr.WrapErrStorageMsg(
+		vector := binaryArray.Value(idx)
+		if actualByteWidth := len(vector); actualByteWidth != byteWidth {
+			return nil, merr.WrapErrDataIntegrityMsg(
 				"ArrayOfVector child at logical element %d has byte width %d, expected %d",
 				j-start,
 				actualByteWidth,
 				byteWidth,
 			)
 		}
-		validElements++
-	}
-
-	extractByteVectors := func() []byte {
-		data := make([]byte, 0, validElements*byteWidth)
-		for j := start; j < end; j++ {
-			idx := int(j)
-			if binaryArray.IsNull(idx) {
-				continue
-			}
-			data = append(data, binaryArray.Value(idx)...)
+		if isFloatVector {
+			floatData = append(floatData, arrow.Float32Traits.CastFromBytes(vector)...)
+		} else {
+			byteData = append(byteData, vector...)
 		}
-		return data
 	}
 
 	var field *schemapb.VectorField
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		floatData := make([]float32, 0, validElements*int(dim))
-		for j := start; j < end; j++ {
-			idx := int(j)
-			if binaryArray.IsNull(idx) {
-				continue
-			}
-			floatData = append(floatData, arrow.Float32Traits.CastFromBytes(binaryArray.Value(idx))...)
-		}
 		field = &schemapb.VectorField{
 			Dim: dim,
 			Data: &schemapb.VectorField_FloatVector{
@@ -1379,22 +1377,22 @@ func deserializeElementNullableArrayOfVector(
 	case schemapb.DataType_BinaryVector:
 		field = &schemapb.VectorField{
 			Dim:  dim,
-			Data: &schemapb.VectorField_BinaryVector{BinaryVector: extractByteVectors()},
+			Data: &schemapb.VectorField_BinaryVector{BinaryVector: byteData},
 		}
 	case schemapb.DataType_Float16Vector:
 		field = &schemapb.VectorField{
 			Dim:  dim,
-			Data: &schemapb.VectorField_Float16Vector{Float16Vector: extractByteVectors()},
+			Data: &schemapb.VectorField_Float16Vector{Float16Vector: byteData},
 		}
 	case schemapb.DataType_BFloat16Vector:
 		field = &schemapb.VectorField{
 			Dim:  dim,
-			Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: extractByteVectors()},
+			Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: byteData},
 		}
 	case schemapb.DataType_Int8Vector:
 		field = &schemapb.VectorField{
 			Dim:  dim,
-			Data: &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
+			Data: &schemapb.VectorField_Int8Vector{Int8Vector: byteData},
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
