@@ -9,6 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/IndexLoadPlan.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "folly/system/ThreadName.h"
+#include "folly/ScopeGuard.h"
 #include <arrow/api.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_binary.h>
@@ -101,6 +107,209 @@ GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
+ public:
+    explicit TestScalarIndexV3LoadRoute(
+        const milvus::storage::FileManagerContext& ctx)
+        : milvus::index::ScalarIndex<int32_t>("test_scalar_v3_async") {
+        file_manager_ =
+            std::make_shared<milvus::storage::MemFileManagerImpl>(ctx);
+    }
+
+    milvus::index::ScalarIndexType
+    GetIndexType() const override {
+        return milvus::index::ScalarIndexType::STLSORT;
+    }
+
+    knowhere::BinarySet
+    Serialize(const milvus::Config&) override {
+        return {};
+    }
+
+    void
+    Load(const knowhere::BinarySet&, const milvus::Config&) override {
+    }
+
+    void
+    Load(milvus::tracer::TraceContext, const milvus::Config&) override {
+    }
+
+    void
+    Build(const milvus::Config&) override {
+    }
+
+    void
+    Build(size_t, const int32_t*, const bool* = nullptr) override {
+    }
+
+    int64_t
+    Count() override {
+        return load_entries_calls_;
+    }
+
+    milvus::index::IndexStatsPtr
+    Upload(const milvus::Config& config) override {
+        return UploadUnified(config);
+    }
+
+    const bool
+    HasRawData() const override {
+        return false;
+    }
+
+    const milvus::TargetBitmap
+    In(size_t, const int32_t*) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    IsNull() override {
+        return {};
+    }
+
+    milvus::TargetBitmap
+    IsNotNull() override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    NotIn(size_t, const int32_t*) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    Range(const int32_t&, milvus::OpType) override {
+        return {};
+    }
+
+    const milvus::TargetBitmap
+    Range(const int32_t&, bool, const int32_t&, bool) override {
+        return {};
+    }
+
+    std::optional<int32_t>
+    Reverse_Lookup(size_t) const override {
+        return std::nullopt;
+    }
+
+    int64_t
+    Size() override {
+        return 0;
+    }
+
+    void
+    WriteEntries(milvus::storage::IndexEntryWriter* writer) override {
+        constexpr int32_t payload = 42;
+        writer->WriteEntry("payload", &payload, sizeof(payload));
+    }
+
+    void
+    LoadEntries(milvus::storage::IndexEntryReader& reader,
+                const milvus::Config&) override {
+        auto entry = reader.ReadEntry("payload");
+        ASSERT_EQ(entry.data.size(), sizeof(int32_t));
+        load_entries_calls_++;
+    }
+
+    milvus::storage::IndexLoadPlan
+    PlanLoad(const milvus::storage::IndexEntryCatalog& catalog,
+             const milvus::Config&) override {
+        planned_thread_ = folly::getCurrentThreadName().value_or("");
+        auto payload = std::make_shared<std::vector<uint8_t>>(
+            catalog.At("payload").plaintext_size);
+        milvus::storage::IndexLoadPlan plan;
+        plan.entries.push_back(milvus::storage::MakeEntryLoadPlan(
+            catalog,
+            "payload",
+            milvus::storage::MemoryEntryTarget{
+                payload, payload->data(), payload->size()},
+            milvus::storage::DefaultEntryStreamSliceSize()));
+        return plan;
+    }
+
+    void
+    FinalizeLoad(milvus::storage::IndexLoadArtifact&& artifact,
+                 const milvus::Config&) override {
+        const auto& target = std::get<milvus::storage::MemoryEntryTarget>(
+            artifact.At("payload").target);
+        ASSERT_EQ(target.bytes, sizeof(int32_t));
+        std::memcpy(&finalized_payload_, target.data, sizeof(int32_t));
+        finalized_thread_ = folly::getCurrentThreadName().value_or("");
+        finalize_load_calls_++;
+    }
+
+    std::string planned_thread_;
+    std::string finalized_thread_;
+    int load_entries_calls_{0};
+    int finalize_load_calls_{0};
+    int32_t finalized_payload_{0};
+};
+
+TEST(ScalarIndexV3AsyncLoadConfigTest, GlobalSwitchSelectsCompleteLoadPath) {
+    using namespace milvus;
+    using namespace milvus::index;
+    using namespace milvus::segcore::storagev2translator;
+    const auto old_enabled = StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard(
+        [old_enabled] { SetStorageV2AsyncLoadEnabled(old_enabled); });
+    for (bool enabled : {false, true}) {
+        SetStorageV2AsyncLoadEnabled(enabled);
+        for (auto priority : {proto::common::LoadPriority::HIGH,
+                              proto::common::LoadPriority::LOW}) {
+            auto ctx = GetTempFileManagerCtx(Int32);
+            TestScalarIndexV3LoadRoute build_index(ctx);
+            auto stats = build_index.UploadUnified({});
+            TestScalarIndexV3LoadRoute load_index(ctx);
+            Config config;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            config[LOAD_PRIORITY] = priority;
+            OpContext op_ctx;
+            load_index.LoadUnified(config, &op_ctx);
+            EXPECT_EQ(load_index.load_entries_calls_, enabled ? 0 : 1);
+            EXPECT_EQ(load_index.finalize_load_calls_, enabled ? 1 : 0);
+            if (enabled) {
+                EXPECT_EQ(load_index.finalized_payload_, 42);
+                EXPECT_TRUE(
+                    load_index.planned_thread_.starts_with("MILVUS_ASYNC"));
+                EXPECT_TRUE(
+                    load_index.finalized_thread_.starts_with("MILVUS_ASYNC"));
+            }
+        }
+    }
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     HybridLoadsStandaloneSortWithoutTypeMeta) {
+    using namespace milvus;
+    using namespace milvus::index;
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous = StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard(
+        [previous] { SetStorageV2AsyncLoadEnabled(previous); });
+    auto ctx = GetTempFileManagerCtx(Int64);
+    ScalarIndexSort<int64_t> build_index(ctx);
+    const std::vector<int64_t> values{30, 10, 20, 10};
+    build_index.Build(values.size(), values.data());
+    auto stats = build_index.UploadUnified({});
+    Config config;
+    config[INDEX_FILES] = stats->GetIndexFiles();
+    config[LOAD_PRIORITY] = proto::common::LoadPriority::LOW;
+    for (bool enabled : {false, true}) {
+        SetStorageV2AsyncLoadEnabled(enabled);
+        HybridScalarIndex<int64_t> loaded(7, ctx);
+        loaded.LoadUnified(config);
+        EXPECT_EQ(loaded.Count(), values.size());
+        const int64_t needle = 10;
+        auto hits = loaded.In(1, &needle);
+        ASSERT_EQ(hits.size(), values.size());
+        EXPECT_EQ(hits.count(), 2);
+        EXPECT_TRUE(hits[1]);
+        EXPECT_TRUE(hits[3]);
+        EXPECT_EQ(loaded.IsNull().count(), 0);
+        EXPECT_EQ(loaded.IsNotNull().count(), values.size());
+    }
 }
 
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {

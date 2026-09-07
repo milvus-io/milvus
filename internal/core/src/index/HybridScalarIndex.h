@@ -37,6 +37,12 @@
 namespace milvus {
 namespace index {
 
+// Shares the persisted-type and legacy standalone-file compatibility rules
+// between async resource admission and actual hybrid loading.
+ScalarIndexType
+ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+                             const Config& config);
+
 /*
 * @brief Implementation of hybrid index  
 * @details This index only for scalar type.
@@ -196,6 +202,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
 
  protected:
     ScalarIndexType

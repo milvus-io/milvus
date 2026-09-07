@@ -26,6 +26,8 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "folly/coro/Task.h"
+#include "storage/IndexLoadPlan.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -285,7 +287,26 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
 
+    // Describe final targets before IO; the new materializer owns byte transfer.
+    virtual storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
+    }
+
+    // Construct the query representation from fully verified targets, without remote IO.
+    virtual void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
+    }
+
  protected:
+    // Entire new path executes on the shared async executor. No legacy reader fallback.
+    folly::coro::Task<void>
+    LoadUnifiedAsync(const std::string& packed_file,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
+
     // Execute a LIKE-pattern query inside PatternMatch implementations.
     // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
     //   NOT a regex. Implementations must convert internally if needed

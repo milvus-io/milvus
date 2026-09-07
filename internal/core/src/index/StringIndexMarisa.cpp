@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <boost/uuid/uuid_io.hpp>
+#include <arrow/status.h>
 #include "common/FastMem.h"
 #include <fcntl.h>
 #include <stdio.h>
@@ -70,6 +71,23 @@ namespace {
 constexpr uint32_t MARISA_CSR_FORMAT_VERSION = 1;
 constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
     "marisa_csr_format_version";
+
+struct MarisaLoadContext {
+    bool is_mmap{false};
+    bool has_csr{false};
+    std::string file_name;
+    size_t str_ids_bytes{0};
+    size_t csr_index_bytes{0};
+    size_t csr_offsets_bytes{0};
+    size_t csr_num_keys{0};
+
+    std::shared_ptr<std::vector<int64_t>> str_ids;
+    std::shared_ptr<std::vector<uint32_t>> csr_index;
+    std::shared_ptr<std::vector<uint32_t>> csr_offsets;
+    std::shared_ptr<storage::MmapFileTarget> trie_file;
+    std::shared_ptr<storage::MmapFileTarget> str_ids_file;
+    std::shared_ptr<storage::MmapFileTarget> csr_file;
+};
 
 }  // namespace
 
@@ -868,6 +886,294 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
                        csr_offsets_.size() * sizeof(uint32_t));
     writer->PutMeta(MARISA_CSR_FORMAT_VERSION_META, MARISA_CSR_FORMAT_VERSION);
     writer->PutMeta("csr_num_keys", csr_num_keys_);
+}
+
+storage::IndexLoadPlan
+StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                            const Config& config) {
+    auto context = std::make_shared<MarisaLoadContext>();
+    context->is_mmap = config.contains(MMAP_FILE_PATH);
+
+    auto local_cm =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto tmp_dir = local_cm ? local_cm->GetRootPath() : std::string("/tmp");
+    context->file_name =
+        tmp_dir + "/" +
+        boost::uuids::to_string(boost::uuids::random_generator()());
+
+    auto trie_bytes = catalog.At(MARISA_TRIE_INDEX).plaintext_size;
+    context->trie_file =
+        std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            context->file_name, trie_bytes, context->is_mmap, nullptr});
+
+    context->str_ids_bytes = catalog.At(MARISA_STR_IDS).plaintext_size;
+    ValidateMarisaEntryElementSize(
+        MARISA_STR_IDS, context->str_ids_bytes, sizeof(int64_t));
+
+    auto has_csr_index = catalog.HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = catalog.HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = catalog.HasMeta("csr_num_keys");
+    auto has_csr_version = catalog.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+    auto has_any_csr =
+        has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
+    if (has_any_csr) {
+        AssertInfo(has_csr_index && has_csr_offsets && has_csr_num_keys &&
+                       has_csr_version,
+                   "incomplete marisa CSR side entries: index {}, offsets {}, "
+                   "num_keys {}, version {}",
+                   has_csr_index,
+                   has_csr_offsets,
+                   has_csr_num_keys,
+                   has_csr_version);
+        auto csr_format_version =
+            catalog.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+        AssertInfo(csr_format_version == MARISA_CSR_FORMAT_VERSION,
+                   "unsupported marisa CSR format version: expected {}, got {}",
+                   MARISA_CSR_FORMAT_VERSION,
+                   csr_format_version);
+        context->has_csr = true;
+        context->csr_num_keys = catalog.GetMeta<size_t>("csr_num_keys");
+        AssertInfo(
+            context->csr_num_keys <=
+                std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1,
+            "marisa CSR key count {} is too large",
+            context->csr_num_keys);
+        context->csr_index_bytes = catalog.At(MARISA_CSR_INDEX).plaintext_size;
+        context->csr_offsets_bytes =
+            catalog.At(MARISA_CSR_OFFSETS).plaintext_size;
+        ValidateMarisaEntryElementSize(
+            MARISA_CSR_INDEX, context->csr_index_bytes, sizeof(uint32_t));
+        ValidateMarisaEntryElementSize(
+            MARISA_CSR_OFFSETS, context->csr_offsets_bytes, sizeof(uint32_t));
+        auto expected_index_bytes =
+            (context->csr_num_keys + 1) * sizeof(uint32_t);
+        AssertInfo(context->csr_index_bytes == expected_index_bytes,
+                   "invalid marisa CSR index size: expected {}, got {}",
+                   expected_index_bytes,
+                   context->csr_index_bytes);
+        AssertInfo(
+            context->csr_offsets_bytes <=
+                std::numeric_limits<size_t>::max() - context->csr_index_bytes,
+            "marisa CSR file size overflow");
+    }
+
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    auto slice_size = storage::DefaultEntryStreamSliceSize();
+    plan.entries.push_back(storage::MakeEntryLoadPlan(
+        catalog,
+        MARISA_TRIE_INDEX,
+        storage::MmapEntryTarget{context->trie_file, 0, trie_bytes},
+        slice_size));
+
+    if (context->is_mmap) {
+        context->str_ids_file = std::make_shared<storage::MmapFileTarget>(
+            storage::MmapFileTarget{context->file_name + ".str_ids",
+                                    context->str_ids_bytes,
+                                    true,
+                                    nullptr});
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_STR_IDS,
+            storage::MmapEntryTarget{
+                context->str_ids_file, 0, context->str_ids_bytes},
+            slice_size));
+    } else {
+        context->str_ids = std::make_shared<std::vector<int64_t>>(
+            context->str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_STR_IDS,
+            storage::MemoryEntryTarget{
+                context->str_ids,
+                reinterpret_cast<uint8_t*>(context->str_ids->data()),
+                context->str_ids_bytes},
+            slice_size));
+    }
+
+    if (!context->has_csr) {
+        return plan;
+    }
+    if (context->is_mmap) {
+        auto csr_file_size =
+            context->csr_index_bytes + context->csr_offsets_bytes;
+        context->csr_file =
+            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+                context->file_name + ".csr", csr_file_size, true, nullptr});
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_CSR_INDEX,
+            storage::MmapEntryTarget{
+                context->csr_file, 0, context->csr_index_bytes},
+            slice_size));
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_CSR_OFFSETS,
+            storage::MmapEntryTarget{context->csr_file,
+                                     context->csr_index_bytes,
+                                     context->csr_offsets_bytes},
+            slice_size));
+    } else {
+        context->csr_index = std::make_shared<std::vector<uint32_t>>(
+            context->csr_index_bytes / sizeof(uint32_t));
+        context->csr_offsets = std::make_shared<std::vector<uint32_t>>(
+            context->csr_offsets_bytes / sizeof(uint32_t));
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_CSR_INDEX,
+            storage::MemoryEntryTarget{
+                context->csr_index,
+                reinterpret_cast<uint8_t*>(context->csr_index->data()),
+                context->csr_index_bytes},
+            slice_size));
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            MARISA_CSR_OFFSETS,
+            storage::MemoryEntryTarget{
+                context->csr_offsets,
+                reinterpret_cast<uint8_t*>(context->csr_offsets->data()),
+                context->csr_offsets_bytes},
+            slice_size));
+    }
+    return plan;
+}
+
+void
+StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                                const Config& config) {
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<MarisaLoadContext>>();
+    AssertInfo(context != nullptr,
+               "StringIndexMarisa FinalizeLoad context is null");
+
+    marisa::Trie new_trie;
+    std::unique_ptr<MmapFileRAII> new_trie_file_raii;
+    if (context->is_mmap) {
+        new_trie_file_raii =
+            std::make_unique<MmapFileRAII>(context->trie_file->path);
+        new_trie.mmap(context->trie_file->path.c_str());
+    } else {
+        auto trie_file = File::Open(context->trie_file->path, O_RDONLY);
+        new_trie.read(trie_file.Descriptor());
+        trie_file.Close();
+    }
+
+    char* new_str_ids_mmap_data = nullptr;
+    char* new_csr_mmap_data = nullptr;
+    auto str_ids_mmap_guard = folly::makeGuard([&]() {
+        if (new_str_ids_mmap_data != nullptr &&
+            new_str_ids_mmap_data != MAP_FAILED) {
+            munmap(new_str_ids_mmap_data, context->str_ids_bytes);
+        }
+    });
+    auto csr_mmap_guard = folly::makeGuard([&]() {
+        if (new_csr_mmap_data != nullptr && new_csr_mmap_data != MAP_FAILED) {
+            munmap(new_csr_mmap_data,
+                   context->csr_index_bytes + context->csr_offsets_bytes);
+        }
+    });
+    std::unique_ptr<MmapFileRAII> new_str_ids_file_raii;
+    std::unique_ptr<MmapFileRAII> new_csr_file_raii;
+    std::vector<int64_t> new_str_ids;
+    std::vector<uint32_t> new_csr_index;
+    std::vector<uint32_t> new_csr_offsets;
+
+    if (context->is_mmap) {
+        new_str_ids_file_raii =
+            std::make_unique<MmapFileRAII>(context->str_ids_file->path);
+        auto file = File::Open(context->str_ids_file->path, O_RDONLY);
+        new_str_ids_mmap_data = static_cast<char*>(mmap(nullptr,
+                                                        context->str_ids_bytes,
+                                                        PROT_READ,
+                                                        MAP_PRIVATE,
+                                                        file.Descriptor(),
+                                                        0));
+        file.Close();
+        AssertInfo(new_str_ids_mmap_data != MAP_FAILED,
+                   "failed to mmap marisa str_ids: {}",
+                   strerror(errno));
+    } else {
+        new_str_ids = std::move(*context->str_ids);
+    }
+    auto new_str_ids_size = context->str_ids_bytes / sizeof(int64_t);
+    AssertInfo(new_str_ids_size <= std::numeric_limits<uint32_t>::max(),
+               "segment row count {} exceeds uint32_t capacity for CSR",
+               new_str_ids_size);
+
+    if (context->has_csr) {
+        AssertInfo(context->csr_num_keys == new_trie.num_keys(),
+                   "invalid marisa CSR key count: expected {}, got {}",
+                   new_trie.num_keys(),
+                   context->csr_num_keys);
+        if (context->is_mmap) {
+            new_csr_file_raii =
+                std::make_unique<MmapFileRAII>(context->csr_file->path);
+            auto file = File::Open(context->csr_file->path, O_RDONLY);
+            auto csr_size =
+                context->csr_index_bytes + context->csr_offsets_bytes;
+            new_csr_mmap_data = static_cast<char*>(mmap(nullptr,
+                                                        csr_size,
+                                                        PROT_READ,
+                                                        MAP_PRIVATE,
+                                                        file.Descriptor(),
+                                                        0));
+            file.Close();
+            AssertInfo(new_csr_mmap_data != MAP_FAILED,
+                       "failed to mmap marisa CSR: {}",
+                       strerror(errno));
+        } else {
+            new_csr_index = std::move(*context->csr_index);
+            new_csr_offsets = std::move(*context->csr_offsets);
+        }
+    }
+
+    config_ = config;
+    trie_.swap(new_trie);
+    mmap_file_raii_ = std::move(new_trie_file_raii);
+    str_ids_size_ = new_str_ids_size;
+    if (context->is_mmap) {
+        AssertInfo(context->str_ids_bytes <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "marisa str_ids mmap size exceeds int64 range");
+        str_ids_mmap_data_ = new_str_ids_mmap_data;
+        new_str_ids_mmap_data = nullptr;
+        str_ids_mmap_size_ = static_cast<int64_t>(context->str_ids_bytes);
+        str_ids_mmap_raii_ = std::move(new_str_ids_file_raii);
+        str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
+    } else {
+        str_ids_ = std::move(new_str_ids);
+        str_ids_ptr_ = str_ids_.data();
+    }
+
+    if (context->has_csr) {
+        csr_num_keys_ = context->csr_num_keys;
+        if (context->is_mmap) {
+            auto csr_size =
+                context->csr_index_bytes + context->csr_offsets_bytes;
+            AssertInfo(csr_size <= static_cast<size_t>(
+                                       std::numeric_limits<int64_t>::max()),
+                       "marisa CSR mmap size exceeds int64 range");
+            csr_mmap_data_ = new_csr_mmap_data;
+            new_csr_mmap_data = nullptr;
+            csr_mmap_size_ = static_cast<int64_t>(csr_size);
+            csr_mmap_raii_ = std::move(new_csr_file_raii);
+            csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
+            csr_offsets_ptr_ = reinterpret_cast<const uint32_t*>(
+                csr_mmap_data_ + context->csr_index_bytes);
+        } else {
+            csr_index_ = std::move(new_csr_index);
+            csr_offsets_ = std::move(new_csr_offsets);
+            csr_index_ptr_ = csr_index_.data();
+            csr_offsets_ptr_ = csr_offsets_.data();
+        }
+    } else {
+        fill_offsets();
+    }
+
+    built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
+    LOG_INFO("FinalizeLoad StringIndexMarisa done");
 }
 
 void

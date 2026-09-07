@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "index/JsonIndexLoadPlan.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstring>
@@ -191,6 +192,26 @@ class JsonScalarIndexWrapper : public BaseIndex {
         // BaseIndex::LoadEntries has fully initialized the base index, so
         // Count() is safe to call and we can eagerly build the exists bitmap.
         BuildExistsBitset(this->Count());
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override {
+        auto plan = BaseIndex::PlanLoad(catalog, config);
+        AppendJsonNonExistOffsetsPlan(plan, catalog);
+        return plan;
+    }
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override {
+        auto new_non_exist_offsets = TakeJsonNonExistOffsets(artifact);
+
+        BaseIndex::FinalizeLoad(std::move(artifact), config);
+        non_exist_offsets_ = std::move(new_non_exist_offsets);
+        BuildExistsBitset(this->Count());
+        LOG_INFO("FinalizeLoad JsonScalarIndexWrapper done, has_non_exist: {}",
+                 !non_exist_offsets_.empty());
     }
 
     // v2 format: override Load() to defer the eager exists bitmap build

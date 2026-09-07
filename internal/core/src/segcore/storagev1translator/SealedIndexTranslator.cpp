@@ -13,6 +13,7 @@
 #include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "log/Log.h"
@@ -93,6 +94,29 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    const bool use_async_load =
+        storagev2translator::StorageV2AsyncLoadEnabled();
+    const auto version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    if (use_async_load && version >= 3 &&
+        !IsVectorDataType(index_load_info_.field_type)) {
+        auto resources =
+            milvus::index::IndexFactory::GetInstance()
+                .ScalarIndexAsyncLoadResource(index_load_info_.field_type,
+                                              index_load_info_.index_size,
+                                              index_load_info_.index_params,
+                                              index_load_info_.enable_mmap,
+                                              index_load_info_.num_rows,
+                                              index_load_info_.index_files,
+                                              file_manager_context_);
+        load_resource_request_ =
+            index_load_info_.load_resource_request.value_or(resources.request);
+        meta_.loading_overhead_config = std::move(resources.overhead);
+        return;
+    }
+
     std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
     bool use_shared_memory_overhead_group = false;
     load_resource_request_ = EstimateLoadResource(

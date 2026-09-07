@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "index/JsonIndexLoadPlan.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstring>
@@ -179,6 +180,26 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",
                  has_non_exist);
         BuildExistsBitset(this->Count());
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override {
+        auto plan = HybridScalarIndex<T>::PlanLoad(catalog, config);
+        AppendJsonNonExistOffsetsPlan(plan, catalog);
+        return plan;
+    }
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override {
+        auto new_non_exist_offsets = TakeJsonNonExistOffsets(artifact);
+
+        HybridScalarIndex<T>::FinalizeLoad(std::move(artifact), config);
+        non_exist_offsets_ = std::move(new_non_exist_offsets);
+        BuildExistsBitset(this->Count());
+        LOG_INFO("FinalizeLoad JsonHybridScalarIndex done, has_non_exist: {}",
+                 !non_exist_offsets_.empty());
     }
 
     JsonCastType

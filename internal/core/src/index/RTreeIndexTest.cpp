@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "folly/coro/BlockingWait.h"
+#include "test_utils/AsyncLoadTestUtils.h"
+#include "storage/IndexMaterializer.h"
 #include <boost/core/enable_if.hpp>
 #include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -2227,4 +2230,62 @@ TEST_F(RTreeIndexTest, GrowingConcurrentQueryKeepsPublishedCandidates) {
         EXPECT_EQ(final_res[off], matches(off)) << "offset " << off;
     }
     EXPECT_EQ(final_res.count(), static_cast<size_t>(kAnchor / 2 + 1));
+}
+
+namespace {
+class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
+ public:
+    using RTreeIndex<std::string>::RTreeIndex;
+
+    void
+    LoadDirectForTest(milvus::storage::AsyncIndexEntryReader& reader,
+                      const milvus::Config& config,
+                      milvus::proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            milvus::storage::MaterializeIndexAsync(reader, std::move(plan)));
+        FinalizeLoad(std::move(artifact), config);
+        artifact.CommitTargets();
+    }
+};
+}  // namespace
+
+TEST_F(RTreeIndexTest, V3AsyncLoadUsesNativeDirectStagingFiles) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    ExposedRTreeIndex build_index(ctx_build);
+    std::vector<std::string> wkbs = {CreatePointWKB(1.0, 1.0),
+                                     CreatePointWKB(2.0, 2.0),
+                                     CreatePointWKB(3.0, 3.0)};
+    build_index.BuildWithRawDataForUT(wkbs.size(), wkbs.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(ctx_build, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    milvus::storage::FileManagerContext ctx_load(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    ctx_load.set_for_loading_index(true);
+    ExposedRTreeIndex load_index(ctx_load);
+    milvus::Config config;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), wkbs.size());
+    auto query = std::make_shared<milvus::Dataset>();
+    query->Set(milvus::index::OPERATOR_TYPE,
+               milvus::proto::plan::GISFunctionFilterExpr_GISOp_Equals);
+    query->Set(milvus::index::MATCH_VALUE,
+               CreateGeometryFromWkt("POINT (2 2)"));
+    auto hits = load_index.Query(query);
+    EXPECT_EQ(hits.count(), 1);
+    EXPECT_TRUE(hits[1]);
 }

@@ -144,6 +144,38 @@ constexpr size_t STRING_SORT_ALIGNMENT = 32;  // 32-byte alignment
 
 const uint64_t STRING_SORT_MMAP_INDEX_PADDING = 1;
 
+namespace {
+
+size_t
+StringSortMmapFileSize(size_t data_size) {
+    AssertInfo(data_size <= std::numeric_limits<size_t>::max() -
+                                (STRING_SORT_ALIGNMENT - 1),
+               "StringIndexSort mmap alignment size overflow");
+    auto aligned_size =
+        ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+        STRING_SORT_ALIGNMENT;
+    AssertInfo(aligned_size <= std::numeric_limits<size_t>::max() -
+                                   STRING_SORT_MMAP_INDEX_PADDING,
+               "StringIndexSort mmap padding size overflow");
+    return aligned_size + STRING_SORT_MMAP_INDEX_PADDING;
+}
+
+struct StringSortLoadContext {
+    size_t total_num_rows{0};
+    bool is_nested{false};
+    bool is_mmap{false};
+    bool has_persisted_offsets{false};
+    size_t index_data_bytes{0};
+    size_t offsets_bytes{0};
+
+    std::shared_ptr<std::vector<uint8_t>> index_data;
+    std::shared_ptr<std::vector<uint8_t>> valid_bitset;
+    std::shared_ptr<storage::MmapFileTarget> index_data_file;
+    std::shared_ptr<storage::MmapFileTarget> offsets_file;
+};
+
+}  // namespace
+
 StringIndexSort::StringIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
@@ -604,6 +636,200 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("idx_to_offsets",
                        idx_to_offsets_.data(),
                        idx_to_offsets_.size() * sizeof(int32_t));
+}
+
+storage::IndexLoadPlan
+StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                          const Config& config) {
+    auto version = catalog.GetMeta<uint32_t>("version");
+    AssertInfo(version == SERIALIZATION_VERSION,
+               "Unsupported StringIndexSort serialization version: {}, "
+               "expected: {}",
+               version,
+               SERIALIZATION_VERSION);
+
+    auto context = std::make_shared<StringSortLoadContext>();
+    context->total_num_rows = catalog.GetMeta<size_t>("num_rows");
+    context->is_nested = is_nested_index_ || catalog.GetMeta<bool>("is_nested");
+    context->is_mmap = config.contains(MMAP_FILE_PATH);
+    context->index_data_bytes = catalog.At("index_data").plaintext_size;
+    context->has_persisted_offsets = catalog.HasEntry("idx_to_offsets");
+
+    AssertInfo(context->total_num_rows <=
+                   std::numeric_limits<size_t>::max() / sizeof(int32_t),
+               "StringIndexSort idx_to_offsets size overflow for {} rows",
+               context->total_num_rows);
+    context->offsets_bytes = context->total_num_rows * sizeof(int32_t);
+    if (context->has_persisted_offsets) {
+        AssertInfo(catalog.At("idx_to_offsets").plaintext_size ==
+                       context->offsets_bytes,
+                   "invalid idx_to_offsets size: expected {}, got {}",
+                   context->offsets_bytes,
+                   catalog.At("idx_to_offsets").plaintext_size);
+    }
+
+    AssertInfo(
+        context->total_num_rows <= std::numeric_limits<size_t>::max() - 7,
+        "StringIndexSort valid bitset size overflow for {} rows",
+        context->total_num_rows);
+    auto expected_valid_bitset_bytes = (context->total_num_rows + 7) / 8;
+    AssertInfo(catalog.At("valid_bitset").plaintext_size ==
+                   expected_valid_bitset_bytes,
+               "invalid valid_bitset size: expected {}, got {}",
+               expected_valid_bitset_bytes,
+               catalog.At("valid_bitset").plaintext_size);
+    context->valid_bitset =
+        std::make_shared<std::vector<uint8_t>>(expected_valid_bitset_bytes);
+
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    auto slice_size = storage::DefaultEntryStreamSliceSize();
+    if (context->is_mmap) {
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        AssertInfo(!mmap_path.empty(),
+                   "StringIndexSort mmap filepath is empty");
+        context->index_data_file =
+            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+                mmap_path,
+                StringSortMmapFileSize(context->index_data_bytes),
+                true,
+                nullptr});
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            "index_data",
+            storage::MmapEntryTarget{
+                context->index_data_file, 0, context->index_data_bytes},
+            slice_size));
+    } else {
+        context->index_data =
+            std::make_shared<std::vector<uint8_t>>(context->index_data_bytes);
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            "index_data",
+            storage::MemoryEntryTarget{context->index_data,
+                                       context->index_data->data(),
+                                       context->index_data->size()},
+            slice_size));
+    }
+
+    plan.entries.push_back(storage::MakeEntryLoadPlan(
+        catalog,
+        "valid_bitset",
+        storage::MemoryEntryTarget{context->valid_bitset,
+                                   context->valid_bitset->data(),
+                                   context->valid_bitset->size()},
+        slice_size));
+
+    if (context->is_mmap && context->has_persisted_offsets) {
+        context->offsets_file = std::make_shared<storage::MmapFileTarget>(
+            storage::MmapFileTarget{context->index_data_file->path + "-meta",
+                                    context->offsets_bytes,
+                                    true,
+                                    nullptr});
+        plan.entries.push_back(storage::MakeEntryLoadPlan(
+            catalog,
+            "idx_to_offsets",
+            storage::MmapEntryTarget{
+                context->offsets_file, 0, context->offsets_bytes},
+            slice_size));
+    }
+    return plan;
+}
+
+void
+StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                              const Config& config) {
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<StringSortLoadContext>>();
+    AssertInfo(context != nullptr,
+               "StringIndexSort FinalizeLoad context is null");
+
+    TargetBitmap new_valid_bitset(context->total_num_rows, false);
+    for (size_t i = 0; i < context->total_num_rows; ++i) {
+        auto byte = (*context->valid_bitset)[i / 8];
+        if ((byte & (1U << (i % 8))) != 0) {
+            new_valid_bitset.set(i);
+        }
+    }
+
+    std::vector<int32_t> new_offsets;
+    if (!context->is_mmap || !context->has_persisted_offsets) {
+        new_offsets.resize(context->total_num_rows);
+    }
+    std::unique_ptr<StringIndexSortImpl> new_impl;
+    char* new_mmap_meta_data = nullptr;
+    auto mmap_meta_guard = folly::makeGuard([&]() {
+        if (new_mmap_meta_data != nullptr && new_mmap_meta_data != MAP_FAILED) {
+            munmap(new_mmap_meta_data, context->offsets_file->file_size);
+        }
+    });
+
+    if (context->is_mmap) {
+        AssertInfo(context->index_data_file != nullptr &&
+                       context->index_data_file->file != nullptr,
+                   "StringIndexSort index_data mmap target is not prepared");
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        mmap_impl->SetMmapFilePath(context->index_data_file->path);
+        if (context->has_persisted_offsets) {
+            AssertInfo(context->offsets_file != nullptr &&
+                           context->offsets_file->file != nullptr,
+                       "StringIndexSort offsets mmap target is not prepared");
+            auto meta_file = File::Open(context->offsets_file->path, O_RDONLY);
+            new_mmap_meta_data =
+                static_cast<char*>(mmap(nullptr,
+                                        context->offsets_file->file_size,
+                                        PROT_READ,
+                                        MAP_PRIVATE,
+                                        meta_file.Descriptor(),
+                                        0));
+            meta_file.Close();
+            AssertInfo(new_mmap_meta_data != MAP_FAILED,
+                       "failed to mmap StringIndexSort idx_to_offsets: {}",
+                       strerror(errno));
+        }
+        mmap_impl->LoadFromFile(context->index_data_bytes,
+                                context->total_num_rows,
+                                new_valid_bitset,
+                                new_offsets,
+                                context->has_persisted_offsets);
+        new_impl = std::move(mmap_impl);
+    } else {
+        AssertInfo(context->index_data != nullptr,
+                   "StringIndexSort memory target is null");
+        auto memory_impl = std::make_unique<StringIndexSortMmapImpl>();
+        memory_impl->LoadFromBuffer(std::move(*context->index_data),
+                                    context->total_num_rows,
+                                    new_valid_bitset,
+                                    new_offsets);
+        new_impl = std::move(memory_impl);
+    }
+
+    config_ = config;
+    total_num_rows_ = context->total_num_rows;
+    is_nested_index_ = context->is_nested;
+    valid_bitset_ = std::move(new_valid_bitset);
+    impl_ = std::move(new_impl);
+    if (context->is_mmap && context->has_persisted_offsets) {
+        AssertInfo(context->offsets_file->file_size <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "StringIndexSort mmap meta size exceeds int64 range");
+        mmap_meta_filepath_ = context->offsets_file->path;
+        mmap_meta_size_ =
+            static_cast<int64_t>(context->offsets_file->file_size);
+        mmap_meta_data_ = new_mmap_meta_data;
+        new_mmap_meta_data = nullptr;
+        idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);
+        idx_to_offsets_size_ = context->total_num_rows;
+    } else {
+        idx_to_offsets_ = std::move(new_offsets);
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
+    }
+
+    is_built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void

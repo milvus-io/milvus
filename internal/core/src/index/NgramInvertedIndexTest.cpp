@@ -46,6 +46,8 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "folly/ScopeGuard.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -273,6 +275,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         load_index_info.index_files = index_files;
         load_index_info.schema = field_meta.field_schema;
         load_index_info.index_size = index_size;
+        load_index_info.num_rows = nb;
 
         uint8_t trace_id[16] = {0};
         uint8_t span_id[8] = {0};
@@ -307,6 +310,18 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             ASSERT_EQ(final[i], expected_result[i]);
         }
     }
+}
+
+TEST(NgramIndexV3AsyncLoadTest, AsyncLoadPreservesSealedQueryResults) {
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous = StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard(
+        [previous] { SetStorageV2AsyncLoadEnabled(previous); });
+    SetStorageV2AsyncLoadEnabled(true);
+    test_ngram_with_data({"alpha beta", "alphabet", "beta", "gamma"},
+                         "alpha",
+                         proto::plan::OpType::PrefixMatch,
+                         {true, true, false, false});
 }
 
 TEST(NgramIndex, TestNgramWikiEpisode) {

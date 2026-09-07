@@ -15,6 +15,11 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncIndexEntryReader.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
+#include "segcore/storagev2translator/AsyncLoadExecutor.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -727,6 +732,23 @@ IndexFactory::ScalarIndexLoadResourceImpl(
                                         file_stream,
                                         stream_load_info);
 
+    return ScalarIndexLoadResourceWithOverhead(field_type,
+                                               index_size_in_bytes,
+                                               index_params,
+                                               mmap_enable,
+                                               num_rows,
+                                               stream_memory_overhead);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResourceWithOverhead(
+    DataType field_type,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    uint64_t stream_memory_overhead) {
+    const auto& index_type = index_params.at("index_type");
     LoadResourceRequest request{};
     request.has_raw_data = false;
 
@@ -872,6 +894,151 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
     return request;
+}
+
+namespace {
+folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
+InspectAsyncScalarIndex(const std::vector<std::string>& files,
+                        const storage::FileManagerContext& context) {
+    AssertInfo(files.size() == 1 && context.Valid(),
+               "Async scalar load requires one V3 file and a valid context");
+    storage::MemFileManagerImpl manager(context);
+    auto input = manager.OpenInputStream(files.front());
+    AssertInfo(input != nullptr, "Failed to open packed scalar index");
+    const auto size = input->Size();
+    co_return co_await storage::AsyncIndexEntryReader::Open(
+        std::move(input),
+        size,
+        context.fieldDataMeta.collection_id,
+        proto::common::LoadPriority::HIGH,
+        {});
+}
+}  // namespace
+
+AsyncScalarIndexLoadResource
+IndexFactory::ScalarIndexAsyncLoadResource(
+    DataType field_type,
+    uint64_t index_size,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& context) {
+    auto reader = folly::coro::blockingWait(
+        InspectAsyncScalarIndex(index_files, context)
+            .scheduleOn(segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                {}, proto::common::LoadPriority::HIGH)));
+    const auto& catalog = reader->Catalog();
+    auto resolved_params = index_params;
+    if (resolved_params.at("index_type") == HYBRID_INDEX_TYPE) {
+        auto config = ParseConfigFromIndexParams(index_params);
+        config[INDEX_FILES] = index_files;
+        const auto type = ResolvePackedHybridIndexType(catalog, config);
+        const auto resolved = HybridInternalIndexTypeToIndexType(type);
+        AssertInfo(!resolved.empty(),
+                   "Unknown async hybrid index type {}",
+                   static_cast<int>(type));
+        resolved_params["index_type"] = resolved;
+    }
+    uint64_t total_transient = 0;
+    uint64_t max_task = 0;
+    for (const auto& entry : catalog.Entries()) {
+        if (const auto* encrypted =
+                std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
+            for (const auto& slice : encrypted->slices) {
+                const auto bytes = SaturatingAdd(
+                    milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
+                    slice.target_bytes);
+                total_transient = SaturatingAdd(total_transient, bytes);
+                max_task = std::max(max_task, bytes);
+            }
+        } else {
+            total_transient =
+                SaturatingAdd(total_transient, entry.plaintext_size);
+            max_task =
+                std::max(max_task,
+                         std::min<uint64_t>(entry.plaintext_size,
+                                            storage::DefaultStreamSliceSize()));
+        }
+    }
+    const auto workers =
+        segcore::storagev2translator::GetAsyncLoadThreadPoolSize();
+    // Bound one load by its materializer's in-flight slice count. Request-local
+    // reservations must remain valid even if the byte budget expands later.
+    const auto read_peak = std::min(
+        total_transient,
+        milvus::SaturatingMultiply(max_task, static_cast<uint64_t>(workers)));
+    const auto& type = resolved_params.at("index_type");
+    uint64_t staging_bytes = 0;
+    if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
+        catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+        // The whole sidecar survives until FinalizeSealed builds validity.
+        staging_bytes = catalog.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+    } else if (type == BITMAP_INDEX_TYPE) {
+        const bool loads_to_mmap =
+            mmap_enable && catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH) >
+                               DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+        if (!loads_to_mmap) {
+            staging_bytes = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
+            mmap_enable = false;
+        }
+        if (catalog.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
+            staging_bytes = SaturatingAdd(
+                staging_bytes,
+                catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size);
+        }
+    }
+    if (type == FMINDEX_INDEX_TYPE &&
+        catalog.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        staging_bytes = SaturatingAdd(
+            staging_bytes,
+            catalog.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
+    }
+    if (type == ASCENDING_SORT && catalog.HasMeta("version") &&
+        catalog.HasEntry("valid_bitset")) {
+        staging_bytes = SaturatingAdd(
+            staging_bytes, catalog.At("valid_bitset").plaintext_size);
+    }
+    auto request = ScalarIndexLoadResourceWithOverhead(field_type,
+                                                       index_size,
+                                                       resolved_params,
+                                                       mmap_enable,
+                                                       num_rows,
+                                                       read_peak);
+    if (type == RTREE_INDEX_TYPE && catalog.HasEntry("index_null_offset")) {
+        request.final_memory_cost =
+            catalog.At("index_null_offset").plaintext_size;
+    }
+    if (field_type == DataType::JSON) {
+        const auto non_exist_bytes =
+            catalog.HasEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME)
+                ? catalog.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size
+                : uint64_t{0};
+        request.final_memory_cost = SaturatingAdd(
+            request.final_memory_cost,
+            SaturatingAdd(non_exist_bytes, ValidityBitmapBytes(num_rows)));
+    }
+    request.max_memory_cost =
+        std::max(request.max_memory_cost,
+                 SaturatingAdd(request.final_memory_cost,
+                               SaturatingAdd(staging_bytes, read_peak)));
+    std::optional<cachinglayer::LoadingOverheadConfig> overhead;
+    // Only fold actual, leased slice buffers into the shared resource group.
+    // Conversion scratch and whole-entry staging stay in the per-load peak.
+    if (staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
+        request.max_memory_cost - request.final_memory_cost <= read_peak) {
+        auto memory_group =
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
+                milvus::ThreadPools::GetLoadExecutorWorkers());
+        AssertInfo(max_task <= static_cast<uint64_t>(
+                                   std::numeric_limits<int64_t>::max()),
+                   "Async scalar task estimate exceeds resource policy range");
+        overhead = cachinglayer::LoadingOverheadConfig{
+            cachinglayer::LoadingOverheadGroupBinding{
+                std::move(memory_group), static_cast<int64_t>(max_task)},
+            std::nullopt};
+    }
+    return {request, std::move(overhead)};
 }
 
 LoadResourceRequest

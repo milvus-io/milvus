@@ -118,6 +118,14 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
+
  private:
     void
     ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,
