@@ -449,6 +449,30 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 			return true
 		}
 
+		// A task whose last figure is 100 and whose group only waits for the
+		// current target to be promoted is not measured again: the walk
+		// below visits every sealed-segment target of the collection per
+		// replica, and this is the one state a scoped task sits in for a
+		// while - every recovered task of every loaded collection, from the
+		// next-target pull after a restart until the promotion lands, at
+		// every 200 ms tick. The stored figure feeds both consumers exactly
+		// as a fresh 100 would: the watermark refreshes, so the group is
+		// never torn down, and the finish still waits for the promotion.
+		//
+		// What this forgoes is seeing a figure that drops back below 100
+		// before the promotion - a next target re-pulled with a freshly
+		// flushed segment - until the promotion tick, where the gate is off
+		// and the figure is measured again. Such a group is not left alone
+		// meanwhile: its task still drives the checkers, which load the
+		// segment. What it cannot do is time out in that window, which a
+		// group at 100 never could (the watermark refreshes at 100), and
+		// which master's own task for a loaded collection never does either.
+		// A re-arm resets the figure to -1 and measures afresh.
+		if task.LastProgress >= 100 && !ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID) {
+			progress[key] = ob.reusedFullProgress(ctx, task)
+			return true
+		}
+
 		figures, err := utils.ReplicaLoadPercentagesByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, task.CollectionID, task.ResourceGroup)
 		if err != nil {
 			// Rate-limited: this runs per task per observation tick, and a
@@ -499,6 +523,22 @@ func (ob *CollectionObserver) everyReplicaHasReported(ctx context.Context, colle
 		}
 	}
 	return found
+}
+
+// reusedFullProgress is the record for a task whose stored figure of 100 is
+// reused rather than measured (see observeResourceGroupProgress): the group at
+// 100, and each of its replicas at 100, so the record keeps the shape of a
+// measured one - Replicas is nil exactly when Percentage is unknown, and it is
+// not. The teardown, the only reader of the per-replica figures, never runs on
+// a group at 100.
+func (ob *CollectionObserver) reusedFullProgress(ctx context.Context, task LoadTask) resourceGroupProgress {
+	figures := make(map[int64]int32)
+	for _, replica := range ob.meta.GetByCollection(ctx, task.CollectionID) {
+		if replica.GetResourceGroup() == task.ResourceGroup {
+			figures[replica.GetID()] = 100
+		}
+	}
+	return resourceGroupProgress{Percentage: 100, Replicas: figures}
 }
 
 func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[string]resourceGroupProgress) {
