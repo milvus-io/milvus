@@ -555,7 +555,7 @@ func TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -589,7 +589,7 @@ func TestImportTask_UpsertRejectsAutoIDPrimaryKey(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.Error(t, err)
@@ -627,7 +627,7 @@ func TestImportTask_UpsertAllowsNonAutoIDPrimaryKey(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
