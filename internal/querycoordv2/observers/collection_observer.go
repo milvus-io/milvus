@@ -182,7 +182,9 @@ func NewCollectionObserver(
 //     the timeout is only ever measured over ticks that learned something;
 //   - the teardown itself may never take the last replicas of a Loaded
 //     collection (releaseResourceGroupOnTimeout), so even a reading that is
-//     wrong in the pessimistic direction cannot unload a serving collection.
+//     wrong in the pessimistic direction cannot unload a serving collection;
+//     and a group with a single serviceable leader is never torn down at all
+//     (observeResourceGroupTimeout's readiness shield).
 //
 // A task whose group never becomes readable simply stays paused until the
 // collection leaves meta, where observeTimeout's first check removes it.
@@ -326,12 +328,35 @@ func (ob *CollectionObserver) Observe(ctx context.Context) {
 // not.
 const unknownLoadPercentage int32 = -1
 
+// resourceGroupProgress is what the per-tick scan publishes for one scoped
+// task: the group's figure, and the per-replica figures it was folded from.
+//
+// Both come from ONE reading of the targets and the distribution. That is
+// what lets the teardown be narrower than the measurement: the group is
+// judged stalled on Percentage, and the replicas released for it are the ones
+// whose own figure, in that same reading, sat at the stalled watermark. A
+// second reading taken at teardown time could not say that -- a target
+// re-pull landing in between drops every replica below 100 and would hand the
+// teardown a replica that was carrying everything when the group was judged.
+type resourceGroupProgress struct {
+	// Percentage is the group's figure, the minimum over Replicas, or
+	// unknownLoadPercentage when nothing was learned this tick.
+	Percentage int32
+	// Replicas holds each replica's own figure, keyed by replica ID. It is
+	// nil exactly when Percentage is unknown.
+	Replicas map[int64]int32
+}
+
+// unknownResourceGroupProgress is the record for a tick that learned nothing.
+var unknownResourceGroupProgress = resourceGroupProgress{Percentage: unknownLoadPercentage}
+
 // observeResourceGroupProgress is the resource-group-aware slice of the per-tick
 // scan, computed exactly once per tick and consumed by both observeTimeout (as
-// the progress watermark) and observeLoadStatus (to decide when a scoped task is
-// finished). Keeping it in one place is what stops the two consumers from
-// drifting apart, and reusing utils.LoadPercentageByResourceGroup is what stops
-// the walk over channel/segment targets from being written a second time.
+// the progress watermark, and the per-replica figures behind it) and
+// observeLoadStatus (to decide when a scoped task is finished). Keeping it in
+// one place is what stops the two consumers from drifting apart, and reusing
+// utils.ReplicaLoadPercentagesByResourceGroup is what stops the walk over
+// channel/segment targets from being written a second time.
 //
 // The scan restricts itself to tasks that actually name a resource group. When
 // no task does -- which is every deployment that does not use per-resource-group
@@ -363,9 +388,9 @@ const unknownLoadPercentage int32 = -1
 // question ShowLoadCollections asks, where -1 has a narrower published meaning
 // ("no replica of this collection in that group") that these situations must
 // not be folded into.
-func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) map[string]int32 {
+func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) map[string]resourceGroupProgress {
 	var (
-		progress map[string]int32
+		progress map[string]resourceGroupProgress
 		reported map[int64][]*meta.DmChannel
 	)
 	ob.loadTasks.Range(func(key string, task LoadTask) bool {
@@ -373,7 +398,7 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 			return true
 		}
 		if progress == nil {
-			progress = make(map[string]int32)
+			progress = make(map[string]resourceGroupProgress)
 			reported = make(map[int64][]*meta.DmChannel)
 		}
 
@@ -381,7 +406,7 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 			mlog.RatedInfo(ctx, 0.1, "collection target not known yet, resource group load percentage unknown",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup))
-			progress[key] = unknownLoadPercentage
+			progress[key] = unknownResourceGroupProgress
 			return true
 		}
 
@@ -396,11 +421,11 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 			mlog.RatedInfo(ctx, 0.1, "a replica of the resource group has not reported yet, load percentage unknown",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup))
-			progress[key] = unknownLoadPercentage
+			progress[key] = unknownResourceGroupProgress
 			return true
 		}
 
-		percentage, err := utils.LoadPercentageByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, task.CollectionID, task.ResourceGroup)
+		figures, err := utils.ReplicaLoadPercentagesByResourceGroup(ctx, ob.meta, ob.targetMgr, ob.dist, task.CollectionID, task.ResourceGroup)
 		if err != nil {
 			// Rate-limited: this runs per task per observation tick, and a
 			// persistent read failure (a recorded load failure, say) would
@@ -410,11 +435,12 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 				mlog.String("resourceGroup", task.ResourceGroup),
 				mlog.Err(err))
 		}
+		percentage := utils.MinReplicaLoadPercentage(figures)
 		if percentage < 0 {
-			progress[key] = unknownLoadPercentage
+			progress[key] = unknownResourceGroupProgress
 			return true
 		}
-		progress[key] = percentage
+		progress[key] = resourceGroupProgress{Percentage: percentage, Replicas: figures}
 		return true
 	})
 	return progress
@@ -451,7 +477,7 @@ func (ob *CollectionObserver) everyReplicaHasReported(ctx context.Context, colle
 	return found
 }
 
-func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[string]int32) {
+func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[string]resourceGroupProgress) {
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
 		collection := ob.meta.GetCollection(ctx, task.CollectionID)
 		// collection released
@@ -530,8 +556,9 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[s
 }
 
 // observeResourceGroupTimeout decides the fate of one resource-group-scoped
-// task from percentage, the load percentage of this task's collection
-// restricted to this task's resource group, as computed once for this tick.
+// task from progress: the load percentage of this task's collection restricted
+// to this task's resource group, and the per-replica figures behind it, as
+// computed once for this tick.
 //
 // The judgment reads nothing shared with sibling resource groups. Reading
 // collection.UpdatedAt here would be the bug this branch exists to avoid: a
@@ -539,8 +566,9 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[s
 // hours in the past, so a second resource group's task would be declared timed
 // out on its very first observer tick and the replica just spawned for it would
 // be released before it could load anything.
-func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, key string, task LoadTask, percentage int32) {
+func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, key string, task LoadTask, progress resourceGroupProgress) {
 	now := time.Now()
+	percentage := progress.Percentage
 
 	// An unknown percentage PAUSES the clock: the watermark keeps the last
 	// percentage that was actually read, and LastProgressAt is moved to now so
@@ -616,13 +644,22 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 	// that keeps a Loaded collection's LAST replicas does not reach it - a
 	// collection loaded into several groups loses one that is serving.
 	//
+	// Ready is ANY-of over the group's replicas: a shard is served if ONE
+	// query-visible replica of the group has a serviceable leader for it
+	// (utils.ShardLeaderReadinessByResourceGroup), so a group with two
+	// replicas serving and a third stalled at the channel answers Ready and
+	// is kept WHOLE, stalled replica included. That is deliberate. Master
+	// never releases a replica of a Loaded collection; its checkers keep
+	// retrying the stalled one at their own cadence, and they do here too.
+	// The per-replica teardown below is for a group that serves nothing.
+	//
 	// A Ready group refreshes its watermark rather than finishing: finishing
 	// is observeLoadStatus's decision, made on the percentage reaching 100
 	// with the current target promoted, and it stays that way. The task lives
 	// on and is asked again a load timeout later, which is what a fully loaded
 	// group does anyway. A Ready group that never samples 100 therefore keeps
-	// its task indefinitely, one cheap readiness read per load timeout; the
-	// task goes away with the collection, when it is released or dropped.
+	// its task indefinitely, one readiness read per load timeout; the task
+	// goes away with the collection, when it is released or dropped.
 	if ob.resourceGroupIsReady(ctx, task) {
 		mlog.RatedInfo(ctx, 0.1, "resource group load percentage has not moved for the load timeout, but its shard leaders are ready, keeping it",
 			mlog.FieldCollectionID(task.CollectionID),
@@ -641,7 +678,7 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 		mlog.Stringer("loadType", task.LoadType),
 		mlog.Int32("loadPercentage", percentage),
 		mlog.Duration("stalledFor", now.Sub(task.LastProgressAt)))
-	ob.releaseResourceGroupOnTimeout(ctx, key, task)
+	ob.releaseResourceGroupOnTimeout(ctx, key, task, progress.Replicas)
 }
 
 // resourceGroupIsReady answers whether the replicas of this task's resource
@@ -663,53 +700,96 @@ func (ob *CollectionObserver) resourceGroupIsReady(ctx context.Context, task Loa
 	return readiness.Ready
 }
 
-// releaseResourceGroupOnTimeout tears down exactly the replicas of this
-// collection that live in the timed-out resource group. Sibling resource groups
-// keep their replicas, since their loads are independent by construction. The
-// collection-level meta and target go away only once the last resource group is
-// gone, which is the same condition under which the unscoped path drops them.
+// releaseResourceGroupOnTimeout tears down the replicas of this collection
+// that stalled in the timed-out resource group, and only those. Sibling
+// resource groups keep their replicas, since their loads are independent by
+// construction; so do this group's own replicas that are not behind.
+//
+// The group is MEASURED as one figure -- the minimum over its replicas -- but
+// it is torn down replica by replica. The two granularities differ on purpose:
+// an expansion may put several replicas into one group at once, and if two of
+// them carry everything while a third sits on a node that cannot load it, the
+// group reads as the third for as long as it stalls. Releasing the group would
+// take the two that are loaded with it, and retrying the expansion would do
+// the same again. So figures, the per-replica reading from the tick that
+// judged the group stalled, decides: a replica whose own figure sat at the
+// stalled watermark is released; one above it -- at 100, or merely further
+// along, which is not evidence it stalled -- is kept. A replica the reading
+// did not cover (added to the group since the tick) is kept too: no figure,
+// no evidence.
+//
+// ReplicaNumber comes down by exactly the number of replicas removed. If the
+// group still holds replicas afterwards, the task lives on to watch them, with
+// a fresh watermark so the survivors are judged on their own figure rather
+// than on the one the released replica pinned; it finishes as any scoped task
+// does once they carry everything, and a survivor that then stalls for a full
+// load timeout is released the same way. The task ends with the group, when
+// its last replica is gone.
+//
+// The collection-level meta and target go away only once the last resource
+// group is gone, which is the same condition under which the unscoped path
+// drops them.
 //
 // With one exception, which is the hard limit on what a load timeout is allowed
 // to do: it may shrink an expansion that never came up, and it may abandon a
 // load that never completed, but it may NEVER unload a collection that is
-// serving. If taking this resource group's replicas away would leave a Loaded
-// collection with none, the task is dropped and nothing is released -- the
-// collection keeps serving with the replicas it has. The unscoped path has
-// always had this property for free, because its timeout branch only runs for a
-// Loading collection; a scoped task is registered on a Loaded one, so it needs
-// the rule spelled out. Any percentage that is wrong in the pessimistic
-// direction -- and the ways to read a serving group as 0 are many, all of them
-// transient -- stops here instead of costing the deployment its collection.
-func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context, key string, task LoadTask) {
+// serving. If releasing the stalled replicas would leave a Loaded collection
+// with none, the task is dropped and nothing is released -- the collection
+// keeps serving with the replicas it has. The unscoped path has always had
+// this property for free, because its timeout branch only runs for a Loading
+// collection; a scoped task is registered on a Loaded one, so it needs the
+// rule spelled out. Any percentage that is wrong in the pessimistic direction
+// -- and the ways to read a serving group as 0 are many, all of them transient
+// -- stops here instead of costing the deployment its collection.
+//
+// The readiness shield in observeResourceGroupTimeout runs before this and is
+// ANY-of over the group: a group with a single serviceable leader never gets
+// here, whatever its other replicas are doing. This teardown is for a group
+// that serves nothing.
+func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context, key string, task LoadTask, figures map[int64]int32) {
 	replicas := ob.meta.GetByCollection(ctx, task.CollectionID)
-	replicaIDs := make([]int64, 0)
+	stalled := make([]int64, 0)
+	kept := make([]int64, 0)
 	for _, replica := range replicas {
-		if replica.GetResourceGroup() == task.ResourceGroup {
-			replicaIDs = append(replicaIDs, replica.GetID())
+		if replica.GetResourceGroup() != task.ResourceGroup {
+			continue
 		}
+		figure, measured := figures[replica.GetID()]
+		if !measured || figure > task.LastProgress {
+			kept = append(kept, replica.GetID())
+			continue
+		}
+		stalled = append(stalled, replica.GetID())
 	}
 
-	if len(replicaIDs) == len(replicas) {
+	if len(stalled) == len(replicas) {
 		if collection := ob.meta.GetCollection(ctx, task.CollectionID); collection != nil &&
 			collection.GetStatus() == querypb.LoadStatus_Loaded {
-			mlog.RatedWarn(ctx, 0.1, "load timeout for the last resource group of a loaded collection, keeping it loaded and dropping the task",
+			mlog.RatedWarn(ctx, 0.1, "load timeout for the last replicas of a loaded collection, keeping it loaded and dropping the task",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup),
 				mlog.String("traceID", key),
-				mlog.Int64s("replicaIDs", replicaIDs))
+				mlog.Int64s("replicaIDs", stalled))
 			ob.loadTasks.Remove(key)
 			return
 		}
 	}
 
-	if len(replicaIDs) > 0 {
-		if err := ob.meta.RemoveReplicas(ctx, task.CollectionID, replicaIDs...); err != nil {
+	if len(stalled) > 0 {
+		mlog.Info(ctx, "releasing the replicas that stalled in a timed out resource group",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.String("traceID", key),
+			mlog.Int64s("stalledReplicaIDs", stalled),
+			mlog.Int64s("keptReplicaIDs", kept),
+			mlog.Int32("loadPercentage", task.LastProgress))
+		if err := ob.meta.RemoveReplicas(ctx, task.CollectionID, stalled...); err != nil {
 			// Leave the task in place so the next tick retries the teardown;
 			// dropping it here would leak the stalled replicas forever.
 			mlog.Warn(ctx, "failed to remove replicas of timed out resource group",
 				mlog.FieldCollectionID(task.CollectionID),
 				mlog.String("resourceGroup", task.ResourceGroup),
-				mlog.Int64s("replicaIDs", replicaIDs),
+				mlog.Int64s("replicaIDs", stalled),
 				mlog.Err(err))
 			return
 		}
@@ -723,8 +803,8 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		return
 	}
 	// The incremental-expansion path raised the collection's ReplicaNumber
-	// when this resource group was added; taking its replicas away must write
-	// the number back down, or everything that reads it - updateLoadConfig's
+	// when this resource group was added; taking replicas away must write the
+	// number back down, or everything that reads it - updateLoadConfig's
 	// replica-changed check, ShowLoadCollections, the collection-wide
 	// observer's loadPercentage denominator - keeps counting replicas that no
 	// longer exist, and the load percentage can never reach 100 again.
@@ -738,6 +818,15 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 				mlog.Err(err))
 		}
 	}
+
+	if len(kept) > 0 {
+		// The group still holds replicas: keep watching them, from a fresh
+		// watermark, so they are judged on their own figure.
+		task.LastProgress = -1
+		task.LastProgressAt = time.Now()
+		ob.loadTasks.Insert(key, task)
+		return
+	}
 	ob.loadTasks.Remove(key)
 }
 
@@ -748,7 +837,7 @@ func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID i
 	return metaExist && targetExist
 }
 
-func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress map[string]int32) {
+func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress map[string]resourceGroupProgress) {
 	loading := false
 	observeTaskNum := 0
 	observeStart := time.Now()
@@ -818,7 +907,7 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 		// group's supervision, its timeout and its teardown, at the moment it
 		// carries everything and answers nothing.
 		if task.ResourceGroup != "" {
-			loaded = progress[traceID] >= 100 &&
+			loaded = progress[traceID].Percentage >= 100 &&
 				ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID)
 		}
 
