@@ -231,6 +231,13 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
+	// sealed segments resident on a streaming node's query node while the
+	// replica has a regular one: moved, like a balancer's move, at its
+	// priority (CreateSegmentTasksFromPlans sets Low for a move)
+	tasks = c.createMisplacedSegmentMoveTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), replica, replicaSegmentDist)
+	task.SetReason("sealed segment misplaced on a streaming query node", tasks...)
+	ret = append(ret, tasks...)
+
 	redundancies = c.filterOutSegmentInUse(ctx, replica, redundancies, ch2DelegatorList)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
@@ -534,7 +541,8 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// A sealed segment belongs on a regular query node, and the split
 		// between those and the streaming query nodes that carry delegators
 		// stays exactly as it was: this only runs when the replica has NO
-		// regular node at all.
+		// regular node at all, and its resource group runs on streaming
+		// nodes alone (see groupRunsOnStreamingNodesAlone).
 		//
 		// That is not a broken replica. A resource group whose only compute
 		// is a streaming node has none by construction - milvus keeps the
@@ -553,7 +561,8 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// streaming node's query node for good, since the balancers only walk
 		// GetRWNodes. A stock binary keeps the empty candidate set it always
 		// had.
-		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
+		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() &&
+			c.groupRunsOnStreamingNodesAlone(ctx, replica) {
 			rwNodes = replica.GetRWSQNodes()
 		}
 
@@ -577,6 +586,119 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	// the same budget on the next check tick -- it never converges. Needs
 	// either backoff/a retry cap on repeated DeadlineExceeded rebuilds, or a
 	// no-progress timeout instead of a flat per-task wall-clock budget.
+	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+// groupRunsOnStreamingNodesAlone answers whether the replica's resource group
+// holds no regular query node and asks for none, so that a streaming node's
+// embedded query node is the only compute it has by construction, and not
+// merely for the moment.
+//
+// The replica's own RW set cannot tell the two apart. A regular query node
+// that restarts leaves the resource group (handleNodeStopping/handleNodeDown
+// unassign it) and the replica (the replica observer flips it rw->ro and
+// removes it) at once, so a MIXED group - a regular node next to a streaming
+// node - reads exactly like a streaming-only one for the length of the
+// restart; placing the sealed segments on the streaming node's query node
+// then loads the whole replica onto compute it was never meant for. The
+// resource group's node set empties at the same moment, for the same reason,
+// so the count of present nodes is not enough either.
+//
+// What persists across the restart is what the group ASKS for: its
+// requests.nodeNum. A group that runs regular query nodes requests them, and
+// while they are away it is missing them (ResourceGroup.MissingNumOfNodes),
+// which is the same notion the replica manager waits on before assigning a
+// new replica (NeedWaitRGReady). Its sealed segments wait too, on master's
+// terms: nothing is placed until the regular node is back. A group whose only
+// compute is a streaming node requests no regular node, and holds none.
+//
+// A group the resource manager does not know cannot be asked; the replica's
+// node sets are then the only evidence, and they say the streaming node is
+// all there is.
+func (c *SegmentChecker) groupRunsOnStreamingNodesAlone(ctx context.Context, replica *meta.Replica) bool {
+	rg := c.meta.GetResourceGroup(ctx, replica.GetResourceGroup())
+	if rg == nil {
+		return true
+	}
+	return rg.NodeNum() == 0 && rg.MissingNumOfNodes() == 0
+}
+
+// createMisplacedSegmentMoveTasks moves the sealed segments of the replica
+// that sit on a streaming node's embedded query node onto a regular query
+// node, once the replica has one.
+//
+// Such a segment was placed there by createSegmentLoadTasks while the group
+// had no regular node, and nothing on master ever moves it back: the
+// balancers walk GetRWNodes/GetRONodes only, and the redundancy pass here
+// measures the distribution with meta.WithReplica, whose Contains includes
+// the streaming query nodes, so the segment is neither lacking nor redundant
+// as far as the target is concerned. It is misplaced, and this is the one
+// pass that knows it. The move is one task - load on the regular node, then
+// release from the streaming node - so the replica keeps serving the segment
+// throughout, exactly as a balancer's move does; a bare release would leave a
+// gap until the next round loaded it again.
+//
+// Only segments in the target are moved: one that has left the target is the
+// redundancy pass's to release, and loading it onto a regular node first
+// would be wasted work. Growing segments are not this checker's to place and
+// live in the delegator's leader view, not in the segment distribution, so
+// they are untouched by construction; so are the delegators themselves.
+//
+// Only an installed form runs this, as only an installed form places a
+// sealed segment on a streaming node's query node in the first place. A
+// stock binary keeps its checker round exactly as it was.
+func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, replica *meta.Replica, dist []*meta.Segment) []task.Task {
+	if !extension.FormInstalled() || replica.RWSQNodesCount()+replica.ROSQNodesCount() == 0 {
+		return nil
+	}
+	misplaced := lo.Filter(dist, func(s *meta.Segment, _ int) bool {
+		return replica.ContainSQNode(s.Node)
+	})
+	if len(misplaced) == 0 {
+		return nil
+	}
+	targets := c.targetMgr.GetSealedSegmentsByCollection(ctx, replica.GetCollectionID(), meta.NextTargetFirst)
+	misplaced = lo.Filter(misplaced, func(s *meta.Segment, _ int) bool {
+		_, inTarget := targets[s.GetID()]
+		return inTarget
+	})
+
+	logger := mlog.With(
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+	)
+	plans := make([]assign.SegmentAssignPlan, 0)
+	for shard, segments := range lo.GroupBy(misplaced, func(s *meta.Segment) string { return s.GetInsertChannel() }) {
+		// A move loads the segment through the shard's delegator, as a load
+		// does; without one the segment waits where it is.
+		if c.dist.ChannelDistManager.GetShardLeader(shard, replica) == nil {
+			logger.RatedInfo(ctx, rate.Limit(10), "no shard leader for replica to move a misplaced segment",
+				mlog.String("shard", shard))
+			continue
+		}
+		rwNodes := replica.GetChannelRWNodes(shard)
+		if len(rwNodes) == 0 {
+			rwNodes = replica.GetRWNodes()
+		}
+		if len(rwNodes) == 0 {
+			// Still no regular node: the streaming node's query node is
+			// where the segment belongs for now.
+			continue
+		}
+		residentOn := lo.SliceToMap(segments, func(s *meta.Segment) (int64, int64) { return s.GetID(), s.Node })
+		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, true)
+		for i := range shardPlans {
+			shardPlans[i].From = residentOn[shardPlans[i].Segment.GetID()]
+			shardPlans[i].Replica = replica
+			shardPlans[i].LoadPriority = replica.LoadPriority()
+		}
+		plans = append(plans, shardPlans...)
+	}
+	if len(plans) == 0 {
+		return nil
+	}
+	logger.Info(ctx, "moving sealed segments off a streaming node's query node onto a regular query node",
+		mlog.Int64s("segmentIDs", lo.Map(plans, func(p assign.SegmentAssignPlan, _ int) int64 { return p.Segment.GetID() })))
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
