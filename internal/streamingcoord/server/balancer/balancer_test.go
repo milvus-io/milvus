@@ -374,14 +374,20 @@ func TestBalancerFreezeNodeInOtherResourceGroup(t *testing.T) {
 	assert.NotNil(t, b)
 	defer b.Close()
 
-	// Wait for the balancer loop to be live and the initial round to finish.
+	// waitForBalanceRound requests a balance round and blocks until it has
+	// completed. The first Trigger's future is set inside apply() before the
+	// round runs, so the collected signal only proves a round started; the
+	// second Trigger's future is set only when the execute loop returns to
+	// the select, which is after the in-flight round finished. That makes
+	// every assertion after this helper ordered after the cleanup ran.
 	waitForBalanceRound := func() {
-		b.Trigger(ctx)
+		assert.NoError(t, b.Trigger(ctx)) // request a round
 		select {
-		case <-collected:
+		case <-collected: // that (or a later) round has started
 		case <-time.After(30 * time.Second):
 			t.Fatal("no balance round observed")
 		}
+		assert.NoError(t, b.Trigger(ctx)) // returns only after the in-flight round completed
 	}
 	// Drain any signals left by rounds before the freeze request was applied.
 	drainCollected := func() {
