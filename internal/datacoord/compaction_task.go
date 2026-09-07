@@ -108,7 +108,13 @@ func incCompactionTaskMetric(task *datapb.CompactionTask) {
 }
 
 func decCompactionTaskMetric(task *datapb.CompactionTask) {
-	updateCompactionTaskMetric(getCompactionTaskMetric(task), -1)
+	metric := getCompactionTaskMetric(task)
+	// Terminal transitions are already accounted for and remain in Done on
+	// every other cleanup path, so channel removal must preserve them too.
+	if metric.status == metrics.Done {
+		return
+	}
+	updateCompactionTaskMetric(metric, -1)
 }
 
 func setNodeID(nodeID int64) compactionTaskOpt {

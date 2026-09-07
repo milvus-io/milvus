@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/magiconair/properties/assert"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -481,6 +483,49 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.handler.restoreTask(t2)
 	s.handler.removeTasksByChannel(ch)
 	s.Zero(s.handler.queueTasks.Len())
+	s.Empty(s.handler.executingTasks)
+}
+
+func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannelPreservesTerminalDoneMetric() {
+	s.SetupTest()
+	const (
+		channel     = "terminal-task-channel"
+		nodeID      = int64(99528)
+		firstPlanID = int64(99528)
+	)
+	terminalStates := []datapb.CompactionTaskState{
+		datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_failed,
+		datapb.CompactionTaskState_timeout,
+	}
+
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		"99528",
+		datapb.CompactionType_MixCompaction.String(),
+		metrics.Done,
+	)
+	initialDone := testutil.ToFloat64(done)
+	s.T().Cleanup(func() {
+		done.Set(initialDone)
+	})
+
+	scheduler := s.handler.scheduler.(*task.MockGlobalScheduler)
+	scheduler.EXPECT().Enqueue(mock.Anything).Return().Times(len(terminalStates))
+	for i, state := range terminalStates {
+		planID := firstPlanID + int64(i)
+		scheduler.EXPECT().AbortAndRemoveTask(planID).Once()
+		s.handler.restoreTask(newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:  planID,
+			Type:    datapb.CompactionType_MixCompaction,
+			State:   state,
+			Channel: channel,
+			NodeID:  nodeID,
+		}, nil, s.mockMeta, newMockVersionManager()))
+	}
+	s.Equal(initialDone+float64(len(terminalStates)), testutil.ToFloat64(done))
+
+	s.handler.removeTasksByChannel(channel)
+	s.Equal(initialDone+float64(len(terminalStates)), testutil.ToFloat64(done))
 	s.Empty(s.handler.executingTasks)
 }
 
