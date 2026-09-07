@@ -40,6 +40,7 @@ import (
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -63,7 +64,10 @@ type CollectionObserverRGSuite struct {
 	broker       *meta.MockBroker
 	cluster      *session.MockCluster
 	proxyManager *proxyutil.MockProxyClientManager
-	nodeMgr      *session.NodeManager
+	// invalidated is every collection the observer asked the proxies to
+	// drop their shard-leader cache for, in order.
+	invalidated []int64
+	nodeMgr     *session.NodeManager
 
 	dist              *meta.DistributionManager
 	meta              *meta.Meta
@@ -117,6 +121,12 @@ func (s *CollectionObserverRGSuite) SetupTest() {
 	s.cluster = session.NewMockCluster(s.T())
 	s.proxyManager = proxyutil.NewMockProxyClientManager(s.T())
 	s.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.invalidated = nil
+	s.proxyManager.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) error {
+			s.invalidated = append(s.invalidated, req.GetCollectionIDs()...)
+			return nil
+		}).Maybe()
 	s.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -1775,4 +1785,138 @@ func (s *CollectionObserverRGSuite) TestARecoveredTaskAtHundredIsNotTimedOutByAD
 	s.EqualValues(66, task.LastProgress, "the fresh figure sees the drop: the channel and one of two segments, two targets of three")
 	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute, "and the stall clock starts from that tick")
 	s.Len(s.replicaIDsInRG(1900, rgB), 1)
+}
+
+// The reviewer's L1: every other place that removes replicas tells the
+// proxies to drop their shard-leader cache for the collection (job_update
+// right after the same RemoveReplicas, job_load, job_release), because the
+// cache observer is fed by distribution events only and RemoveReplicas
+// touches the catalog and the in-memory indexes alone. Without it, until the
+// checker has released the deleted replica's channels, searches routed to
+// its delegators - every search scoped to the group, and any unscoped one
+// balanced onto those leaders - reach a replica that no longer exists, fail
+// on the query node, and are retried only then. The timeout release must do
+// what the jobs do.
+func (s *CollectionObserverRGSuite) TestReleasingATimedOutGroupInvalidatesTheShardLeaderCache() {
+	s.registerLoadingCollection(1800, 1801, "1800-dmc0", 2, 18001, 18002)
+	s.putReplica(1800, 180001, 81, rgA)
+	s.putDelegator(1800, 81, "1800-dmc0", 18001, 18002)
+	s.putReplica(1800, 180002, 82, rgB)
+	s.putDelegator(1800, 82, "1800-dmc0")
+
+	s.ob.LoadCollection(s.ctx, 1800, rgB)
+	key := s.taskKey(1800, rgB)
+	progress := s.ob.observeResourceGroupProgress(s.ctx)
+	s.backdateTaskWatermark(key, 33, time.Hour)
+	s.Require().Empty(s.invalidated, "sanity: nothing has been released yet")
+
+	s.ob.observeTimeout(s.ctx, progress)
+
+	s.Require().Empty(s.replicaIDsInRG(1800, rgB), "sanity: the stalled group is released")
+	s.Len(s.replicaIDsInRG(1800, rgA), 1)
+	s.Equal([]int64{1800}, s.invalidated, "releasing the group's replicas must invalidate the proxies' shard-leader cache for the collection")
+}
+
+// The same when the timed-out group was the collection's last: the
+// collection goes, and so must the proxies' cached leaders for it.
+func (s *CollectionObserverRGSuite) TestReleasingTheLastGroupInvalidatesTheShardLeaderCache() {
+	s.registerLoadingCollection(1900, 1901, "1900-dmc0", 1, 19001, 19002)
+	s.putReplica(1900, 190001, 91, rgB)
+	s.putDelegator(1900, 91, "1900-dmc0")
+
+	s.ob.LoadCollection(s.ctx, 1900, rgB)
+	key := s.taskKey(1900, rgB)
+	s.backdateTaskWatermark(key, 33, time.Hour)
+
+	s.ob.observeTimeout(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
+
+	s.Require().Nil(s.meta.GetCollection(s.ctx, 1900), "sanity: the last group's timeout releases the collection")
+	s.Equal([]int64{1900}, s.invalidated)
+}
+
+// A removal the catalog refuses removes nothing, and the proxies keep their
+// cache: the replicas are still there to serve, and the next tick retries.
+func (s *CollectionObserverRGSuite) TestARefusedReplicaRemovalInvalidatesNoCache() {
+	s.registerLoadingCollection(2000, 2001, "2000-dmc0", 2, 20001, 20002)
+	s.putReplica(2000, 200001, 101, rgA)
+	s.putDelegator(2000, 101, "2000-dmc0", 20001, 20002)
+	s.putReplica(2000, 200002, 102, rgB)
+	s.putDelegator(2000, 102, "2000-dmc0")
+
+	s.ob.LoadCollection(s.ctx, 2000, rgB)
+	key := s.taskKey(2000, rgB)
+	progress := s.ob.observeResourceGroupProgress(s.ctx)
+	s.backdateTaskWatermark(key, 33, time.Hour)
+
+	refuse := mockey.Mock((*meta.ReplicaManager).RemoveReplicas).Return(errors.New("etcd unavailable")).Build()
+	defer refuse.UnPatch()
+	s.ob.observeTimeout(s.ctx, progress)
+
+	s.Len(s.replicaIDsInRG(2000, rgB), 1, "sanity: the refused removal removed nothing")
+	s.True(s.ob.loadTasks.Contain(key), "and the task stays to retry")
+	s.Empty(s.invalidated, "a cache that still names serving leaders is left alone")
+}
+
+// An observer built without a proxy manager, as some callers build it,
+// releases the group without reaching for one.
+func (s *CollectionObserverRGSuite) TestATimedOutReleaseSurvivesAMissingProxyManager() {
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, nil, s.nodeMgr)
+	s.registerLoadingCollection(2100, 2101, "2100-dmc0", 2, 21001, 21002)
+	s.putReplica(2100, 210001, 111, rgA)
+	s.putDelegator(2100, 111, "2100-dmc0", 21001, 21002)
+	s.putReplica(2100, 210002, 112, rgB)
+	s.putDelegator(2100, 112, "2100-dmc0")
+
+	ob.LoadCollection(s.ctx, 2100, rgB)
+	key, ok := findTask(ob, 2100, rgB)
+	s.Require().True(ok)
+	progress := ob.observeResourceGroupProgress(s.ctx)
+	s.backdateTaskWatermarkIn(ob, key, 33, time.Hour)
+
+	s.NotPanics(func() { ob.observeTimeout(s.ctx, progress) })
+	s.Empty(s.replicaIDsInRG(2100, rgB), "the stalled group is released all the same")
+	s.Empty(s.invalidated)
+}
+
+// A proxy that cannot be told is logged, and the release completes all the
+// same: its cache is invalidated reactively by the first search that fails
+// on a released leader, as the jobs that remove replicas rely on too.
+func (s *CollectionObserverRGSuite) TestAnUnreachableProxyDoesNotStopATimedOutRelease() {
+	proxies := proxyutil.NewMockProxyClientManager(s.T())
+	proxies.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(errors.New("proxy unreachable")).Once()
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, proxies, s.nodeMgr)
+	s.registerLoadingCollection(2200, 2201, "2200-dmc0", 2, 22001, 22002)
+	s.putReplica(2200, 220001, 121, rgA)
+	s.putDelegator(2200, 121, "2200-dmc0", 22001, 22002)
+	s.putReplica(2200, 220002, 122, rgB)
+	s.putDelegator(2200, 122, "2200-dmc0")
+
+	ob.LoadCollection(s.ctx, 2200, rgB)
+	key, ok := findTask(ob, 2200, rgB)
+	s.Require().True(ok)
+	progress := ob.observeResourceGroupProgress(s.ctx)
+	s.backdateTaskWatermarkIn(ob, key, 33, time.Hour)
+
+	ob.observeTimeout(s.ctx, progress)
+	s.Empty(s.replicaIDsInRG(2200, rgB), "the stalled group is released whether or not the proxies heard")
+	s.False(ob.loadTasks.Contain(key))
+}
+
+// A task whose collection has no replica left by the time it is torn down -
+// they went by another path between the reading and the teardown - has
+// nothing to remove but still takes the collection with it, and the proxies'
+// leaders for it, exactly once.
+func (s *CollectionObserverRGSuite) TestATeardownWithNoReplicaLeftStillInvalidatesTheCacheOnce() {
+	s.registerLoadingCollection(2300, 2301, "2300-dmc0", 1, 23001, 23002)
+	s.ob.LoadCollection(s.ctx, 2300, rgB)
+	key := s.taskKey(2300, rgB)
+	loadTask, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.Require().Empty(s.meta.GetByCollection(s.ctx, 2300))
+
+	s.ob.releaseResourceGroupOnTimeout(s.ctx, key, loadTask, nil)
+
+	s.Nil(s.meta.GetCollection(s.ctx, 2300))
+	s.False(s.ob.loadTasks.Contain(key))
+	s.Equal([]int64{2300}, s.invalidated)
 }
