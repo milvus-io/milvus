@@ -293,4 +293,3 @@ func TestFlushInsertBuffer_V3PersistsBM25Statslogs(t *testing.T) {
 	require.True(t, ok, "BM25 stats must be registered in the manifest for the BM25 output field")
 	require.NotEmpty(t, bm25Entry.Paths, "BM25 stats must reference a persisted stats blob")
 }
-
