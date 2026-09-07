@@ -981,6 +981,9 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 		Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+	// The observer reads the next target's version to decide whether a
+	// figure of 100 may be reused; a constant is enough for a mock target.
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(int64(1)).Maybe()
 
 	// Node 1 belongs to rgA's replica and already serves the only channel
 	// target; rgB's replica has no node carrying anything.
