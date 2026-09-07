@@ -141,33 +141,31 @@ func TestStoreWriteReadChunk(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
 
-func TestStoreWriteChunkFencedByNewerTerm(t *testing.T) {
+func TestStoreWriteChunkRewriteIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	records := map[string][]uint64{
 		"v1": {100},
 	}
-	// Simulate a leftover chunk of a newer owner written under the stale
-	// owner's key (split-brain residue): same generation key, footer term 5.
-	payload, _, err := marshalChunk("p1", 7, 5, writeSections(records))
+	// A rewrite with identical content stays idempotent even when the stored
+	// bytes differ (a retry that spans a binary upgrade re-encodes the same
+	// records differently). Flip a byte in the header's reserved region, which
+	// no decoder checks, so bytes differ while content matches.
+	payload, _, err := marshalChunk("p1", 7, 3, writeSections(records))
 	assert.NoError(t, err)
+	payload[11] ^= 0xff
 	assert.NoError(t, cm.Write(ctx, NewStore(cm, "p1", 3).ChunkKey(7), payload))
+	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records))
+	assert.NoError(t, err)
 
-	// The stale owner (term 3) must not overwrite it.
+	// An object at this key that another term wrote cannot arise -- the key
+	// carries the writing term -- so it is corruption rather than a race.
+	foreign, _, err := marshalChunk("p1", 7, 5, writeSections(records))
+	assert.NoError(t, err)
+	assert.NoError(t, cm.Write(ctx, NewStore(cm, "p1", 3).ChunkKey(7), foreign))
 	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records))
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrStoreFenced))
-
-	// A same-term rewrite with identical content stays idempotent even when
-	// the stored bytes differ (a retry that spans a binary upgrade re-encodes
-	// the same records differently). Flip a byte in the header's reserved
-	// region, which no decoder checks, so bytes differ while content matches.
-	ownPayload, _, err := marshalChunk("p1", 7, 3, writeSections(records))
-	assert.NoError(t, err)
-	ownPayload[11] ^= 0xff
-	assert.NoError(t, cm.Write(ctx, NewStore(cm, "p1", 3).ChunkKey(7), ownPayload))
-	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records))
-	assert.NoError(t, err)
+	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
 
 func TestStoreManifestRoundTrip(t *testing.T) {
