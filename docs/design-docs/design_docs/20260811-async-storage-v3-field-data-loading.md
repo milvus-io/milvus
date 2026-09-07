@@ -477,6 +477,19 @@ Admission has the following semantics:
 - shrinking a capacity does not revoke admitted work. New requests wait until
   they fit the new limits, subject to the byte-only oversized exception.
 
+Immediate admission checks cancellation, priority and both capacities before
+creating a waiter or registering cancellation callbacks. The asynchronous API
+still creates its Future contract. If waiting is necessary, the controller
+prepares the waiter and queue node outside the mutex and rechecks admission
+before linking the node into the shared queue. Queue-node allocation and
+destruction happen outside the mutex.
+
+Each blocking waiter has a one-shot Baton. The operation that changes it from
+pending to admitted or cancelled posts that Baton after unlocking, including
+when notification precedes the start of the wait. This avoids broadcasting to
+unrelated blocking waiters. Promise completion and cancellation-callback
+destruction also happen outside the mutex.
+
 Refill loops holding unfinished work use `TryAcquire` so they can consume and
 release that work instead of blocking on admission. Callers must not hold an
 admission while waiting for child work that needs the same exhausted controller.

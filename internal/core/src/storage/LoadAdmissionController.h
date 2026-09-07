@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <condition_variable>
 #include <cstddef>
 #include <list>
 #include <memory>
@@ -24,6 +23,7 @@
 
 #include "folly/CancellationToken.h"
 #include "folly/coro/Promise.h"
+#include "folly/synchronization/Baton.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
@@ -162,6 +162,8 @@ class LoadAdmissionController {
         std::unique_ptr<folly::CancellationCallback> cancellation_callback;
         State state{State::Pending};
         bool is_blocking_waiter{false};
+        // The terminal-state winner posts once, even if wait has not started.
+        folly::Baton<> ready;
         // Queue membership and this iterator are protected by mu_.
         PendingQueue* queue{nullptr};
         PendingQueue::iterator queue_position{};
@@ -184,12 +186,17 @@ class LoadAdmissionController {
     CanAdmitImmediatelyLocked(LoadAdmissionPriority priority,
                               LoadAdmissionRequest request) const;
 
+    // Transfers the single node prepared outside mu_ into its priority queue.
     void
-    EnqueuePendingLocked(const std::shared_ptr<PendingAdmission>& pending,
+    EnqueuePendingLocked(PendingQueue& prepared,
                          LoadAdmissionPriority priority);
 
+    // Accounts for resources after the caller has checked joint capacity.
     void
-    MarkAdmittedLocked(const std::shared_ptr<PendingAdmission>& pending);
+    ReserveLocked(LoadAdmissionRequest request) noexcept;
+
+    void
+    MarkAdmittedLocked(PendingAdmission& pending);
 
     [[nodiscard]] PendingResolution
     TakeAdmittedLocked();
@@ -198,7 +205,7 @@ class LoadAdmissionController {
     void
     FulfillAdmission(std::shared_ptr<PendingAdmission> pending);
 
-    // Resolves admitted asynchronous waiters without holding mu_.
+    // Completes promises and posts blocking waiters without holding mu_.
     void
     ResolvePending(PendingResolution resolution);
 
@@ -208,7 +215,6 @@ class LoadAdmissionController {
 
     std::mutex capacity_update_mutex_;
     mutable std::mutex mu_;
-    std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t inflight_slots_{0};
     size_t capacity_bytes_{0};

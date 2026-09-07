@@ -71,9 +71,31 @@ LoadAdmissionController::AcquireAsync(
     const folly::CancellationToken& cancellation_token) {
     auto [promise, future] =
         folly::coro::makePromiseContract<LoadAdmissionLease>();
+    bool admitted = false;
+    bool cancelled = false;
+    {
+        std::lock_guard lock(mu_);
+        cancelled = cancellation_token.isCancellationRequested();
+        if (!cancelled && CanAdmitImmediatelyLocked(priority, request)) {
+            ReserveLocked(request);
+            admitted = true;
+        }
+    }
+    if (cancelled) {
+        promise.trySetException(folly::OperationCancelled{});
+        return future;
+    }
+    if (admitted) {
+        promise.trySetValue(LoadAdmissionLease(this, request));
+        return future;
+    }
+
+    // The returned future has not escaped yet, so only the explicit token
+    // can cancel the fast path. Register both sources before queueing below.
     auto pending = std::make_shared<PendingAdmission>();
     pending->promise = std::move(promise);
     pending->request = request;
+    PendingQueue prepared{pending};
 
     const auto merged_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, pending->promise.getCancellationToken());
@@ -88,15 +110,16 @@ LoadAdmissionController::AcquireAsync(
                 });
     }
 
-    bool admitted = false;
     {
         std::lock_guard lock(mu_);
         if (pending->state != PendingAdmission::State::Cancelled) {
+            // Capacity, queue order and cancellation may have changed while
+            // the waiter and callback were being prepared outside the lock.
             if (CanAdmitImmediatelyLocked(priority, request)) {
-                MarkAdmittedLocked(pending);
+                MarkAdmittedLocked(*pending);
                 admitted = true;
             } else {
-                EnqueuePendingLocked(pending, priority);
+                EnqueuePendingLocked(prepared, priority);
             }
         }
     }
@@ -110,21 +133,8 @@ LoadAdmissionController::AcquireAsync(
 void
 LoadAdmissionController::Acquire(const LoadAdmissionRequest request,
                                  const LoadAdmissionPriority priority) {
-    auto pending = std::make_shared<PendingAdmission>();
-    pending->request = request;
-    pending->is_blocking_waiter = true;
-
-    std::unique_lock lock(mu_);
-    if (CanAdmitImmediatelyLocked(priority, request)) {
-        MarkAdmittedLocked(pending);
-    } else {
-        EnqueuePendingLocked(pending, priority);
-        cv_.wait(lock, [&pending] {
-            return pending->state != PendingAdmission::State::Pending;
-        });
-    }
-    AssertInfo(pending->state == PendingAdmission::State::Admitted,
-               "Blocking load admission was not admitted");
+    const bool admitted = AcquireUntil(request, priority, {});
+    AssertInfo(admitted, "Blocking load admission was not admitted");
 }
 
 bool
@@ -132,9 +142,21 @@ LoadAdmissionController::AcquireUntil(
     const LoadAdmissionRequest request,
     const LoadAdmissionPriority priority,
     const folly::CancellationToken& cancellation_token) {
+    {
+        std::lock_guard lock(mu_);
+        if (cancellation_token.isCancellationRequested()) {
+            return false;
+        }
+        if (CanAdmitImmediatelyLocked(priority, request)) {
+            ReserveLocked(request);
+            return true;
+        }
+    }
+
     auto pending = std::make_shared<PendingAdmission>();
     pending->request = request;
     pending->is_blocking_waiter = true;
+    PendingQueue prepared{pending};
     if (cancellation_token.canBeCancelled()) {
         const std::weak_ptr<PendingAdmission> weak_pending = pending;
         pending->cancellation_callback =
@@ -146,24 +168,28 @@ LoadAdmissionController::AcquireUntil(
                 });
     }
 
-    bool acquired = false;
+    bool admitted = false;
     {
-        std::unique_lock lock(mu_);
+        std::lock_guard lock(mu_);
         if (pending->state != PendingAdmission::State::Cancelled) {
             if (CanAdmitImmediatelyLocked(priority, request)) {
-                MarkAdmittedLocked(pending);
+                MarkAdmittedLocked(*pending);
+                admitted = true;
             } else {
-                EnqueuePendingLocked(pending, priority);
-                cv_.wait(lock, [&pending] {
-                    return pending->state != PendingAdmission::State::Pending;
-                });
+                EnqueuePendingLocked(prepared, priority);
             }
         }
-        acquired = pending->state == PendingAdmission::State::Admitted;
     }
 
+    if (admitted) {
+        FulfillAdmission(pending);
+    }
+    // Always pair the terminal-state winner's post with one wait, including
+    // cancellation during callback construction and admission before wait.
+    pending->ready.wait();
     pending->cancellation_callback.reset();
-    return acquired;
+    // The terminal state is immutable and published by the Baton handoff.
+    return pending->state == PendingAdmission::State::Admitted;
 }
 
 bool
@@ -171,8 +197,7 @@ LoadAdmissionController::TryAcquire(const LoadAdmissionRequest request,
                                     const LoadAdmissionPriority priority) {
     std::lock_guard lock(mu_);
     if (CanAdmitImmediatelyLocked(priority, request)) {
-        inflight_bytes_ += request.transient_bytes;
-        inflight_slots_ += request.slots;
+        ReserveLocked(request);
         return true;
     }
     return false;
@@ -196,7 +221,6 @@ LoadAdmissionController::Release(const LoadAdmissionRequest request) {
         resolution = TakeAdmittedLocked();
     }
     ResolvePending(std::move(resolution));
-    cv_.notify_all();
 }
 
 size_t
@@ -227,7 +251,6 @@ LoadAdmissionController::SetCapacityBytes(const size_t bytes) {
         }
     }
     ResolvePending(std::move(resolution));
-    cv_.notify_all();
 }
 
 size_t
@@ -245,7 +268,6 @@ LoadAdmissionController::SetCapacitySlots(const size_t slots) {
         resolution = TakeAdmittedLocked();
     }
     ResolvePending(std::move(resolution));
-    cv_.notify_all();
 }
 
 void
@@ -256,7 +278,6 @@ LoadAdmissionController::NotifyCapacityUpdated() {
         resolution = TakeAdmittedLocked();
     }
     ResolvePending(std::move(resolution));
-    cv_.notify_all();
 }
 
 size_t
@@ -299,21 +320,27 @@ LoadAdmissionController::CanAdmitImmediatelyLocked(
 
 void
 LoadAdmissionController::EnqueuePendingLocked(
-    const std::shared_ptr<PendingAdmission>& pending,
-    const LoadAdmissionPriority priority) {
+    PendingQueue& prepared, const LoadAdmissionPriority priority) {
     auto& queue =
         priority == LoadAdmissionPriority::High ? high_pending_ : low_pending_;
-    const auto position = queue.insert(queue.end(), pending);
+    const auto position = prepared.begin();
+    const auto& pending = *position;
+    queue.splice(queue.end(), prepared, position);
     pending->queue = &queue;
     pending->queue_position = position;
 }
 
 void
-LoadAdmissionController::MarkAdmittedLocked(
-    const std::shared_ptr<PendingAdmission>& pending) {
-    pending->state = PendingAdmission::State::Admitted;
-    inflight_bytes_ += pending->request.transient_bytes;
-    inflight_slots_ += pending->request.slots;
+LoadAdmissionController::ReserveLocked(
+    const LoadAdmissionRequest request) noexcept {
+    inflight_bytes_ += request.transient_bytes;
+    inflight_slots_ += request.slots;
+}
+
+void
+LoadAdmissionController::MarkAdmittedLocked(PendingAdmission& pending) {
+    pending.state = PendingAdmission::State::Admitted;
+    ReserveLocked(pending.request);
 }
 
 LoadAdmissionController::PendingResolution
@@ -322,15 +349,14 @@ LoadAdmissionController::TakeAdmittedLocked() {
 
     const auto admit_queue = [this, &resolution](auto& queue) {
         while (!queue.empty()) {
-            const auto& pending = queue.front();
-            if (!CanAcquireCapacityLocked(pending->request)) {
+            auto& pending = *queue.front();
+            if (!CanAcquireCapacityLocked(pending.request)) {
                 break;
             }
-            const auto admitted = pending;
+            pending.queue = nullptr;
+            MarkAdmittedLocked(pending);
             resolution.admitted.splice(
                 resolution.admitted.end(), queue, queue.begin());
-            admitted->queue = nullptr;
-            MarkAdmittedLocked(admitted);
         }
     };
     admit_queue(high_pending_);
@@ -345,6 +371,7 @@ LoadAdmissionController::FulfillAdmission(
     std::shared_ptr<PendingAdmission> pending) {
     if (pending->is_blocking_waiter) {
         // AcquireUntil owns and clears the callback after its wait completes.
+        pending->ready.post();
         return;
     }
     pending->cancellation_callback.reset();
@@ -363,13 +390,15 @@ void
 LoadAdmissionController::CancelPending(
     std::shared_ptr<PendingAdmission> pending) {
     PendingResolution resolution;
+    PendingQueue removed;
     bool cancelled = false;
     {
         std::lock_guard lock(mu_);
         if (pending->state == PendingAdmission::State::Pending) {
             pending->state = PendingAdmission::State::Cancelled;
             if (pending->queue != nullptr) {
-                pending->queue->erase(pending->queue_position);
+                removed.splice(
+                    removed.end(), *pending->queue, pending->queue_position);
                 pending->queue = nullptr;
             }
             cancelled = true;
@@ -377,11 +406,12 @@ LoadAdmissionController::CancelPending(
         }
     }
     if (cancelled) {
-        if (!pending->is_blocking_waiter) {
+        if (pending->is_blocking_waiter) {
+            pending->ready.post();
+        } else {
             pending->promise.trySetException(folly::OperationCancelled{});
         }
         ResolvePending(std::move(resolution));
-        cv_.notify_all();
     }
 }
 

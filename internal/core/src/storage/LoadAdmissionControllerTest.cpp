@@ -17,6 +17,7 @@
 #include "storage/LoadAdmissionController.h"
 
 #include <algorithm>
+#include <barrier>
 #include <chrono>
 #include <cstddef>
 #include <future>
@@ -313,6 +314,106 @@ TEST_F(LoadAdmissionControllerAsyncTest, RejectsPreCancelledAdmission) {
                  folly::OperationCancelled);
     EXPECT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
     budget_.Release({1, 1});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectsPreCancelledBlockingAdmissionWithAvailableCapacity) {
+    budget_.SetCapacitySlots(1);
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+
+    EXPECT_FALSE(budget_.AcquireUntil(
+        {0, 1}, LoadAdmissionPriority::High, cancellation.getToken()));
+    ASSERT_TRUE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    budget_.Release({0, 1});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       UnconsumedImmediateFutureReleasesReservation) {
+    budget_.SetCapacitySlots(1);
+    folly::CancellationSource cancellation;
+    {
+        auto future = budget_.AcquireAsync(
+            {0, 1}, LoadAdmissionPriority::High, cancellation.getToken());
+        ASSERT_TRUE(future.isReady());
+        cancellation.requestCancellation();
+        EXPECT_FALSE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    }
+    ASSERT_TRUE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    budget_.Release({0, 1});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       BlockingAdmissionRacesWithCancellationAndRelease) {
+    budget_.SetCapacitySlots(1);
+    for (size_t i = 0; i < 100; ++i) {
+        auto running = folly::coro::blockingWait(
+            budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+        folly::CancellationSource cancellation;
+        std::barrier start(3);
+        auto waiter = std::async(std::launch::async, [&] {
+            start.arrive_and_wait();
+            const bool admitted = budget_.AcquireUntil(
+                {0, 1}, LoadAdmissionPriority::High, cancellation.getToken());
+            if (admitted) {
+                budget_.Release({0, 1});
+            }
+            return admitted;
+        });
+        std::thread cancel_thread([&] {
+            start.arrive_and_wait();
+            cancellation.requestCancellation();
+        });
+        start.arrive_and_wait();
+        running.Release();
+        cancel_thread.join();
+
+        ASSERT_EQ(waiter.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        waiter.get();
+        ASSERT_TRUE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+        budget_.Release({0, 1});
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, SlotExpansionWakesBlockingAdmission) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancellation;
+    auto waiter = std::async(std::launch::async, [&] {
+        const bool admitted = budget_.AcquireUntil(
+            {0, 2}, LoadAdmissionPriority::High, cancellation.getToken());
+        if (admitted) {
+            budget_.Release({0, 2});
+        }
+        return admitted;
+    });
+    bool queued = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!budget_.TryAcquire({0, 0}, LoadAdmissionPriority::Low)) {
+            queued = true;
+            break;
+        }
+        budget_.Release({0, 0});
+        std::this_thread::yield();
+    }
+
+    budget_.SetCapacitySlots(3);
+    const auto status = waiter.wait_for(std::chrono::seconds(2));
+    if (status != std::future_status::ready) {
+        cancellation.requestCancellation();
+    }
+    ASSERT_EQ(waiter.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_TRUE(waiter.get());
+    EXPECT_EQ(status, std::future_status::ready);
+    EXPECT_TRUE(queued);
+    running.Release();
+    ASSERT_TRUE(budget_.TryAcquire({0, 3}, LoadAdmissionPriority::High));
+    budget_.Release({0, 3});
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest, CancellingQueueHeadAdmitsNextRequest) {
