@@ -778,6 +778,9 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root")
+		// Dispatched once (IndexVersion 1) but no keys were ever recorded: the
+		// build prefix is swept in case that attempt left files behind.
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/200/300/2000/").Return(nil)
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
@@ -3046,7 +3049,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 
 		err := gc.removeDroppedSegmentFiles(ctx, segment, map[string]struct{}{
 			"root/index_files/40/1/10/2001/idx-file": {},
-		})
+		}, nil)
 		assert.NoError(t, err)
 	})
 
@@ -3056,7 +3059,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 		invalid := segment.Clone()
 		invalid.ManifestPath = "invalid"
 
-		assert.Error(t, gc.removeDroppedSegmentFiles(ctx, invalid, nil))
+		assert.Error(t, gc.removeDroppedSegmentFiles(ctx, invalid, nil, nil))
 	})
 
 	t.Run("remove base path failed", func(t *testing.T) {
@@ -3064,7 +3067,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath).Return(errors.New("remove failed")).Once()
 		gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
 
-		assert.Error(t, gc.removeDroppedSegmentFiles(ctx, segment, nil))
+		assert.Error(t, gc.removeDroppedSegmentFiles(ctx, segment, nil, nil))
 	})
 
 	t.Run("remove index file failed", func(t *testing.T) {
@@ -3075,7 +3078,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 
 		err := gc.removeDroppedSegmentFiles(ctx, segment, map[string]struct{}{
 			"root/index_files/40/1/10/2001/idx-file": {},
-		})
+		}, nil)
 		assert.Error(t, err)
 	})
 }
@@ -4940,7 +4943,7 @@ func TestGarbageCollector_removeDroppedSegmentFiles_LegacyJSONLogs(t *testing.T)
 	}
 
 	indexFiles := map[string]struct{}{indexFile: {}}
-	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles))
+	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles, nil))
 
 	expectedJSON := path.Join("root", common.JSONIndexPath, "11", "1", "100", "10", "7001", "102", jsonFile)
 	mu.Lock()
@@ -4987,11 +4990,243 @@ func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
 	}
 
 	indexFiles := map[string]struct{}{indexFile: {}}
-	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles))
+	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles, nil))
 
 	expectedJSON := path.Join("root", common.JSONStatsPath, "3", "11", "1", "100", "10", "7001", "102", jsonFile)
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Contains(t, removed, expectedJSON)
 	assert.Contains(t, removed, indexFile)
+}
+
+// newKeylessBuildMetaForGC builds a meta whose only SegmentIndex is a terminal
+// build with no recorded file keys (an aborted task), whose field index has
+// been dropped, and whose segment is gone.
+func newKeylessBuildMetaForGC(t *testing.T, catalog *catalogmocks.DataCoordCatalog, pathVersion indexpb.IndexStorePathVersion, finishedAt time.Time) (*meta, *model.SegmentIndex) {
+	t.Helper()
+	const (
+		collID  = UniqueID(100)
+		partID  = UniqueID(200)
+		segID   = UniqueID(300)
+		indexID = UniqueID(400)
+		buildID = UniqueID(2000)
+	)
+	m := &meta{
+		segments: NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			catalog:          catalog,
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			keyLock:          lock.NewKeyLock[UniqueID](),
+		},
+	}
+	m.snapshotMeta = &snapshotMeta{}
+	segIdx := &model.SegmentIndex{
+		SegmentID:             segID,
+		CollectionID:          collID,
+		PartitionID:           partID,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		NodeID:                1,
+		IndexVersion:          2,
+		IndexStorePathVersion: pathVersion,
+		IndexState:            commonpb.IndexState_Failed,
+		FailReason:            indexTaskAbortReasonIndexDropped,
+		FinishedUTCTime:       uint64(finishedAt.Unix()),
+	}
+	m.indexMeta.segmentBuildInfo.Add(segIdx)
+	segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdxes.Insert(indexID, segIdx)
+	m.indexMeta.segmentIndexes.Insert(segID, segIdxes)
+	return m, segIdx
+}
+
+func TestGarbageCollector_recycleUnusedSegIndexes_KeylessBuild(t *testing.T) {
+	mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+	defer mockIsBuildIDBlocked.UnPatch()
+	const v1 = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+
+	t.Run("v1 build prefix is swept once the abort tolerance passed", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, UniqueID(100), UniqueID(200), UniqueID(300), UniqueID(2000)).Return(nil)
+		m, segIdx := newKeylessBuildMetaForGC(t, catalog, v1, time.Now().Add(-2*time.Hour))
+
+		// No Remove expectation: there are no known keys. The whole build
+		// prefix (every index version) goes instead.
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/200/300/2000/").Return(nil)
+
+		gc := newGarbageCollector(m, nil, GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID)
+		assert.False(t, ok, "meta is removed only after the prefix sweep")
+	})
+
+	t.Run("v1 build within the abort tolerance is left alone", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		m, segIdx := newKeylessBuildMetaForGC(t, catalog, v1, time.Now())
+
+		// A late upload from the canceled worker may still be landing:
+		// neither the prefix nor the meta may be touched yet.
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+
+		gc := newGarbageCollector(m, nil, GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID)
+		assert.True(t, ok)
+	})
+
+	t.Run("v1 prefix sweep failure keeps the meta", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		m, segIdx := newKeylessBuildMetaForGC(t, catalog, v1, time.Now().Add(-2*time.Hour))
+
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/200/300/2000/").Return(errors.New("mock error"))
+
+		gc := newGarbageCollector(m, nil, GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID)
+		assert.True(t, ok)
+	})
+
+	t.Run("never dispatched v1 build has nothing to sweep", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, UniqueID(100), UniqueID(200), UniqueID(300), UniqueID(2000)).Return(nil)
+		m, segIdx := newKeylessBuildMetaForGC(t, catalog, v1, time.Now())
+		stored, ok := m.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Get(segIdx.BuildID)
+		require.True(t, ok)
+		stored.IndexVersion = 0
+
+		// No RemoveWithPrefix and no tolerance wait: no worker ever wrote
+		// under this build.
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+
+		gc := newGarbageCollector(m, nil, GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok = m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID)
+		assert.False(t, ok)
+	})
+
+	t.Run("v0 keyless build leaves its files to the orphan scan", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, UniqueID(100), UniqueID(200), UniqueID(300), UniqueID(2000)).Return(nil)
+		m, segIdx := newKeylessBuildMetaForGC(t, catalog, 0, time.Now().Add(-2*time.Hour))
+
+		// recycleUnusedIndexFilesV0 walks index_files/ by buildID and removes
+		// anything without meta, so no prefix sweep is needed here.
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+
+		gc := newGarbageCollector(m, nil, GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID)
+		assert.False(t, ok)
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegments_PrefixSweepFailureKeepsMeta(t *testing.T) {
+	ctx := context.Background()
+	m, segment, segIdx, binlogPath := setupDroppedSegmentWithIndexForGC(t)
+	stored, ok := m.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Get(segIdx.BuildID)
+	require.True(t, ok)
+	stored.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+	stored.IndexState = commonpb.IndexState_Failed
+	stored.IndexFileKeys = nil
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, binlogPath).Return(nil)
+	cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/10/1001/40/").Return(errors.New("mock error"))
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm, dropTolerance: 0})
+	gc.recycleDroppedSegments(ctx, nil)
+
+	// Neither the segment nor the index record may go while files may remain.
+	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
+	assert.Len(t, m.indexMeta.GetAllSegmentIndexes(segment.ID), 1)
+}
+
+func TestGarbageCollector_recycleDroppedSegments_WaitsForUnsettledKeylessBuild(t *testing.T) {
+	newCase := func(t *testing.T, state commonpb.IndexState, finishedAt uint64) (*meta, *SegmentInfo, *model.SegmentIndex) {
+		m, segment, segIdx, _ := setupDroppedSegmentWithIndexForGC(t)
+		stored, ok := m.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Get(segIdx.BuildID)
+		require.True(t, ok)
+		stored.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+		stored.IndexState = state
+		stored.IndexFileKeys = nil
+		stored.FinishedUTCTime = finishedAt
+		return m, segment, segIdx
+	}
+	assertUntouched := func(t *testing.T, m *meta, segment *SegmentInfo) {
+		assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+		assert.Len(t, m.indexMeta.GetAllSegmentIndexes(segment.ID), 1)
+	}
+
+	t.Run("build still dispatched: whole segment cleanup deferred", func(t *testing.T) {
+		m, segment, _ := newCase(t, commonpb.IndexState_InProgress, 0)
+		// No Remove / RemoveWithPrefix expectation: neither the binlogs nor
+		// the build prefix may go while the worker can still upload.
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm, dropTolerance: 0})
+		gc.recycleDroppedSegments(context.Background(), nil)
+		assertUntouched(t, m, segment)
+	})
+
+	t.Run("build aborted within tolerance: whole segment cleanup deferred", func(t *testing.T) {
+		m, segment, _ := newCase(t, commonpb.IndexState_Failed, uint64(time.Now().Unix()))
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleDroppedSegments(context.Background(), nil)
+		assertUntouched(t, m, segment)
+	})
+
+	t.Run("build aborted past tolerance: swept together with the segment", func(t *testing.T) {
+		m, segment, _ := newCase(t, commonpb.IndexState_Failed, uint64(time.Now().Add(-2*time.Hour).Unix()))
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/10/1001/40/").Return(nil)
+
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm, dropTolerance: time.Hour})
+		gc.recycleDroppedSegments(context.Background(), nil)
+		assert.Nil(t, m.GetSegment(context.Background(), segment.ID))
+		assert.Empty(t, m.indexMeta.GetAllSegmentIndexes(segment.ID))
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegments_SweepsKeylessV1BuildPrefix(t *testing.T) {
+	ctx := context.Background()
+	m, segment, segIdx, binlogPath := setupDroppedSegmentWithIndexForGC(t)
+	// Turn the fixture's finished build into an aborted collection-rooted one:
+	// the worker was canceled before it reported its file keys.
+	stored, ok := m.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Get(segIdx.BuildID)
+	require.True(t, ok)
+	stored.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+	stored.IndexState = commonpb.IndexState_Failed
+	stored.IndexFileKeys = nil
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, binlogPath).Return(nil)
+	cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/100/10/1001/40/").Return(nil)
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm, dropTolerance: 0})
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Nil(t, m.GetSegment(ctx, segment.ID))
+	assert.Empty(t, m.indexMeta.GetAllSegmentIndexes(segment.ID))
 }

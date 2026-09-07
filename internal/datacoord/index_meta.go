@@ -1040,6 +1040,13 @@ func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = state
 		segIdx.FailReason = failReason
+		if state == commonpb.IndexState_Finished || state == commonpb.IndexState_Failed {
+			// A terminal state reached without a worker result (e.g. an
+			// aborted build) still needs an end time: GC waits out the drop
+			// tolerance from it before sweeping the build prefix, so a late
+			// upload from the canceled worker cannot slip past the sweep.
+			segIdx.FinishedUTCTime = uint64(time.Now().Unix())
+		}
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 

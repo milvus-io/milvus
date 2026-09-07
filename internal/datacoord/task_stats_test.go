@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -78,6 +79,13 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.segID = 1179
 	s.targetID = 1180
 
+	s.mt = s.newMeta()
+}
+
+// newMeta builds a fresh meta holding one flushed segment and one Init stats
+// task on it. Tests that remove the task or drop the segment should use their
+// own instance instead of mutating the shared s.mt.
+func (s *statsTaskSuite) newMeta() *meta {
 	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
 	statsTask := &indexpb.StatsTask{
 		CollectionID:  1,
@@ -96,7 +104,7 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
-	s.mt = &meta{
+	return &meta{
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -551,6 +559,237 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 
 		st.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState()) // No change
+	})
+}
+
+func (s *statsTaskSuite) TestQueryTaskOnWorkerAbortsWhenSegmentDropped() {
+	newTask := func(mt *meta) *statsTask {
+		return newStatsTask(&indexpb.StatsTask{
+			TaskID:     s.taskID,
+			SegmentID:  s.segID,
+			SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
+			State:      indexpb.JobState_JobStateInProgress,
+			NodeID:     100,
+		}, 1, mt, nil, nil, newIndexEngineVersionManager())
+	}
+
+	s.Run("segment dropped", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		// No QueryStats expectation: the dropped segment must be detected
+		// before polling the worker, and the worker-side job canceled.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("segment removed from meta", func() {
+		mt := s.newMeta()
+		delete(mt.segments.segments, s.segID)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("finished result of a dropped segment: files reclaimed before drop", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		var removed []string
+		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, files []string) error {
+			removed = files
+			return nil
+		})
+		mt.chunkManager = cm
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		// The result can never be committed (the segment is unhealthy), so
+		// its files are deleted right away instead of waiting for the
+		// orphan scan.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(int64(100), mock.Anything).Return(&workerpb.StatsResults{
+			Results: []*workerpb.StatsResult{{
+				TaskID: s.taskID,
+				State:  indexpb.JobState_JobStateFinished,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{
+					101: {FieldID: 101, BuildID: 7, Version: 1, Files: []string{"root/text_log/7/1/1/2/1179/101/tokenizer.json"}},
+				},
+				JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+					102: {FieldID: 102, BuildID: 8, Version: 1, JsonKeyStatsDataFormat: 2, Files: []string{"shared_key_index/.managed.json_0"}},
+					103: {FieldID: 103, BuildID: 9, Version: 1, JsonKeyStatsDataFormat: 1, Files: []string{"legacy.json"}},
+				},
+			}},
+		}, nil)
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+		// Paths are derived exactly as dropped-segment GC would from the
+		// segment record: text files are stored as full paths, JSON stats
+		// under {root}/json_stats/{format}/{buildID}/{version}/{coll}/{part}/{seg}/{field}.
+		s.ElementsMatch([]string{
+			"root/text_log/7/1/1/2/1179/101/tokenizer.json",
+			"root/json_stats/2/8/1/1/2/1179/102/shared_key_index/.managed.json_0",
+			"root/json_key_index_log/9/1/1/2/1179/103/legacy.json",
+		}, removed)
+	})
+
+	s.Run("reclaim failure still drops the task, files left to the orphan scan", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		mt.chunkManager = cm
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(int64(100), mock.Anything).Return(&workerpb.StatsResults{
+			Results: []*workerpb.StatsResult{{
+				TaskID: s.taskID,
+				State:  indexpb.JobState_JobStateFinished,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{
+					101: {FieldID: 101, Files: []string{"root/text_log/7/1/1/2/1179/101/tokenizer.json"}},
+				},
+			}},
+		}, nil)
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+	})
+
+	s.Run("finished result without files has nothing to reclaim", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		// No MultiRemove expectation.
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		mt.chunkManager = cm
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(int64(100), mock.Anything).Return(&workerpb.StatsResults{
+			Results: []*workerpb.StatsResult{{TaskID: s.taskID, State: indexpb.JobState_JobStateFinished}},
+		}, nil)
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+	})
+
+	s.Run("finished result published through a manifest is left to the base path sweep", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		// No MultiRemove expectation: V3 stats live under the segment base
+		// path, which dropped-segment GC removes as a whole.
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		mt.chunkManager = cm
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(int64(100), mock.Anything).Return(&workerpb.StatsResults{
+			Results: []*workerpb.StatsResult{{
+				TaskID:   s.taskID,
+				State:    indexpb.JobState_JobStateFinished,
+				Manifest: `{"base_path":"files/insert_log/1/2/1179","ver":2}`,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{
+					101: {FieldID: 101, Files: []string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"}},
+				},
+			}},
+		}, nil)
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+	})
+
+	s.Run("worker still running or unreachable: drop without reclaiming", func() {
+		for name, ret := range map[string]func() (*workerpb.StatsResults, error){
+			"running": func() (*workerpb.StatsResults, error) {
+				return &workerpb.StatsResults{Results: []*workerpb.StatsResult{{TaskID: s.taskID, State: indexpb.JobState_JobStateInProgress}}}, nil
+			},
+			"unreachable": func() (*workerpb.StatsResults, error) { return nil, errors.New("mock error") },
+		} {
+			s.Run(name, func() {
+				mt := s.newMeta()
+				mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+				cm := mocks.NewChunkManager(s.T())
+				cm.EXPECT().RootPath().Return("root").Maybe()
+				mt.chunkManager = cm
+				catalog := catalogmocks.NewDataCoordCatalog(s.T())
+				catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+				mt.statsTaskMeta.catalog = catalog
+				st := newTask(mt)
+
+				cluster := session.NewMockCluster(s.T())
+				cluster.EXPECT().QueryStats(int64(100), mock.Anything).Return(ret())
+				cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+				st.QueryTaskOnWorker(cluster)
+
+				s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+			})
+		}
+	})
+
+	s.Run("drop on worker failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(errors.New("mock error"))
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("drop meta failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(errors.New("mock error"))
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
 	})
 }
 

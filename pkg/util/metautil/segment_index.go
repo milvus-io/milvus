@@ -53,6 +53,19 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 	return paths
 }
 
+// BuildIDPrefix returns the directory prefix shared by every attempt (index
+// version) of this build. It is what GC reclaims when the exact file keys of a
+// build are unknown, e.g. a task aborted while the worker was still uploading.
+// v0: {root}/index_files/{buildID}
+// v1: {root}/index_v1/{collID}/{partID}/{segID}/{buildID}
+func (b *IndexPathBuilder) BuildIDPrefix() string {
+	if IsCollectionRooted(b.pathVersion) {
+		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID)
+		return path.Join(b.rootPath, common.SegmentIndexV1Path, k)
+	}
+	return path.Join(b.rootPath, common.SegmentIndexV0Path, JoinIDPath(b.buildID))
+}
+
 // BuildPrefix returns the directory prefix containing all files for this index build.
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
 // v1: {root}/index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}

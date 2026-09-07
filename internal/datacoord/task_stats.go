@@ -246,6 +246,15 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		mlog.FieldNodeID(st.NodeID),
 	)
 
+	// The segment may have been dropped (collection/partition drop, compaction)
+	// while the task is in flight. Cancel the worker-side job instead of
+	// letting it finish stats nobody will read.
+	if st.meta.GetHealthySegment(ctx, st.GetSegmentID()) == nil {
+		log.Info(ctx, "segment dropped while stats task in progress, aborting")
+		st.abortForDroppedSegment(ctx, cluster)
+		return
+	}
+
 	// Query task status
 	results, err := cluster.QueryStats(st.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -291,6 +300,92 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 	log.Warn(context.TODO(), "task not found in results")
 	st.resetTask(ctx, "task not found in results")
+}
+
+// abortForDroppedSegment cancels an in-flight stats task whose origin segment
+// is gone: reclaim a result the worker may already have produced, drop the job
+// on the worker, then remove the task meta. A failed drop or meta removal
+// leaves the task InProgress so the next check round retries.
+func (st *statsTask) abortForDroppedSegment(ctx context.Context, cluster session.Cluster) {
+	st.reclaimUncommittedResultFiles(ctx, cluster)
+	if err := st.tryDropTaskOnWorker(cluster); err != nil {
+		return
+	}
+	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		mlog.Warn(ctx, "remove stats task of dropped segment failed, will retry later",
+			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
+		return
+	}
+	st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+}
+
+// reclaimUncommittedResultFiles asks the worker once for the task result. A
+// result finished for a dropped segment can never be committed: the segment
+// operators discard results for unhealthy segments, so its files would only be
+// found by the orphan scan (missingTolerance plus scanInterval, about a week by
+// default). Delete them now instead, best effort. Results published through a
+// segment manifest live under the segment base path, which dropped-segment GC
+// removes as a whole, so they are left alone.
+func (st *statsTask) reclaimUncommittedResultFiles(ctx context.Context, cluster session.Cluster) {
+	if st.meta == nil || st.meta.chunkManager == nil {
+		return
+	}
+	log := mlog.With(mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()), mlog.FieldNodeID(st.NodeID))
+	results, err := cluster.QueryStats(st.NodeID, &workerpb.QueryJobsRequest{
+		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskIDs:   []int64{st.GetTaskID()},
+	})
+	if err != nil {
+		log.Info(ctx, "cannot query worker before aborting stats task, canceling without a result", mlog.Err(err))
+		return
+	}
+	for _, result := range results.GetResults() {
+		if result.GetTaskID() != st.GetTaskID() || result.GetState() != indexpb.JobState_JobStateFinished {
+			continue
+		}
+		if result.GetManifest() != "" {
+			log.Info(ctx, "finished stats result of dropped segment lives under the segment base path, left to segment GC")
+			return
+		}
+		files := st.uncommittedResultFiles(ctx, result)
+		if len(files) == 0 {
+			return
+		}
+		if err := st.meta.chunkManager.MultiRemove(ctx, files); err != nil {
+			log.Warn(ctx, "failed to reclaim files of uncommitted stats result, left to the orphan scan",
+				mlog.Int("files", len(files)), mlog.Err(err))
+			return
+		}
+		log.Info(ctx, "reclaimed files of uncommitted stats result of dropped segment", mlog.Int("files", len(files)))
+		return
+	}
+}
+
+// uncommittedResultFiles resolves the object paths of a legacy-layout (no
+// manifest) text/JSON stats result the same way dropped-segment GC would have,
+// had the result been recorded on the segment.
+func (st *statsTask) uncommittedResultFiles(ctx context.Context, result *workerpb.StatsResult) []string {
+	collectionID, partitionID := st.GetCollectionID(), st.GetPartitionID()
+	if segment := st.meta.GetSegment(ctx, st.GetSegmentID()); segment != nil {
+		// The dropped record, when still present, is authoritative for the
+		// path components.
+		collectionID, partitionID = segment.GetCollectionID(), segment.GetPartitionID()
+	}
+	sinfo := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            st.GetSegmentID(),
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		TextStatsLogs: result.GetTextStatsLogs(),
+		JsonKeyStats:  result.GetJsonKeyStatsLogs(),
+	}}
+	files := make([]string, 0)
+	for file := range getTextLogPaths(sinfo, "") {
+		files = append(files, file)
+	}
+	for file := range getJSONKeyLogPaths(sinfo, st.meta.chunkManager.RootPath()) {
+		files = append(files, file)
+	}
+	return files
 }
 
 func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
