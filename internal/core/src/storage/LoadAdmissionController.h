@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <list>
 #include <memory>
@@ -146,7 +147,13 @@ class LoadAdmissionController {
     void
     NotifyCapacityUpdated();
 
+    // Publishes one resource/queue snapshot without holding mu_ during metric
+    // updates. The scrape boundary must serialize publication and collection.
+    void
+    UpdateMetrics() const;
+
  private:
+    using Clock = std::chrono::steady_clock;
     struct PendingAdmission;
     using PendingQueue = std::list<std::shared_ptr<PendingAdmission>>;
 
@@ -167,10 +174,14 @@ class LoadAdmissionController {
         // Queue membership and this iterator are protected by mu_.
         PendingQueue* queue{nullptr};
         PendingQueue::iterator queue_position{};
+        // Initialized only on enqueue, then immutable until resolution.
+        Clock::time_point queued_at{};
+        LoadAdmissionPriority priority{LoadAdmissionPriority::High};
     };
 
     struct PendingResolution {
         PendingQueue admitted;
+        Clock::time_point admitted_at{};
     };
 
     LoadAdmissionController() = default;
@@ -208,6 +219,12 @@ class LoadAdmissionController {
     // Completes promises and posts blocking waiters without holding mu_.
     void
     ResolvePending(PendingResolution resolution);
+
+    // Only for a waiter that actually entered a queue and reached a terminal
+    // state. Histogram updates must run outside mu_.
+    static void
+    ObserveQueueWait(const PendingAdmission& pending,
+                     Clock::time_point finished_at);
 
     // Cancels a pending waiter and then admits any newly unblocked work.
     void

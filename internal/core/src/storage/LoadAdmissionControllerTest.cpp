@@ -20,8 +20,13 @@
 #include <barrier>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <future>
+#include <initializer_list>
 #include <memory>
+#include <optional>
+#include <sstream>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -35,6 +40,7 @@
 #include "folly/coro/WithCancellation.h"
 #include "folly/executors/ManualExecutor.h"
 #include "gtest/gtest.h"
+#include "monitor/monitor_c.h"
 
 namespace milvus::storage {
 namespace {
@@ -49,6 +55,36 @@ static_assert(std::is_same_v<AsyncAcquireReturn,
 folly::coro::Task<LoadAdmissionLease>
 AwaitAdmission(folly::coro::Future<LoadAdmissionLease> admission) {
     co_return co_await std::move(admission);
+}
+
+// Exercises the same text export consumed by the Go metrics registry.
+std::string
+ScrapeAdmissionMetrics() {
+    const std::unique_ptr<char, decltype(&std::free)> text(GetCoreMetrics(),
+                                                           &std::free);
+    return std::string(text.get());
+}
+
+// Finds a sample independently of the serializer's label ordering.
+std::optional<double>
+FindAdmissionSample(const std::string& text,
+                    std::string_view suffix,
+                    std::initializer_list<std::string_view> labels = {}) {
+    const std::string name = "internal_load_admission_" + std::string(suffix);
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.starts_with(name) || line.size() <= name.size() ||
+            (line[name.size()] != ' ' && line[name.size()] != '{')) {
+            continue;
+        }
+        if (std::all_of(labels.begin(), labels.end(), [&](auto label) {
+                return line.find(label) != std::string::npos;
+            })) {
+            return std::stod(line.substr(line.find_last_of(' ') + 1));
+        }
+    }
+    return std::nullopt;
 }
 
 class LoadAdmissionControllerAsyncTest : public testing::Test {
@@ -67,6 +103,220 @@ class LoadAdmissionControllerAsyncTest : public testing::Test {
 
     LoadAdmissionController& budget_ = LoadAdmissionController::GetInstance();
 };
+
+TEST_F(LoadAdmissionControllerAsyncTest, MetricsExposeReservationsAndCapacity) {
+    budget_.SetCapacityBytes(10);
+    budget_.SetCapacitySlots(3);
+    auto lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({4, 2}, LoadAdmissionPriority::High));
+    auto metrics = ScrapeAdmissionMetrics();
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_bytes"), 4);
+    EXPECT_EQ(FindAdmissionSample(metrics, "capacity_bytes"), 10);
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_slots"), 2);
+    EXPECT_EQ(FindAdmissionSample(metrics, "capacity_slots"), 3);
+
+    // A shrink does not revoke reservations, and zero is the unlimited value.
+    budget_.SetCapacitySlots(1);
+    budget_.SetCapacityBytes(0);
+    metrics = ScrapeAdmissionMetrics();
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_bytes"), 4);
+    EXPECT_EQ(FindAdmissionSample(metrics, "capacity_bytes"), 0);
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_slots"), 2);
+    EXPECT_EQ(FindAdmissionSample(metrics, "capacity_slots"), 1);
+    lease.Release();
+    metrics = ScrapeAdmissionMetrics();
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_bytes"), 0);
+    EXPECT_EQ(FindAdmissionSample(metrics, "reserved_slots"), 0);
+    EXPECT_EQ(
+        FindAdmissionSample(metrics, "pending_requests", {"priority=\"high\""}),
+        0);
+    EXPECT_EQ(FindAdmissionSample(
+                  metrics, "oldest_wait_seconds", {"priority=\"high\""}),
+              0);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, MetricsTrackQueueAgeAndOutcomes) {
+    budget_.SetCapacitySlots(1);
+    const auto before = ScrapeAdmissionMetrics();
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancellation;
+    auto high_cancelled = budget_.AcquireAsync(
+        {1, 1}, LoadAdmissionPriority::High, cancellation.getToken());
+    auto low_cancelled = budget_.AcquireAsync(
+        {1, 1}, LoadAdmissionPriority::Low, cancellation.getToken());
+    auto high_admitted =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    auto low_admitted =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
+    const auto queued = ScrapeAdmissionMetrics();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    const auto aged = ScrapeAdmissionMetrics();
+    for (const auto priority : {"priority=\"high\"", "priority=\"low\""}) {
+        EXPECT_EQ(FindAdmissionSample(queued, "pending_requests", {priority}),
+                  2);
+        const auto first =
+            FindAdmissionSample(queued, "oldest_wait_seconds", {priority});
+        const auto second =
+            FindAdmissionSample(aged, "oldest_wait_seconds", {priority});
+        EXPECT_TRUE(first.has_value() && second.has_value() &&
+                    *second > *first);
+    }
+    cancellation.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(high_cancelled)),
+                 folly::OperationCancelled);
+    EXPECT_THROW(folly::coro::blockingWait(std::move(low_cancelled)),
+                 folly::OperationCancelled);
+    running.Release();
+    auto high_lease = folly::coro::blockingWait(std::move(high_admitted));
+    EXPECT_FALSE(low_admitted.isReady());
+    high_lease.Release();
+    auto low_lease = folly::coro::blockingWait(std::move(low_admitted));
+    low_lease.Release();
+
+    const auto after = ScrapeAdmissionMetrics();
+    for (const auto priority : {"priority=\"high\"", "priority=\"low\""}) {
+        EXPECT_EQ(FindAdmissionSample(after, "pending_requests", {priority}),
+                  0);
+        EXPECT_EQ(FindAdmissionSample(after, "oldest_wait_seconds", {priority}),
+                  0);
+        for (const auto outcome :
+             {"outcome=\"admitted\"", "outcome=\"cancelled\""}) {
+            const auto start = FindAdmissionSample(
+                before, "queue_wait_seconds_count", {priority, outcome});
+            const auto end = FindAdmissionSample(
+                after, "queue_wait_seconds_count", {priority, outcome});
+            EXPECT_TRUE(start.has_value() && end.has_value() &&
+                        *end == *start + 1);
+            const auto start_sum = FindAdmissionSample(
+                before, "queue_wait_seconds_sum", {priority, outcome});
+            const auto end_sum = FindAdmissionSample(
+                after, "queue_wait_seconds_sum", {priority, outcome});
+            EXPECT_TRUE(start_sum.has_value() && end_sum.has_value() &&
+                        *end_sum > *start_sum);
+            EXPECT_EQ(FindAdmissionSample(after,
+                                          "queue_wait_seconds_bucket",
+                                          {priority, outcome, "le=\"+Inf\""}),
+                      end);
+        }
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, MetricsExcludeRequestsThatNeverQueue) {
+    budget_.SetCapacitySlots(1);
+    const auto before = ScrapeAdmissionMetrics();
+    for (const auto priority :
+         {LoadAdmissionPriority::High, LoadAdmissionPriority::Low}) {
+        budget_.Acquire({1, 1}, priority);
+        EXPECT_FALSE(budget_.TryAcquire({1, 1}, priority));
+        budget_.Release({1, 1});
+        ASSERT_TRUE(budget_.TryAcquire({1, 1}, priority));
+        budget_.Release({1, 1});
+        auto lease =
+            folly::coro::blockingWait(budget_.AcquireAsync({1, 1}, priority));
+        folly::CancellationSource cancellation;
+        cancellation.requestCancellation();
+        EXPECT_FALSE(
+            budget_.AcquireUntil({1, 1}, priority, cancellation.getToken()));
+        EXPECT_THROW(folly::coro::blockingWait(budget_.AcquireAsync(
+                         {1, 1}, priority, cancellation.getToken())),
+                     folly::OperationCancelled);
+        lease.Release();
+    }
+    const auto after = ScrapeAdmissionMetrics();
+    for (const auto priority : {"priority=\"high\"", "priority=\"low\""}) {
+        for (const auto outcome :
+             {"outcome=\"admitted\"", "outcome=\"cancelled\""}) {
+            const auto start = FindAdmissionSample(
+                before, "queue_wait_seconds_count", {priority, outcome});
+            ASSERT_TRUE(start.has_value());
+            EXPECT_EQ(
+                FindAdmissionSample(
+                    after, "queue_wait_seconds_count", {priority, outcome}),
+                start);
+        }
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, MetricsCountBlockingQueueOutcomes) {
+    budget_.SetCapacitySlots(1);
+    const auto before = ScrapeAdmissionMetrics();
+    for (const bool cancel : {false, true}) {
+        auto running = folly::coro::blockingWait(
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+        folly::CancellationSource cancellation;
+        auto waiter = std::async(std::launch::async, [&] {
+            const bool admitted = budget_.AcquireUntil(
+                {1, 1}, LoadAdmissionPriority::High, cancellation.getToken());
+            if (admitted) {
+                budget_.Release({1, 1});
+            }
+            return admitted;
+        });
+        bool queued = false;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (FindAdmissionSample(ScrapeAdmissionMetrics(),
+                                    "pending_requests",
+                                    {"priority=\"high\""}) == 1) {
+                queued = true;
+                break;
+            }
+            std::this_thread::yield();
+        }
+        if (cancel || !queued) {
+            cancellation.requestCancellation();
+        } else {
+            budget_.SetCapacitySlots(2);
+        }
+        EXPECT_TRUE(queued);
+        EXPECT_EQ(waiter.get(), !cancel && queued);
+        running.Release();
+        budget_.SetCapacitySlots(1);
+    }
+    const auto after = ScrapeAdmissionMetrics();
+    for (const auto outcome :
+         {"outcome=\"admitted\"", "outcome=\"cancelled\""}) {
+        const auto start = FindAdmissionSample(
+            before, "queue_wait_seconds_count", {"priority=\"high\"", outcome});
+        const auto end = FindAdmissionSample(
+            after, "queue_wait_seconds_count", {"priority=\"high\"", outcome});
+        EXPECT_TRUE(start.has_value() && end.has_value() && *end == *start + 1);
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       ConcurrentMetricScrapesKeepResourceSnapshotConsistent) {
+    budget_.SetCapacitySlots(1);
+    std::jthread worker([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            budget_.Acquire({7, 1}, LoadAdmissionPriority::High);
+            budget_.Release({7, 1});
+        }
+    });
+    std::vector<std::future<bool>> scrapers;
+    scrapers.reserve(4);
+    for (size_t i = 0; i < 4; ++i) {
+        scrapers.push_back(std::async(std::launch::async, [] {
+            for (size_t j = 0; j < 8; ++j) {
+                const auto metrics = ScrapeAdmissionMetrics();
+                const auto bytes =
+                    FindAdmissionSample(metrics, "reserved_bytes");
+                const auto slots =
+                    FindAdmissionSample(metrics, "reserved_slots");
+                if (!bytes || !slots || *bytes != 7 * *slots ||
+                    FindAdmissionSample(metrics, "capacity_slots") != 1) {
+                    return false;
+                }
+            }
+            return true;
+        }));
+    }
+    for (auto& scraper : scrapers) {
+        EXPECT_TRUE(scraper.get());
+    }
+}
 
 TEST_F(LoadAdmissionControllerAsyncTest,
        SlotsLimitAdmissionWithUnlimitedBytes) {
@@ -521,6 +771,7 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     budget_.SetCapacityBytes(0);
     budget_.SetCapacitySlots(1);
 
+    const auto before = ScrapeAdmissionMetrics();
     for (size_t i = 0; i < 100; ++i) {
         auto running =
             budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
@@ -546,6 +797,19 @@ TEST_F(LoadAdmissionControllerAsyncTest,
         ASSERT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
         budget_.Release({1, 1});
     }
+    const auto after = ScrapeAdmissionMetrics();
+    double resolved = 0;
+    for (const auto outcome :
+         {"outcome=\"admitted\"", "outcome=\"cancelled\""}) {
+        const auto start = FindAdmissionSample(
+            before, "queue_wait_seconds_count", {"priority=\"high\"", outcome});
+        const auto end = FindAdmissionSample(
+            after, "queue_wait_seconds_count", {"priority=\"high\"", outcome});
+        ASSERT_TRUE(start.has_value());
+        ASSERT_TRUE(end.has_value());
+        resolved += *end - *start;
+    }
+    EXPECT_EQ(resolved, 100);
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest, CapacityUpdateWakesPendingAdmission) {

@@ -20,6 +20,7 @@
 
 #include "common/EasyAssert.h"
 #include "folly/OperationCancelled.h"
+#include "monitor/Monitor.h"
 #include "storage/LoadOverheadController.h"
 
 namespace milvus::storage {
@@ -280,6 +281,49 @@ LoadAdmissionController::NotifyCapacityUpdated() {
     ResolvePending(std::move(resolution));
 }
 
+void
+LoadAdmissionController::UpdateMetrics() const {
+    struct Snapshot {
+        size_t reserved_bytes;
+        size_t capacity_bytes;
+        size_t reserved_slots;
+        size_t capacity_slots;
+        size_t high_pending;
+        size_t low_pending;
+        double high_oldest_wait;
+        double low_oldest_wait;
+    } snapshot;
+    {
+        std::lock_guard lock(mu_);
+        const auto now = Clock::now();
+        const auto oldest_wait = [now](const PendingQueue& queue) {
+            return queue.empty() ? 0.0
+                                 : std::chrono::duration<double>(
+                                       now - queue.front()->queued_at)
+                                       .count();
+        };
+        snapshot = {inflight_bytes_,
+                    capacity_bytes_,
+                    inflight_slots_,
+                    capacity_slots_,
+                    high_pending_.size(),
+                    low_pending_.size(),
+                    oldest_wait(high_pending_),
+                    oldest_wait(low_pending_)};
+    }
+    using namespace milvus::monitor;
+    internal_load_admission_reserved_bytes.Set(snapshot.reserved_bytes);
+    internal_load_admission_capacity_bytes.Set(snapshot.capacity_bytes);
+    internal_load_admission_reserved_slots.Set(snapshot.reserved_slots);
+    internal_load_admission_capacity_slots.Set(snapshot.capacity_slots);
+    internal_load_admission_pending_requests_high.Set(snapshot.high_pending);
+    internal_load_admission_pending_requests_low.Set(snapshot.low_pending);
+    internal_load_admission_oldest_wait_seconds_high.Set(
+        snapshot.high_oldest_wait);
+    internal_load_admission_oldest_wait_seconds_low.Set(
+        snapshot.low_oldest_wait);
+}
+
 size_t
 LoadAdmissionController::CapacityBytesLocked() const {
     return capacity_bytes_;
@@ -325,6 +369,8 @@ LoadAdmissionController::EnqueuePendingLocked(
         priority == LoadAdmissionPriority::High ? high_pending_ : low_pending_;
     const auto position = prepared.begin();
     const auto& pending = *position;
+    pending->queued_at = Clock::now();
+    pending->priority = priority;
     queue.splice(queue.end(), prepared, position);
     pending->queue = &queue;
     pending->queue_position = position;
@@ -363,6 +409,11 @@ LoadAdmissionController::TakeAdmittedLocked() {
     if (high_pending_.empty()) {
         admit_queue(low_pending_);
     }
+    if (!resolution.admitted.empty()) {
+        // Timestamp the batch decision under mu_, excluding notification and
+        // coroutine resumption. Empty releases do not read the clock.
+        resolution.admitted_at = Clock::now();
+    }
     return resolution;
 }
 
@@ -382,8 +433,26 @@ LoadAdmissionController::FulfillAdmission(
 void
 LoadAdmissionController::ResolvePending(PendingResolution resolution) {
     for (auto& pending : resolution.admitted) {
+        ObserveQueueWait(*pending, resolution.admitted_at);
         FulfillAdmission(std::move(pending));
     }
+}
+
+void
+LoadAdmissionController::ObserveQueueWait(const PendingAdmission& pending,
+                                          const Clock::time_point finished_at) {
+    using namespace milvus::monitor;
+    const bool high = pending.priority == LoadAdmissionPriority::High;
+    const bool admitted = pending.state == PendingAdmission::State::Admitted;
+    auto& histogram =
+        high ? (admitted
+                    ? internal_load_admission_queue_wait_seconds_high_admitted
+                    : internal_load_admission_queue_wait_seconds_high_cancelled)
+             : (admitted
+                    ? internal_load_admission_queue_wait_seconds_low_admitted
+                    : internal_load_admission_queue_wait_seconds_low_cancelled);
+    histogram.Observe(
+        std::chrono::duration<double>(finished_at - pending.queued_at).count());
 }
 
 void
@@ -391,12 +460,14 @@ LoadAdmissionController::CancelPending(
     std::shared_ptr<PendingAdmission> pending) {
     PendingResolution resolution;
     PendingQueue removed;
+    Clock::time_point cancelled_at{};
     bool cancelled = false;
     {
         std::lock_guard lock(mu_);
         if (pending->state == PendingAdmission::State::Pending) {
             pending->state = PendingAdmission::State::Cancelled;
             if (pending->queue != nullptr) {
+                cancelled_at = Clock::now();
                 removed.splice(
                     removed.end(), *pending->queue, pending->queue_position);
                 pending->queue = nullptr;
@@ -406,6 +477,10 @@ LoadAdmissionController::CancelPending(
         }
     }
     if (cancelled) {
+        // Cancellation before enqueue is not a queue-wait sample.
+        if (!removed.empty()) {
+            ObserveQueueWait(*pending, cancelled_at);
+        }
         if (pending->is_blocking_waiter) {
             pending->ready.post();
         } else {

@@ -510,6 +510,43 @@ count. Explicit `0` disables only the slot limit; negative values fall back to
 the CPU-derived default. The CPU count is a sizing heuristic for unfinished
 load work, not a count of threads currently executing it.
 
+### Admission metrics
+
+The process-wide controller exports these metric families with the prefix
+`internal_load_admission_`:
+
+| Suffix | Type | Labels | Meaning |
+|---|---|---|---|
+| `reserved_bytes` | Gauge | none | Estimated transient bytes reserved by unfinished admitted work, not RSS |
+| `capacity_bytes` | Gauge | none | Effective byte capacity; `0` means unlimited |
+| `reserved_slots` | Gauge | none | Slots reserved by unfinished admitted work |
+| `capacity_slots` | Gauge | none | Effective slot capacity; `0` means unlimited |
+| `pending_requests` | Gauge | `priority=high/low` | Requests still waiting without a reservation |
+| `oldest_wait_seconds` | Gauge | `priority=high/low` | Age of the queue head, or `0` for an empty queue |
+| `queue_wait_seconds` | Histogram | `priority=high/low`, `outcome=admitted/cancelled` | Time from enqueue to the terminal admission or cancellation decision |
+
+The C metrics scrape takes one O(1) resource/queue snapshot under the admission
+mutex, then publishes gauges after unlocking. Scrapes serialize publication and
+collection so concurrent scrapes cannot mix gauge snapshots. Queue-head age
+continues to grow even when no request completes. Reserved values can exceed
+capacity after a shrink or, for bytes, an oversized admission; utilization ratios
+must exclude zero capacities.
+
+Only requests that actually enter a queue record a monotonic start time. An
+admission batch records its completion time under the admission mutex; a queued
+cancellation records its own decision time. Each queued request contributes once
+to the matching histogram, outside the admission mutex and before notification.
+The histogram excludes coroutine resumption delay, immediate admissions,
+`TryAcquire` attempts, and cancellation before enqueue. Its `_count` provides
+the cumulative number of queued requests resolved with each outcome. Histogram
+observations and the gauge snapshot are collected independently, so they are
+not an atomic accounting transaction.
+
+Immediate admission and releases that admit no waiters perform no metric updates
+or clock reads. The four histogram instances are registered once; updates require
+no label lookup or allocation. The histogram library still takes its own mutex,
+so contention at very high queue-resolution rates remains a measurement concern.
+
 ## Finalization and Local File I/O
 
 ### Memory-backed fields
@@ -769,8 +806,7 @@ sealed-segment tests, and `make verifiers`.
 ## Follow-Up Work
 
 - Add the async scalar-index path described by issue #51245.
-- Add dedicated window/admission/read/finalization latency and in-flight byte
-  metrics before broad rollout.
+- Add dedicated window/read/finalization latency metrics before broad rollout.
 - Choose a non-zero default transient budget and validate it with the read-window
   default on object-storage and mmap workloads before supported enablement.
 - Decide whether native async storage support must become a hard requirement
