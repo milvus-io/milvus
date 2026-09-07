@@ -224,6 +224,11 @@ func getStateFromError(err error) indexpb.JobState {
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
+	} else if merr.IsPermanentSegcoreErr(err) {
+		// A segcore code the table marks permanent (index build failed on this
+		// input, corrupted data, missing object, misconfigured bucket): the same
+		// task reproduces it on every worker, so retrying only burns slots.
+		return indexpb.JobState_JobStateFailed
 	} else if merr.GetErrorType(err) == merr.InputError {
 		// The request or the source data is itself what fails the build, so the task
 		// fails identically on every worker and on every attempt. Fail it once instead

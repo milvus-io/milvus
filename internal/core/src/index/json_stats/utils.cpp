@@ -187,7 +187,7 @@ CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
             case JsonKeyLayoutType::DYNAMIC_ONLY:
                 fields.push_back(CreateArrowField(key, type, field_id++));
                 if (field_id > END_JSON_STATS_FIELD_ID) {
-                    ThrowInfo(ErrorCode::UnexpectedError,
+                    ThrowInfo(ErrorCode::JsonKeyInvalid,
                               "Field ID exceeds the limit: {}, field_id: {}",
                               END_JSON_STATS_FIELD_ID,
                               field_id);

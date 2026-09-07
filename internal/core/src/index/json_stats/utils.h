@@ -61,6 +61,22 @@ JsonStringHasEscape(std::string_view s) {
     return std::memchr(s.data(), '\\', s.size()) != nullptr;
 }
 
+// A simdjson failure raised while indexing a document is a property of that
+// document, so the same task fails identically on every worker and must not be
+// retried. The allocation/IO codes are the exception: they describe the machine,
+// not the data, and can succeed on another attempt.
+inline ErrorCode
+JsonParseErrorCode(simdjson::error_code code) {
+    switch (code) {
+        case simdjson::MEMALLOC:
+        case simdjson::CAPACITY:
+        case simdjson::IO_ERROR:
+            return ErrorCode::UnexpectedError;
+        default:
+            return ErrorCode::JsonKeyInvalid;
+    }
+}
+
 // Unescape a JSON-escaped string slice (without surrounding quotes)
 // Returns a decoded UTF-8 std::string or throws on error
 inline std::string
@@ -93,7 +109,7 @@ UnescapeJsonString(const std::string& escaped) {
         throw;
     } catch (const simdjson::simdjson_error& e) {
         // simdjson only fails here because the document itself is malformed.
-        ThrowInfo(ErrorCode::JsonKeyInvalid,
+        ThrowInfo(JsonParseErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
                   escaped,
                   e.what());

@@ -159,7 +159,14 @@ ReadMediumType(BinlogReaderPtr reader) {
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
     AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
-    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
+    if (magic_num != MAGIC_NUM) {
+        // A wrong magic number means the object is not the binlog format this
+        // reader expects (e.g. a v2 parquet file behind v1 meta). The bytes do
+        // not change between attempts, so reporting it as the generic
+        // UnexpectedError only makes the build task retry forever.
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "invalid magic num: {}", magic_num);
+    }
 }
 
 void

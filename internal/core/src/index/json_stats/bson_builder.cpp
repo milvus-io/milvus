@@ -113,7 +113,7 @@ BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
     simdjson::dom::parser parser;
     simdjson::dom::element root = parser.parse(json_array);
     if (root.type() != simdjson::dom::element_type::ARRAY) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::JsonKeyInvalid,
                   "input is not a JSON array: {}",
                   json_array);
     }
@@ -208,9 +208,14 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
                 s.type = JSONType::ARRAY;
                 s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
                 return DomNode(std::move(s));
+            } catch (const SegcoreError&) {
+                // Already classified inside BuildBsonArrayBytesFromJsonString;
+                // SegcoreError derives from std::runtime_error, so without this
+                // the generic handler below would rewrap it and lose the code.
+                throw;
             } catch (const simdjson::simdjson_error& e) {
                 ThrowInfo(
-                    ErrorCode::UnexpectedError,
+                    JsonParseErrorCode(e.error()),
                     "Failed to build bson array (simdjson) from string: {}, {}",
                     value,
                     e.what());

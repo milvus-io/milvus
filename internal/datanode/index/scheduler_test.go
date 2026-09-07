@@ -70,6 +70,28 @@ func TestGetStateFromError(t *testing.T) {
 		}
 	})
 
+	// Codes the table marks permanent reproduce identically on every worker, so
+	// the task must give up instead of burning a slot per attempt.
+	t.Run("permanent segcore errors are terminal", func(t *testing.T) {
+		for _, tc := range []struct {
+			code int32
+			name string
+		}{
+			{2004, "IndexBuildError"},
+			{2016, "BucketInvalid"},
+			{2017, "ObjectNotExist"},
+			{2044, "StorageError"},
+		} {
+			assert.Equalf(t, indexpb.JobState_JobStateFailed,
+				getStateFromError(merr.SegcoreError(tc.code, tc.name)),
+				"segcore code %d (%s) must fail instead of retrying", tc.code, tc.name)
+		}
+		// wrapped the way indexcgowrapper reports it
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(errors.Wrap(merr.SegcoreError(2004, "disk file error"),
+				"failed to create index, C Runtime Exception")))
+	})
+
 	t.Run("input error survives wrapping", func(t *testing.T) {
 		err := errors.Wrap(merr.SegcoreError(2025, "bad json"), "failed to build json key index")
 		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
