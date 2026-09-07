@@ -170,6 +170,150 @@ func (_c *MockBalancer_ConfirmPrimaryResourceGroupReady_Call) RunAndReturn(run f
 	return _c
 }
 
+// EnsureReadOnlyWALReplica provides a mock function with given fields: ctx, pchannel, resourceGroup
+func (_m *MockBalancer) EnsureReadOnlyWALReplica(ctx context.Context, pchannel string, resourceGroup string) error {
+	ret := _m.Called(ctx, pchannel, resourceGroup)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureReadOnlyWALReplica")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, pchannel, resourceGroup)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_EnsureReadOnlyWALReplica_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnsureReadOnlyWALReplica'
+type MockBalancer_EnsureReadOnlyWALReplica_Call struct {
+	*mock.Call
+}
+
+// EnsureReadOnlyWALReplica is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+//   - resourceGroup string
+func (_e *MockBalancer_Expecter) EnsureReadOnlyWALReplica(ctx interface{}, pchannel interface{}, resourceGroup interface{}) *MockBalancer_EnsureReadOnlyWALReplica_Call {
+	return &MockBalancer_EnsureReadOnlyWALReplica_Call{Call: _e.mock.On("EnsureReadOnlyWALReplica", ctx, pchannel, resourceGroup)}
+}
+
+func (_c *MockBalancer_EnsureReadOnlyWALReplica_Call) Run(run func(ctx context.Context, pchannel string, resourceGroup string)) *MockBalancer_EnsureReadOnlyWALReplica_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_EnsureReadOnlyWALReplica_Call) Return(_a0 error) *MockBalancer_EnsureReadOnlyWALReplica_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_EnsureReadOnlyWALReplica_Call) RunAndReturn(run func(context.Context, string, string) error) *MockBalancer_EnsureReadOnlyWALReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReleaseReadOnlyWALReplica provides a mock function with given fields: ctx, pchannel, walReplicaID
+func (_m *MockBalancer) ReleaseReadOnlyWALReplica(ctx context.Context, pchannel string, walReplicaID int64) error {
+	ret := _m.Called(ctx, pchannel, walReplicaID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReleaseReadOnlyWALReplica")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) error); ok {
+		r0 = rf(ctx, pchannel, walReplicaID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_ReleaseReadOnlyWALReplica_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseReadOnlyWALReplica'
+type MockBalancer_ReleaseReadOnlyWALReplica_Call struct {
+	*mock.Call
+}
+
+// ReleaseReadOnlyWALReplica is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+//   - walReplicaID int64
+func (_e *MockBalancer_Expecter) ReleaseReadOnlyWALReplica(ctx interface{}, pchannel interface{}, walReplicaID interface{}) *MockBalancer_ReleaseReadOnlyWALReplica_Call {
+	return &MockBalancer_ReleaseReadOnlyWALReplica_Call{Call: _e.mock.On("ReleaseReadOnlyWALReplica", ctx, pchannel, walReplicaID)}
+}
+
+func (_c *MockBalancer_ReleaseReadOnlyWALReplica_Call) Run(run func(ctx context.Context, pchannel string, walReplicaID int64)) *MockBalancer_ReleaseReadOnlyWALReplica_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_ReleaseReadOnlyWALReplica_Call) Return(_a0 error) *MockBalancer_ReleaseReadOnlyWALReplica_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_ReleaseReadOnlyWALReplica_Call) RunAndReturn(run func(context.Context, string, int64) error) *MockBalancer_ReleaseReadOnlyWALReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SwitchWALPrimaryReplica provides a mock function with given fields: ctx, pchannel, targetReplicaID
+func (_m *MockBalancer) SwitchWALPrimaryReplica(ctx context.Context, pchannel string, targetReplicaID int64) error {
+	ret := _m.Called(ctx, pchannel, targetReplicaID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SwitchWALPrimaryReplica")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) error); ok {
+		r0 = rf(ctx, pchannel, targetReplicaID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_SwitchWALPrimaryReplica_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SwitchWALPrimaryReplica'
+type MockBalancer_SwitchWALPrimaryReplica_Call struct {
+	*mock.Call
+}
+
+// SwitchWALPrimaryReplica is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+//   - targetReplicaID int64
+func (_e *MockBalancer_Expecter) SwitchWALPrimaryReplica(ctx interface{}, pchannel interface{}, targetReplicaID interface{}) *MockBalancer_SwitchWALPrimaryReplica_Call {
+	return &MockBalancer_SwitchWALPrimaryReplica_Call{Call: _e.mock.On("SwitchWALPrimaryReplica", ctx, pchannel, targetReplicaID)}
+}
+
+func (_c *MockBalancer_SwitchWALPrimaryReplica_Call) Run(run func(ctx context.Context, pchannel string, targetReplicaID int64)) *MockBalancer_SwitchWALPrimaryReplica_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_SwitchWALPrimaryReplica_Call) Return(_a0 error) *MockBalancer_SwitchWALPrimaryReplica_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_SwitchWALPrimaryReplica_Call) RunAndReturn(run func(context.Context, string, int64) error) *MockBalancer_SwitchWALPrimaryReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAllStreamingNodes provides a mock function with given fields: ctx
 func (_m *MockBalancer) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	ret := _m.Called(ctx)
@@ -443,6 +587,102 @@ func (_c *MockBalancer_MarkAsUnavailable_Call) Return(_a0 error) *MockBalancer_M
 }
 
 func (_c *MockBalancer_MarkAsUnavailable_Call) RunAndReturn(run func(context.Context, []types.PChannelInfo) error) *MockBalancer_MarkAsUnavailable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MarkWALReplicasAsUnavailable provides a mock function with given fields: ctx, replicas, assignmentEpoch
+func (_m *MockBalancer) MarkWALReplicasAsUnavailable(ctx context.Context, replicas []types.ChannelID, assignmentEpoch int64) error {
+	ret := _m.Called(ctx, replicas, assignmentEpoch)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MarkWALReplicasAsUnavailable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []types.ChannelID, int64) error); ok {
+		r0 = rf(ctx, replicas, assignmentEpoch)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_MarkWALReplicasAsUnavailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkWALReplicasAsUnavailable'
+type MockBalancer_MarkWALReplicasAsUnavailable_Call struct {
+	*mock.Call
+}
+
+// MarkWALReplicasAsUnavailable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - replicas []types.ChannelID
+//   - assignmentEpoch int64
+func (_e *MockBalancer_Expecter) MarkWALReplicasAsUnavailable(ctx interface{}, replicas interface{}, assignmentEpoch interface{}) *MockBalancer_MarkWALReplicasAsUnavailable_Call {
+	return &MockBalancer_MarkWALReplicasAsUnavailable_Call{Call: _e.mock.On("MarkWALReplicasAsUnavailable", ctx, replicas, assignmentEpoch)}
+}
+
+func (_c *MockBalancer_MarkWALReplicasAsUnavailable_Call) Run(run func(ctx context.Context, replicas []types.ChannelID, assignmentEpoch int64)) *MockBalancer_MarkWALReplicasAsUnavailable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]types.ChannelID), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_MarkWALReplicasAsUnavailable_Call) Return(_a0 error) *MockBalancer_MarkWALReplicasAsUnavailable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_MarkWALReplicasAsUnavailable_Call) RunAndReturn(run func(context.Context, []types.ChannelID, int64) error) *MockBalancer_MarkWALReplicasAsUnavailable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MarkWALPrimaryReplicaAsUnavailable provides a mock function with given fields: ctx, replicaID, assignmentEpoch
+func (_m *MockBalancer) MarkWALPrimaryReplicaAsUnavailable(ctx context.Context, replicaID types.ChannelID, assignmentEpoch int64) error {
+	ret := _m.Called(ctx, replicaID, assignmentEpoch)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MarkWALPrimaryReplicaAsUnavailable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.ChannelID, int64) error); ok {
+		r0 = rf(ctx, replicaID, assignmentEpoch)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkWALPrimaryReplicaAsUnavailable'
+type MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call struct {
+	*mock.Call
+}
+
+// MarkWALPrimaryReplicaAsUnavailable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - replicaID types.ChannelID
+//   - assignmentEpoch int64
+func (_e *MockBalancer_Expecter) MarkWALPrimaryReplicaAsUnavailable(ctx interface{}, replicaID interface{}, assignmentEpoch interface{}) *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call {
+	return &MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call{Call: _e.mock.On("MarkWALPrimaryReplicaAsUnavailable", ctx, replicaID, assignmentEpoch)}
+}
+
+func (_c *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call) Run(run func(ctx context.Context, replicaID types.ChannelID, assignmentEpoch int64)) *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.ChannelID), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call) Return(_a0 error) *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call) RunAndReturn(run func(context.Context, types.ChannelID, int64) error) *MockBalancer_MarkWALPrimaryReplicaAsUnavailable_Call {
 	_c.Call.Return(run)
 	return _c
 }

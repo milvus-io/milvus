@@ -19,15 +19,16 @@ import (
 // newAssignmentDiscoverClient creates a new assignment discover client.
 func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient) *assignmentDiscoverClient {
 	c := &assignmentDiscoverClient{
-		lifetime:              typeutil.NewLifetime(),
-		w:                     w,
-		streamClient:          streamClient,
-		logger:                mlog.With(),
-		requestCh:             make(chan *streamingpb.AssignmentDiscoverRequest, 16),
-		exitCh:                make(chan struct{}),
-		wg:                    sync.WaitGroup{},
-		lastErrorReportedTerm: make(map[string]int64),
-		clusterID:             paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		lifetime:                         typeutil.NewLifetime(),
+		w:                                w,
+		streamClient:                     streamClient,
+		logger:                           mlog.With(),
+		requestCh:                        make(chan *streamingpb.AssignmentDiscoverRequest, 16),
+		exitCh:                           make(chan struct{}),
+		wg:                               sync.WaitGroup{},
+		lastErrorReportedTerm:            make(map[string]int64),
+		lastErrorReportedWALReplicaEpoch: make(map[types.ChannelID]int64),
+		clusterID:                        paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 	}
 	c.executeBackgroundTask()
 	return c
@@ -35,15 +36,16 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 
 // assignmentDiscoverClient is the client for assignment discover.
 type assignmentDiscoverClient struct {
-	lifetime              *typeutil.Lifetime
-	w                     *watcher
-	logger                *mlog.Logger
-	requestCh             chan *streamingpb.AssignmentDiscoverRequest
-	exitCh                chan struct{}
-	wg                    sync.WaitGroup
-	streamClient          streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
-	lastErrorReportedTerm map[string]int64
-	clusterID             string
+	lifetime                         *typeutil.Lifetime
+	w                                *watcher
+	logger                           *mlog.Logger
+	requestCh                        chan *streamingpb.AssignmentDiscoverRequest
+	exitCh                           chan struct{}
+	wg                               sync.WaitGroup
+	streamClient                     streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
+	lastErrorReportedTerm            map[string]int64
+	lastErrorReportedWALReplicaEpoch map[types.ChannelID]int64
+	clusterID                        string
 }
 
 // ReportAssignmentError reports the assignment error to server.
@@ -60,6 +62,28 @@ func (c *assignmentDiscoverClient) ReportAssignmentError(pchannel types.PChannel
 			ReportError: &streamingpb.ReportAssignmentErrorRequest{
 				Pchannel: types.NewProtoFromPChannelInfo(pchannel),
 				Err:      statusErr,
+			},
+		},
+	}:
+	case <-c.exitCh:
+	}
+}
+
+func (c *assignmentDiscoverClient) ReportWALReplicaAssignmentError(assignment types.PChannelInfoAssigned, err error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return
+	}
+	defer c.lifetime.Done()
+
+	statusErr := status.AsStreamingError(err).AsPBError()
+	select {
+	case c.requestCh <- &streamingpb.AssignmentDiscoverRequest{
+		Command: &streamingpb.AssignmentDiscoverRequest_ReportError{
+			ReportError: &streamingpb.ReportAssignmentErrorRequest{
+				Pchannel:        types.NewProtoFromPChannelInfo(assignment.Channel),
+				Err:             statusErr,
+				WalReplicaId:    assignment.WALReplicaID,
+				AssignmentEpoch: assignment.AssignmentEpoch,
 			},
 		},
 	}:
@@ -123,6 +147,19 @@ func (c *assignmentDiscoverClient) sendLoop() (err error) {
 func (c *assignmentDiscoverClient) shouldIgnore(req *streamingpb.AssignmentDiscoverRequest) bool {
 	switch req := req.Command.(type) {
 	case *streamingpb.AssignmentDiscoverRequest_ReportError:
+		if req.ReportError.GetWalReplicaId() != 0 ||
+			req.ReportError.GetAssignmentEpoch() != 0 ||
+			req.ReportError.GetPchannel().GetAccessMode() == streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY {
+			replicaID := types.ChannelID{
+				Name:         req.ReportError.GetPchannel().GetName(),
+				WALReplicaID: req.ReportError.GetWalReplicaId(),
+			}
+			if epoch, ok := c.lastErrorReportedWALReplicaEpoch[replicaID]; ok && req.ReportError.GetAssignmentEpoch() <= epoch {
+				return true
+			}
+			c.lastErrorReportedWALReplicaEpoch[replicaID] = req.ReportError.GetAssignmentEpoch()
+			return false
+		}
 		if term, ok := c.lastErrorReportedTerm[req.ReportError.Pchannel.Name]; ok && req.ReportError.Pchannel.Term <= term {
 			// If the error at newer term has been reported, ignore it right now.
 			return true
@@ -166,9 +203,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				for _, channel := range assignment.Channels {
 					channels[channel.Name] = types.NewPChannelInfoFromProto(channel)
 				}
+				walReplicas := make(map[types.ChannelID]types.WALReplicaInfo, len(assignment.WalReplicas))
+				for _, replica := range assignment.WalReplicas {
+					info := types.NewWALReplicaInfoFromProto(replica)
+					walReplicas[info.ChannelID] = info
+				}
 				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
-					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),
-					Channels: channels,
+					NodeInfo:    types.NewStreamingNodeInfoFromProto(assignment.Node),
+					Channels:    channels,
+					WALReplicas: walReplicas,
 				}
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{

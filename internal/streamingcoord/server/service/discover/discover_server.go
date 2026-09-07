@@ -78,6 +78,20 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 		switch req := req.Command.(type) {
 		case *streamingpb.AssignmentDiscoverRequest_ReportError:
 			channel := types.NewPChannelInfoFromProto(req.ReportError.GetPchannel())
+			if channel.AccessMode == types.AccessModeRO {
+				s.balancer.MarkWALReplicasAsUnavailable(s.ctx, []types.ChannelID{{
+					Name:         channel.Name,
+					WALReplicaID: req.ReportError.GetWalReplicaId(),
+				}}, req.ReportError.GetAssignmentEpoch())
+				continue
+			}
+			if req.ReportError.GetWalReplicaId() != 0 || req.ReportError.GetAssignmentEpoch() != 0 {
+				s.balancer.MarkWALPrimaryReplicaAsUnavailable(s.ctx, types.ChannelID{
+					Name:         channel.Name,
+					WALReplicaID: req.ReportError.GetWalReplicaId(),
+				}, req.ReportError.GetAssignmentEpoch())
+				continue
+			}
 			// mark the channel as unavailable and trigger a recover right away.
 			s.balancer.MarkAsUnavailable(s.ctx, []types.PChannelInfo{channel})
 		case *streamingpb.AssignmentDiscoverRequest_Close:

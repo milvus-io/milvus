@@ -40,6 +40,7 @@ type CurrentLayout struct {
 	Channels           map[channel.ChannelID]types.PChannelInfo
 	Stats              map[channel.ChannelID]channel.PChannelStatsView
 	AllNodesInfo       map[int64]types.StreamingNodeStatus    // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
+	AssignableNodes    map[int64]struct{}                     // AssignableNodes is the node set ordinary balance may choose as a new target. nil means all healthy nodes are assignable.
 	ChannelsToNodes    map[types.ChannelID]int64              // ChannelsToNodes maps assigned channel name to node id.
 	ExpectedAccessMode map[channel.ChannelID]types.AccessMode // ExpectedAccessMode is the expected access mode of all channel.
 }
@@ -74,11 +75,26 @@ func (layout *CurrentLayout) TotalNodes() int {
 	return len(layout.AllNodesInfo)
 }
 
+// GetAssignableNodeIDs returns streaming nodes that ordinary balance may choose
+// for new or rebalanced assignments.
+func (layout *CurrentLayout) GetAssignableNodeIDs() []int64 {
+	if layout.AssignableNodes == nil {
+		return lo.Keys(layout.AllNodesInfo)
+	}
+	return lo.Keys(layout.AssignableNodes)
+}
+
 // AllowRebalance returns true if the balance of the pchannel is allowed.
 func (layout *CurrentLayout) AllowRebalance(channelID channel.ChannelID) bool {
 	if !layout.Config.AllowRebalance {
 		// If rebalance is not allowed, return false directly.
 		return false
+	}
+
+	if info, ok := layout.Channels[channelID]; ok && info.AccessMode == types.AccessModeRW {
+		if _, assigned := layout.ChannelsToNodes[channelID]; assigned {
+			return false
+		}
 	}
 
 	// If the last assign timestamp is too close to the current time, rebalance is not allowed.

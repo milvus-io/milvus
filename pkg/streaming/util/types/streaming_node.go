@@ -51,8 +51,56 @@ func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
 
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
-	NodeInfo StreamingNodeInfo
-	Channels map[string]PChannelInfo
+	NodeInfo    StreamingNodeInfo
+	Channels    map[string]PChannelInfo
+	WALReplicas map[ChannelID]WALReplicaInfo
+}
+
+// WALReplicaInfo is the service-discovery projection of one WAL replica.
+type WALReplicaInfo struct {
+	ChannelID         ChannelID
+	AccessMode        AccessMode
+	ResourceGroup     string
+	PChannelWriteTerm int64
+	AssignmentEpoch   int64
+	State             streamingpb.PChannelMetaState
+}
+
+// WALReplicaInfoAssigned binds a WAL replica to its serviceable StreamingNode.
+type WALReplicaInfoAssigned struct {
+	Replica WALReplicaInfo
+	Node    StreamingNodeInfo
+}
+
+// NewWALReplicaInfoFromProto creates a WALReplicaInfo from proto.
+func NewWALReplicaInfoFromProto(replica *streamingpb.WALReplicaInfo) WALReplicaInfo {
+	if replica == nil {
+		return WALReplicaInfo{}
+	}
+	return WALReplicaInfo{
+		ChannelID: ChannelID{
+			Name:         replica.GetPchannel(),
+			WALReplicaID: replica.GetWalReplicaId(),
+		},
+		AccessMode:        AccessMode(replica.GetAccessMode()),
+		ResourceGroup:     replica.GetResourceGroup(),
+		PChannelWriteTerm: replica.GetPchannelWriteTerm(),
+		AssignmentEpoch:   replica.GetAssignmentEpoch(),
+		State:             replica.GetState(),
+	}
+}
+
+// NewProtoFromWALReplicaInfo creates a proto from WALReplicaInfo.
+func NewProtoFromWALReplicaInfo(info WALReplicaInfo) *streamingpb.WALReplicaInfo {
+	return &streamingpb.WALReplicaInfo{
+		Pchannel:          info.ChannelID.Name,
+		WalReplicaId:      info.ChannelID.WALReplicaID,
+		AccessMode:        streamingpb.PChannelAccessMode(info.AccessMode),
+		ResourceGroup:     info.ResourceGroup,
+		PchannelWriteTerm: info.PChannelWriteTerm,
+		AssignmentEpoch:   info.AssignmentEpoch,
+		State:             info.State,
+	}
 }
 
 // NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.

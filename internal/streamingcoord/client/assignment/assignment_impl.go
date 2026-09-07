@@ -108,6 +108,20 @@ func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchan
 	return nil
 }
 
+func (c *AssignmentServiceImpl) ReportWALReplicaAssignmentError(ctx context.Context, assignmentInfo types.PChannelInfoAssigned, assignmentErr error) error {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("assignment service client is closing")
+	}
+	defer c.lifetime.Done()
+
+	assignment, err := c.getAssignmentDiscoverOrWait(ctx)
+	if err != nil {
+		return merr.Wrap(err, "at creating assignment service")
+	}
+	assignment.ReportWALReplicaAssignmentError(assignmentInfo, assignmentErr)
+	return nil
+}
+
 // GetReplicateConfigurationOpt is the option for GetReplicateConfiguration.
 type GetReplicateConfigurationOpt func(*getReplicateConfigurationOpts)
 

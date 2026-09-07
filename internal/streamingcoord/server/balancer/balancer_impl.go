@@ -296,6 +296,30 @@ func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.
 	return err
 }
 
+func (b *balancerImpl) MarkWALReplicasAsUnavailable(ctx context.Context, replicas []types.ChannelID, assignmentEpoch int64) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+	_, err := b.sendRequestAndWaitFinish(ctx, newOpMarkWALReplicasAsUnavailable(ctx, replicas, assignmentEpoch))
+	return err
+}
+
+func (b *balancerImpl) MarkWALPrimaryReplicaAsUnavailable(ctx context.Context, replicaID types.ChannelID, assignmentEpoch int64) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
+	_, err := b.sendRequestAndWaitFinish(ctx, newOpMarkWALPrimaryReplicaAsUnavailable(ctx, replicaID, assignmentEpoch))
+	return err
+}
+
 // Trigger trigger a re-balance.
 func (b *balancerImpl) Trigger(ctx context.Context) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -590,13 +614,20 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	var allNodes map[int64]*types.StreamingNodeInfoWithResourceGroup
+	if rgName != "" {
+		allNodes, err = b.GetAllStreamingNodes(ctx)
+		if err != nil {
+			return false, err
+		}
+	}
 
 	// call the balance strategy to generate the expected layout.
 	accessMode := types.AccessModeRO
 	if b.channelMetaManager.IsStreamingEnabledOnce() {
 		accessMode = types.AccessModeRW
 	}
-	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
+	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode, allNodes)
 	expectedLayout, err := b.policy.Balance(currentLayout)
 	if err != nil {
 		return false, merr.Wrap(err, "fail to balance")
@@ -696,10 +727,23 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.
-func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]*types.StreamingNodeStatus, accessMode types.AccessMode) (layout CurrentLayout) {
+func generateCurrentLayout(
+	view *channel.PChannelView,
+	allNodesStatus map[int64]*types.StreamingNodeStatus,
+	accessMode types.AccessMode,
+	allNodes map[int64]*types.StreamingNodeInfoWithResourceGroup,
+) (layout CurrentLayout) {
 	channelsToNodes := make(map[types.ChannelID]int64, len(view.Channels))
 	channels := make(map[channel.ChannelID]types.PChannelInfo, len(view.Channels))
 	expectedAccessMode := make(map[types.ChannelID]types.AccessMode, len(view.Channels))
+	assignableNodes := make(map[int64]struct{}, len(allNodesStatus))
+	allNodesInfo := make(map[int64]types.StreamingNodeStatus, len(allNodesStatus))
+	for serverID, nodeStatus := range allNodesStatus {
+		if nodeStatus.IsHealthy() {
+			allNodesInfo[serverID] = *nodeStatus
+			assignableNodes[serverID] = struct{}{}
+		}
+	}
 
 	for id, meta := range view.Channels {
 		expectedAccessMode[id] = accessMode
@@ -716,6 +760,11 @@ func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]
 		}
 		if nodeStatus, ok := allNodesStatus[meta.CurrentServerID()]; ok && nodeStatus.IsHealthy() {
 			channelsToNodes[id] = meta.CurrentServerID()
+		} else if pinnedNode, ok := pinServiceableReadWriteOwner(meta, allNodes); ok {
+			allNodesInfo[pinnedNode.ServerID] = types.StreamingNodeStatus{
+				StreamingNodeInfo: pinnedNode.StreamingNodeInfo,
+			}
+			channelsToNodes[id] = pinnedNode.ServerID
 		} else {
 			// dead or expired relationship.
 			mlog.Warn(context.TODO(), "channel of current server id is not healthy or not alive",
@@ -726,21 +775,26 @@ func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]
 			)
 		}
 	}
-	allNodesInfo := make(map[int64]types.StreamingNodeStatus, len(allNodesStatus))
-	for serverID, nodeStatus := range allNodesStatus {
-		// filter out the unhealthy nodes.
-		if nodeStatus.IsHealthy() {
-			allNodesInfo[serverID] = *nodeStatus
-		}
-	}
 	return CurrentLayout{
 		Config:             newCommonBalancePolicyConfig(),
 		Channels:           channels,
 		Stats:              view.Stats,
 		AllNodesInfo:       allNodesInfo,
+		AssignableNodes:    assignableNodes,
 		ChannelsToNodes:    channelsToNodes,
 		ExpectedAccessMode: expectedAccessMode,
 	}
+}
+
+func pinServiceableReadWriteOwner(
+	meta *channel.PChannelMeta,
+	allNodes map[int64]*types.StreamingNodeInfoWithResourceGroup,
+) (*types.StreamingNodeInfoWithResourceGroup, bool) {
+	if len(allNodes) == 0 || meta.ChannelInfo().AccessMode != types.AccessModeRW {
+		return nil, false
+	}
+	node, ok := allNodes[meta.CurrentServerID()]
+	return node, ok
 }
 
 type backoffConfigFetcher struct{}

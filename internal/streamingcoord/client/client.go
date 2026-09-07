@@ -49,6 +49,9 @@ type AssignmentService interface {
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)
 
+	// ReportWALReplicaAssignmentError reports a WAL replica assignment error.
+	ReportWALReplicaAssignmentError(ctx context.Context, assignment types.PChannelInfoAssigned, err error) error
+
 	// UpdateWALBalancePolicy is used to update the WAL balance policy.
 	// Return the WAL balance policy after the update.
 	// Deprecated: This function is deprecated and will be removed in the future.
