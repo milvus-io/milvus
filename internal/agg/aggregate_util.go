@@ -566,6 +566,11 @@ func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []s
 // ComputeAvgFromSumAndCount computes average from sum and count field data.
 // It takes sumFieldData and countFieldData, computes avg = sum / count for each row,
 // and returns a new Double FieldData containing the average values.
+// In compliance with SQL-NULL aggregate semantics, if count <= 0 or if either sum
+// or count row is marked as null/invalid in its validity mask, the resulting row is
+// emitted as a SQL-NULL aggregate (filled with 0.0 and marked invalid in ValidData).
+// When nulls or input validity masks are present, a validity mask is attached to the result;
+// otherwise, for purely valid non-null rows, ValidData remains empty/nil for backwards compatibility.
 func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData *schemapb.FieldData) (*schemapb.FieldData, error) {
 	if sumFieldData == nil || countFieldData == nil {
 		return nil, merr.WrapErrServiceInternalMsg("sumFieldData and countFieldData cannot be nil")
