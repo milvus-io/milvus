@@ -168,7 +168,7 @@ func TestAStockBinaryRefusesALoadIntoAResourceGroupServedByAStreamingNode(t *tes
 // The reviewer's cluster: one query node and two streaming nodes, all in one
 // resource group, asked for two replicas. A stock binary counts the one query
 // node and refuses, as it always has; a form counts the streaming nodes too and
-// admits the load.
+// admits the load, since each replica can have a streaming node of its own.
 func TestAStockBinaryCountsOnlyTheQueryNodesOfAMixedResourceGroup(t *testing.T) {
 	stockBinary(t)
 	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1)
@@ -194,6 +194,80 @@ func TestAFormCountsTheStreamingNodesOfAMixedResourceGroup(t *testing.T) {
 	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_mixed": 2}, assignment)
+}
+
+// The reviewer's failure: one query node and ONE streaming node in the
+// group, asked for two replicas. With the streaming service on, every replica
+// needs a streaming node of its own group for its delegator - the channel
+// checker places delegators on the replica's streaming nodes only, and those
+// are handed out without overlap between the replicas of a group - so the
+// group's capacity is the larger of its regular and streaming node counts,
+// never their sum. Summed, the second replica is admitted, never receives a
+// streaming node, is marked unplaced by the channel checker every tick, and
+// a scoped expansion waiting on it never completes and never times out.
+func TestAFormDoesNotSumRegularAndStreamingNodesOfAMixedResourceGroup(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1)
+
+	// A second streaming node elsewhere keeps the cluster-wide check, which
+	// milvus has always had, out of the way: what refuses is the group.
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed":     typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
+		"one streaming node gives one replica a delegator; the regular node beside it does not give a second")
+}
+
+// A group whose only compute is streaming nodes admits as many replicas as it
+// has streaming nodes: each gets a delegator, and the sealed segments go to
+// the same streaming query nodes.
+func TestAFormAdmitsAsManyReplicasAsAStreamingOnlyGroupHasStreamingNodes(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_streaming")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_streaming": typeutil.NewUniqueSet(101, 102),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_streaming": 2}, assignment)
+}
+
+// And one more than that is refused, whatever the cluster holds elsewhere.
+func TestAFormRefusesMoreReplicasThanAStreamingOnlyGroupHasStreamingNodes(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_streaming")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_streaming": typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+}
+
+// Regular nodes alone give master's answer: a group of two query nodes and no
+// streaming node admits two replicas on a form exactly as it does on a stock
+// binary, so a deployment that never runs a group on streaming nodes sees no
+// change.
+func TestAFormAdmitsARegularOnlyGroupAsMasterDoes(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_regular", 1, 2)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(201, 202),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_regular"}, 2, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_regular": 2}, assignment)
 }
 
 // The count is per resource group, not cluster-wide: a streaming node in
