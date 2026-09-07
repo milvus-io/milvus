@@ -162,7 +162,7 @@ func TestReconcileScopeAddDataViewShards(t *testing.T) {
 			{ReplicaID: 10},
 		},
 	})
-	dataSnapshot := NewDataViewSnapshot(1, []*viewpb.DataViewOfCollection{
+	dataSnapshot := dataViewSnapshotFromProto([]*viewpb.DataViewOfCollection{
 		{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{},
@@ -198,7 +198,7 @@ func TestReconcileScopeDoesNotExpandDirtyShard(t *testing.T) {
 			{ReplicaID: 20},
 		},
 	})
-	dataSnapshot := NewDataViewSnapshot(1, []*viewpb.DataViewOfCollection{
+	dataSnapshot := dataViewSnapshotFromProto([]*viewpb.DataViewOfCollection{
 		{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{},

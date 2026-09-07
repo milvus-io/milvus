@@ -51,7 +51,7 @@ func TestDefaultBalanceConfigUsesNormalizedRowScores(t *testing.T) {
 }
 
 func TestHardConstraintsRejectUnavailableNodes(t *testing.T) {
-	seg := &SegmentInfo{RowNum: 100}
+	seg := &SegmentDataView{RowNum: 100}
 
 	assert.False(t, passHardConstraints(&BalanceNode{NodeID: 1}, seg))
 	assert.False(t, passHardConstraints(&BalanceNode{NodeID: 2, Alive: true, Stopping: true}, seg))
@@ -59,7 +59,7 @@ func TestHardConstraintsRejectUnavailableNodes(t *testing.T) {
 }
 
 func TestSegmentRowsUsesRowNumInsteadOfMemSize(t *testing.T) {
-	seg := &SegmentInfo{MemSize: 1_000_000, RowNum: 10}
+	seg := &SegmentDataView{MemSize: 1_000_000, RowNum: 10}
 	assert.Equal(t, int64(10), segmentRows(seg))
 }
 

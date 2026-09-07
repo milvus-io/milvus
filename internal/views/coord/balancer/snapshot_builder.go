@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // SnapshotBuilder assembles a BalancerSnapshot from the various sources:
@@ -126,7 +125,7 @@ func (b *SnapshotBuilder) build(ctx context.Context, pending triggerBatch) (*Bal
 		b.rebuildRowCountLedger(ctx, targetShards, targetSnapshot.StatsMap(), dataViewSnapshot, scope.collectionIDs)
 	} else if len(rowCountDirtyShards) > 0 {
 		rowCountSnapshot := b.viewRegistry.SnapshotForShards(rowCountDirtyShards)
-		b.refreshRowCountLedger(ctx, rowCountDirtyShards, rowCountSnapshot.StatsMap())
+		b.refreshRowCountLedger(ctx, rowCountDirtyShards, rowCountSnapshot.StatsMap(), dataViewSnapshot)
 	}
 
 	// 4. Assemble the scoped snapshot consumed by BalancePolicy.
@@ -164,15 +163,15 @@ func (b *SnapshotBuilder) takeRowCountDirtyShards() []qviews.ShardID {
 }
 
 // cacheSegmentRowCounts preloads RowNum for segments referenced by the scoped
-// DataView before a full ledger rebuild resolves placement-only segments.
+// DataView before a full ledger rebuild resolves placement-only segments. The
+// native snapshot embeds each segment's RowNum inline, so this is a plain
+// traversal with no per-segment metadata lookup.
 func (b *SnapshotBuilder) cacheSegmentRowCounts(snapshot *DataViewSnapshot, collectionIDs map[int64]struct{}) {
 	for collectionID := range collectionIDs {
-		snapshot.RangeShards(collectionID, func(shard *viewpb.DataViewOfShard) bool {
-			for _, partition := range shard.GetPartitions() {
-				for _, segmentID := range partition.GetSegmentIds() {
-					if info, ok := snapshot.SegmentInfo(segmentID); ok {
-						b.rowCountLedger.segmentRowCounts[segmentID] = segmentRows(info)
-					}
+		snapshot.RangeShards(collectionID, func(shard *ShardDataView) bool {
+			for _, partition := range shard.Partitions {
+				for _, segment := range partition.Segments {
+					b.rowCountLedger.segmentRowCounts[segment.SegmentID] = segment.RowNum
 				}
 			}
 			return true
@@ -191,16 +190,18 @@ func (b *SnapshotBuilder) rebuildRowCountLedger(
 ) {
 	b.rowCountLedger = newRowCountLedger()
 	b.cacheSegmentRowCounts(dataSnapshot, collectionIDs)
-	b.refreshRowCountLedger(ctx, shardIDs, statsByShard)
+	b.refreshRowCountLedger(ctx, shardIDs, statsByShard, dataSnapshot)
 }
 
-// refreshRowCountLedger requests uncached placement metadata in one batch,
-// then replaces each shard's contribution in the node aggregates. Missing
-// metadata remains uncached and contributes zero rows.
+// refreshRowCountLedger resolves placement-only segments from the scoped
+// DataView snapshot in one batch, then replaces each shard's contribution in
+// the node aggregates. Segments absent from the snapshot (not yet projected,
+// or outside the DataView scope) stay uncached and contribute zero rows.
 func (b *SnapshotBuilder) refreshRowCountLedger(
 	ctx context.Context,
 	shardIDs []qviews.ShardID,
 	statsByShard map[qviews.ShardID]*coordview.ShardStats,
+	dataSnapshot *DataViewSnapshot,
 ) {
 	unknownSegments := make([]int64, 0)
 	for _, shardID := range shardIDs {
@@ -216,13 +217,10 @@ func (b *SnapshotBuilder) refreshRowCountLedger(
 		}
 	}
 
-	if len(unknownSegments) > 0 {
-		segmentSnapshot := b.dataViewProvider.SegmentSnapshot(ctx, unknownSegments)
-		if segmentSnapshot != nil {
-			for _, segmentID := range unknownSegments {
-				if info, ok := segmentSnapshot.Get(segmentID); ok {
-					b.rowCountLedger.segmentRowCounts[segmentID] = segmentRows(info)
-				}
+	if dataSnapshot != nil {
+		for _, segmentID := range unknownSegments {
+			if info, ok := dataSnapshot.SegmentInfo(segmentID); ok {
+				b.rowCountLedger.segmentRowCounts[segmentID] = segmentRows(info)
 			}
 		}
 	}

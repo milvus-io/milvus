@@ -33,7 +33,7 @@ func baseSnap(cfg *loadmgr.LoadConfig, shardID qviews.ShardID) *BalancerSnapshot
 	return &BalancerSnapshot{
 		LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(1, map[int64]*loadmgr.LoadConfig{cfg.CollectionID: cfg}),
 		ShardViewSnapshot:  coordview.NewShardViewSnapshot(1, map[qviews.ShardID]*coordview.ShardStats{}),
-		DataViewSnapshot:   NewDataViewSnapshot(1, nil, nil),
+		DataViewSnapshot:   NewDataViewSnapshot(1, nil),
 		Nodes:              map[int64]*BalanceNode{},
 	}
 }
@@ -42,10 +42,10 @@ func setTestDataSnapshot(
 	snap *BalancerSnapshot,
 	collectionID int64,
 	version qviews.DataVersion,
-	segments SegmentSnapshot,
+	segments map[int64]*SegmentDataView,
 	shards ...*viewpb.DataViewOfShard,
 ) {
-	snap.DataViewSnapshot = NewDataViewSnapshot(1, []*viewpb.DataViewOfCollection{
+	snap.DataViewSnapshot = dataViewSnapshotFromProto([]*viewpb.DataViewOfCollection{
 		{
 			CollectionId: collectionID,
 			DataVersion:  version.IntoProto(),

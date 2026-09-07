@@ -53,7 +53,7 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 					shardDataView(shardID.VChannel, 100, 101, 102),
 				},
 			}},
-			segments: map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentDataView{
 				101: {SegmentID: 101, PartitionID: 100, RowNum: 600},
 				102: {SegmentID: 102, PartitionID: 100, RowNum: 200},
 			},
@@ -89,7 +89,7 @@ func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
-			segments: map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentDataView{
 				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},
@@ -172,7 +172,7 @@ func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
 				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
-			segments: map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentDataView{
 				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},
@@ -206,7 +206,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
-			segments: map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentDataView{
 				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},

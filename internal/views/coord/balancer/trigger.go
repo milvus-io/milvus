@@ -6,7 +6,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
@@ -115,7 +114,7 @@ func (s *reconcileScope) AddDataViewShards(
 		if cfg == nil {
 			continue
 		}
-		dataSnapshot.RangeShards(collectionID, func(shard *viewpb.DataViewOfShard) bool {
+		dataSnapshot.RangeShards(collectionID, func(shard *ShardDataView) bool {
 			if shard == nil {
 				return true
 			}
@@ -125,7 +124,7 @@ func (s *reconcileScope) AddDataViewShards(
 				}
 				s.targetShards[qviews.ShardID{
 					ReplicaID: replica.ReplicaID,
-					VChannel:  shard.GetVchannel(),
+					VChannel:  shard.VChannel,
 				}] = struct{}{}
 			}
 			return true
