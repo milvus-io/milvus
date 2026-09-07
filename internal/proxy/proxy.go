@@ -426,6 +426,21 @@ func (node *Proxy) SetViewQueryClient(client queryclient.Client) {
 	node.viewQueryClient = client
 }
 
+// GetCollectionVChannels returns the vchannels of a collection via the proxy's
+// GetCollection flow (metacache). It backs the QueryView client's
+// collection → vchannel resolution.
+func (node *Proxy) GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, error) {
+	metaCache := node.getMetaCache()
+	if metaCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg("meta cache is not initialized")
+	}
+	collInfo, err := metaCache.GetCollectionInfo(ctx, "", "", collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), collInfo.VChannels...), nil
+}
+
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	if node.simpleLimiter == nil {

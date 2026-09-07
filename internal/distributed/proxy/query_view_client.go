@@ -24,6 +24,7 @@ import (
 	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type viewQueryClientSetter interface {
@@ -33,7 +34,13 @@ type viewQueryClientSetter interface {
 var newProxyViewQueryClient = newDefaultProxyViewQueryClient
 
 func (s *Server) initViewQueryClient(setter viewQueryClientSetter) error {
-	client, closeFunc, err := newProxyViewQueryClient(s.etcdCli)
+	// The vchannel provider is the proxy's GetCollection flow (metacache);
+	// the setter is the proxy component itself.
+	provider, ok := s.proxy.(resolver.CollectionVChannelProvider)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("proxy does not implement collection vchannel provider")
+	}
+	client, closeFunc, err := newProxyViewQueryClient(s.etcdCli, provider)
 	if err != nil {
 		return err
 	}
@@ -50,10 +57,10 @@ func (s *Server) closeViewQueryClient() {
 	s.viewQueryClientClose = nil
 }
 
-func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client) (queryclient.Client, func(), error) {
+func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider resolver.CollectionVChannelProvider) (queryclient.Client, func(), error) {
 	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
 	assignment := streamingCoordClient.Assignment()
-	shardResolver := resolver.NewShardResolverImpl(assignment)
+	shardResolver := resolver.NewShardResolverImpl(vchannelProvider)
 	streamingNodeClient := streamingnodehandler.NewHandlerClient(assignment)
 	queryNodeClient := querynodehandler.NewClient(etcdCli)
 
@@ -67,7 +74,6 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client) (queryclient.Clien
 		queryPlanClient,
 		queryServiceClient,
 		shardResolver,
-		queryclient.NewRandomReplicaPicker(),
 	)
 	closeFunc := func() {
 		shardResolver.Close()

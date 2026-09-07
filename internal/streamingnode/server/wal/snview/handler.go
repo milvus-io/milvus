@@ -60,13 +60,19 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
-	mu             sync.Mutex
-	closed         bool
-	pchannel       string
-	shards         map[qviews.ShardID]*snShardView
-	catalog        metastore.StreamingNodeCataLog
-	resMgr         StreamingNodeResourceManager
-	localOptimizer optimizer.LocalOptimizer
+	mu       sync.Mutex
+	closed   bool
+	pchannel string
+	shards   map[qviews.ShardID]*snShardView
+	// shardsByVChannel is a secondary index from vchannel to the shard IDs
+	// hosting views of that vchannel. A vchannel can be served by multiple
+	// replicas, each with its own shard ID. It backs the UnknownReplicaID
+	// lookup in AcquireLatestUpView: the query client resolves shards by
+	// vchannel only and picks one of the replica shards.
+	shardsByVChannel map[string]map[qviews.ShardID]struct{}
+	catalog          metastore.StreamingNodeCataLog
+	resMgr           StreamingNodeResourceManager
+	localOptimizer   optimizer.LocalOptimizer
 }
 
 type QueryViewLease struct {
@@ -85,11 +91,12 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
-		pchannel:       pchannel,
-		shards:         make(map[qviews.ShardID]*snShardView),
-		catalog:        catalog,
-		resMgr:         resMgr,
-		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		pchannel:         pchannel,
+		shards:           make(map[qviews.ShardID]*snShardView),
+		shardsByVChannel: make(map[string]map[qviews.ShardID]struct{}),
+		catalog:          catalog,
+		resMgr:           resMgr,
+		localOptimizer:   optimizer.NewNoopLocalOptimizer(),
 	}
 
 	grouped := make(map[qviews.ShardID]map[qviews.QueryViewVersion]*snQueryViewStateMachine)
@@ -112,6 +119,7 @@ func recoverSNQueryViewHandler(
 		shard := recoverSnShardView(pchannel, shardID, shardViews, catalog, resMgr)
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
+		h.indexShardLocked(shardID)
 	}
 
 	return h
@@ -171,6 +179,7 @@ func (h *SNQueryViewHandler) CloseForHandoff() {
 		shards = append(shards, shard)
 	}
 	h.shards = make(map[qviews.ShardID]*snShardView)
+	h.shardsByVChannel = make(map[string]map[qviews.ShardID]struct{})
 	h.mu.Unlock()
 
 	for _, shard := range shards {
@@ -186,6 +195,19 @@ func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qv
 	}
 	h.mu.Lock()
 	shard := h.shards[shardID]
+	if shard == nil && shardID.ReplicaID == qviews.UnknownReplicaID {
+		// The client resolves shards by vchannel only and carries an unknown
+		// replica ID before Phase 1; resolve through the vchannel index.
+		// A vchannel may be served by several replicas (one shard per replica);
+		// the lookup picks one of them — unambiguous under the single-replica
+		// semantics the query client targets.
+		if shardIDs, ok := h.shardsByVChannel[shardID.VChannel]; ok {
+			for indexed := range shardIDs {
+				shard = h.shards[indexed]
+				break
+			}
+		}
+	}
 	h.mu.Unlock()
 	if shard == nil {
 		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
@@ -210,8 +232,21 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 			onEmpty:  h.makeOnEmpty(shardID),
 		}
 		h.shards[shardID] = shard
+		h.indexShardLocked(shardID)
 	}
 	return shard
+}
+
+// indexShardLocked registers shardID in the vchannel secondary index.
+// A vchannel may map to multiple shard IDs (one per replica hosting it).
+// Caller must hold h.mu.
+func (h *SNQueryViewHandler) indexShardLocked(shardID qviews.ShardID) {
+	shardIDs, ok := h.shardsByVChannel[shardID.VChannel]
+	if !ok {
+		shardIDs = make(map[qviews.ShardID]struct{})
+		h.shardsByVChannel[shardID.VChannel] = shardIDs
+	}
+	shardIDs[shardID] = struct{}{}
 }
 
 func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func() {
@@ -219,5 +254,11 @@ func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		delete(h.shards, shardID)
+		if shardIDs, ok := h.shardsByVChannel[shardID.VChannel]; ok {
+			delete(shardIDs, shardID)
+			if len(shardIDs) == 0 {
+				delete(h.shardsByVChannel, shardID.VChannel)
+			}
+		}
 	}
 }

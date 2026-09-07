@@ -60,10 +60,9 @@ func NewLegacyViewQueryClient(
 	queryPlanClient QueryPlanClient,
 	queryServiceClient ViewQueryServiceClient,
 	shardResolver resolver.ShardResolver,
-	replicaPicker ReplicaPicker,
 ) Client {
 	return &legacyOnlyClient{
-		legacy: newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver, replicaPicker),
+		legacy: newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver),
 	}
 }
 
@@ -72,13 +71,12 @@ func newLegacyClient(
 	queryPlanClient QueryPlanClient,
 	queryServiceClient ViewQueryServiceClient,
 	shardResolver resolver.ShardResolver,
-	replicaPicker ReplicaPicker,
 ) *legacyClient {
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	return &legacyClient{
-		shardClient:   newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient, shardResolver, replicaPicker),
+		shardClient:   newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient),
 		shardResolver: shardResolver,
 	}
 }

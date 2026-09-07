@@ -8,7 +8,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -46,12 +45,6 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 		1,
 		planClient,
 		queryService,
-		&fakeShardResolver{replicas: &resolver.ShardReplicas{
-			VChannel:       shardID.VChannel,
-			PrimaryShardID: shardID,
-			ShardIDs:       []qviews.ShardID{shardID},
-		}},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	shardPlan, err := client.Search(context.Background(), &ShardSearchRequest{
@@ -82,12 +75,6 @@ func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
 		1,
 		planClient,
 		queryService,
-		&fakeShardResolver{replicas: &resolver.ShardReplicas{
-			VChannel:       shardID.VChannel,
-			PrimaryShardID: shardID,
-			ShardIDs:       []qviews.ShardID{shardID},
-		}},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	_, err := client.Search(context.Background(), &ShardSearchRequest{
@@ -106,64 +93,38 @@ func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
 	require.Equal(t, 0, planClient.mvccReqCount)
 }
 
-func TestSessionSearchOnSecondaryUsesPrimaryWALMVCC(t *testing.T) {
+func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 	vchannel := "by-dev-rootcoord-dml_0_100v0"
-	primaryShardID := qviews.ShardID{ReplicaID: 1, VChannel: vchannel}
-	secondaryShardID := qviews.ShardID{ReplicaID: 2, VChannel: vchannel}
-	mvcc := &viewpb.QueryPlanMVCC{
+	primaryShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(primaryShardID, &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      100,
 		TransformingTimetick: 90,
-	}
-	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(secondaryShardID, mvcc)}
+	})}
 	queryService := &fakeViewQueryServiceClient{}
 	client := newShardViewQueryClient(
 		1,
 		planClient,
 		queryService,
-		&fakeShardResolver{replicas: &resolver.ShardReplicas{
-			VChannel:       vchannel,
-			PrimaryShardID: primaryShardID,
-			ShardIDs:       []qviews.ShardID{primaryShardID, secondaryShardID},
-		}},
-		fixedReplicaPicker{shardID: secondaryShardID},
 	)
 
 	_, err := client.Search(context.Background(), &ShardSearchRequest{
 		VChannel: vchannel,
 		Req: &internalpb.SearchRequest{
 			CollectionID:       100,
-			ConsistencyLevel:   commonpb.ConsistencyLevel_Session,
+			ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
 			GuaranteeTimestamp: 999,
 		},
 		Reducer: fakeSearchResultReducer{},
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, 1, planClient.mvccReqCount)
-	require.Equal(t, primaryShardID, planClient.mvccShardID)
-	require.Equal(t, vchannel, planClient.mvccReq.GetVchannel())
-	require.True(t, proto.Equal(mvcc, planClient.planReq.GetQueryPlanMvcc()))
-	require.Equal(t, commonpb.ConsistencyLevel(0), planClient.planReq.GetConsistencyLevel())
-}
-
-type fakeShardResolver struct {
-	replicas *resolver.ShardReplicas
-}
-
-func (f *fakeShardResolver) ResolveVChannels(context.Context, int64) ([]string, error) {
-	return []string{f.replicas.VChannel}, nil
-}
-
-func (f *fakeShardResolver) ResolveShard(context.Context, int64, string) (*resolver.ShardReplicas, error) {
-	return f.replicas, nil
-}
-
-type fixedReplicaPicker struct {
-	shardID qviews.ShardID
-}
-
-func (p fixedReplicaPicker) Pick(context.Context, ReplicaPickInfo) (ReplicaPickResult, error) {
-	return ReplicaPickResult{ShardID: p.shardID}, nil
+	// The client always targets the primary replica: the plan request carries
+	// the primary shard ID and strong consistency is satisfied by the primary's
+	// WAL directly, without a cross-replica MVCC round trip.
+	require.Equal(t, primaryShardID.IntoProto(), planClient.planReq.GetShardId())
+	require.Equal(t, commonpb.ConsistencyLevel_Strong, planClient.planReq.GetConsistencyLevel())
+	require.Nil(t, planClient.planReq.GetQueryPlanMvcc())
+	require.Equal(t, 0, planClient.mvccReqCount)
 }
 
 type fakeQueryPlanClient struct {

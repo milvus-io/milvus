@@ -164,6 +164,31 @@ func TestWALAdaptorGetQueryPlanBuildsPlanFromLatestUpView(t *testing.T) {
 	assert.Equal(t, int64(2), plan.GetWorkNodes()[1].GetQueryNode().GetNodeId())
 }
 
+func TestWALAdaptorGetQueryPlanEchoesRealReplicaIDForUnknownReplicaRequest(t *testing.T) {
+	walAdaptor := newQueryPlanTestWALAdaptor(t)
+	req := &viewpb.GetQueryPlanRequest{
+		CollectionId: 10,
+		// The client resolves shards by vchannel only and does not know the
+		// replica ID before Phase 1; the plan must echo the actual view's
+		// replica ID so Phase 2 targets the real replica.
+		ShardId: &viewpb.ShardID{ReplicaId: qviews.UnknownReplicaID, Vchannel: queryPlanTestVChannel},
+		Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{
+			GrowingTimetick:      123,
+			TransformingTimetick: 122,
+		}},
+		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
+			LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 10},
+		},
+	}
+
+	plan, err := walAdaptor.GetQueryPlan(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, plan.GetShardId())
+	assert.Equal(t, int64(1), plan.GetShardId().GetReplicaId())
+	assert.Equal(t, queryPlanTestVChannel, plan.GetShardId().GetVchannel())
+}
+
 func TestWALAdaptorGetMVCCTimestampReturnsQueryPlanMVCC(t *testing.T) {
 	walAdaptor := newQueryPlanTestWALAdaptor(t)
 	walAdaptor.param.MVCCManager.ApplyRecoveryBarrier(queryPlanTestVChannel, 100)
