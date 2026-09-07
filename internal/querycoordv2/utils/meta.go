@@ -165,10 +165,26 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		// group on streaming nodes alone is the one a compiled-in form
 		// builds, so the count follows extension.FormInstalled and the stock
 		// admission stays exactly what it was.
+		//
+		// The two counts bound the group, they do not add up. With the
+		// streaming service on, every replica needs a streaming node of ITS
+		// OWN group for its delegator: the channel checker places delegators
+		// on the replica's streaming nodes only (GetRWSQNodes), and the
+		// replica manager hands a group's streaming nodes out without overlap
+		// between its replicas. The cluster-wide streaming-node check above
+		// is not per group, so this is where the group is bounded. Regular
+		// nodes alone give master's answer, so a regular-only group is
+		// admitted exactly as master admits it; streaming nodes give
+		// delegator capacity; a mixed group holds as many replicas as the
+		// larger of the two. Summed, one regular node and one streaming node
+		// would admit two replicas, and the second would never receive a
+		// streaming node: the channel checker would mark it unplaced every
+		// tick, and a scoped expansion waiting on it would neither complete
+		// nor time out.
 		available := len(nodes)
 		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
 			if sqNodes, ok := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName]; ok {
-				available += sqNodes.Len()
+				available = max(available, sqNodes.Len())
 			}
 		}
 
