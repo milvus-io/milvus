@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -1462,4 +1463,117 @@ func (s *CollectionObserverRGSuite) TestAnUnreadyResourceGroupStuckBelowHundredI
 	s.Len(s.replicaIDsInRG(1300, rgA), 1, "the serving sibling survives")
 	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1300).GetStatus())
 	s.False(s.ob.loadTasks.Contain(key))
+}
+
+// failSaveCollectionOnce makes the catalog refuse the next SaveCollection and
+// serve every later one, and returns a counter of the calls it saw. This is
+// the write UpdateReplicaNumber makes: putCollection returns on its failure
+// before touching in-memory state, so a refused write leaves the stale count
+// in etcd and in memory alike.
+func (s *CollectionObserverRGSuite) failSaveCollectionOnce() (calls *int, unpatch func()) {
+	count := 0
+	var origin func(querycoord.Catalog, context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) error
+	save := mockey.Mock(querycoord.Catalog.SaveCollection).
+		To(func(c querycoord.Catalog, ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
+			count++
+			if count == 1 {
+				return errors.New("etcd unavailable")
+			}
+			return origin(c, ctx, collection, partitions...)
+		}).Origin(&origin).Build()
+	return &count, func() { save.UnPatch() }
+}
+
+// TestAFailedReplicaNumberWriteBackIsRetriedUntilItSticks is the reviewer's
+// failure with no survivor. A scoped task times out, RemoveReplicas persists
+// the deletion, and the write of the collection's ReplicaNumber that must
+// follow fails transiently. Logging it and dropping the task leaves meta with
+// ReplicaNumber=2 over one replica: a later UpdateLoadConfig(replica_number=2)
+// reads as "no change", and after a restart the partition percentage divides
+// by the stale 2 and never reaches 100. The task must stay until the count is
+// written, retry it on its own ticks -- a paused task never would, since a
+// group with no replica reports nothing -- and only then go.
+func (s *CollectionObserverRGSuite) TestAFailedReplicaNumberWriteBackIsRetriedUntilItSticks() {
+	s.registerLoadingCollection(1500, 1501, "1500-dmc0", 2, 15001, 15002)
+	s.putReplica(1500, 150001, 61, rgA)
+	s.putServiceableDelegator(1500, 61, "1500-dmc0", 15001, 15002)
+	s.markCollectionLoaded(1500, 1501)
+	s.putReplica(1500, 150002, 62, rgB)
+	s.putDelegator(1500, 62, "1500-dmc0") // the channel and nothing else
+
+	s.ob.LoadCollection(s.ctx, 1500, rgB)
+	key := s.taskKey(1500, rgB)
+	s.ob.Observe(s.ctx)
+	s.ageTaskWatermark(key, time.Hour)
+
+	saves, unpatch := s.failSaveCollectionOnce()
+	defer unpatch()
+	s.ob.Observe(s.ctx)
+
+	s.Empty(s.replicaIDsInRG(1500, rgB), "the stalled replica is released")
+	s.Len(s.replicaIDsInRG(1500, rgA), 1)
+	s.Require().EqualValues(1, *saves, "the write-back was attempted and refused")
+	s.EqualValues(2, s.meta.GetCollection(s.ctx, 1500).GetReplicaNumber(), "the refused write left the stale count in place")
+	s.True(s.ob.loadTasks.Contain(key), "the task must stay until the count is written")
+
+	s.ob.Observe(s.ctx)
+	s.EqualValues(2, *saves, "the next tick retries the write-back")
+	s.EqualValues(1, s.meta.GetCollection(s.ctx, 1500).GetReplicaNumber(), "and it sticks")
+	s.EqualValues(len(s.meta.GetByCollection(s.ctx, 1500)), s.meta.GetCollection(s.ctx, 1500).GetReplicaNumber())
+	s.False(s.ob.loadTasks.Contain(key), "with nothing left to watch and nothing left to write, the task goes")
+	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1500).GetStatus())
+}
+
+// TestAReArmedTaskRetriesTheReplicaNumberWriteBack is the same failure with
+// survivors: the group keeps two replicas, the task is re-armed to watch
+// them, and the refused count must be retried by that re-armed task on its
+// next tick rather than forgotten with the teardown that owed it.
+func (s *CollectionObserverRGSuite) TestAReArmedTaskRetriesTheReplicaNumberWriteBack() {
+	s.registerLoadingCollection(1600, 1601, "1600-dmc0", 4, 16001, 16002)
+	s.putReplica(1600, 160001, 71, rgA)
+	s.putServiceableDelegator(1600, 71, "1600-dmc0", 16001, 16002)
+	s.markCollectionLoaded(1600, 1601)
+	s.putReplica(1600, 160002, 72, rgB)
+	s.putDelegator(1600, 72, "1600-dmc0", 16001, 16002)
+	s.putReplica(1600, 160003, 73, rgB)
+	s.putDelegator(1600, 73, "1600-dmc0", 16001, 16002)
+	s.putReplica(1600, 160004, 74, rgB)
+	s.putDelegator(1600, 74, "1600-dmc0") // the channel and nothing else
+
+	s.ob.LoadCollection(s.ctx, 1600, rgB)
+	key := s.taskKey(1600, rgB)
+	s.ob.Observe(s.ctx)
+	s.ageTaskWatermark(key, time.Hour)
+
+	saves, unpatch := s.failSaveCollectionOnce()
+	defer unpatch()
+	s.ob.Observe(s.ctx)
+
+	s.ElementsMatch([]int64{160002, 160003}, s.replicaIDsInRG(1600, rgB), "only the stalled replica is released")
+	s.Require().EqualValues(1, *saves, "the write-back was attempted and refused")
+	s.EqualValues(4, s.meta.GetCollection(s.ctx, 1600).GetReplicaNumber(), "the refused write left the stale count in place")
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok, "the group still holds replicas, so the task keeps watching them")
+	s.EqualValues(-1, task.LastProgress, "re-armed for the survivors")
+
+	s.ob.Observe(s.ctx)
+	s.EqualValues(2, *saves, "the re-armed task retries the write-back on its next tick")
+	s.EqualValues(3, s.meta.GetCollection(s.ctx, 1600).GetReplicaNumber(), "and it sticks")
+	s.EqualValues(len(s.meta.GetByCollection(s.ctx, 1600)), s.meta.GetCollection(s.ctx, 1600).GetReplicaNumber())
+	s.True(s.ob.loadTasks.Contain(key), "the survivors are still being watched; the current target is not promoted yet")
+
+	// From here the task finishes as any scoped task on a loaded group does.
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1600))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1600))
+	s.ob.Observe(s.ctx)
+	s.False(s.ob.loadTasks.Contain(key))
+	s.EqualValues(2, *saves, "a task that owes nothing writes nothing")
+}
+
+// A collection that is gone has no count to write: the write-back answers
+// done, and observeTimeout's first check removes the task that owed it.
+func (s *CollectionObserverRGSuite) TestTheReplicaNumberWriteBackOfAReleasedCollectionIsDone() {
+	const noSuchCollection = int64(424242)
+	s.Require().Nil(s.meta.GetCollection(s.ctx, noSuchCollection))
+	s.True(s.ob.writeReplicaNumberBack(s.ctx, LoadTask{CollectionID: noSuchCollection, ResourceGroup: rgB}))
 }
