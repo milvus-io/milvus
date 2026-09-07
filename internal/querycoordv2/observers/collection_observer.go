@@ -94,6 +94,17 @@ type CollectionObserver struct {
 // as a Loaded collection on master is, and master pushes nothing for those.
 // It is cleared when the task is re-armed to watch what a teardown left
 // behind, since that group has just proven it is not serving.
+//
+// ReplicaNumberPending is set when a teardown removed replicas but the write
+// of the collection's ReplicaNumber that must follow was refused. The two are
+// separate catalog writes by separate managers, so the deletion can be
+// persisted while the count is not, and a count left stale is read by
+// everything downstream as replicas that still exist. A task so marked owes
+// the write, and retries it at the top of each of its observations until it
+// sticks (observeResourceGroupTimeout); it is what keeps a task alive for a
+// group with no replica left, which would otherwise have been removed with
+// the teardown and could never have retried. It is cleared once the count is
+// persisted.
 type LoadTask struct {
 	LoadType     querypb.LoadType
 	CollectionID int64
@@ -105,6 +116,8 @@ type LoadTask struct {
 	LastProgressAt time.Time
 
 	ReadySince time.Time
+
+	ReplicaNumberPending bool
 }
 
 // NewCollectionObserver builds the observer. nodeMgr is read by the
@@ -581,6 +594,28 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 	now := time.Now()
 	percentage := progress.Percentage
 
+	// A task that owes the replica-count write-back of an earlier teardown
+	// settles that first, before anything is judged on the group's figure:
+	// the count is what every reader of the collection divides by, and it
+	// is wrong until this succeeds. This runs before the unknown/pause logic
+	// below on purpose - a group whose last replica was released reports
+	// nothing, and a task paused on that would never retry. Until the write
+	// sticks nothing else is decided for the task; the survivors, if any,
+	// are re-armed with a fresh watermark and lose nothing by the wait.
+	if task.ReplicaNumberPending {
+		if !ob.writeReplicaNumberBack(ctx, task) {
+			return
+		}
+		task.ReplicaNumberPending = false
+		if !ob.groupHoldsReplicas(ctx, task) {
+			// Nothing left to watch and nothing left to write: the task
+			// only lived to retry the count.
+			ob.loadTasks.Remove(key)
+			return
+		}
+		ob.loadTasks.Insert(key, task)
+	}
+
 	// An unknown percentage PAUSES the clock: the watermark keeps the last
 	// percentage that was actually read, and LastProgressAt is moved to now so
 	// that the timeout can only ever be measured over ticks that learned
@@ -828,16 +863,12 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 	// replica-changed check, ShowLoadCollections, the collection-wide
 	// observer's loadPercentage denominator - keeps counting replicas that no
 	// longer exist, and the load percentage can never reach 100 again.
-	if coll := ob.meta.GetCollection(ctx, task.CollectionID); coll != nil &&
-		int(coll.GetReplicaNumber()) != len(remaining) {
-		if err := ob.meta.UpdateReplicaNumber(ctx, task.CollectionID,
-			int32(len(remaining)), coll.GetUserSpecifiedReplicaMode()); err != nil {
-			mlog.Warn(ctx, "failed to write ReplicaNumber back down after releasing a timed-out resource group",
-				mlog.FieldCollectionID(task.CollectionID),
-				mlog.String("resourceGroup", task.ResourceGroup),
-				mlog.Err(err))
-		}
-	}
+	//
+	// The replica deletion above is already persisted, so a refused write
+	// here cannot be undone and must not be forgotten either: the task is
+	// marked as owing it and retries at the top of its next observation,
+	// whether or not the group kept any replica (see LoadTask).
+	task.ReplicaNumberPending = !ob.writeReplicaNumberBack(ctx, task)
 
 	if len(kept) > 0 {
 		// The group still holds replicas: keep watching them, from a fresh
@@ -850,7 +881,49 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		ob.loadTasks.Insert(key, task)
 		return
 	}
+	if task.ReplicaNumberPending {
+		// Nothing left to watch, but the count is still owed: the task stays
+		// for that alone, and goes once the write sticks.
+		ob.loadTasks.Insert(key, task)
+		return
+	}
 	ob.loadTasks.Remove(key)
+}
+
+// writeReplicaNumberBack makes the collection's ReplicaNumber agree with the
+// replicas it actually has, and answers whether it does afterwards. A
+// collection that is gone has nothing to write and answers true; a write the
+// catalog refuses answers false, and the caller retries on a later tick.
+func (ob *CollectionObserver) writeReplicaNumberBack(ctx context.Context, task LoadTask) bool {
+	coll := ob.meta.GetCollection(ctx, task.CollectionID)
+	if coll == nil {
+		return true
+	}
+	replicas := len(ob.meta.GetByCollection(ctx, task.CollectionID))
+	if int(coll.GetReplicaNumber()) == replicas {
+		return true
+	}
+	if err := ob.meta.UpdateReplicaNumber(ctx, task.CollectionID, int32(replicas), coll.GetUserSpecifiedReplicaMode()); err != nil {
+		mlog.Warn(ctx, "failed to write ReplicaNumber back down after releasing a timed-out resource group, will retry",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.Int32("staleReplicaNumber", coll.GetReplicaNumber()),
+			mlog.Int("replicas", replicas),
+			mlog.Err(err))
+		return false
+	}
+	return true
+}
+
+// groupHoldsReplicas answers whether any replica of the task's collection
+// still lives in the task's resource group.
+func (ob *CollectionObserver) groupHoldsReplicas(ctx context.Context, task LoadTask) bool {
+	for _, replica := range ob.meta.GetByCollection(ctx, task.CollectionID) {
+		if replica.GetResourceGroup() == task.ResourceGroup {
+			return true
+		}
+	}
+	return false
 }
 
 func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID int64) bool {
