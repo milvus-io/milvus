@@ -65,6 +65,7 @@ type rwOptions struct {
 	version             int64
 	op                  rwOp
 	bufferSize          int64
+	readConcurrency     int
 	downloader          downloaderFn
 	uploader            uploaderFn
 	multiPartUploadSize int64
@@ -127,6 +128,17 @@ func WithCollectionID(collID int64) RwOption {
 func WithVersion(version int64) RwOption {
 	return func(options *rwOptions) {
 		options.version = version
+	}
+}
+
+// WithReadConcurrency sets how many input chunks a binlog reader keeps open at
+// once, the one being consumed included. Values <= 1 keep the original
+// strictly serial behaviour; larger values let the reader fetch up to n-1
+// further chunks from object storage while the caller consumes the current
+// one. Chunks are still delivered in order.
+func WithReadConcurrency(n int) RwOption {
+	return func(options *rwOptions) {
+		options.readConcurrency = n
 	}
 }
 
@@ -373,10 +385,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			if ferr != nil {
 				return nil, ferr
 			}
-			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readConcurrency)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
-			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, rwOptions.readConcurrency)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
