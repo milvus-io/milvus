@@ -32,8 +32,8 @@
 namespace milvus::segcore::storagev2translator {
 namespace {
 
-using ChunkReaderOpenResult =
-    arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>;
+// Prevents one batch from issuing an unbounded number of storage opens.
+constexpr size_t kMaxConcurrentChunkReaderOpens = 16;
 
 // Throws FollyCancel when reader preparation observes cancellation.
 void
@@ -49,21 +49,43 @@ CheckOpenCancellation(const folly::CancellationToken& cancellation_token,
 
 // Rejects cancellation before invoking the storage factory. Once issued, the
 // storage future is drained because its public API cannot interrupt the open.
-[[nodiscard]] folly::coro::Task<ChunkReaderOpenResult>
+// Validates the result before the window can dispatch another storage open.
+[[nodiscard]] folly::coro::Task<ChunkReaderPtr>
 OpenOneChunkReaderAsync(
     const int64_t segment_id,
     const std::shared_ptr<milvus_storage::api::Reader>& reader,
+    const size_t request_index,
     ChunkReaderOpenSpec spec) {
     const auto& cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
     CheckOpenCancellation(
         cancellation_token, segment_id, "AsyncChunkReader::open");
-    co_return co_await reader->get_chunk_reader_async(spec.column_group_index,
-                                                      spec.needed_columns);
+    auto chunk_reader_result = co_await reader->get_chunk_reader_async(
+        spec.column_group_index, spec.needed_columns);
+    if (!chunk_reader_result.ok()) {
+        const auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "async chunk reader open failed, segment {}, column "
+                  "group index {}, request index {}, status: {}",
+                  segment_id,
+                  spec.column_group_index,
+                  request_index,
+                  error.what());
+    }
+    auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
+    AssertInfo(chunk_reader != nullptr,
+               "[StorageV3] async chunk reader open returned null for "
+               "segment {}, column group index {}, request index {}",
+               segment_id,
+               spec.column_group_index,
+               request_index);
+    co_return ChunkReaderPtr(std::move(chunk_reader));
 }
 
-// Propagates the merged cancellation token to each open, drains all issued
-// opens on partial failure or cancellation, and restores request order.
+// Cancels pending opens on the first failure and drains all issued opens.
+// External cancellation takes precedence over failures; successful results
+// retain request order.
 [[nodiscard]] folly::coro::Task<std::vector<ChunkReaderPtr>>
 OpenChunkReadersAsyncImpl(const int64_t segment_id,
                           std::shared_ptr<milvus_storage::api::Reader> reader,
@@ -84,48 +106,23 @@ OpenChunkReadersAsyncImpl(const int64_t segment_id,
         co_return std::vector<ChunkReaderPtr>{};
     }
 
-    std::vector<folly::coro::Task<ChunkReaderOpenResult>> open_tasks;
+    std::vector<folly::coro::Task<ChunkReaderPtr>> open_tasks;
     open_tasks.reserve(specs.size());
-    std::vector<int64_t> column_group_indices;
-    column_group_indices.reserve(specs.size());
-    for (auto& spec : specs) {
-        column_group_indices.push_back(spec.column_group_index);
-        open_tasks.push_back(
-            OpenOneChunkReaderAsync(segment_id, reader, std::move(spec)));
+    for (size_t i = 0; i < specs.size(); ++i) {
+        open_tasks.push_back(OpenOneChunkReaderAsync(
+            segment_id, reader, i, std::move(specs[i])));
     }
 
-    auto open_results = co_await folly::coro::co_withCancellation(
-        cancellation_token,
-        folly::coro::collectAllTryRange(std::move(open_tasks)));
+    // Capture the collection failure until the external cancellation check.
+    // Folly keeps the first failure separate from its sibling-cancellation token.
+    auto open_result =
+        co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
+            cancellation_token,
+            folly::coro::collectAllWindowed(std::move(open_tasks),
+                                            kMaxConcurrentChunkReaderOpens)));
     CheckOpenCancellation(
         cancellation_token, segment_id, "AsyncChunkReader::open");
-
-    std::vector<ChunkReaderPtr> chunk_readers;
-    chunk_readers.reserve(open_results.size());
-    for (size_t i = 0; i < open_results.size(); ++i) {
-        open_results[i].throwUnlessValue();
-        auto chunk_reader_result = std::move(open_results[i]).value();
-        if (!chunk_reader_result.ok()) {
-            const auto error =
-                milvus_storage::ToSegcoreError(chunk_reader_result.status());
-            ThrowInfo(error.get_error_code(),
-                      "async chunk reader open failed, segment {}, column "
-                      "group index {}, request index {}, status: {}",
-                      segment_id,
-                      column_group_indices[i],
-                      i,
-                      error.what());
-        }
-        auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
-        AssertInfo(chunk_reader != nullptr,
-                   "[StorageV3] async chunk reader open returned null for "
-                   "segment {}, column group index {}, request index {}",
-                   segment_id,
-                   column_group_indices[i],
-                   i);
-        chunk_readers.emplace_back(std::move(chunk_reader));
-    }
-    co_return chunk_readers;
+    co_return std::move(open_result).value();
 }
 
 // Adapts TaskWithExecutor back to the public Task return type while retaining

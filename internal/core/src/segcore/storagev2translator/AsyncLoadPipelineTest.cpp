@@ -36,6 +36,7 @@
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
+#include "folly/ExceptionWrapper.h"
 #include "folly/Executor.h"
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
@@ -63,6 +64,19 @@ using ChunkReadResult =
 using ChunkReadFuture = folly::SemiFuture<ChunkReadResult>;
 
 constexpr int64_t kTestSegmentId = 100;
+constexpr size_t kChunkReaderOpenConcurrencyLimit = 16;
+
+// Builds open requests whose column-group indices match their request order.
+[[nodiscard]] std::vector<ChunkReaderOpenSpec>
+MakeChunkReaderOpenSpecs(const size_t count) {
+    std::vector<ChunkReaderOpenSpec> specs;
+    specs.reserve(count);
+    for (size_t request_index = 0; request_index < count; ++request_index) {
+        specs.push_back(
+            {.column_group_index = static_cast<int64_t>(request_index)});
+    }
+    return specs;
+}
 
 using LoadCellsAsyncReturn = decltype(LoadCellsAsync(
     std::declval<milvus::OpContext*>(),
@@ -525,6 +539,19 @@ class FakeReader final : public milvus_storage::api::Reader {
     }
 
     void
+    FailWithException(const size_t request_index,
+                      folly::exception_wrapper error) {
+        Pending(request_index)->promise.setException(std::move(error));
+    }
+
+    void
+    CompleteWithNull(const size_t request_index) {
+        Pending(request_index)
+            ->promise.setValue(
+                std::unique_ptr<milvus_storage::api::ChunkReader>{});
+    }
+
+    void
     SetOnAsyncCall(std::function<void()> on_async_call) {
         std::lock_guard lock(mutex_);
         on_async_call_ = std::move(on_async_call);
@@ -737,6 +764,39 @@ TEST_F(AsyncLoadPipelineTest,
               std::optional<int64_t>{3});
 }
 
+TEST_F(AsyncLoadPipelineTest, LimitsConcurrentChunkReaderOpens) {
+    constexpr size_t kRequestCount = kChunkReaderOpenConcurrencyLimit + 1;
+
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    auto specs = MakeChunkReaderOpenSpecs(kRequestCount);
+
+    auto future = Start(OpenChunkReadersAsync(
+        nullptr, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+
+    EXPECT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
+    EXPECT_FALSE(future.isReady());
+
+    reader->Complete(0);
+    executor_.drain();
+    EXPECT_EQ(reader->AsyncCalls(), kRequestCount);
+    EXPECT_FALSE(future.isReady());
+
+    for (size_t request_index = kRequestCount - 1; request_index > 0;
+         --request_index) {
+        reader->Complete(request_index);
+    }
+    const auto opened = Get(std::move(future));
+    ASSERT_EQ(opened.size(), kRequestCount);
+    for (size_t request_index = 0; request_index < kRequestCount;
+         ++request_index) {
+        const auto* chunk_reader =
+            dynamic_cast<FakeChunkReader*>(opened[request_index].get());
+        ASSERT_NE(chunk_reader, nullptr);
+        EXPECT_EQ(chunk_reader->Identifier(),
+                  std::optional<int64_t>{static_cast<int64_t>(request_index)});
+    }
+}
+
 TEST_F(AsyncLoadPipelineTest, RunsSynchronousFallbackFactoryOnExecutor) {
     auto reader = std::make_shared<SyncFallbackReader>(&executor_);
     std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 5}};
@@ -776,6 +836,143 @@ TEST_F(AsyncLoadPipelineTest, MapsChunkReaderOpenStorageErrors) {
             EXPECT_EQ(error.get_error_code(), expected_error_code);
         }
         EXPECT_EQ(reader->SyncCalls(), 0);
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, DoesNotRefillChunkReaderOpenWindowAfterFailure) {
+    struct FailureCase {
+        const char* name;
+        std::function<void(FakeReader&, size_t)> fail;
+        ErrorCode expected_code;
+        const char* expected_message;
+    };
+    const std::vector<FailureCase> cases{
+        {"throttling",
+         [](FakeReader& reader, size_t index) {
+             reader.Fail(index,
+                         milvus_storage::MakeExtendError(
+                             milvus_storage::ExtendStatusCode::
+                                 StorageTransientThrottling,
+                             "first open failure"));
+         },
+         ErrorCode::StorageTransientError,
+         "first open failure"},
+        {"invalid metadata",
+         [](FakeReader& reader, size_t index) {
+             reader.Fail(index, arrow::Status::Invalid("first open failure"));
+         },
+         ErrorCode::DataFormatBroken,
+         "first open failure"},
+        {"out of memory",
+         [](FakeReader& reader, size_t index) {
+             reader.Fail(index,
+                         arrow::Status::OutOfMemory("first open failure"));
+         },
+         ErrorCode::MemAllocateFailed,
+         "first open failure"},
+        {"exceptional future",
+         [](FakeReader& reader, size_t index) {
+             reader.FailWithException(
+                 index,
+                 folly::make_exception_wrapper<SegcoreError>(
+                     ErrorCode::StorageTransientError, "first open failure"));
+         },
+         ErrorCode::StorageTransientError,
+         "first open failure"},
+        {"null reader",
+         [](FakeReader& reader, size_t index) {
+             reader.CompleteWithNull(index);
+         },
+         ErrorCode::UnexpectedError,
+         "request index 15"},
+    };
+    constexpr size_t kRequestCount = 2 * kChunkReaderOpenConcurrencyLimit + 1;
+    constexpr size_t kFailedIndex = kChunkReaderOpenConcurrencyLimit - 1;
+
+    for (const auto& test_case : cases) {
+        SCOPED_TRACE(test_case.name);
+        auto reader = std::make_shared<FakeReader>(&executor_);
+        auto future =
+            Start(OpenChunkReadersAsync(nullptr,
+                                        kTestSegmentId,
+                                        reader,
+                                        MakeChunkReaderOpenSpecs(kRequestCount),
+                                        OpenOptions()));
+        ASSERT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
+
+        test_case.fail(*reader, kFailedIndex);
+        executor_.drain();
+        EXPECT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
+        EXPECT_FALSE(future.isReady());
+
+        // A later failure at a lower request index must not replace the cause.
+        reader->Fail(0, arrow::Status::IOError("later open failure"));
+        executor_.drain();
+        EXPECT_FALSE(future.isReady());
+
+        // Drain even unexpected refills so a regression fails without hanging.
+        for (size_t index = 1; index < reader->AsyncCalls(); ++index) {
+            if (index != kFailedIndex) {
+                reader->Complete(index);
+                executor_.drain();
+            }
+        }
+        EXPECT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
+        try {
+            Get(std::move(future));
+            FAIL() << "expected the first open failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), test_case.expected_code);
+            EXPECT_NE(
+                std::string(error.what()).find(test_case.expected_message),
+                std::string::npos);
+        }
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, StopsChunkReaderOpensAfterSynchronousFailure) {
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    reader->SetOnAsyncCall([]() {
+        throw SegcoreError(ErrorCode::StorageTransientError,
+                           "synchronous open failure");
+    });
+
+    try {
+        Run(OpenChunkReadersAsync(
+            nullptr,
+            kTestSegmentId,
+            reader,
+            MakeChunkReaderOpenSpecs(kChunkReaderOpenConcurrencyLimit + 1),
+            OpenOptions()));
+        FAIL() << "expected a synchronous factory failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
+        EXPECT_STREQ(error.what(), "synchronous open failure");
+    }
+    EXPECT_EQ(reader->AsyncCalls(), 1);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       PreservesExternalCancellationDuringChunkReaderOpenFailureDrain) {
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    auto future = Start(OpenChunkReadersAsync(&ctx,
+                                              kTestSegmentId,
+                                              reader,
+                                              MakeChunkReaderOpenSpecs(2),
+                                              OpenOptions()));
+    reader->Fail(0, arrow::Status::Invalid("corrupt metadata"));
+    executor_.drain();
+    EXPECT_FALSE(future.isReady());
+
+    source.requestCancellation();
+    reader->Complete(1);
+    try {
+        Get(std::move(future));
+        FAIL() << "expected external cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
     }
 }
 
@@ -825,6 +1022,39 @@ TEST_F(AsyncLoadPipelineTest,
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
     }
     EXPECT_EQ(dispatched_opens, 1);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       DoesNotRefillChunkReaderOpenWindowAfterCancellation) {
+    constexpr size_t kRequestCount = kChunkReaderOpenConcurrencyLimit + 1;
+
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    auto specs = MakeChunkReaderOpenSpecs(kRequestCount);
+
+    auto future = Start(OpenChunkReadersAsync(
+        &ctx, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+    const auto dispatched_opens = reader->AsyncCalls();
+    EXPECT_EQ(dispatched_opens, kChunkReaderOpenConcurrencyLimit);
+
+    source.requestCancellation();
+    reader->Complete(0);
+    executor_.drain();
+    EXPECT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
+    EXPECT_FALSE(future.isReady());
+
+    for (size_t request_index = 1; request_index < dispatched_opens;
+         ++request_index) {
+        reader->Complete(request_index);
+    }
+    try {
+        Get(std::move(future));
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reader->AsyncCalls(), kChunkReaderOpenConcurrencyLimit);
 }
 
 TEST_F(AsyncLoadPipelineTest,
