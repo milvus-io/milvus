@@ -944,7 +944,9 @@ func (ob *CollectionObserver) writeReplicaNumberBack(ctx context.Context, task L
 		return true
 	}
 	if err := ob.meta.UpdateReplicaNumber(ctx, task.CollectionID, int32(replicas), coll.GetUserSpecifiedReplicaMode()); err != nil {
-		mlog.Warn(ctx, "failed to write ReplicaNumber back down after releasing a timed-out resource group, will retry",
+		// Rate-limited: a catalog that stays down is retried on every tick
+		// of the task, and would otherwise print five times a second.
+		mlog.RatedWarn(ctx, 0.1, "failed to write ReplicaNumber back down after releasing a timed-out resource group, will retry",
 			mlog.FieldCollectionID(task.CollectionID),
 			mlog.String("resourceGroup", task.ResourceGroup),
 			mlog.Int32("staleReplicaNumber", coll.GetReplicaNumber()),
@@ -1048,9 +1050,19 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 		// measured against the current target. Finishing there would drop this
 		// group's supervision, its timeout and its teardown, at the moment it
 		// carries everything and answers nothing.
+		//
+		// And a task that still owes the replica-count write-back of a
+		// teardown (ReplicaNumberPending) does not finish: its survivors may
+		// reach 100 and see the promotion while the catalog is still refusing
+		// the count, and finishing then would drop the only thing that
+		// retries it, leaving the stale count as the end state. The retry at
+		// the top of observeResourceGroupTimeout runs earlier in this same
+		// tick and clears the mark once the write sticks, so the task
+		// finishes on the tick the catalog is back.
 		if task.ResourceGroup != "" {
 			loaded = progress[traceID].Percentage >= 100 &&
-				ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID)
+				ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID) &&
+				!task.ReplicaNumberPending
 		}
 
 		// all partition loaded, finish task
