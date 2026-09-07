@@ -38,8 +38,14 @@ For a before/after comparison, run this same example on the parent revision with
 the same feature flags and dictionary files. Set an external memory limit for
 unfixed runs: 1000 runtime dictionaries can require tens of GiB.
 
-Successful cached dictionaries remain resident until process exit. Replacing a
-dictionary in the same directory requires restarting the process.
+Successful cached dictionaries remain resident until process exit. Previously
+loaded paths reuse their dictionary without accessing the dictionary directory.
+Replacing files or retargeting a previously loaded symlink requires restarting
+the process. New path aliases are canonicalized to share existing dictionaries;
+different canonical directories remain isolated. Relative paths are anchored to
+the current working directory, which must still be available to resolve them.
+Download URLs configure mirrors, not dictionary identity: changing them does not
+refresh existing disk or memory dictionaries.
 
 These checks do not replace the growing-segment experiment from issue #53227.
 Record actual retained segment counts, sealing/release activity, and jemalloc
@@ -71,3 +77,11 @@ argument supplied. These adjustments are not part of this fix.
 
 Full Milvus growing-segment recovery, jemalloc profiling, and an unmodified
 checkout unit-test pass remain unverified.
+
+After adding the loaded-path fast cache, five dictionary-cache tests and ten
+IPADIC tokenizer tests passed in the same temporary validation setup. New tests
+cover directory removal without recreation, URL changes, relative paths, pinned
+symlinks, and symlink-aware `..` resolution. Before the fast-cache change, the
+directory-removal and symlink-retargeting regressions both failed. The production
+library and allocation example also rebuilt in the original checkout. The
+allocation figures above were not remeasured after this follow-up.
