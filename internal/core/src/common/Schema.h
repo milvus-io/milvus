@@ -498,6 +498,13 @@ class Schema {
     bool
     IsExternalManifestStoredField(FieldId field_id) const;
 
+    // Use this schema's external storage format with field metadata from a
+    // newer schema. This is needed when a plan references a field added after
+    // an external segment's manifest was loaded.
+    bool
+    IsExternalManifestStoredField(const Schema& field_schema,
+                                  FieldId field_id) const;
+
     // Real-PK milvus-table segments import source delete logs, so they must
     // also read the source insert timestamp column to keep delete/reinsert
     // ordering identical to the source Milvus segment.
@@ -510,6 +517,9 @@ class Schema {
     // ID strings.
     std::string
     GetPhysicalColumnName(FieldId field_id) const;
+
+    std::string
+    GetPhysicalColumnName(const Schema& field_schema, FieldId field_id) const;
 
     // Resolve a column group column name to a FieldId.
     // Normal collections: column name is the numeric field ID string.

@@ -29,6 +29,7 @@ type ManagerSuite struct {
 	types         []SegmentType
 	segments      []Segment
 	levels        []datapb.SegmentLevel
+	collections   []*Collection
 
 	mgr *segmentManager
 }
@@ -50,6 +51,7 @@ func (s *ManagerSuite) SetupSuite() {
 func (s *ManagerSuite) SetupTest() {
 	s.mgr = NewSegmentManager()
 	s.segments = nil
+	s.collections = nil
 
 	for i, id := range s.segmentIDs {
 		schema := mock_segcore.GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
@@ -57,6 +59,7 @@ func (s *ManagerSuite) SetupTest() {
 			LoadType: querypb.LoadType_LoadCollection,
 		})
 		s.Require().NoError(err)
+		s.collections = append(s.collections, collection)
 		segment, err := NewSegment(
 			context.Background(),
 			collection,
@@ -76,6 +79,14 @@ func (s *ManagerSuite) SetupTest() {
 
 		s.mgr.Put(context.Background(), s.types[i], segment)
 	}
+}
+
+func (s *ManagerSuite) TearDownTest() {
+	s.mgr.Clear(context.Background())
+	for _, collection := range s.collections {
+		DeleteCollection(collection)
+	}
+	s.collections = nil
 }
 
 func (s *ManagerSuite) TestExist() {

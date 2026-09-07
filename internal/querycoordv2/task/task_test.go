@@ -1307,6 +1307,14 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	ctx := context.Background()
 	targetNode := int64(3)
 	partition := int64(100)
+	logicalSchema := &schemapb.CollectionSchema{
+		Name:    "TestLoadSegmentTask",
+		Version: 3,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	suite.meta.GetCollection(ctx, suite.collection).LoadFields = []int64{100}
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
@@ -1315,11 +1323,10 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	// Expect
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestLoadSegmentTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
+			CollectionID: suite.collection,
+			Schema:       logicalSchema,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.MmapEnabledKey, Value: "true"},
 			},
 		}, nil
 	})
@@ -1339,7 +1346,18 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.MatchedBy(func(req *querypb.SyncDistributionRequest) bool {
+		loadMeta := req.GetLoadMeta()
+		effectiveSchema := req.GetSchema()
+		if loadMeta.GetLogicalSchema() != logicalSchema ||
+			effectiveSchema == nil || effectiveSchema == logicalSchema ||
+			len(loadMeta.GetLoadFields()) != 1 || loadMeta.GetLoadFields()[0] != 100 {
+			return false
+		}
+		_, rawHasMmapSetting := common.IsMmapDataEnabled(logicalSchema.GetFields()[0].GetTypeParams()...)
+		mmapEnabled, effectiveHasMmapSetting := common.IsMmapDataEnabled(effectiveSchema.GetFields()[0].GetTypeParams()...)
+		return !rawHasMmapSetting && effectiveHasMmapSetting && mmapEnabled
+	})).Return(merr.Success(), nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{

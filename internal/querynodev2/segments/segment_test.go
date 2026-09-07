@@ -153,9 +153,11 @@ func (suite *SegmentSuite) SetupTest() {
 
 func (suite *SegmentSuite) TearDownTest() {
 	ctx := context.Background()
-	suite.sealed.Release(context.Background())
-	suite.growing.Release(context.Background())
-	DeleteCollection(suite.collection)
+	suite.manager.Segment.Clear(ctx)
+	releaseAllTestCollections(suite.manager.Collection)
+	suite.sealed = nil
+	suite.growing = nil
+	suite.collection = nil
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
@@ -814,19 +816,18 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 	assert.NotContains(t, gotAgain, int64(103))
 }
 
-func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
+func TestLocalSegmentReopenUsesCapturedSchemaState(t *testing.T) {
 	paramtable.Init()
 
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection := NewCollectionWithoutSegcoreForTest(10, schema)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 101
+			return request.Schema == schema && request.SchemaVersion == 1
 		})).
 		Return(nil)
 
@@ -859,8 +860,7 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection := NewCollectionWithoutSegcoreForTest(10, schema)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
@@ -911,8 +911,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection := NewCollectionWithoutSegcoreForTest(10, schema)
 
 	getParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 		for _, kv := range kvs {

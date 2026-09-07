@@ -504,6 +504,30 @@ TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     EXPECT_FALSE(segment->FieldAccessible(sparse));
 }
 
+TEST(test_chunk_segment, ExternalLoadSchemaSkipsTimestampMask) {
+    auto logical_schema = std::make_shared<Schema>();
+    auto pk = logical_schema->AddDebugField("pk", DataType::INT64);
+    logical_schema->set_primary_field_id(pk);
+
+    auto load_proto = logical_schema->ToProto();
+    load_proto.set_external_source("s3://external-bucket/table");
+    load_proto.set_external_spec(R"({"format":"parquet"})");
+    auto load_schema = Schema::ParseFrom(load_proto);
+
+    auto segment = segcore::CreateSealedSegment(logical_schema);
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    segment->SetLoadInfo(std::move(load_info), std::move(load_schema));
+
+    auto* internal =
+        dynamic_cast<segcore::SegmentInternalInterface*>(segment.get());
+    ASSERT_NE(internal, nullptr);
+    BitsetType timestamp_mask(1);
+    BitsetTypeView timestamp_mask_view(timestamp_mask);
+    EXPECT_NO_THROW(internal->mask_with_timestamps(timestamp_mask_view, 1, 0));
+    EXPECT_EQ(timestamp_mask.count(), 0);
+}
+
 // #50783 defense-in-depth: GetFieldIndexMeta must throw (AssertInfo) rather than
 // dereference end() for a missing field; assert() is compiled out under NDEBUG.
 TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {

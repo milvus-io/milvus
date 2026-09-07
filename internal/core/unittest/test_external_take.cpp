@@ -1898,6 +1898,90 @@ TEST(InternalTakeTest, TryTakeForSearch_UsesFieldIdColumns) {
     EXPECT_EQ(varchar_data->scalars().string_data().data(1), "row_0");
 }
 
+TEST(InternalTakeTest, RetrieveFallsBackForFieldAddedAfterSegmentLoad) {
+    auto info = BuildInternalSchemaForTake();
+    auto table = BuildInternalTakeArrowTable(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto latest_schema = std::make_shared<Schema>(*info.schema);
+    auto added_field = FieldId(109);
+    latest_schema->AddField(FieldMeta(
+        FieldName("added"), added_field, DataType::INT64, true, std::nullopt));
+    auto plan = std::make_unique<query::RetrievePlan>(latest_schema);
+    plan->field_ids_ = {info.int64_id, added_field};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    int64_t offset = 0;
+    EXPECT_FALSE(segment->TryTakeForRetrieve(
+        plan.get(), results, &offset, 1, false, false));
+    EXPECT_EQ(reader_ptr->take_call_count(), 1);
+}
+
+TEST(InternalTakeTest, SearchFallsBackForFieldAddedAfterSegmentLoad) {
+    auto info = BuildInternalSchemaForTake();
+    auto table = BuildInternalTakeArrowTable(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto latest_schema = std::make_shared<Schema>(*info.schema);
+    auto added_field = FieldId(109);
+    latest_schema->AddField(FieldMeta(
+        FieldName("added"), added_field, DataType::INT64, true, std::nullopt));
+    auto plan = std::make_unique<query::Plan>(latest_schema);
+    plan->target_entries_ = {info.int64_id, added_field};
+
+    SearchResult results;
+    int64_t offset = 0;
+    EXPECT_FALSE(
+        segment->TestTryTakeForSearch(plan.get(), &offset, 1, results));
+    EXPECT_EQ(reader_ptr->take_call_count(), 1);
+}
+
+TEST(ExternalTakeTest, AddedFieldUsesSegmentExternalStorageContext) {
+    auto info = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    // Schema::ToProto intentionally contains only logical field metadata. The
+    // loaded segment remains the source of external storage format/context.
+    auto logical_schema = Schema::ParseFrom(info.schema->ToProto());
+    const auto added_field = FieldId(109);
+    logical_schema->AddField(FieldMeta(FieldName("added"),
+                                       added_field,
+                                       DataType::INT64,
+                                       true,
+                                       std::nullopt,
+                                       "added_col"));
+
+    int64_t offset = 0;
+    auto retrieve_plan = std::make_unique<query::RetrievePlan>(logical_schema);
+    retrieve_plan->field_ids_ = {info.int64_id, added_field};
+    auto retrieve_result = std::make_unique<proto::segcore::RetrieveResults>();
+    EXPECT_FALSE(segment->TryTakeForRetrieve(
+        retrieve_plan.get(), retrieve_result, &offset, 1, false, false));
+
+    auto search_plan = std::make_unique<query::Plan>(logical_schema);
+    search_plan->target_entries_ = {info.int64_id, added_field};
+    SearchResult search_result;
+    EXPECT_FALSE(segment->TestTryTakeForSearch(
+        search_plan.get(), &offset, 1, search_result));
+    EXPECT_EQ(reader_ptr->take_call_count(), 2);
+}
+
 TEST(InternalTakeTest, TryTakeForRetrieve_ResolvesTextOutputField) {
     auto info = BuildInternalSchemaWithTextAndDynamicFields();
     auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);

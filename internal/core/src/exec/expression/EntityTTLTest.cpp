@@ -25,6 +25,17 @@
 using namespace milvus;
 using namespace milvus::segcore;
 
+namespace {
+
+query::PlanOptions
+TTLPlanOptions(FieldId field_id) {
+    query::PlanOptions options;
+    options.entity_ttl_field_id = field_id;
+    return options;
+}
+
+}  // namespace
+
 // Test that QueryContext correctly stores and returns entity_ttl_physical_time_us
 TEST(PhysicalTime, QueryContextPhysicalTimeUs) {
     auto schema = std::make_shared<Schema>();
@@ -184,7 +195,7 @@ TEST(PhysicalTime, TTLFilterWithPhysicalTime) {
             old_query_ts,
             0,
             0,
-            query::PlanOptions(),
+            TTLPlanOptions(ttl_fid),
             std::make_shared<milvus::exec::QueryConfig>(),
             nullptr,
             std::unordered_map<std::string,
@@ -296,7 +307,7 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
                 query_ts,
                 0,
                 0,
-                query::PlanOptions(),
+                TTLPlanOptions(ttl_fid),
                 std::make_shared<milvus::exec::QueryConfig>(),
                 nullptr,
                 std::unordered_map<std::string,
@@ -331,7 +342,7 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
                 query_ts,
                 0,
                 0,
-                query::PlanOptions(),
+                TTLPlanOptions(ttl_fid),
                 std::make_shared<milvus::exec::QueryConfig>(),
                 nullptr,
                 std::unordered_map<std::string,
@@ -356,4 +367,36 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
         EXPECT_EQ(valid_count, 0)
             << "After expiration, all data should be filtered";
     }
+}
+
+TEST(EntityTTL, RuntimeFieldOverridesSegmentSchema) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto old_ttl_fid =
+        schema->AddDebugField("old_ttl", DataType::TIMESTAMPTZ, true);
+    auto new_ttl_fid =
+        schema->AddDebugField("new_ttl", DataType::TIMESTAMPTZ, true);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(old_ttl_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_internal =
+        dynamic_cast<SegmentInternalInterface*>(segment.get());
+
+    exec::QueryContext switched_context(
+        "test", segment_internal, 0, 1, 0, 0, TTLPlanOptions(new_ttl_fid));
+    auto switched_expr =
+        exec::CreateTTLFieldFilterExpression(&switched_context);
+    auto ttl_or =
+        std::dynamic_pointer_cast<const expr::LogicalBinaryExpr>(switched_expr);
+    ASSERT_NE(ttl_or, nullptr);
+    ASSERT_EQ(ttl_or->inputs().size(), 2);
+    auto null_expr =
+        std::dynamic_pointer_cast<const expr::NullExpr>(ttl_or->inputs()[0]);
+    ASSERT_NE(null_expr, nullptr);
+    EXPECT_EQ(null_expr->column_.field_id_, new_ttl_fid);
+
+    exec::QueryContext removed_context(
+        "test", segment_internal, 0, 1, 0, 0, query::PlanOptions());
+    EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&removed_context), nullptr);
 }

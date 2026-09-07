@@ -11,15 +11,16 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdint.h>
 #include <stdbool.h>
 
 #include "common/common_type_c.h"
 #include "segcore/collection_c.h"
+#include "segcore/schema_c.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef void* CSearchPlan;
 typedef void* CPlaceholderGroup;
@@ -31,6 +32,14 @@ CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
                        CSearchPlan* res_plan);
+
+CStatus
+CreateSearchPlanByExprWithSchema(CCollection c_col,
+                                 CSchemaHandle schema_handle,
+                                 int64_t entity_ttl_field_id,
+                                 const void* serialized_expr_plan,
+                                 const int64_t size,
+                                 CSearchPlan* res_plan);
 
 CStatus
 ParsePlaceholderGroup(CSearchPlan c_plan,
@@ -67,6 +76,14 @@ CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
                          CRetrievePlan* res_plan);
+
+CStatus
+CreateRetrievePlanByExprWithSchema(CCollection c_col,
+                                   CSchemaHandle schema_handle,
+                                   int64_t entity_ttl_field_id,
+                                   const void* serialized_expr_plan,
+                                   const int64_t size,
+                                   CRetrievePlan* res_plan);
 
 void
 DeleteRetrievePlan(CRetrievePlan plan);

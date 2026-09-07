@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "PlanImpl.h"
@@ -38,6 +39,12 @@ CreateSearchPlanByExpr(SchemaPtr schema,
                        const int64_t size);
 
 std::unique_ptr<Plan>
+CreateSearchPlanByExpr(SchemaPtr schema,
+                       std::optional<FieldId> entity_ttl_field_id,
+                       const void* serialized_expr_plan,
+                       const int64_t size);
+
+std::unique_ptr<Plan>
 CreateSearchPlanFromPlanNode(SchemaPtr schema,
                              const proto::plan::PlanNode& plan_node);
 
@@ -56,6 +63,12 @@ GetNumOfQueries(const PlaceholderGroup*);
 
 std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(SchemaPtr schema,
+                         const void* serialized_expr_plan,
+                         const int64_t size);
+
+std::unique_ptr<RetrievePlan>
+CreateRetrievePlanByExpr(SchemaPtr schema,
+                         std::optional<FieldId> entity_ttl_field_id,
                          const void* serialized_expr_plan,
                          const int64_t size);
 

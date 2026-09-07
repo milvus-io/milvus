@@ -47,6 +47,8 @@ type (
 // CreateCSegmentRequest is a request to create a segment.
 type CreateCSegmentRequest struct {
 	Collection  *CCollection
+	Schema      *SchemaRef
+	LoadSchema  *SchemaRef
 	SegmentID   int64
 	SegmentType SegmentType
 	IsSorted    bool
@@ -68,6 +70,8 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 
 // CreateCSegment creates a segment from a CreateCSegmentRequest.
 func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
+	defer runtime.KeepAlive(req.Schema)
+	defer runtime.KeepAlive(req.LoadSchema)
 	var ptr C.CSegmentInterface
 	var status C.CStatus
 	if req.LoadInfo != nil {
@@ -80,8 +84,18 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			return nil, err
 		}
 
-		status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+		if req.Schema != nil {
+			if req.Schema.rawPointer() == nil || req.LoadSchema == nil || req.LoadSchema.rawPointer() == nil {
+				return nil, merr.WrapErrParameterInvalidMsg("schema-backed segment load requires an effective load schema")
+			}
+			status = C.NewSegmentWithLoadInfoAndSchema(req.Collection.rawPointer(), req.Schema.rawPointer(), req.LoadSchema.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+		} else {
+			status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+		}
 	} else {
+		if req.Schema != nil || req.LoadSchema != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("schema-backed segment creation requires load info")
+		}
 		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
@@ -97,6 +111,25 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		}
 	}
 	return seg, nil
+}
+
+// UpdateSegmentSchema advances a segment to the schema owned by schemaRef.
+// Growing segments use this before accepting an insert produced from a newer
+// schema snapshot.
+func UpdateSegmentSchema(segment CSegment, schemaRef *SchemaRef) error {
+	if segment == nil {
+		return merr.WrapErrParameterInvalidMsg("segment is nil")
+	}
+	if schemaRef == nil || schemaRef.rawPointer() == nil {
+		return merr.WrapErrParameterInvalidMsg("schema reference is released")
+	}
+	defer runtime.KeepAlive(schemaRef)
+
+	status := C.UpdateSegmentSchema(
+		C.CSegmentInterface(segment.RawPointer()),
+		schemaRef.rawPointer(),
+	)
+	return ConsumeCStatusIntoError(&status)
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -351,8 +384,11 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if req.LoadInfo == nil {
 		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
 	}
-	if req.Schema == nil {
+	if req.SchemaRef == nil && req.Schema == nil {
 		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
+	}
+	if req.SchemaRef != nil && req.LoadSchemaRef == nil {
+		return merr.WrapErrParameterInvalidMsg("schema-backed reopen requires an effective load schema")
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
@@ -371,17 +407,30 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
 	}
 
-	schemaBlob, err := proto.Marshal(req.Schema)
-	if err != nil {
-		return err
+	var schemaBlob []byte
+	if req.SchemaRef == nil {
+		schemaBlob, err = proto.Marshal(req.Schema)
+		if err != nil {
+			return err
+		}
+		if len(schemaBlob) == 0 {
+			return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
+		}
+		defer runtime.KeepAlive(schemaBlob)
 	}
-	if len(schemaBlob) == 0 {
-		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
-	}
-	defer runtime.KeepAlive(schemaBlob)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
+			if req.SchemaRef != nil {
+				return (cgo.CFuturePtr)(C.AsyncReopenSegmentWithSchema(
+					traceCtx.ctx,
+					s.ptr,
+					req.SchemaRef.rawPointer(),
+					req.LoadSchemaRef.rawPointer(),
+					(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
+					C.int64_t(len(loadInfoBlob)),
+				))
+			}
 			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
 				traceCtx.ctx,
 				s.ptr,

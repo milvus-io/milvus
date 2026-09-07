@@ -180,8 +180,20 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	suite.node.Stop()
+	suite.node.delegators.Range(func(_ string, delegator delegator.ShardDelegator) bool {
+		delegator.Close()
+		return true
+	})
+	releaseServiceTestCollections(suite.node.manager.Collection)
 	suite.etcdClient.Close()
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+}
+
+func releaseServiceTestCollections(manager segments.CollectionManager) {
+	for _, collectionID := range manager.List() {
+		for !manager.Unref(collectionID, 1) {
+		}
+	}
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
@@ -798,6 +810,8 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
+	oldManager := suite.node.manager.Collection
+	suite.T().Cleanup(func() { releaseServiceTestCollections(oldManager) })
 	suite.node.manager.Collection = segments.NewCollectionManager()
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 
@@ -835,6 +849,8 @@ func (suite *ServiceSuite) TestLoadSegments_BadIndexMeta() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
+	oldManager := suite.node.manager.Collection
+	suite.T().Cleanup(func() { releaseServiceTestCollections(oldManager) })
 	suite.node.manager.Collection = segments.NewCollectionManager()
 	// suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 
@@ -1035,7 +1051,7 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				LoadScope:     querypb.LoadScope_Reopen,
 				IndexInfoList: indexInfos,
 			}
-			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
+			mockLoader.EXPECT().ReopenSegmentsWithSchemaState(mock.Anything, mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
 
 			time.Sleep(time.Nanosecond)
 			status, err := suite.node.LoadSegments(ctx, req)

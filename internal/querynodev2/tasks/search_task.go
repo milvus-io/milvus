@@ -276,7 +276,7 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 
-	preparedChains, err := prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
+	preparedChains, err := prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), searchReq.Schema())
 	if err != nil {
 		return err
 	}

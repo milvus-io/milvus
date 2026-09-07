@@ -667,6 +667,14 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             }
         }
 
+        // Element-level predicates may omit their document predicate.  Keep a
+        // document FilterBits/IterativeFilter node in that case so runtime TTL
+        // is still compiled for the query.
+        if (is_element_level && doc_expr == nullptr &&
+            entity_ttl_field_id_.has_value()) {
+            doc_expr = CreateAlwaysTrueExprs();
+        }
+
         bool is_iterative =
             plan_node->search_info_.iterative_filter_execution &&
             !plan_node->search_info_.has_group_by();
@@ -750,7 +758,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         // When entity-level TTL is enabled, add an AlwaysTrueExpr so that
         // CompileExpressions injects the TTL bitmap filter at runtime.
         // (issue #47977)
-        if (schema->get_ttl_field_id().has_value()) {
+        if (entity_ttl_field_id_.has_value()) {
             auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
             plannode = std::make_shared<plan::FilterBitsNode>(
                 milvus::plan::GetNextPlanNodeId(), always_true_expr);
@@ -776,6 +784,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     PlanOptionsFromProto(plan_node_proto.plan_options(),
                          plan_node->plan_options_);
+    plan_node->plan_options_.entity_ttl_field_id = entity_ttl_field_id_;
 
     return plan_node;
 }
@@ -824,6 +833,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             };
 
+        bool has_doc_filter = false;
         if (query.has_predicates()) {
             auto* predicate_proto = &query.predicates();
             if (predicate_proto->expr_case() ==
@@ -834,12 +844,21 @@ ProtoParser::RetrievePlanNodeFromProto(
                 struct_name = ef.struct_name();
                 if (ef.has_predicate()) {
                     parse_expr_to_filter_node(ef.predicate());
+                    has_doc_filter = true;
                 }
             } else if (predicate_proto->expr_case() ==
                        proto::plan::Expr::kRandomSampleExpr) {
                 auto& sample_expr = predicate_proto->random_sample_expr();
                 if (sample_expr.has_predicate()) {
                     parse_expr_to_filter_node(sample_expr.predicate());
+                    has_doc_filter = true;
+                } else if (entity_ttl_field_id_.has_value()) {
+                    plannode = std::make_shared<plan::FilterBitsNode>(
+                        milvus::plan::GetNextPlanNodeId(),
+                        CreateAlwaysTrueExprs(),
+                        sources);
+                    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                    has_doc_filter = true;
                 }
                 plannode = std::make_shared<plan::RandomSampleNode>(
                     milvus::plan::GetNextPlanNodeId(),
@@ -848,7 +867,15 @@ ProtoParser::RetrievePlanNodeFromProto(
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             } else {
                 parse_expr_to_filter_node(query.predicates());
+                has_doc_filter = true;
             }
+        }
+        if (!has_doc_filter && entity_ttl_field_id_.has_value()) {
+            plannode = std::make_shared<plan::FilterBitsNode>(
+                milvus::plan::GetNextPlanNodeId(),
+                CreateAlwaysTrueExprs(),
+                sources);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
         if (query.has_query_iterator_cursor()) {
             AssertInfo(is_element_level,
@@ -953,6 +980,7 @@ ProtoParser::RetrievePlanNodeFromProto(
 
     PlanOptionsFromProto(plan_node_proto.plan_options(),
                          plan_node->plan_options_);
+    plan_node->plan_options_.entity_ttl_field_id = entity_ttl_field_id_;
     return plan_node;
 }
 
@@ -1071,8 +1099,15 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     plan->plan_node_ = PlanNodeFromProto(plan_node_proto);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
     plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
+    if (entity_ttl_field_id_.has_value()) {
+        AddAccessFieldID(plan->access_entries_,
+                         entity_ttl_field_id_.value().get());
+    }
     ExtractedPlanInfo extra_info(schema->get_field_id_bitset_size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
+    if (entity_ttl_field_id_.has_value()) {
+        extra_info.add_involved_field(entity_ttl_field_id_.value());
+    }
     plan->extra_info_opt_ = std::move(extra_info);
 
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
@@ -1092,6 +1127,10 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
     retrieve_plan->plan_node_ = RetrievePlanNodeFromProto(plan_node_proto);
     retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
+    if (entity_ttl_field_id_.has_value()) {
+        AddAccessFieldID(retrieve_plan->access_entries_,
+                         entity_ttl_field_id_.value().get());
+    }
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);

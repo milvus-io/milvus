@@ -11,10 +11,6 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -25,6 +21,11 @@ extern "C" {
 #include "segcore/load_field_data_c.h"
 #include "segcore/load_index_c.h"
 #include "segcore/plan_c.h"
+#include "segcore/schema_c.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
@@ -59,6 +60,20 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
+
+CStatus
+NewSegmentWithLoadInfoAndSchema(CCollection collection,
+                                CSchemaHandle schema_handle,
+                                CSchemaHandle load_schema_handle,
+                                SegmentType seg_type,
+                                int64_t segment_id,
+                                CSegmentInterface* newSegment,
+                                bool is_sorted_by_pk,
+                                const uint8_t* load_info_blob,
+                                const int64_t load_info_length);
+
+CStatus
+UpdateSegmentSchema(CSegmentInterface c_segment, CSchemaHandle schema_handle);
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.
@@ -139,6 +154,14 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const void* schema_blob,
                    const int64_t schema_length,
                    const uint64_t schema_version);
+
+CFuture*
+AsyncReopenSegmentWithSchema(CTraceContext c_trace,
+                             CSegmentInterface c_segment,
+                             CSchemaHandle schema_handle,
+                             CSchemaHandle load_schema_handle,
+                             const uint8_t* load_info_blob,
+                             const int64_t load_info_length);
 
 void
 DeleteSegment(CSegmentInterface c_segment);

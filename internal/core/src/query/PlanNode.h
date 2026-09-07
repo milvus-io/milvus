@@ -30,6 +30,9 @@ class PlanNodeVisitor;
 
 struct PlanOptions {
     bool expr_use_json_stats = true;
+    // Entity TTL is collection runtime state ordered by the DDL barrier.  It
+    // is intentionally kept out of the immutable logical-schema cache key.
+    std::optional<FieldId> entity_ttl_field_id;
 };
 
 // Base of all Nodes

@@ -196,6 +196,9 @@ func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCo
 		// The update timestamp is a load barrier, not the logical schema version.
 		// QueryNode uses it only to reject stale load results after schema changes.
 		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
+		// Keep the RootCoord schema separate from QueryCoord's mmap/warmup
+		// decoration on the request-level schema.
+		LogicalSchema: collectionInfo.GetSchema(),
 	}
 }
 
@@ -284,17 +287,21 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
 
-	// Index warmup is normally materialized into each IndexInfo by
-	// applyIndexWarmupSetting. No-index vector fields have no IndexInfo carrier,
-	// but segcore treats their raw data as the vector-index/search path until an
-	// index exists. Carry QueryCoord's auto-warmup vector-index fallback through
-	// the effective load schema without changing warmup.vectorField semantics.
-	if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist &&
-		autoWarmupForNonPKIsolationCollection(collectionProperties) {
-		schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
-			Key:   common.WarmupVectorIndexKey,
-			Value: common.WarmupSync,
-		})
+	// Persist QueryCoord's auto-warmup fallback on the effective load schema so
+	// schema evolution can apply the same policy to newly added fields/indexes.
+	if autoWarmupForNonPKIsolationCollection(collectionProperties) {
+		if _, exist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, schemaCloned.GetProperties()...); !exist {
+			schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
+				Key:   common.WarmupScalarFieldKey,
+				Value: common.WarmupSync,
+			})
+		}
+		if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist {
+			schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
+				Key:   common.WarmupVectorIndexKey,
+				Value: common.WarmupSync,
+			})
+		}
 	}
 	return schemaCloned
 }

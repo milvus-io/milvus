@@ -136,6 +136,7 @@ type InsertData struct {
 
 	StartPosition *msgpb.MsgPosition
 	PartitionID   int64
+	SchemaState   *segments.CollectionSchemaState
 }
 
 type DeleteData struct {
@@ -170,22 +171,24 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			var err error
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.
-			growing, err = segments.NewSegment(
-				context.Background(),
-				sd.collection,
-				sd.segmentManager,
-				segments.SegmentTypeGrowing,
-				0,
-				&querypb.SegmentLoadInfo{
-					SegmentID:     segmentID,
-					PartitionID:   insertData.PartitionID,
-					CollectionID:  sd.collectionID,
-					InsertChannel: sd.vchannelName,
-					StartPosition: insertData.StartPosition,
-					DeltaPosition: insertData.StartPosition,
-					Level:         datapb.SegmentLevel_L1,
-				},
-			)
+			loadInfo := &querypb.SegmentLoadInfo{
+				SegmentID:     segmentID,
+				PartitionID:   insertData.PartitionID,
+				CollectionID:  sd.collectionID,
+				InsertChannel: sd.vchannelName,
+				StartPosition: insertData.StartPosition,
+				DeltaPosition: insertData.StartPosition,
+				Level:         datapb.SegmentLevel_L1,
+			}
+			if insertData.SchemaState != nil {
+				growing, err = segments.NewSegmentWithSchemaState(
+					context.Background(), sd.collection, sd.segmentManager,
+					segments.SegmentTypeGrowing, 0, loadInfo, insertData.SchemaState)
+			} else {
+				growing, err = segments.NewSegment(
+					context.Background(), sd.collection, sd.segmentManager,
+					segments.SegmentTypeGrowing, 0, loadInfo)
+			}
 			if err != nil {
 				log.Error(context.TODO(), "failed to create new segment",
 					mlog.FieldSegmentID(segmentID),
@@ -193,6 +196,19 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				panic(err)
 			}
 			newGrowingSegment = true
+		}
+
+		if insertData.SchemaState != nil {
+			if err := segments.UpdateGrowingSegmentSchema(growing, insertData.SchemaState); err != nil {
+				log.Error(context.TODO(), "failed to update growing segment schema",
+					mlog.FieldSegmentID(segmentID),
+					mlog.Err(err))
+				if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
+					log.Warn(context.TODO(), "try to update released segment, skip it", mlog.Err(err))
+					continue
+				}
+				panic(err)
+			}
 		}
 
 		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
@@ -458,10 +474,15 @@ func (sd *shardDelegator) addGrowing(entries ...SegmentEntry) {
 // LoadGrowing load growing segments locally.
 func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	log := sd.getLogger(ctx)
+	schemaState, err := sd.captureCollectionSchemaState()
+	if err != nil {
+		return err
+	}
+	defer schemaState.Release()
 
 	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	log.Info(ctx, "loading growing segments...", mlog.Int64s("segmentIDs", segmentIDs))
-	loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, infos...)
+	loaded, err := sd.loader.LoadWithSchemaState(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, schemaState, infos...)
 	if err != nil {
 		log.Warn(ctx, "failed to load growing segment", mlog.Err(err))
 		return err
@@ -602,33 +623,36 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	return nil
 }
 
-// syncCollectionMeta refreshes the delegator node's CCollection IndexMeta and
-// channel-local function runtime after a forwarded worker load. Worker LoadSegments
-// already updates IndexMeta on the target worker, but the delegator must stay in sync.
+// syncCollectionMeta refreshes collection-wide load policy and index metadata
+// after a forwarded worker load. The vchannel-local schema/function state is
+// advanced only by that vchannel's WAL schema event.
 func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	schema := req.GetSchema()
+	loadMeta := req.GetLoadMeta()
+	var meta *segcorepb.CollectionIndexMeta
 	if len(req.GetIndexInfoList()) > 0 {
-		schema := req.GetSchema()
-		if schema == nil {
-			schema = sd.collection.Schema()
+		metaSchema := schema
+		if metaSchema == nil {
+			metaSchema = sd.currentSchema()
 		}
+		meta = segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), metaSchema)
+	}
 
-		loadMeta := req.GetLoadMeta()
-		if loadMeta == nil {
-			loadMeta = &querypb.LoadMetaInfo{
-				CollectionID: req.GetCollectionID(),
-			}
-		}
-
-		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+	if schema != nil && loadMeta != nil {
 		if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
 			return err
 		}
 		sd.collectionManager.Unref(req.GetCollectionID(), 1)
+		return nil
 	}
 
-	// Reopen and concurrent loads also provide a deterministic catch-up point when
-	// another channel has already advanced the shared Collection schema.
-	return sd.UpdateDelegatorSchema(ctx)
+	// Legacy or incomplete forwarding requests do not contain enough information
+	// to rebuild the logical/effective schema pair. They may still carry newer
+	// index metadata, which is safe to update independently.
+	if err := sd.collection.UpdateIndexMeta(meta); err != nil {
+		return err
+	}
+	return nil
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -727,7 +751,14 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
 		})
 
-		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
+		logicalSchema := req.GetLoadMeta().GetLogicalSchema()
+		if logicalSchema == nil {
+			logicalSchema = req.GetSchema()
+		}
+		if logicalSchema == nil {
+			logicalSchema = sd.currentSchema()
+		}
+		candidates, err := sd.loader.LoadBloomFilterSetWithSchema(ctx, req.GetCollectionID(), logicalSchema, infos...)
 		if err != nil {
 			log.Warn(ctx, "failed to load bloom filter set for segment", mlog.Err(err))
 			return err
@@ -799,7 +830,7 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
+	if sd.schemaState != nil && schemaBarrierTs < sd.schemaState.barrierTs() {
 		return merr.WrapErrServiceInternal("schema barrier changed")
 	}
 
@@ -825,8 +856,12 @@ func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLo
 			loaded = append(loaded, l0Seg)
 		}
 	} else {
-		var err error
-		loaded, err = sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeSealed, version, infos...)
+		schemaState, err := sd.captureCollectionSchemaState()
+		if err != nil {
+			return err
+		}
+		defer schemaState.Release()
+		loaded, err = sd.loader.LoadWithSchemaState(ctx, sd.collectionID, segments.SegmentTypeSealed, version, schemaState, infos...)
 		if err != nil {
 			log.Warn(ctx, "failed to load l0 segment", mlog.Err(err))
 			return err

@@ -131,7 +131,8 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			mlog.Error(ctx, "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
-		collection.WithInsertSchemaTransition(func(schema *schemapb.CollectionSchema) {
+		if err := iNode.delegator.WithInsertSchemaState(func(schemaState *segments.CollectionSchemaState) {
+			schema := schemaState.Schema()
 			functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
 			if err != nil {
 				mlog.Error(ctx, "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
@@ -148,9 +149,15 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 				}
 				iNode.addInsertData(insertDatas, msg, schema)
 			}
+			for _, insertData := range insertDatas {
+				insertData.SchemaState = schemaState
+			}
 
 			iNode.delegator.ProcessInsert(insertDatas)
-		})
+		}); err != nil {
+			mlog.Error(ctx, "failed to capture collection schema state", mlog.String("channel", iNode.channel), mlog.Err(err))
+			panic(err)
+		}
 	}
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Inc()
 

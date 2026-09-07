@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -222,6 +223,81 @@ func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// LoadBloomFilterSetWithSchema provides a mock function with given fields: ctx, collectionID, schema, infos
+func (_m *MockLoader) LoadBloomFilterSetWithSchema(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+	_va := make([]interface{}, len(infos))
+	for _i := range infos {
+		_va[_i] = infos[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, collectionID, schema)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadBloomFilterSetWithSchema")
+	}
+
+	var r0 []*pkoracle.BloomFilterSet
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)); ok {
+		return rf(ctx, collectionID, schema, infos...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet); ok {
+		r0 = rf(ctx, collectionID, schema, infos...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*pkoracle.BloomFilterSet)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) error); ok {
+		r1 = rf(ctx, collectionID, schema, infos...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockLoader_LoadBloomFilterSetWithSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadBloomFilterSetWithSchema'
+type MockLoader_LoadBloomFilterSetWithSchema_Call struct {
+	*mock.Call
+}
+
+// LoadBloomFilterSetWithSchema is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - schema *schemapb.CollectionSchema
+//   - infos ...*querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) LoadBloomFilterSetWithSchema(ctx interface{}, collectionID interface{}, schema interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSetWithSchema_Call {
+	return &MockLoader_LoadBloomFilterSetWithSchema_Call{Call: _e.mock.On("LoadBloomFilterSetWithSchema",
+		append([]interface{}{ctx, collectionID, schema}, infos...)...)}
+}
+
+func (_c *MockLoader_LoadBloomFilterSetWithSchema_Call) Run(run func(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo)) *MockLoader_LoadBloomFilterSetWithSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(*querypb.SegmentLoadInfo)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), args[2].(*schemapb.CollectionSchema), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadBloomFilterSetWithSchema_Call) Return(_a0 []*pkoracle.BloomFilterSet, _a1 error) *MockLoader_LoadBloomFilterSetWithSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockLoader_LoadBloomFilterSetWithSchema_Call) RunAndReturn(run func(context.Context, int64, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)) *MockLoader_LoadBloomFilterSetWithSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadDeltaLogs provides a mock function with given fields: ctx, segment, loadInfo
 func (_m *MockLoader) LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
 	ret := _m.Called(ctx, segment, loadInfo)
@@ -270,6 +346,83 @@ func (_c *MockLoader_LoadDeltaLogs_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// LoadWithSchemaState provides a mock function with given fields: ctx, collectionID, segmentType, version, schemaState, _a5
+func (_m *MockLoader) LoadWithSchemaState(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, schemaState *CollectionSchemaState, _a5 ...*querypb.SegmentLoadInfo) ([]Segment, error) {
+	_va := make([]interface{}, len(_a5))
+	for _i := range _a5 {
+		_va[_i] = _a5[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, collectionID, segmentType, version, schemaState)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadWithSchemaState")
+	}
+
+	var r0 []Segment
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, commonpb.SegmentState, int64, *CollectionSchemaState, ...*querypb.SegmentLoadInfo) ([]Segment, error)); ok {
+		return rf(ctx, collectionID, segmentType, version, schemaState, _a5...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, commonpb.SegmentState, int64, *CollectionSchemaState, ...*querypb.SegmentLoadInfo) []Segment); ok {
+		r0 = rf(ctx, collectionID, segmentType, version, schemaState, _a5...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]Segment)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, commonpb.SegmentState, int64, *CollectionSchemaState, ...*querypb.SegmentLoadInfo) error); ok {
+		r1 = rf(ctx, collectionID, segmentType, version, schemaState, _a5...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockLoader_LoadWithSchemaState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithSchemaState'
+type MockLoader_LoadWithSchemaState_Call struct {
+	*mock.Call
+}
+
+// LoadWithSchemaState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - segmentType commonpb.SegmentState
+//   - version int64
+//   - schemaState *CollectionSchemaState
+//   - _a5 ...*querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) LoadWithSchemaState(ctx interface{}, collectionID interface{}, segmentType interface{}, version interface{}, schemaState interface{}, _a5 ...interface{}) *MockLoader_LoadWithSchemaState_Call {
+	return &MockLoader_LoadWithSchemaState_Call{Call: _e.mock.On("LoadWithSchemaState",
+		append([]interface{}{ctx, collectionID, segmentType, version, schemaState}, _a5...)...)}
+}
+
+func (_c *MockLoader_LoadWithSchemaState_Call) Run(run func(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, schemaState *CollectionSchemaState, _a5 ...*querypb.SegmentLoadInfo)) *MockLoader_LoadWithSchemaState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-5)
+		for i, a := range args[5:] {
+			if a != nil {
+				variadicArgs[i] = a.(*querypb.SegmentLoadInfo)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), args[2].(commonpb.SegmentState), args[3].(int64), args[4].(*CollectionSchemaState), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadWithSchemaState_Call) Return(_a0 []Segment, _a1 error) *MockLoader_LoadWithSchemaState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockLoader_LoadWithSchemaState_Call) RunAndReturn(run func(context.Context, int64, commonpb.SegmentState, int64, *CollectionSchemaState, ...*querypb.SegmentLoadInfo) ([]Segment, error)) *MockLoader_LoadWithSchemaState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReopenSegments provides a mock function with given fields: ctx, loadInfos
 func (_m *MockLoader) ReopenSegments(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo) error {
 	ret := _m.Called(ctx, loadInfos)
@@ -313,6 +466,54 @@ func (_c *MockLoader_ReopenSegments_Call) Return(_a0 error) *MockLoader_ReopenSe
 }
 
 func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context, []*querypb.SegmentLoadInfo) error) *MockLoader_ReopenSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReopenSegmentsWithSchemaState provides a mock function with given fields: ctx, schemaState, loadInfos
+func (_m *MockLoader) ReopenSegmentsWithSchemaState(ctx context.Context, schemaState *CollectionSchemaState, loadInfos []*querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, schemaState, loadInfos)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReopenSegmentsWithSchemaState")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *CollectionSchemaState, []*querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, schemaState, loadInfos)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_ReopenSegmentsWithSchemaState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReopenSegmentsWithSchemaState'
+type MockLoader_ReopenSegmentsWithSchemaState_Call struct {
+	*mock.Call
+}
+
+// ReopenSegmentsWithSchemaState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - schemaState *CollectionSchemaState
+//   - loadInfos []*querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) ReopenSegmentsWithSchemaState(ctx interface{}, schemaState interface{}, loadInfos interface{}) *MockLoader_ReopenSegmentsWithSchemaState_Call {
+	return &MockLoader_ReopenSegmentsWithSchemaState_Call{Call: _e.mock.On("ReopenSegmentsWithSchemaState", ctx, schemaState, loadInfos)}
+}
+
+func (_c *MockLoader_ReopenSegmentsWithSchemaState_Call) Run(run func(ctx context.Context, schemaState *CollectionSchemaState, loadInfos []*querypb.SegmentLoadInfo)) *MockLoader_ReopenSegmentsWithSchemaState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*CollectionSchemaState), args[2].([]*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockLoader_ReopenSegmentsWithSchemaState_Call) Return(_a0 error) *MockLoader_ReopenSegmentsWithSchemaState_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_ReopenSegmentsWithSchemaState_Call) RunAndReturn(run func(context.Context, *CollectionSchemaState, []*querypb.SegmentLoadInfo) error) *MockLoader_ReopenSegmentsWithSchemaState_Call {
 	_c.Call.Return(run)
 	return _c
 }

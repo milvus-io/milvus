@@ -20,6 +20,7 @@
 #include "monitor/scope_metric.h"
 #include "segcore/Collection.h"
 #include "segcore/collection_c.h"
+#include "segcore/schema_handle.h"
 
 CStatus
 NewCollection(const void* schema_proto_blob,
@@ -31,6 +32,24 @@ NewCollection(const void* schema_proto_blob,
         auto collection = std::make_unique<milvus::segcore::Collection>(
             schema_proto_blob, length);
         *newCollection = collection.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+NewCollectionWithSchema(CSchemaHandle schema_handle,
+                        CCollection* new_collection) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(new_collection != nullptr,
+                   "collection output pointer is null");
+        *new_collection = nullptr;
+        auto collection = std::make_unique<milvus::segcore::Collection>(
+            milvus::segcore::CloneSchemaPtrFromC(schema_handle));
+        *new_collection = collection.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -55,13 +74,27 @@ UpdateSchema(CCollection collection,
 }
 
 CStatus
+UpdateSchemaWithHandle(CCollection collection, CSchemaHandle schema_handle) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
+        AssertInfo(col != nullptr, "collection is null");
+        col->set_schema(milvus::segcore::CloneSchemaPtrFromC(schema_handle));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 UpdateLoadFields(CCollection collection,
                  const int64_t* field_ids,
                  const int64_t length) {
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        col->get_schema()->UpdateLoadFields(
+        col->update_load_fields(
             std::vector<int64_t>(field_ids, field_ids + length));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

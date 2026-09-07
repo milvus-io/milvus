@@ -227,12 +227,13 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	schemaState, err := node.manager.Collection.PutOrRefWithSchemaState(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	defer schemaState.Release()
 	defer func() {
 		if !merr.Ok(status) {
 			node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -246,7 +247,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		req.GetTargetVersion(),
 	)
 
-	delegator, err := delegator.NewShardDelegator(
+	delegator, err := delegator.NewShardDelegatorWithSchemaState(
 		ctx,
 		req.GetCollectionID(),
 		req.GetReplicaID(),
@@ -260,6 +261,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.chunkManager,
 		queryView,
 		node.binlogSaver,
+		schemaState,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
 	)
 	if err != nil {
@@ -544,13 +546,14 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	schemaState, err := node.manager.Collection.PutOrRefWithSchemaState(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
+	defer schemaState.Release()
 
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
@@ -558,10 +561,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.loadDeltaLogs(ctx, req), nil
 	case querypb.LoadScope_Stats:
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
+		return node.reopenSegments(ctx, req, schemaState), nil
 	case querypb.LoadScope_Reopen:
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
+		return node.reopenSegments(ctx, req, schemaState), nil
 	case querypb.LoadScope_Full:
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		// Continue with the full segment load below.
@@ -578,10 +581,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Actual load segment
 	log.Info(ctx, "start to load segments...")
-	loaded, err := node.loader.Load(ctx,
+	loaded, err := node.loader.LoadWithSchemaState(ctx,
 		req.GetCollectionID(),
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
+		schemaState,
 		req.GetInfos()...,
 	)
 	if err != nil {

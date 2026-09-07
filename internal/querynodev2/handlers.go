@@ -144,14 +144,14 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 	return merr.Success()
 }
 
-func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
+func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, schemaState *segments.CollectionSchemaState) *commonpb.Status {
 	log := mlog.With(
 		mlog.FieldCollectionID(req.GetCollectionID()),
 		mlog.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
 
 	log.Info(ctx, "start to reopen segments")
-	err := node.loader.ReopenSegments(ctx, req.GetInfos())
+	err := node.loader.ReopenSegmentsWithSchemaState(ctx, schemaState, req.GetInfos())
 	if err != nil {
 		log.Warn(ctx, "failed to reopen segments", mlog.Err(err))
 		return merr.Status(err)

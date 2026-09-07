@@ -185,6 +185,65 @@ TEST_F(SegmentLoadInfoTest, ConstructFromProto) {
     EXPECT_EQ(info.GetPriority(), proto::common::LoadPriority::LOW);
 }
 
+TEST_F(SegmentLoadInfoTest, UsesSharedLoadSchemaAndPreservesItAcrossCopies) {
+    auto effective_schema = schema_->ToProto();
+    auto* collection_mmap = effective_schema.add_properties();
+    collection_mmap->set_key(MMAP_ENABLED_KEY);
+    collection_mmap->set_value("true");
+    auto load_schema = Schema::ParseFrom(effective_schema);
+    load_schema->UpdateLoadFields({101});
+
+    SegmentLoadInfo info(proto_, schema_, load_schema);
+    SegmentLoadInfo copied(info);
+    load_schema.reset();
+
+    EXPECT_TRUE(copied.ShouldLoadField(FieldId(101)));
+    EXPECT_FALSE(copied.ShouldLoadField(FieldId(102)));
+    EXPECT_EQ(copied.MmapEnabled(FieldId(101)), std::make_pair(true, true));
+}
+
+TEST_F(SegmentLoadInfoTest, StorageSchemaUsesLatestLoadSnapshot) {
+    auto logical_proto = schema_->ToProto();
+    logical_proto.set_external_source("s3://old-bucket/data");
+    logical_proto.set_external_spec(R"({"format":"parquet"})");
+    auto logical_schema = Schema::ParseFrom(logical_proto);
+
+    auto load_proto = logical_proto;
+    load_proto.set_external_source("s3://new-bucket/data");
+    load_proto.set_external_spec(R"({"format":"milvus-table"})");
+    auto load_schema = Schema::ParseFrom(load_proto);
+
+    SegmentLoadInfo info(proto_, logical_schema, load_schema);
+    EXPECT_EQ(info.GetStorageSchema().get(), load_schema.get());
+    EXPECT_EQ(info.GetStorageSchema()->get_external_source(),
+              "s3://new-bucket/data");
+    EXPECT_TRUE(info.GetStorageSchema()->is_milvus_table_external_collection());
+
+    SegmentLoadInfo legacy(proto_, logical_schema);
+    EXPECT_EQ(legacy.GetStorageSchema().get(), logical_schema.get());
+}
+
+TEST(SegmentLoadInfoPolicyTest, LogicalSchemaStillExcludesNoLoadField) {
+    auto logical_schema = std::make_shared<Schema>();
+    logical_schema->AddDebugField("pk", DataType::INT64);
+    logical_schema->AddField(FieldMeta(FieldName("external"),
+                                       FieldId(101),
+                                       DataType::INT64,
+                                       false,
+                                       std::nullopt,
+                                       "external_column"));
+    logical_schema->set_primary_field_id(FieldId(100));
+
+    auto effective_schema = logical_schema->ToProto();
+    auto load_schema = Schema::ParseFrom(effective_schema);
+    load_schema->UpdateLoadFields({101});
+    proto::segcore::SegmentLoadInfo proto;
+    SegmentLoadInfo info(
+        proto, std::move(logical_schema), std::move(load_schema));
+
+    EXPECT_FALSE(info.ShouldLoadField(FieldId(101)));
+}
+
 TEST_F(SegmentLoadInfoTest, MoveConstructor) {
     SegmentLoadInfo info1(proto_, schema_);
     SegmentLoadInfo info2(std::move(info1));
@@ -3186,6 +3245,50 @@ MakeSchemaWithFieldIds(std::initializer_list<int64_t> field_ids) {
 }
 
 }  // namespace
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffUsesLoadSnapshotForExternalStorageKind) {
+    auto load_proto = schema_->ToProto();
+    load_proto.set_external_source("s3://external-bucket/table");
+    load_proto.set_external_spec(R"({"format":"parquet"})");
+    auto load_schema = Schema::ParseFrom(load_proto);
+
+    SegmentLoadInfo info(
+        MakeManifestProto("/manifest/v1"), schema_, std::move(load_schema));
+    info.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}}));
+
+    LoadDiff diff;
+    EXPECT_NO_THROW({ diff = info.GetLoadDiff(); });
+    EXPECT_TRUE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffReloadsSameManifestWhenExternalSourceChanges) {
+    auto logical_proto = schema_->ToProto();
+    logical_proto.set_external_source("s3://old-bucket/table");
+    logical_proto.set_external_spec(R"({"format":"parquet"})");
+    auto logical_schema = Schema::ParseFrom(logical_proto);
+
+    auto old_load_schema = Schema::ParseFrom(logical_proto);
+    auto new_load_proto = logical_proto;
+    new_load_proto.set_external_source("s3://new-bucket/table");
+    auto new_load_schema = Schema::ParseFrom(new_load_proto);
+
+    SegmentLoadInfo current(MakeManifestProto("/manifest/stable"),
+                            logical_schema,
+                            std::move(old_load_schema));
+    SegmentLoadInfo next(MakeManifestProto("/manifest/stable"),
+                         logical_schema,
+                         std::move(new_load_schema));
+
+    auto diff = current.ComputeDiff(next);
+    EXPECT_FALSE(diff.manifest_updated);
+    EXPECT_TRUE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.replace_external_manifest);
+}
 
 TEST_F(SegmentLoadInfoTest, ConstructSkipsIndexInfoForDroppedField) {
     proto::segcore::SegmentLoadInfo p;

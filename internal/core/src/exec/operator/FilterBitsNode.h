@@ -34,6 +34,10 @@ ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
                                  size_t size);
 
+std::string
+BuildExprCacheKey(const plan::FilterBitsNode& filter,
+                  QueryContext* query_context);
+
 class PhyFilterBitsNode : public Operator {
  public:
     PhyFilterBitsNode(

@@ -126,6 +126,10 @@ func (req *cLoadFieldDataRequest) Release() {
 
 type ReopenRequest struct {
 	LoadInfo      *querypb.SegmentLoadInfo
+	SchemaRef     *SchemaRef
+	LoadSchemaRef *SchemaRef
+	// Schema and SchemaVersion are retained for rolling compatibility with the
+	// legacy reopen API. New QueryNode paths pass SchemaRef and LoadSchemaRef.
 	Schema        *schemapb.CollectionSchema
 	SchemaVersion uint64
 }
