@@ -6,7 +6,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // BalancerSnapshot is the world view consumed by BalancePolicy.Plan.
@@ -42,7 +41,7 @@ func (s *BalancerSnapshot) ConfigForShard(shardID qviews.ShardID) *loadmgr.LoadC
 	return s.LoadConfigSnapshot.ReplicaToConfigMap()[shardID.ReplicaID]
 }
 
-func (s *BalancerSnapshot) SegmentInfo(segmentID int64) (*SegmentInfo, bool) {
+func (s *BalancerSnapshot) SegmentInfo(segmentID int64) (*SegmentDataView, bool) {
 	if s == nil || s.DataViewSnapshot == nil {
 		return nil, false
 	}
@@ -56,7 +55,7 @@ func (s *BalancerSnapshot) DataVersionForCollection(collectionID int64) (qviews.
 	return s.DataViewSnapshot.DataVersion(collectionID)
 }
 
-func (s *BalancerSnapshot) DataViewForShard(shardID qviews.ShardID) *viewpb.DataViewOfShard {
+func (s *BalancerSnapshot) DataViewForShard(shardID qviews.ShardID) *ShardDataView {
 	cfg := s.ConfigForShard(shardID)
 	if cfg == nil || s.DataViewSnapshot == nil {
 		return nil
@@ -71,12 +70,12 @@ func (s *BalancerSnapshot) RangeDataShards(collectionID int64, fn func(qviews.Sh
 	if cfg == nil || s.DataViewSnapshot == nil {
 		return
 	}
-	s.DataViewSnapshot.RangeShards(collectionID, func(shard *viewpb.DataViewOfShard) bool {
+	s.DataViewSnapshot.RangeShards(collectionID, func(shard *ShardDataView) bool {
 		if shard == nil {
 			return true
 		}
 		for _, replica := range cfg.Replicas {
-			if !fn(qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.GetVchannel()}) {
+			if !fn(qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}) {
 				return false
 			}
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // NodeProvider supplies the identity / health / capacity / resource group of
@@ -67,19 +66,19 @@ func (s *NodeSnapshot) Range(fn func(int64, *NodeInfo) bool) {
 type DataViewProvider interface {
 	DataViewSnapshot(ctx context.Context) *DataViewSnapshot
 	DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot
-	SegmentSnapshot(ctx context.Context, segmentIDs []int64) SegmentSnapshot
 }
 
 type (
-	DataViewSnapshot = balancerapi.DataViewSnapshot
-	SegmentInfo      = balancerapi.SegmentInfo
-	SegmentSnapshot  = balancerapi.SegmentSnapshot
+	DataViewSnapshot   = balancerapi.DataViewSnapshot
+	SegmentDataView    = balancerapi.SegmentDataView
+	ShardDataView      = balancerapi.ShardDataView
+	PartitionDataView  = balancerapi.PartitionDataView
+	CollectionDataView = balancerapi.CollectionDataView
 )
 
 func NewDataViewSnapshot(
 	version uint64,
-	collections []*viewpb.DataViewOfCollection,
-	segments SegmentSnapshot,
+	collections []*CollectionDataView,
 ) *DataViewSnapshot {
-	return balancerapi.NewDataViewSnapshot(version, collections, segments)
+	return balancerapi.NewDataViewSnapshot(version, collections)
 }

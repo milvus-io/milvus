@@ -191,9 +191,9 @@ func shardTotalLoad(snap *BalancerSnapshot, shardID qviews.ShardID) int64 {
 		return 0
 	}
 	var total int64
-	for _, p := range shard.GetPartitions() {
-		for _, segmentID := range p.GetSegmentIds() {
-			total += segmentRows(segmentInfoFor(snap, segmentID, p.GetPartitionId()))
+	for _, p := range shard.Partitions {
+		for _, segment := range p.Segments {
+			total += segment.RowNum
 		}
 	}
 	return total

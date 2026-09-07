@@ -50,12 +50,12 @@ func allocate(
 		load        int64
 	}
 	entries := make([]segEntry, 0)
-	for _, p := range shardDV.GetPartitions() {
-		for _, segID := range p.GetSegmentIds() {
+	for _, p := range shardDV.Partitions {
+		for _, segment := range p.Segments {
 			entries = append(entries, segEntry{
-				segmentID:   segID,
-				partitionID: p.GetPartitionId(),
-				load:        segmentRows(segmentInfoFor(snap, segID, p.GetPartitionId())),
+				segmentID:   segment.SegmentID,
+				partitionID: p.PartitionID,
+				load:        segment.RowNum,
 			})
 		}
 	}
@@ -167,16 +167,43 @@ func findReplica(cfg *loadmgr.LoadConfig, replicaID int64) *loadmgr.ReplicaAssig
 }
 
 // syntheticDataView constructs the minimal DataViewOfCollection the builder
-// needs. Only DataVersion, CollectionId, and the target shard are populated —
-// the builder does not look at other shards.
+// needs from the native shard snapshot. Only DataVersion, CollectionId, and
+// the target shard are populated — the builder does not look at other shards.
+// The native structure is decoupled from the viewpb wire format, so the shard
+// is re-materialized as proto here at the builder boundary. TransformStartAfterTimetick
+// stays 0: the DataView manager never sets it (matches the pre-split behavior).
 func syntheticDataView(
 	cfg *loadmgr.LoadConfig,
 	dv qviews.DataVersion,
-	shard *viewpb.DataViewOfShard,
+	shard *ShardDataView,
 ) *viewpb.DataViewOfCollection {
 	return &viewpb.DataViewOfCollection{
 		CollectionId: cfg.CollectionID,
 		DataVersion:  dv.IntoProto(),
-		Shards:       []*viewpb.DataViewOfShard{shard},
+		Shards:       []*viewpb.DataViewOfShard{shardDataViewToProto(shard)},
 	}
+}
+
+// shardDataViewToProto converts a native shard snapshot back to the viewpb
+// wire form. Only the fields the QueryViewAtCoordBuilder consumes are
+// populated (Vchannel plus partition membership).
+func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
+	if shard == nil {
+		return nil
+	}
+	protoShard := &viewpb.DataViewOfShard{
+		Vchannel:   shard.VChannel,
+		Partitions: make([]*viewpb.DataViewOfPartition, 0, len(shard.Partitions)),
+	}
+	for _, partition := range shard.Partitions {
+		protoPartition := &viewpb.DataViewOfPartition{
+			PartitionId: partition.PartitionID,
+			SegmentIds:  make([]int64, 0, len(partition.Segments)),
+		}
+		for _, segment := range partition.Segments {
+			protoPartition.SegmentIds = append(protoPartition.SegmentIds, segment.SegmentID)
+		}
+		protoShard.Partitions = append(protoShard.Partitions, protoPartition)
+	}
+	return protoShard
 }

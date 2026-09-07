@@ -184,7 +184,7 @@ func (ctx *allocationContext) assign(nodeID int64, rows int64) {
 
 func pickNode(
 	ctx *allocationContext,
-	seg *SegmentInfo,
+	seg *SegmentDataView,
 	currentStates map[int64]coordview.SegmentState,
 ) (int64, bool) {
 	var (
@@ -267,23 +267,23 @@ func candidateNodeIDs(predicted map[int64]*BalanceNode, resourceGroup string) []
 //   - Node alive and not in graceful shutdown
 //
 // Row count is a relative balance signal, not an admission-control capacity.
-func passHardConstraints(node *BalanceNode, _ *SegmentInfo) bool {
+func passHardConstraints(node *BalanceNode, _ *SegmentDataView) bool {
 	if !node.Alive || node.Stopping {
 		return false
 	}
 	return true
 }
 
-func segmentRows(seg *SegmentInfo) int64 {
+func segmentRows(seg *SegmentDataView) int64 {
 	if seg == nil {
 		return 0
 	}
 	return seg.RowNum
 }
 
-func segmentInfoFor(snap *BalancerSnapshot, segmentID, partitionID int64) *SegmentInfo {
+func segmentInfoFor(snap *BalancerSnapshot, segmentID, partitionID int64) *SegmentDataView {
 	if info, ok := snap.SegmentInfo(segmentID); ok && info != nil {
 		return info
 	}
-	return &SegmentInfo{SegmentID: segmentID, PartitionID: partitionID}
+	return &SegmentDataView{SegmentID: segmentID, PartitionID: partitionID}
 }
