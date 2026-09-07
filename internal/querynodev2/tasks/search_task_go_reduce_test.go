@@ -1327,6 +1327,101 @@ func TestExecuteMergedSubTasks(t *testing.T) {
 	t.Logf("merged slicing OK: sub-task NQs=%v, topK=%d", subTaskNqs, topK)
 }
 
+func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
+	ts := setupTestSegments(t, 2, 100, setupOpts{SkipSearchReq: true})
+	defer ts.cleanup()
+
+	for _, tc := range []struct {
+		name      string
+		topKs     []int64
+		planTopK  int64
+		groupSize int64
+		limit     int64
+		allowed   bool
+	}{
+		{"single request", []int64{5}, 5, 0, 5, true},
+		{"merged at limit", []int64{5, 5}, 5, 0, 10, true},
+		{"merged exceeds limit", []int64{5, 5}, 5, 0, 9, false},
+		{"limit disabled", []int64{5, 5}, 5, 0, 0, true},
+		{"maximum topK upper bound", []int64{3, 5}, 5, 0, 8, false},
+		{"optimizer lowered plan topK", []int64{5, 5}, 3, 0, 9, false},
+		{"group by exceeds limit", []int64{5, 5}, 5, 3, 29, false},
+		{"group by at limit", []int64{5, 5}, 5, 3, 30, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			limitKey := params.QueryNodeCfg.TakeForOutputResultCountLimit.Key
+			oldLimit := params.QueryNodeCfg.TakeForOutputResultCountLimit.GetValue()
+			require.NoError(t, params.Save(limitKey, strconv.FormatInt(tc.limit, 10)))
+			t.Cleanup(func() { require.NoError(t, params.Save(limitKey, oldLimit)) })
+
+			var receiver *SearchTask
+			for _, topK := range tc.topKs {
+				req, err := mock_segcore.GenQueryRequest(
+					ts.collection.GetCCollection(), ts.segIDs, 1, tc.planTopK, testCollectionID)
+				require.NoError(t, err)
+				// Identical execution plans may retain different requested TopKs
+				// after optimization. Merge must budget the maximum requested one.
+				req.Req.Topk = topK
+				var plan planpb.PlanNode
+				require.NoError(t, proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), &plan))
+				plan.OutputFieldIds = []int64{103}
+				if tc.groupSize > 0 {
+					plan.GetVectorAnns().QueryInfo.GroupByFieldId = 103
+					plan.GetVectorAnns().QueryInfo.GroupSize = tc.groupSize
+				}
+				req.Req.SerializedExprPlan, err = proto.Marshal(&plan)
+				require.NoError(t, err)
+				task := NewSearchTask(t.Context(), ts.collection, ts.manager, req, 1)
+				if receiver == nil {
+					receiver = task
+				} else {
+					require.True(t, receiver.Merge(task))
+				}
+			}
+
+			var decisions []bool
+			var setAllowed func(*segcore.SearchPlan, bool)
+			setter := mockey.Mock((*segcore.SearchPlan).SetTakeForOutputAllowed).To(
+				func(plan *segcore.SearchPlan, allowed bool) {
+					decisions = append(decisions, allowed)
+					setAllowed(plan, allowed)
+				}).Origin(&setAllowed).Build()
+			t.Cleanup(func() { setter.UnPatch() })
+
+			var searchHistorical func(context.Context, *segments.Manager, *segments.SearchRequest, int64, []int64, []int64) ([]*segments.SearchResult, []segments.Segment, error)
+			searcher := mockey.Mock(segments.SearchHistorical).To(
+				func(ctx context.Context, manager *segments.Manager, req *segments.SearchRequest, collectionID int64, partitionIDs, segmentIDs []int64) ([]*segments.SearchResult, []segments.Segment, error) {
+					require.Equal(t, []bool{tc.allowed}, decisions, "decide once before segment fan-out")
+					// A config refresh after the decision must not change later slices.
+					refreshedLimit := "0"
+					if tc.allowed {
+						refreshedLimit = "1"
+					}
+					require.NoError(t, params.Save(limitKey, refreshedLimit))
+					return searchHistorical(ctx, manager, req, collectionID, partitionIDs, segmentIDs)
+				}).Origin(&searchHistorical).Build()
+			t.Cleanup(func() { searcher.UnPatch() })
+
+			require.NoError(t, receiver.PreExecute())
+			require.NoError(t, receiver.Execute())
+			require.Equal(t, []bool{tc.allowed}, decisions, "output slices must not overwrite the group decision")
+			for i, topK := range tc.topKs {
+				result := receiver.subTaskAt(i).SearchResult()
+				require.NotNil(t, result)
+				require.Equal(t, topK, result.GetTopK())
+				data := result.GetResultData()
+				if data == nil {
+					data = &schemapb.SearchResultData{}
+					require.NoError(t, proto.Unmarshal(result.GetSlicedBlob(), data))
+				}
+				require.NotEmpty(t, data.GetScores())
+				require.Len(t, data.GetFieldsData(), 1, "exercise late output materialization")
+			}
+		})
+	}
+}
+
 func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	const (
 		numSegments = 2
