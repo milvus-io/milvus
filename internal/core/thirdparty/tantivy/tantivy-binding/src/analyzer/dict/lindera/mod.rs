@@ -17,8 +17,11 @@ type DictionaryKey = (String, Option<PathBuf>);
 type DictionaryCell = Arc<OnceCell<Arc<Dictionary>>>;
 
 // Successful dictionaries remain resident until process exit. Replacing files
-// in an existing directory requires a restart.
+// or retargeting a previously loaded path requires a restart. Download URLs are
+// mirrors, not dictionary identity; existing on-disk dictionaries also ignore them.
 static DICTIONARIES: Lazy<Mutex<HashMap<DictionaryKey, DictionaryCell>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static LOADED_PATHS: Lazy<Mutex<HashMap<DictionaryKey, Arc<Dictionary>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn dictionary_key(kind: &DictionaryKind, build_dir: &str) -> Result<DictionaryKey> {
@@ -32,8 +35,12 @@ fn dictionary_key(kind: &DictionaryKind, build_dir: &str) -> Result<DictionaryKe
     let path = if embedded {
         None
     } else {
-        std::fs::create_dir_all(build_dir)?;
-        Some(std::fs::canonicalize(build_dir)?)
+        let path = PathBuf::from(build_dir);
+        Some(if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()?.join(path)
+        })
     };
     Ok((kind.as_str().to_string(), path))
 }
@@ -105,6 +112,84 @@ mod tests {
     }
 
     #[test]
+    fn test_dictionary_cache_survives_directory_removal_and_url_change() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("dictionary");
+        fixture(&directory);
+        let build_dir = directory.to_str().unwrap().to_string();
+        let dictionary = load_dictionary_from_kind(
+            &DictionaryKind::IPADIC,
+            build_dir.clone(),
+            vec!["https://first.invalid/dictionary".into()],
+        )
+        .unwrap();
+        fs::rename(&directory, root.path().join("moved")).unwrap();
+        let again = load_dictionary_from_kind(
+            &DictionaryKind::IPADIC,
+            build_dir,
+            vec!["https://second.invalid/dictionary".into()],
+        )
+        .unwrap();
+        assert!(Arc::ptr_eq(&dictionary, &again));
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn test_dictionary_cache_relative_path() {
+        let current_dir = std::env::current_dir().unwrap();
+        let root = tempfile::tempdir_in(&current_dir).unwrap();
+        fixture(root.path());
+        let relative = root.path().strip_prefix(&current_dir).unwrap();
+        assert_eq!(
+            dictionary_key(&DictionaryKind::IPADIC, relative.to_str().unwrap())
+                .unwrap()
+                .1,
+            Some(root.path().to_path_buf())
+        );
+        let dictionary = load_dictionary_from_kind(
+            &DictionaryKind::IPADIC,
+            relative.to_str().unwrap().into(),
+            vec![],
+        )
+        .unwrap();
+        let absolute = root.path().to_str().unwrap().to_string();
+        root.close().unwrap();
+        let again = load_dictionary_from_kind(&DictionaryKind::IPADIC, absolute, vec![]).unwrap();
+        assert!(Arc::ptr_eq(&dictionary, &again));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_dictionary_cache_pins_loaded_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        fixture(&first);
+        fixture(&second);
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&first, &alias).unwrap();
+        let load = |path: &std::path::Path| {
+            load_dictionary_from_kind(
+                &DictionaryKind::IPADIC,
+                path.to_str().unwrap().into(),
+                vec![],
+            )
+            .unwrap()
+        };
+        let dictionary = load(&alias);
+        assert!(Arc::ptr_eq(&dictionary, &load(&first)));
+        fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&second, &alias).unwrap();
+        assert!(Arc::ptr_eq(&dictionary, &load(&alias)));
+        assert!(!Arc::ptr_eq(&dictionary, &load(&second)));
+        let nested = first.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let nested_alias = root.path().join("nested_alias");
+        std::os::unix::fs::symlink(&nested, &nested_alias).unwrap();
+        assert!(Arc::ptr_eq(&dictionary, &load(&nested_alias.join(".."))));
+    }
+
+    #[test]
     fn test_dictionary_cache_failed_load_retries() {
         let root = tempfile::tempdir().unwrap();
         fixture(root.path());
@@ -140,7 +225,22 @@ pub fn load_dictionary_from_kind(
     build_dir: String,
     download_url: Vec<String>,
 ) -> Result<Arc<Dictionary>> {
-    let key = dictionary_key(kind, &build_dir)?;
+    let requested_key = dictionary_key(kind, &build_dir)?;
+    if requested_key.1.is_some() {
+        if let Some(dictionary) = LOADED_PATHS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&requested_key)
+            .cloned()
+        {
+            return Ok(dictionary);
+        }
+    }
+    let mut key = requested_key.clone();
+    if let Some(path) = &key.1 {
+        std::fs::create_dir_all(path)?;
+        key.1 = Some(std::fs::canonicalize(path)?);
+    }
     let build_dir = match &key.1 {
         Some(path) => path
             .to_str()
@@ -159,17 +259,27 @@ pub fn load_dictionary_from_kind(
         .entry(key)
         .or_default()
         .clone();
-    cell.get_or_try_init(|| {
-        let dictionary = match kind {
-            DictionaryKind::IPADIC => ipadic::load_ipadic(build_dir, download_url),
-            DictionaryKind::CcCedict => cc_cedict::load_cc_cedict(build_dir, download_url),
-            DictionaryKind::KoDic => ko_dic::load_ko_dic(build_dir, download_url),
-            DictionaryKind::IPADICNEologd => {
-                ipadic_neologd::load_ipadic_neologd(build_dir, download_url)
-            }
-            DictionaryKind::UniDic => unidic::load_unidic(build_dir, download_url),
-        }?;
-        Ok(Arc::new(dictionary))
-    })
-    .cloned()
+    let dictionary = cell
+        .get_or_try_init(|| -> Result<Arc<Dictionary>> {
+            let dictionary = match kind {
+                DictionaryKind::IPADIC => ipadic::load_ipadic(build_dir, download_url),
+                DictionaryKind::CcCedict => cc_cedict::load_cc_cedict(build_dir, download_url),
+                DictionaryKind::KoDic => ko_dic::load_ko_dic(build_dir, download_url),
+                DictionaryKind::IPADICNEologd => {
+                    ipadic_neologd::load_ipadic_neologd(build_dir, download_url)
+                }
+                DictionaryKind::UniDic => unidic::load_unidic(build_dir, download_url),
+            }?;
+            Ok(Arc::new(dictionary))
+        })
+        .cloned()?;
+    if requested_key.1.is_some() {
+        return Ok(LOADED_PATHS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(requested_key)
+            .or_insert(dictionary)
+            .clone());
+    }
+    Ok(dictionary)
 }
