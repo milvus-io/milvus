@@ -52,9 +52,10 @@ type BloomFilterBlob []byte
 // (docs/design-docs/design_docs/20260707-bloom-filter-expression.md).
 //
 // The blob body must fit proxy.maxMembershipFilterSize (64 MiB by default),
-// all membership-filter-bearing plans in the request must fit
-// proxy.maxMembershipFilterPlanSize (128 MiB by default), and the complete
-// request must fit proxy.grpc.serverMaxRecvSize. Use
+// the request-wide serialized membership plans (and, for Roaring filters,
+// aggregate estimated decoded bytes) must fit proxy.maxMembershipFilterPlanSize
+// (128 MiB by default), and the complete request must fit
+// proxy.grpc.serverMaxRecvSize. Use
 // sbbf.EstimateMarshalSize(n, fpr) to check the exact blob size for a planned
 // member count before building the filter. Bodies are powers of two, so a
 // count just past a tier boundary doubles the blob and a slightly higher fpr
