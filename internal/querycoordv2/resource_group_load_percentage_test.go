@@ -337,6 +337,76 @@ func TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
 	assert.EqualValues(t, 0, percentage)
 }
 
+// TestReplicaLoadPercentagesByResourceGroup_OneFigurePerReplica pins the
+// per-replica reading the group figure is folded from. The observer's load
+// timeout releases the replicas that stalled rather than the group, so it
+// has to know which replica holds the group at 0 here: the map names it,
+// and LoadPercentageByResourceGroup is exactly its minimum.
+func TestReplicaLoadPercentagesByResourceGroup_OneFigurePerReplica(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 610, 6100, "610-dmc0", 1, 2)
+
+	f.putReplica(t, 610, 62, "rg-shared")
+	f.putDelegator(610, 62, "610-dmc0", 1, 2) // this replica: fully loaded
+
+	f.putReplica(t, 610, 63, "rg-shared")
+	f.putDelegator(610, 63, "610-dmc0", 1) // this replica: the channel and one of two segments
+
+	f.putReplica(t, 610, 64, "rg-shared")
+	// this replica: nothing loaded
+
+	f.putReplica(t, 610, 65, "rg-other")
+	// a replica of another group is not in the answer at all
+
+	ctx := context.Background()
+	figures, err := utils.ReplicaLoadPercentagesByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 610, "rg-shared")
+	require.NoError(t, err)
+	require.Len(t, figures, 3)
+
+	byNode := make(map[int64]int32, len(figures))
+	for _, replica := range f.meta.GetByCollection(ctx, 610) {
+		if figure, ok := figures[replica.GetID()]; ok {
+			byNode[replica.GetNodes()[0]] = figure
+		}
+	}
+	assert.Equal(t, map[int64]int32{62: 100, 63: 66, 64: 0}, byNode)
+
+	percentage, err := f.freeFn(ctx, 610, "rg-shared")
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, percentage, "the group's figure is the minimum over its replicas")
+}
+
+// TestReplicaLoadPercentagesByResourceGroup_OutcomesMatchTheGroupFigure pins
+// that the per-replica reading keeps the group figure's contract for the
+// outcomes that carry no figure: a group holding no replica is an empty map
+// with no error, where the group figure is -1; an unknown group and an
+// unloaded collection with a recorded failure are the same errors.
+func TestReplicaLoadPercentagesByResourceGroup_OutcomesMatchTheGroupFigure(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 620, 6200, "620-dmc0", 1)
+	f.putReplica(t, 620, 66, "rg-here")
+	f.putResourceGroup(t, "rg-empty")
+	ctx := context.Background()
+
+	figures, err := utils.ReplicaLoadPercentagesByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 620, "rg-empty")
+	assert.NoError(t, err)
+	assert.Empty(t, figures, "a group holding no replica has nothing to report a figure for")
+
+	_, err = utils.ReplicaLoadPercentagesByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 620, "rg-typo")
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
+
+	_, err = utils.ReplicaLoadPercentagesByResourceGroup(ctx, nil, f.targetMgr, f.dist, 620, "rg-here")
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+
+	figures, err = utils.ReplicaLoadPercentagesByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 621, "rg-here")
+	assert.NoError(t, err)
+	assert.Empty(t, figures, "a collection that is not registered as loaded has no figure either")
+
+	seedFailedLoadCache(t, 621, merr.WrapErrServiceUnavailable("query node restarting"))
+	_, err = utils.ReplicaLoadPercentagesByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 621, "rg-here")
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+}
+
 // seedFailedLoadCache installs a fresh GlobalFailedLoadCache holding err for
 // collectionID, and restores the previous cache when the test ends so the
 // package-global state does not leak into other tests in this package.

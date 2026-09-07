@@ -296,16 +296,26 @@ func (s *CollectionObserverRGSuite) ageTaskWatermark(key string, age time.Durati
 // under continuous flush it legitimately sits below 100 for a group whose
 // shard leaders are serving; scripting it is how the test holds that state for
 // as long as it likes.
+//
+// The observer reads the per-replica figures the group's figure is folded
+// from, so the script answers per replica: every replica of rgName reads the
+// scripted figure, which folds to the same number.
 func (s *CollectionObserverRGSuite) scriptResourceGroupPercentage(rgName string, figures ...int32) func() {
 	i := 0
-	percentage := mockey.Mock(utils.LoadPercentageByResourceGroup).
-		To(func(_ context.Context, _ *meta.Meta, _ meta.TargetManagerInterface, _ *meta.DistributionManager, _ int64, rg string) (int32, error) {
-			if rg != rgName {
-				return 100, nil
+	percentage := mockey.Mock(utils.ReplicaLoadPercentagesByResourceGroup).
+		To(func(ctx context.Context, m *meta.Meta, _ meta.TargetManagerInterface, _ *meta.DistributionManager, collectionID int64, rg string) (map[int64]int32, error) {
+			figure := int32(100)
+			if rg == rgName {
+				figure = figures[min(i, len(figures)-1)]
+				i++
 			}
-			figure := figures[min(i, len(figures)-1)]
-			i++
-			return figure, nil
+			answer := make(map[int64]int32)
+			for _, replica := range m.GetByCollection(ctx, collectionID) {
+				if replica.GetResourceGroup() == rg {
+					answer[replica.GetID()] = figure
+				}
+			}
+			return answer, nil
 		}).Build()
 	return func() { percentage.UnPatch() }
 }
@@ -423,7 +433,7 @@ func (s *CollectionObserverRGSuite) TestUnscopedTaskKeepsCollectionWideTimeout()
 // path that ignores the partition state either.
 //
 // Deleting the `if task.ResourceGroup != ""` guard around
-// `loaded = progress[traceID] >= 100` flips both halves at once.
+// `loaded = progress[traceID].Percentage >= 100` flips both halves at once.
 func (s *CollectionObserverRGSuite) TestUnscopedTaskCompletionIgnoresResourceGroupProgress() {
 	s.registerLoadingCollection(101, 11, "101-dmc0", 1, 1, 2)
 	s.putReplica(101, 1010, 1, rgA)
@@ -432,13 +442,13 @@ func (s *CollectionObserverRGSuite) TestUnscopedTaskCompletionIgnoresResourceGro
 	s.ob.LoadCollection(s.ctx, 101, "")
 	key := s.taskKey(101, "")
 
-	s.ob.observeLoadStatus(s.ctx, map[string]int32{key: 100})
+	s.ob.observeLoadStatus(s.ctx, map[string]resourceGroupProgress{key: {Percentage: 100}})
 	s.True(s.ob.loadTasks.Contain(key),
 		"unscoped task must stay open while its partition is unloaded, whatever the resource group figure says")
 
 	s.Require().NoError(s.meta.UpdatePartitionLoadPercent(s.ctx, 11, 100))
 
-	s.ob.observeLoadStatus(s.ctx, map[string]int32{key: 0})
+	s.ob.observeLoadStatus(s.ctx, map[string]resourceGroupProgress{key: {Percentage: 0}})
 	s.False(s.ob.loadTasks.Contain(key),
 		"unscoped task must finish once its partition reports 100, whatever the resource group figure says")
 }
@@ -533,7 +543,7 @@ func (s *CollectionObserverRGSuite) TestFullyLoadedResourceGroupNeverTimesOut() 
 	key := s.taskKey(300, rgA)
 
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
-	s.Require().EqualValues(100, progress[key])
+	s.Require().EqualValues(100, progress[key].Percentage)
 
 	for i := 0; i < 3; i++ {
 		s.backdateTaskWatermark(key, 100, time.Hour)
@@ -573,7 +583,7 @@ func (s *CollectionObserverRGSuite) TestStalledResourceGroupTimesOutWithoutTouch
 	key := s.taskKey(400, rgB)
 
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
-	s.Require().EqualValues(33, progress[key])
+	s.Require().EqualValues(33, progress[key].Percentage)
 	s.backdateTaskWatermark(key, 33, time.Hour)
 
 	s.ob.observeTimeout(s.ctx, progress)
@@ -632,7 +642,7 @@ func (s *CollectionObserverRGSuite) TestLoadTimeoutNeverUnloadsAServingCollectio
 
 	s.ob.LoadCollection(s.ctx, 1100, rgA)
 	key := s.taskKey(1100, rgA)
-	s.Require().EqualValues(33, s.ob.observeResourceGroupProgress(s.ctx)[key],
+	s.Require().EqualValues(33, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage,
 		"the group must be reporting a real, stalled percentage for this to be a timeout at all")
 	s.backdateTaskWatermark(key, 33, time.Hour)
 
@@ -686,7 +696,7 @@ func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkTracksRealProgress
 // rg-a's task open until rg-b caught up. rg-a's task must finish anyway, and
 // rg-b's must stay open even though a sibling is done.
 //
-// Deleting the `loaded = progress[traceID] >= 100 && ...` assignment leaves
+// Deleting the `loaded = progress[traceID].Percentage >= 100 && ...` assignment leaves
 // rg-a's task open, which is the interference this change exists to remove.
 func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup() {
 	s.registerLoadingCollection(700, 70, "700-dmc0", 2, 1, 2)
@@ -706,8 +716,8 @@ func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup(
 	keyB := s.taskKey(700, rgB)
 
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
-	s.Require().EqualValues(100, progress[keyA])
-	s.Require().EqualValues(-1, progress[keyB],
+	s.Require().EqualValues(100, progress[keyA].Percentage)
+	s.Require().EqualValues(-1, progress[keyB].Percentage,
 		"rg-b has told this coordinator nothing, so its figure is unknown rather than 0")
 
 	s.ob.observeLoadStatus(s.ctx, progress)
@@ -744,7 +754,7 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 
 	s.ob.LoadCollection(s.ctx, 800, rgB)
 	key := s.taskKey(800, rgB)
-	s.Require().EqualValues(100, s.ob.observeResourceGroupProgress(s.ctx)[key])
+	s.Require().EqualValues(100, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage)
 	s.Require().EqualValues(100, s.meta.GetPartitionLoadPercentage(s.ctx, 80),
 		"the partitions are all loaded, so the gate cannot come from them")
 	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 800, 80))
@@ -783,7 +793,7 @@ func (s *CollectionObserverRGSuite) TestAReplicaThatHasNotReportedMakesTheGroupU
 
 	s.ob.LoadCollection(s.ctx, 1110, rgA)
 	key := s.taskKey(1110, rgA)
-	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage,
 		"one replica of the group has reported nothing, so the group's minimum is not a measurement")
 
 	s.backdateTaskWatermark(key, 0, time.Hour)
@@ -827,7 +837,7 @@ func (s *CollectionObserverRGSuite) TestAnEmptyTargetMakesEveryGroupUnknown() {
 
 	s.ob.LoadCollection(s.ctx, 1120, rgA)
 	key := s.taskKey(1120, rgA)
-	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage,
 		"a percentage measured against a target nobody has is not a measurement")
 
 	s.backdateTaskWatermark(key, 0, time.Hour)
@@ -850,6 +860,121 @@ func (s *CollectionObserverRGSuite) TestAnEmptyTargetMakesEveryGroupUnknown() {
 
 	s.False(s.ob.loadTasks.Contain(key), "with the target known again the group reads 100 and the task finishes")
 	s.Len(s.replicaIDsInRG(1120, rgA), 1)
+}
+
+// TestATimedOutGroupReleasesOnlyTheReplicasThatStalled is the reviewer's
+// expansion scenario. LoadCollection(replica_number=4, resource_groups=[rg-b])
+// on a collection already serving from rg-a spawns three replicas in rg-b; two
+// come to carry every target while the third lands on a memory-constrained
+// node and never gets past the channel. The group's figure is the MINIMUM
+// over its replicas, so it reads 33 tick after tick, and none of rg-b's
+// leaders is serviceable -- the replicas are still query-invisible, say -- so
+// the readiness shield is off. Before this the timeout removed all three,
+// two of them fully loaded, and the expansion could never succeed.
+//
+// The measurement is per group, but the teardown is per replica: only the
+// replicas whose own figure sits at the stalled watermark are released; the
+// two at 100 are kept, ReplicaNumber comes down by exactly the number
+// removed, and the task lives on to watch what remains -- finishing, as any
+// scoped task does, once the survivors carry everything and the current
+// target is promoted.
+func (s *CollectionObserverRGSuite) TestATimedOutGroupReleasesOnlyTheReplicasThatStalled() {
+	s.registerLoadingCollection(1400, 1401, "1400-dmc0", 4, 14001, 14002)
+	s.putReplica(1400, 140001, 51, rgA)
+	s.putServiceableDelegator(1400, 51, "1400-dmc0", 14001, 14002)
+	s.markCollectionLoaded(1400, 1401)
+	// The expansion: three replicas in rg-b, all reporting, none serviceable.
+	s.putReplica(1400, 140002, 52, rgB)
+	s.putDelegator(1400, 52, "1400-dmc0", 14001, 14002)
+	s.putReplica(1400, 140003, 53, rgB)
+	s.putDelegator(1400, 53, "1400-dmc0", 14001, 14002)
+	s.putReplica(1400, 140004, 54, rgB)
+	s.putDelegator(1400, 54, "1400-dmc0") // the channel and nothing else
+
+	s.ob.LoadCollection(s.ctx, 1400, rgB)
+	key := s.taskKey(1400, rgB)
+
+	// The first tick records the group's figure: the slowest replica's.
+	s.ob.Observe(s.ctx)
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.Require().EqualValues(33, task.LastProgress, "the group reads as its slowest replica")
+	s.Require().Len(s.replicaIDsInRG(1400, rgB), 3, "a figure that has only just been read is not a stall")
+
+	// A load timeout later the figure has not moved.
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.ElementsMatch([]int64{140002, 140003}, s.replicaIDsInRG(1400, rgB),
+		"only the replica that stalled is released; the two that carry everything stay")
+	s.Len(s.replicaIDsInRG(1400, rgA), 1, "the serving sibling group is untouched")
+	s.EqualValues(3, s.meta.GetCollection(s.ctx, 1400).GetReplicaNumber(),
+		"ReplicaNumber comes down by the number of replicas actually removed")
+	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1400).GetStatus())
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok, "the group still holds replicas, so the task keeps watching them")
+	s.EqualValues(-1, task.LastProgress, "the survivors are measured afresh, not against the figure the stalled replica pinned")
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute)
+
+	// The survivors carry everything; once the current target is promoted the
+	// task finishes exactly as a scoped task on a loaded group does.
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1400))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1400))
+	s.ob.Observe(s.ctx)
+	s.False(s.ob.loadTasks.Contain(key), "a group whose remaining replicas carry everything is loaded")
+	s.ElementsMatch([]int64{140002, 140003}, s.replicaIDsInRG(1400, rgB))
+}
+
+// TestAGroupWithAnyServiceableLeaderIsKeptWhole pins the scope of the
+// readiness shield: it is ANY-of over the group's replicas. rg-b holds three
+// replicas, two of them serving -- their delegators are serviceable on the
+// current target -- and one stalled at the channel. The group's figure sits
+// at 33 for a whole load timeout, and yet nothing is released: the group is
+// serving, and a stalled replica inside a serving group is left to the
+// checkers, exactly as master leaves it. The task survives with a refreshed
+// watermark.
+//
+// Making the shield all-of over the group's replicas flips this into a
+// teardown of the stalled replica; the test exists so that cannot happen
+// silently.
+func (s *CollectionObserverRGSuite) TestAGroupWithAnyServiceableLeaderIsKeptWhole() {
+	s.registerLoadingCollection(1500, 1501, "1500-dmc0", 4, 15001, 15002)
+	s.putReplica(1500, 150001, 61, rgA)
+	s.putServiceableDelegator(1500, 61, "1500-dmc0", 15001, 15002)
+	s.putReplica(1500, 150002, 62, rgB)
+	s.putServiceableDelegator(1500, 62, "1500-dmc0", 15001, 15002)
+	s.putReplica(1500, 150003, 63, rgB)
+	s.putServiceableDelegator(1500, 63, "1500-dmc0", 15001, 15002)
+	s.putReplica(1500, 150004, 64, rgB)
+	s.putDelegator(1500, 64, "1500-dmc0") // the channel and nothing else
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1500))
+	s.markCollectionLoaded(1500, 1501)
+
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(s.ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, 1500, rgB)
+	s.Require().NoError(err)
+	s.Require().True(readiness.Ready, "two of three replicas serve every shard, so the group is Ready")
+
+	s.ob.LoadCollection(s.ctx, 1500, rgB)
+	key := s.taskKey(1500, rgB)
+
+	s.ob.Observe(s.ctx)
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.Require().EqualValues(33, task.LastProgress, "the stalled replica pins the group's figure")
+
+	for tick := 0; tick < 3; tick++ {
+		s.ageTaskWatermark(key, time.Hour)
+		s.ob.Observe(s.ctx)
+
+		s.ElementsMatch([]int64{150002, 150003, 150004}, s.replicaIDsInRG(1500, rgB),
+			"tick %d: a group with a serviceable leader is kept whole, stalled replica included", tick)
+		s.Len(s.replicaIDsInRG(1500, rgA), 1, "tick %d", tick)
+		s.EqualValues(4, s.meta.GetCollection(s.ctx, 1500).GetReplicaNumber(), "tick %d", tick)
+		s.Require().True(s.ob.loadTasks.Contain(key), "tick %d: the task lives on", tick)
+		task, _ = s.ob.loadTasks.Get(key)
+		s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
+			"tick %d: a Ready group refreshes its watermark instead of being torn down", tick)
+	}
 }
 
 func TestCollectionObserverRG(t *testing.T) {
@@ -876,7 +1001,7 @@ func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkRefreshesOnRegress
 	s.backdateTaskWatermark(key, 94, time.Hour)
 	task, ok := s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
-	s.ob.observeResourceGroupTimeout(s.ctx, key, task, 70)
+	s.ob.observeResourceGroupTimeout(s.ctx, key, task, resourceGroupProgress{Percentage: 70})
 
 	task, ok = s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
@@ -889,7 +1014,7 @@ func (s *CollectionObserverRGSuite) TestResourceGroupWatermarkRefreshesOnRegress
 	s.backdateTaskWatermark(key, 70, time.Hour)
 	task, ok = s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
-	s.ob.observeResourceGroupTimeout(s.ctx, key, task, 80)
+	s.ob.observeResourceGroupTimeout(s.ctx, key, task, resourceGroupProgress{Percentage: 80})
 
 	task, ok = s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
@@ -918,7 +1043,7 @@ func (s *CollectionObserverRGSuite) TestUnreadableResourceGroupIsNeverTornDown()
 
 	s.ob.LoadCollection(s.ctx, 901, "no-such-rg")
 	key := s.taskKey(901, "no-such-rg")
-	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage,
 		"a percentage that could not be read must be published as unknown, not as a figure")
 
 	for i := 0; i < 3; i++ {
@@ -950,7 +1075,7 @@ func (s *CollectionObserverRGSuite) TestNothingReportedYetIsUnknown() {
 
 	s.ob.LoadCollection(s.ctx, 902, rgA)
 	key := s.taskKey(902, rgA)
-	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key],
+	s.EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage,
 		"with nothing reported for the collection, the percentage is unknown rather than 0")
 
 	s.backdateTaskWatermark(key, 0, time.Hour)
