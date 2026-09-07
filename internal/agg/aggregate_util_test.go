@@ -17,12 +17,14 @@
 package agg
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -124,6 +126,7 @@ func TestComputeAvgFromSumAndCount_Success(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Double, result.GetType())
 	expected := []float64{5.0, 5.0, 6.0}
 	assert.Equal(t, expected, result.GetScalars().GetDoubleData().GetData())
+	assert.Empty(t, typeutil.GetFieldDataValidData(result), "result validData should be empty/nil when no nulls exist in Int64 sum")
 
 	// Double sum and Int64 count
 	sumFieldDouble := &schemapb.FieldData{
@@ -143,6 +146,7 @@ func TestComputeAvgFromSumAndCount_Success(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Double, result.GetType())
 	expectedDouble := []float64{5.25, 5.0, 6.05}
 	assert.Equal(t, expectedDouble, result.GetScalars().GetDoubleData().GetData())
+	assert.Empty(t, typeutil.GetFieldDataValidData(result), "result validData should be empty/nil when no nulls exist in Double sum")
 }
 
 func TestComputeAvgFromSumAndCount_ZeroCountTreatedAsNull(t *testing.T) {
@@ -241,6 +245,52 @@ func TestComputeAvgFromSumAndCount_NullInputs(t *testing.T) {
 	require.Len(t, validData, 2)
 	assert.True(t, validData[0])
 	assert.False(t, validData[1], "null in sumFieldData should propagate to result validData")
+
+	// Test when countFieldData has existing validData mask (exercises countValidData branch)
+	sumFieldCountMask := &schemapb.FieldData{
+		Type: schemapb.DataType_Double,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{Data: []float64{10.0, 20.0}},
+				},
+			},
+		},
+	}
+	countFieldCountMask := &schemapb.FieldData{
+		Type: schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{2, 4}},
+				},
+			},
+		},
+	}
+	typeutil.SetFieldDataValidData(countFieldCountMask, []bool{true, false})
+
+	resultCountMask, err := ComputeAvgFromSumAndCount(sumFieldCountMask, countFieldCountMask)
+	require.NoError(t, err)
+	require.NotNil(t, resultCountMask)
+	validDataCountMask := typeutil.GetFieldDataValidData(resultCountMask)
+	require.Len(t, validDataCountMask, 2)
+	assert.True(t, validDataCountMask[0])
+	assert.False(t, validDataCountMask[1], "null in countFieldData should propagate to result validData")
+	assert.Equal(t, 5.0, resultCountMask.GetScalars().GetDoubleData().GetData()[0])
+	assert.Equal(t, 0.0, resultCountMask.GetScalars().GetDoubleData().GetData()[1])
+
+	// Test when both sumFieldData and countFieldData have validity masks
+	typeutil.SetFieldDataValidData(sumFieldCountMask, []bool{true, true})
+	typeutil.SetFieldDataValidData(countFieldCountMask, []bool{false, true})
+	resultBothMask, err := ComputeAvgFromSumAndCount(sumFieldCountMask, countFieldCountMask)
+	require.NoError(t, err)
+	require.NotNil(t, resultBothMask)
+	validDataBothMask := typeutil.GetFieldDataValidData(resultBothMask)
+	require.Len(t, validDataBothMask, 2)
+	assert.False(t, validDataBothMask[0], "row 0 has invalid count mask")
+	assert.True(t, validDataBothMask[1], "row 1 has valid sum and count")
+	assert.Equal(t, 0.0, resultBothMask.GetScalars().GetDoubleData().GetData()[0])
+	assert.Equal(t, 5.0, resultBothMask.GetScalars().GetDoubleData().GetData()[1])
 }
 
 func TestComputeAvgFromSumAndCount_Errors(t *testing.T) {
@@ -312,4 +362,121 @@ func TestComputeAvgFromSumAndCount_Errors(t *testing.T) {
 	_, err = ComputeAvgFromSumAndCount(unsupportedSumField, validCountField)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported sum field type")
+}
+
+// TestGroupAggReducer_AvgWithZeroCountAndNullGroup verifies end-to-end multi-segment reduction
+// for AVG aggregation when a group contains only NULL values across segments (zero count / masked sum).
+// It verifies that zero-count and masked groups survive the reducer without division-by-zero errors
+// and that SQL-NULL aggregate semantics (0.0 fill value and validData=false) are preserved.
+func TestGroupAggReducer_AvgWithZeroCountAndNullGroup(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "group_field", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "agg_field", DataType: schemapb.DataType_Int64},
+		},
+	}
+	aggregates := []*planpb.Aggregate{
+		{Op: planpb.AggregateOp_sum, FieldId: 101},
+		{Op: planpb.AggregateOp_count, FieldId: 101},
+	}
+	reducer := NewGroupAggReducer([]int64{100}, aggregates, -1, schema)
+
+	// Segment 1:
+	// Group 1: sum=10, count=2 (valid)
+	// Group 2: sum=null (masked), count=0 (zero count)
+	groupField1 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "group_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+			},
+		},
+	}
+	sumField1 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "agg_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 0}}},
+			},
+		},
+	}
+	typeutil.SetFieldDataValidData(sumField1, []bool{true, false})
+	countField1 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "agg_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2, 0}}},
+			},
+		},
+	}
+
+	// Segment 2:
+	// Group 1: sum=20, count=3 (valid)
+	// Group 2: sum=null (masked), count=0 (zero count)
+	groupField2 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "group_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+			},
+		},
+	}
+	sumField2 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "agg_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20, 0}}},
+			},
+		},
+	}
+	typeutil.SetFieldDataValidData(sumField2, []bool{true, false})
+	countField2 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "agg_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{3, 0}}},
+			},
+		},
+	}
+
+	res1 := NewAggregationResult([]*schemapb.FieldData{groupField1, sumField1, countField1}, 2)
+	res2 := NewAggregationResult([]*schemapb.FieldData{groupField2, sumField2, countField2}, 2)
+
+	reduced, err := reducer.Reduce(context.Background(), []*AggregationResult{res1, res2})
+	require.NoError(t, err)
+	require.NotNil(t, reduced)
+
+	reducedFields := reduced.GetFieldDatas()
+	require.Len(t, reducedFields, 3)
+
+	// Post-reduction: proxy computes AVG from reduced sum and count columns
+	avgField, err := ComputeAvgFromSumAndCount(reducedFields[1], reducedFields[2])
+	require.NoError(t, err)
+	require.NotNil(t, avgField)
+
+	groupKeys := reducedFields[0].GetScalars().GetLongData().GetData()
+	avgValues := avgField.GetScalars().GetDoubleData().GetData()
+	validData := typeutil.GetFieldDataValidData(avgField)
+
+	require.Len(t, groupKeys, 2)
+	require.Len(t, avgValues, 2)
+	require.Len(t, validData, 2)
+
+	for i, key := range groupKeys {
+		if key == 1 {
+			// Valid group: (10 + 20) / (2 + 3) = 6.0
+			assert.InDelta(t, 6.0, avgValues[i], 0.0001)
+			assert.True(t, validData[i], "group 1 should be marked valid non-null")
+		} else if key == 2 {
+			// All-NULL group: count is 0, sum is null -> emitted as SQL-NULL aggregate (0.0 fill, valid=false)
+			assert.Equal(t, 0.0, avgValues[i])
+			assert.False(t, validData[i], "group 2 (all-NULL group) should be marked invalid/null")
+		}
+	}
 }
