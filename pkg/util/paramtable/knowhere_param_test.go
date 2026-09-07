@@ -189,6 +189,26 @@ func TestKnowhereConfig_MergeParameter(t *testing.T) {
 	}
 }
 
+func TestKnowhereConfig_MergeIndexParamsJSON(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	bt.Save("knowhere.TEST_INDEX.search.default_number", "0.5")
+	bt.Save("knowhere.TEST_INDEX.search.default_string", "balanced")
+
+	result, err := cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, `{"default_number":0.8,"request_param":16}`)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"default_number":0.8,"default_string":"balanced","request_param":16}`, result)
+
+	result, err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, `{"request_param":16}`)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"default_number":0.5,"default_string":"balanced","request_param":16}`, result)
+
+	_, err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, "invalid")
+	assert.Error(t, err)
+}
+
 func TestKnowhereConfig_MergeWithResource(t *testing.T) {
 	cfg := &knowhereConfig{}
 

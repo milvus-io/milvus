@@ -537,7 +537,8 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	const isSecondStageSearch = false
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
+	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim, indexType)
 	if err != nil {
 		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
 		return nil, err
