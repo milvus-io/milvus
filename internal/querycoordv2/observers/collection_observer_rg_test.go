@@ -1632,13 +1632,21 @@ func (s *CollectionObserverRGSuite) TestATaskAtHundredWaitingForPromotionIsNotRe
 	s.Len(s.replicaIDsInRG(1700, rgB), 1, "a group at 100 is never timed out, reused figure or not")
 	s.EqualValues(1, *reads)
 
+	// A re-pulled next target may hold a segment the group does not carry
+	// yet: the figure is measured against it afresh, then reused again.
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1700))
+	s.ob.Observe(s.ctx)
+	s.EqualValues(2, *reads, "a re-pulled next target is measured against")
+	s.ob.Observe(s.ctx)
+	s.EqualValues(2, *reads, "and the fresh figure is reused from then on")
+
 	// A re-arm says the figure may have changed: it is measured afresh.
 	task, ok = s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
 	task.LastProgress = -1
 	s.ob.loadTasks.Insert(key, task)
 	s.ob.Observe(s.ctx)
-	s.EqualValues(2, *reads, "a re-armed task is measured again")
+	s.EqualValues(3, *reads, "a re-armed task is measured again")
 	task, ok = s.ob.loadTasks.Get(key)
 	s.Require().True(ok)
 	s.EqualValues(100, task.LastProgress)
@@ -1647,7 +1655,7 @@ func (s *CollectionObserverRGSuite) TestATaskAtHundredWaitingForPromotionIsNotRe
 	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1700))
 	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1700))
 	s.ob.Observe(s.ctx)
-	s.EqualValues(3, *reads, "once the current target exists the figure is measured, not reused")
+	s.EqualValues(4, *reads, "once the current target exists the figure is measured, not reused")
 	s.False(s.ob.loadTasks.Contain(key), "and the task finishes on it")
 }
 

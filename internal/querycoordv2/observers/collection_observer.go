@@ -114,6 +114,12 @@ type LoadTask struct {
 
 	LastProgress   int32
 	LastProgressAt time.Time
+	// LastProgressTargetVersion is the version of the next target that
+	// LastProgress was measured against. observeResourceGroupProgress reuses
+	// a figure of 100 only while that target is still the one in force: a
+	// re-pulled next target may hold a segment the group does not carry yet,
+	// and is measured against afresh.
+	LastProgressTargetVersion int64
 
 	ReadySince time.Time
 
@@ -369,6 +375,9 @@ type resourceGroupProgress struct {
 	// Replicas holds each replica's own figure, keyed by replica ID. It is
 	// nil exactly when Percentage is unknown.
 	Replicas map[int64]int32
+	// TargetVersion is the version of the next target Percentage was
+	// measured against; zero when Percentage is unknown.
+	TargetVersion int64
 }
 
 // unknownResourceGroupProgress is the record for a tick that learned nothing.
@@ -459,16 +468,21 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 		// as a fresh 100 would: the watermark refreshes, so the group is
 		// never torn down, and the finish still waits for the promotion.
 		//
-		// What this forgoes is seeing a figure that drops back below 100
-		// before the promotion - a next target re-pulled with a freshly
-		// flushed segment - until the promotion tick, where the gate is off
-		// and the figure is measured again. Such a group is not left alone
-		// meanwhile: its task still drives the checkers, which load the
-		// segment. What it cannot do is time out in that window, which a
-		// group at 100 never could (the watermark refreshes at 100), and
-		// which master's own task for a loaded collection never does either.
-		// A re-arm resets the figure to -1 and measures afresh.
-		if task.LastProgress >= 100 && !ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID) {
+		// The figure is reused only while the next target it was measured
+		// against is still the one in force. A re-pulled next target may
+		// hold a freshly flushed segment the group does not carry yet, and
+		// the figure against it is measured afresh; the target version is a
+		// map lookup, so this costs nothing per tick. A re-arm resets the
+		// figure to -1 and measures afresh too. What remains unseen between
+		// two measurements is a figure that drops with the distribution
+		// alone - a node releasing a segment - until the next target moves
+		// or the promotion tick, where the gate is off; such a group's task
+		// still drives the checkers meanwhile, which load the segment back,
+		// and what it cannot do in that window is time out, which master's
+		// own task for a loaded collection never does either.
+		nextTargetVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID, meta.NextTarget)
+		if task.LastProgress >= 100 && nextTargetVersion == task.LastProgressTargetVersion &&
+			!ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID) {
 			progress[key] = ob.reusedFullProgress(ctx, task)
 			return true
 		}
@@ -488,7 +502,7 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 			progress[key] = unknownResourceGroupProgress
 			return true
 		}
-		progress[key] = resourceGroupProgress{Percentage: percentage, Replicas: figures}
+		progress[key] = resourceGroupProgress{Percentage: percentage, Replicas: figures, TargetVersion: nextTargetVersion}
 		return true
 	})
 	return progress
@@ -538,7 +552,7 @@ func (ob *CollectionObserver) reusedFullProgress(ctx context.Context, task LoadT
 			figures[replica.GetID()] = 100
 		}
 	}
-	return resourceGroupProgress{Percentage: 100, Replicas: figures}
+	return resourceGroupProgress{Percentage: 100, Replicas: figures, TargetVersion: task.LastProgressTargetVersion}
 }
 
 func (ob *CollectionObserver) observeTimeout(ctx context.Context, progress map[string]resourceGroupProgress) {
@@ -706,6 +720,7 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 	// never instantly expired.
 	if percentage != task.LastProgress || percentage >= 100 || task.LastProgressAt.IsZero() {
 		task.LastProgress = percentage
+		task.LastProgressTargetVersion = progress.TargetVersion
 		task.LastProgressAt = now
 		ob.loadTasks.Insert(key, task)
 		return
