@@ -147,7 +147,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 
 	suite.Run("knowhere_search_defaults", func() {
 		params := paramtable.Get()
-		searchKey := params.KnowhereConfig.IndexParam.KeyPrefix + "CARDINAL_TIERED.search.ivf_search_ratio"
+		searchKey := params.KnowhereConfig.IndexParam.KeyPrefix + "TEST_INDEX.search.default_param"
 		params.Save(params.KnowhereConfig.Enable.Key, "true")
 		params.Save(searchKey, "0.5")
 		defer params.Reset(params.KnowhereConfig.Enable.Key)
@@ -158,7 +158,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				VectorAnns: &planpb.VectorANNS{
 					QueryInfo: &planpb.QueryInfo{
 						Topk:         100,
-						SearchParams: `{"nprobe":16}`,
+						SearchParams: `{"request_param":16}`,
 					},
 				},
 			},
@@ -172,9 +172,9 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 					SerializedExprPlan: bs,
 					IsTopkReduce:       true,
 				},
-			}, nil, 2, isSecondStageSearch, func(int64) int64 { return 512 }, "CARDINAL_TIERED")
+			}, nil, 2, isSecondStageSearch, func(int64) int64 { return 512 }, "TEST_INDEX")
 			suite.NoError(err)
-			suite.JSONEq(`{"ivf_search_ratio":0.5,"nprobe":16}`, suite.getQueryInfo(req).GetSearchParams())
+			suite.JSONEq(`{"default_param":0.5,"request_param":16}`, suite.getQueryInfo(req).GetSearchParams())
 			suite.False(req.GetReq().GetIsTopkReduce())
 		}
 	})
