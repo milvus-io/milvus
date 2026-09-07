@@ -2,6 +2,7 @@ package flusherimpl
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -158,7 +159,17 @@ func (impl *WALFlusherImpl) notifyFatal(err error) error {
 // Close closes the wal flusher and release all related resources for it.
 func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
-	impl.notifier.BlockUntilFinish()
+	// Bound the wait for the flusher loop. The loop normally exits right after
+	// the context is canceled, but it may be stuck inside a dispatch that
+	// blocks on an external call (e.g. a hung object-storage flush). Do not
+	// let that stall the WAL close chain forever.
+	gracefulCloseTimeout := paramtable.Get().StreamingCfg.WALCloseGracefulTimeout.GetAsDurationByParse()
+	select {
+	case <-impl.notifier.FinishChan():
+	case <-time.After(gracefulCloseTimeout):
+		impl.logger.Warn(context.TODO(), "wal flusher close timeout, abandon wait for flusher loop to finish",
+			mlog.Duration("timeout", gracefulCloseTimeout))
+	}
 
 	impl.logger.Info(context.TODO(), "wal flusher start to close the recovery storage...")
 	impl.RecoveryStorage.Close()

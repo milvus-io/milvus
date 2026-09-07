@@ -8471,6 +8471,12 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// wal close configuration.
+	// WALCloseGracefulTimeout bounds the graceful drain of the flowgraph
+	// (and the flusher loop wait) during WAL close, so a hung object-storage
+	// call cannot stall walLifetime.Close() / walManager.Close() / RemoveWAL.
+	WALCloseGracefulTimeout ParamItem `refreshable:"true"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -8917,6 +8923,19 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALCloseGracefulTimeout = ParamItem{
+		Key:     "streaming.walClose.gracefulTimeout",
+		Version: "3.0.0",
+		Doc: `The graceful close timeout of the wal close chain, 10s by default.
+When the wal is on-closing, the flusher/flowgraph drain tries to flush the in-flight data first.
+If a downstream call (e.g. object storage) neither completes nor returns an error promptly,
+the close chain abandons the drain after this timeout so that RemoveWAL and StreamingNode
+shutdown stay bounded instead of blocking until the balancer operation timeout (30m by default).`,
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.WALCloseGracefulTimeout.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",
