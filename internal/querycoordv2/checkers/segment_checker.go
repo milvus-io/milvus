@@ -65,14 +65,25 @@ type SegmentChecker struct {
 	versionCache map[int64]*collectionVersionCache
 
 	// replicasWithRegularNodes holds the ID of every replica that has been
-	// seen with a regular RW query node and whose resource group has not
-	// given regular nodes up since. It is what tells a replica whose regular
-	// node is merely away from one that has none to wait for (see
+	// seen with a regular RW query node and has not been without one for
+	// the grace period since. It is what tells a replica whose regular node
+	// is merely away from one that has none to wait for (see
 	// createSegmentLoadTasks); it is set on every check of a replica
-	// (noteRegularNodes) and dropped at the top of every round for a replica
-	// that is gone or whose group holds no regular node and asks for none
+	// (noteRegularNodes) and dropped at the top of every round for a
+	// replica that is gone or has held no regular node for the grace period
 	// (forgetReleasedReplicas).
 	replicasWithRegularNodes typeutil.UniqueSet
+	// lastRegularNodeSeenAt is, per recorded replica, the last round the
+	// replica itself was seen holding at least one regular RW query node:
+	// what the grace period is measured from. It is dated with the record
+	// and refreshed every round the replica holds a regular node, and it
+	// goes when the record goes, so it stays as bounded as the record is.
+	// It is the replica's, not its group's: a group can keep a regular node
+	// on one replica while another replica of it has lost its own for good.
+	lastRegularNodeSeenAt map[int64]time.Time
+	// now is the clock the grace period reads, once per round; a test sets
+	// its own.
+	now func() time.Time
 }
 
 func NewSegmentChecker(
@@ -97,6 +108,8 @@ func NewSegmentChecker(
 		versionCache:      make(map[int64]*collectionVersionCache),
 
 		replicasWithRegularNodes: typeutil.NewUniqueSet(),
+		lastRegularNodeSeenAt:    make(map[int64]time.Time),
+		now:                      time.Now,
 	}
 }
 
@@ -117,21 +130,28 @@ func (c *SegmentChecker) readyToCheck(ctx context.Context, collectionID int64) b
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
+		// A checker that is off dates nothing, so the time it was off must
+		// not count towards any replica's grace: once it is back on, the
+		// grace runs from the round it came back (forgetReleasedReplicas
+		// dates an undated record by the current round).
+		clear(c.lastRegularNodeSeenAt)
 		return nil
 	}
+	// One reading of the clock is the round: every replica is dated and
+	// judged by the same instant.
+	now := c.now()
 
 	// Before any replica is checked, so that the regular-node record the
 	// placement reads is as current as the round's own view of the
-	// resource groups. Refreshed after the replicas instead, a round whose
+	// replicas. Refreshed after the replicas instead, a round whose
 	// record was stale would wait, produce no task, and mark the
 	// collection synced. Dropping a record also drops the collection from
-	// the version cache below: a group giving regular nodes up moves
-	// neither the target nor the distribution version, so on a quiet
-	// cluster the fast path would otherwise keep skipping the collection,
-	// and the segment that is now free to be placed would wait for the
-	// next target re-pull (NextTargetSurviveTime, minutes) instead of
-	// this round.
-	c.forgetReleasedReplicas(ctx)
+	// the version cache below: a grace period ending moves neither the
+	// target nor the distribution version, so on a quiet cluster the fast
+	// path would otherwise keep skipping the collection, and the segment
+	// that is now free to be placed would wait for the next target re-pull
+	// (NextTargetSurviveTime, minutes) instead of this round.
+	c.forgetReleasedReplicas(ctx, now)
 
 	collectionIDs := c.meta.GetAll(ctx)
 	for _, cid := range collectionIDs {
@@ -147,7 +167,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
 			for _, r := range replicas {
-				tasks := c.checkReplica(ctx, r)
+				tasks := c.checkReplica(ctx, r, now)
 				// Add tasks immediately after checking each replica to reduce
 				// the time window between task generation and addition.
 				// This prevents duplicate segment loading when dist updates
@@ -236,9 +256,9 @@ func (c *SegmentChecker) cleanVersionCache(activeCollections []int64) {
 	}
 }
 
-func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica, now time.Time) []task.Task {
 	ret := make([]task.Task, 0)
-	c.noteRegularNodes(replica)
+	c.noteRegularNodes(replica, now)
 
 	replicaSegmentDist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
@@ -248,7 +268,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare with targets to find the lack and redundancy of segments
 	lacks, loadPriorities, redundancies, toUpdate := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica, replicaSegmentDist)
-	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica)
+	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica, now)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
@@ -534,7 +554,7 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 	return notUsed
 }
 
-func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica, now time.Time) []task.Task {
 	logger := mlog.With(
 		mlog.FieldCollectionID(replica.GetCollectionID()),
 		mlog.Int64("replicaID", replica.GetID()),
@@ -596,36 +616,44 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// a regular node keeps its sealed segments for one, and they wait
 		// while it is away, as on master.
 		//
-		// That memory reflects membership, not history alone. A regular
-		// node can leave for good: the operator hands it to another group
-		// (TransferNode), scales the group down to none, or moves the
-		// replica itself into a group whose only compute is a streaming
-		// node (TransferReplica keeps the replica's ID). Kept on history,
-		// the memory would then gate every placement path of the replica
-		// until a coordinator restart - empty RW set, no fallback, no task,
-		// nothing logged, the delegator never reaching the new target. So
-		// the record is dropped once the replica's group holds no regular
-		// node AND asks for none (forgetReleasedReplicas): a group that
-		// still asks for one is owed it, and the resource manager pulls one
-		// in (recoverMissingNodeRG), so the replica keeps waiting; a group
-		// that asks for none has given regular nodes up for good. A restart
-		// in a group that asks for one or more keeps the record, since the
-		// group's request outlives the node.
+		// That memory is bounded by time, not by the group's configuration
+		// or the group's nodes. A regular node can leave for good: the
+		// operator hands it to another group (TransferNode), scales the
+		// group down, or moves the replica itself into a group whose only
+		// compute is a streaming node (TransferReplica keeps the replica's
+		// ID). Kept on history, the memory would then gate every placement
+		// path of the replica until a coordinator restart - empty RW set,
+		// no fallback, no task, the delegator never reaching the new
+		// target. And neither the group's configuration nor its node set
+		// can tell a restart from a departure: the default group asks for
+		// no regular node (requests 0) whether it holds one or not, a named
+		// group that asks for one keeps asking after its node's pod is
+		// deleted for good, and a group can keep a regular node on one
+		// replica while another replica of it has lost its own for good.
+		// So the record is dropped once THE REPLICA has held no regular
+		// node continuously for the load timeout (forgetReleasedReplicas):
+		// a restart is minutes and keeps the record, so the default group's
+		// restart is no longer a full load onto the streaming node's query
+		// node plus a full move back; a permanent removal releases it after
+		// the grace, whatever the group asks for or holds elsewhere. While
+		// the record blocks the fallback the checker says so
+		// (warnRegularNodeAwaited), naming the replica, the group and how
+		// long the replica has been without a regular node, so the wait is
+		// never silent.
 		//
-		// A group that asks for no regular node yet holds one - the default
-		// group, whose requests are 0 - keeps the record for as long as it
-		// holds one; once it holds none the coordinator cannot tell a
-		// restart from a scale-down, and the record goes. Its regular
-		// node's restart is therefore the same bounded window as this
-		// coordinator's own restart, whose memory is empty, as it is for a
-		// replica just spawned by an update of the load config (job_update
-		// puts it into meta before RecoverReplicaOfCollection gives it
-		// nodes). A mixed group whose regular node happens to be away at
-		// that moment, or such a fresh replica checked before it received
-		// its node, gets ONE placement on the streaming node's query node;
-		// the move pass in checkReplica (createMisplacedSegmentMoveTasks)
-		// brings those segments back onto the regular node once it returns,
-		// so the case is bounded to that one window and repairs itself.
+		// A replica never seen with a regular node - one of a form's
+		// cluster, or of a fresh default group without regular nodes -
+		// carries no record: it places on the streaming node's query node
+		// from the first check. So does this coordinator's
+		// own restart, whose memory is empty, and a replica just spawned by
+		// an update of the load config (job_update puts it into meta before
+		// RecoverReplicaOfCollection gives it nodes). A mixed group whose
+		// regular node happens to be away at that moment, or such a fresh
+		// replica checked before it received its node, gets ONE placement
+		// on the streaming node's query node; the move pass in checkReplica
+		// (createMisplacedSegmentMoveTasks) brings those segments back onto
+		// the regular node once it returns, so the case is bounded to that
+		// one window and repairs itself.
 		//
 		// Only an installed form places segments there, the same gate the
 		// admission in utils.AssignReplica keys on: a stock deployment never
@@ -634,9 +662,12 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// streaming node's query node for good, since the balancers only walk
 		// GetRWNodes. A stock binary keeps the empty candidate set it always
 		// had.
-		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() &&
-			!c.replicasWithRegularNodes.Contain(replica.GetID()) {
-			rwNodes = replica.GetRWSQNodes()
+		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
+			if c.replicasWithRegularNodes.Contain(replica.GetID()) {
+				c.warnRegularNodeAwaited(ctx, replica, shard, now)
+			} else {
+				rwNodes = replica.GetRWSQNodes()
+			}
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
@@ -663,69 +694,93 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 }
 
 // noteRegularNodes records that the replica has a regular RW query node, if
-// it has one now. The record outlives the node: a replica whose regular node
-// is away keeps it for as long as its group is owed one, which is what
+// it has one now, dated by this round. The record outlives the node: a
+// replica whose regular node is away keeps it for as long as it has not
+// been without one for the grace period, which is what
 // createSegmentLoadTasks reads to keep the replica's sealed segments waiting
 // for that node rather than placing them on a streaming node's query node.
-// It is called on every check of a replica, so the record is as fresh as the
-// checker's own view.
-func (c *SegmentChecker) noteRegularNodes(replica *meta.Replica) {
+// It is called on every check of a replica, so the record is as fresh as
+// the checker's own view.
+func (c *SegmentChecker) noteRegularNodes(replica *meta.Replica, now time.Time) {
 	if replica.RWNodesCount() > 0 {
 		c.replicasWithRegularNodes.Insert(replica.GetID())
+		c.lastRegularNodeSeenAt[replica.GetID()] = now
 	}
+}
+
+// regularNodeGrace is how long a replica must have held no regular query
+// node before its record is released: the load timeout, which is the
+// longest a load is allowed to wait for anything, so a record never
+// outlives the load it would have stalled. It is not a new setting.
+func regularNodeGrace() time.Duration {
+	return Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
 }
 
 // forgetReleasedReplicas drops the regular-node record of every replica that
 // has released its claim to one: a replica that no longer exists, so the
-// record stays bounded by the replicas there are, and a replica whose
-// resource group has given regular nodes up (groupGaveRegularNodesUp), so
-// the record reflects membership rather than history. It runs once per
-// check round, before any replica is checked: one in-memory lookup per
-// recorded replica, and one snapshot per resource group the recorded
-// replicas are in.
+// record stays bounded by the replicas there are, and a replica that has
+// held no regular node for the grace period (replicaWithoutRegularNodeFor),
+// so the record reflects a node that is away rather than one that is gone.
+// It runs once per check round, before any replica is checked, and dates
+// every recorded replica that holds a regular node by this round, whether
+// or not the round goes on to check it (the version cache may skip its
+// collection): one in-memory lookup per recorded replica. A replica's
+// timestamp goes with its record.
 //
 // A live replica whose record is dropped has a placement that was gated a
 // moment ago and is not any more, with nothing else having moved: its
 // collection is taken out of the version cache so this round looks at it
 // rather than skipping it as unchanged.
-func (c *SegmentChecker) forgetReleasedReplicas(ctx context.Context) {
+func (c *SegmentChecker) forgetReleasedReplicas(ctx context.Context, now time.Time) {
 	released := make([]int64, 0)
-	gaveUp := make(map[string]bool)
 	c.replicasWithRegularNodes.Range(func(replicaID int64) bool {
 		replica := c.meta.Get(ctx, replicaID)
 		if replica == nil {
 			released = append(released, replicaID)
 			return true
 		}
-		groupName := replica.GetResourceGroup()
-		answer, asked := gaveUp[groupName]
-		if !asked {
-			answer = c.groupGaveRegularNodesUp(ctx, groupName)
-			gaveUp[groupName] = answer
-		}
-		if answer {
+		if c.replicaWithoutRegularNodeFor(replica, now) >= regularNodeGrace() {
 			released = append(released, replicaID)
 			delete(c.versionCache, replica.GetCollectionID())
 		}
 		return true
 	})
 	c.replicasWithRegularNodes.Remove(released...)
+	for _, replicaID := range released {
+		delete(c.lastRegularNodeSeenAt, replicaID)
+	}
 }
 
-// groupGaveRegularNodesUp answers whether the resource group holds no
-// regular query node and asks for none: NodeNum is the regular nodes
-// assigned to it now, MissingNumOfNodes the ones it is owed on top. A group
-// that is owed one is merely waiting for it, and the resource manager pulls
-// one in; a group that holds none and is owed none has given them up - the
-// operator transferred its node away, scaled it to none, or the replica was
-// moved into a group that never had any. A group the resource manager does
-// not know is not judged: the replica keeps waiting, as on master.
-func (c *SegmentChecker) groupGaveRegularNodesUp(ctx context.Context, groupName string) bool {
-	group := c.meta.GetResourceGroup(ctx, groupName)
-	if group == nil {
-		return false
+// replicaWithoutRegularNodeFor answers how long the replica has held no
+// regular RW query node, dating it on the way: a replica that holds one now
+// is dated by this round and has been without one for no time at all; one
+// that holds none is measured from the last round it held one, or from this
+// round if it has no timestamp (the checker was off in between, and the
+// time it was off does not count). A replica transferred into a group whose
+// only compute is a streaming node is simply one whose regular node was
+// stripped at the transfer round, and is measured from there.
+func (c *SegmentChecker) replicaWithoutRegularNodeFor(replica *meta.Replica, now time.Time) time.Duration {
+	seenAt, dated := c.lastRegularNodeSeenAt[replica.GetID()]
+	if replica.RWNodesCount() > 0 || !dated {
+		c.lastRegularNodeSeenAt[replica.GetID()] = now
+		return 0
 	}
-	return group.NodeNum() == 0 && group.MissingNumOfNodes() == 0
+	return now.Sub(seenAt)
+}
+
+// warnRegularNodeAwaited says, rate-limited, that a sealed segment of the
+// replica is waiting for a regular query node the replica has lost, and for
+// how long the replica has been without one: the wait is bounded by the
+// grace period, and this is what an operator sees while it lasts instead of
+// a placement that silently produces no task.
+func (c *SegmentChecker) warnRegularNodeAwaited(ctx context.Context, replica *meta.Replica, shard string, now time.Time) {
+	mlog.RatedWarn(ctx, rate.Limit(0.1), "a sealed segment waits for a regular node its replica has lost",
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+		mlog.String("resourceGroup", replica.GetResourceGroup()),
+		mlog.String("shard", shard),
+		mlog.Duration("withoutRegularNodeFor", c.replicaWithoutRegularNodeFor(replica, now)),
+		mlog.Duration("grace", regularNodeGrace()))
 }
 
 // createMisplacedSegmentMoveTasks moves the sealed segments of the replica
@@ -756,6 +811,16 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 	if !extension.FormInstalled() || replica.RWSQNodesCount()+replica.ROSQNodesCount() == 0 {
 		return nil
 	}
+	// Nothing to move a segment to: while the regular node has not
+	// returned, the streaming node's query node is where the segment
+	// belongs for now. Decided before the target is fetched and each shard
+	// asked for its leader, since this is every check of the collection for
+	// as long as the node is away. The per-shard RW nodes are drawn from the
+	// replica's RW set (Replica.CopyForWrite, removeChannelExclusiveNodes),
+	// so an empty RW set means no shard has one either.
+	if replica.RWNodesCount() == 0 {
+		return nil
+	}
 	misplaced := lo.Filter(dist, func(s *meta.Segment, _ int) bool {
 		return replica.ContainSQNode(s.Node)
 	})
@@ -784,11 +849,6 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 		rwNodes := replica.GetChannelRWNodes(shard)
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
-		}
-		if len(rwNodes) == 0 {
-			// Still no regular node: the streaming node's query node is
-			// where the segment belongs for now.
-			continue
 		}
 		residentOn := lo.SliceToMap(segments, func(s *meta.Segment) (int64, int64) { return s.GetID(), s.Node })
 		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, true)
