@@ -9,30 +9,37 @@
 
 ## Summary
 
-This design adds an opt-in asynchronous load path for field data backed by the
-Storage V3 manifest and column-group reader. The existing caching-layer
+This design adds an experimental asynchronous load path for field data backed
+by the Storage V3 manifest and column-group reader. The existing caching-layer
 `Translator` interface remains synchronous, but the work behind
 `ManifestGroupTranslator::get_cells()` is decomposed into coroutine-based read
 windows that can overlap remote reads without dedicating one load worker to
 each blocking storage request.
 
-The design has five main properties:
+Before installing these translators, the batch load path also opens projected
+chunk readers through the native asynchronous reader factory.
 
-1. Requested cache cells are sorted by their physical row-group position and
+The design has six main properties:
+
+1. Projected chunk readers are opened on the async-load executor with at most
+   16 concurrent opens per call, then passed to translator construction.
+2. Requested cache cells are sorted by their physical row-group position and
    grouped into byte-bounded, contiguous read windows.
-2. Every window acquires a process-wide transient-memory budget lease before
+3. Every window acquires a process-wide transient-memory budget lease before
    its storage read is submitted.
-3. Remote reads run through the native asynchronous `ChunkReader` API on a
+4. Remote reads run through the native asynchronous `ChunkReader` API on a
    priority-aware executor.
-4. In-memory finalization stays on the load executor, while mmap finalization
+5. In-memory finalization stays on the load executor, while mmap finalization
    may move to a dedicated local-file executor so blocking file writes do not
    occupy remote-load workers.
-5. Caller cancellation and the first sibling failure cancel pending windows;
+6. Caller cancellation and the first sibling failure cancel pending windows;
    failures are published before a window releases its budget lease.
 
 The path is guarded by the temporary
 `queryNode.segcore.storageV2.enableAsyncLoad` switch, which defaults to
-`false`. The legacy `LoadCellBatchAsync` path remains available during rollout.
+`false`. Async loading support for data and indexes is incomplete, and enabling
+the switch is currently unsupported. The legacy `LoadCellBatchAsync` path
+remains the default.
 
 This PR covers Storage V3 field data and JSON key-stat column groups. It does
 not make scalar-index loading asynchronous.
@@ -45,6 +52,7 @@ This document follows the names used by the current Segcore implementation:
 |---|---|
 | cache cell | The caching-layer unit returned by a translator. One cell contains one or more adjacent row groups. |
 | row group / chunk | A physical reader unit addressed by `ChunkReader`; `chunk_indices` are row-group indices in this path. |
+| reader open | Preparing one projected `ChunkReader` through `Reader::get_chunk_reader_async()`, before a translator can load its cells. |
 | read window | One async storage request containing one or more adjacent cache cells and all row groups belonging to them. |
 | loaded bytes | The estimated final decoded size used to split read windows. |
 | transient bytes | The estimated peak temporary memory held from admission through finalization. This is what the global budget charges. |
@@ -86,6 +94,8 @@ semantics, and error categories across coroutine and executor boundaries.
 
 ## Goals
 
+- Open projected chunk readers asynchronously for manifest batch loads and
+  JSON key-stat column groups, with bounded per-call concurrency.
 - Use the native `ChunkReader::get_chunks_async()` path for Storage V3
   field-data reads.
 - Overlap independent read windows without blocking a worker for each remote
@@ -100,7 +110,8 @@ semantics, and error categories across coroutine and executor boundaries.
   existing translator.
 - Cancel pending sibling windows after the first failure and propagate the
   original typed error.
-- Allow a disabled-by-default rollout with the legacy path as fallback.
+- Keep the experimental path disabled by default with the legacy path as
+  fallback.
 - Reuse the same async pipeline for normal manifest field data and JSON
   key-stat column groups.
 
@@ -110,8 +121,8 @@ semantics, and error categories across coroutine and executor boundaries.
 - Removing `LoadCellBatchAsync` or the legacy translator path in this PR.
 - Changing the public caching-layer `Translator` interface to return a future
   or coroutine.
-- Making `ChunkReader` creation asynchronous. Reader preparation remains
-  synchronous before the translator is installed.
+- Making the entire segment-load API asynchronous. Top-level `Reader::create()`
+  and the outer load/translator interfaces remain synchronous.
 - Changing cache-cell sizing or cache eviction semantics.
 - Allowing a zero-byte read window. A read-window target must be positive.
 - Guaranteeing immediate cancellation of a storage request that has already
@@ -132,8 +143,8 @@ ManifestGroupTranslator::get_cells(OpContext* ctx,
                                    const std::vector<cid_t>& cids);
 ```
 
-The rollout mode is captured when a translator is constructed. A cache miss
-then selects one of two implementations:
+Each translator retains the mode selected during preparation or construction.
+A cache miss then selects one of two implementations:
 
 ```text
 ManifestGroupTranslator::get_cells()
@@ -148,16 +159,81 @@ ManifestGroupTranslator::get_cells()
 ```
 
 The outer call is still synchronous because the caching-layer contract is
-unchanged. The asynchronous benefit is inside `LoadCellsAsync`: storage waits
-and sibling windows compose as coroutines on dedicated executors rather than as
-one blocking storage operation per load task.
+unchanged. During cell loading, storage waits and sibling windows compose
+inside `LoadCellsAsync` as coroutines on dedicated executors rather than as one
+blocking storage operation per load task.
 
 The switch is passed into translators created for:
 
 - eager and lazy Storage V3 sealed-segment column groups; and
 - eager and lazy JSON key-stat column groups.
 
-### End-to-end flow
+### Async reader preparation
+
+Reader preparation and cell loading are separate stages:
+
+| Stage | Entry point | Responsibility |
+|---|---|---|
+| reader preparation | `OpenChunkReadersAsync()` in `AsyncChunkReader` | Open projected readers through `Reader::get_chunk_reader_async()` and return them in request order. |
+| cell loading | `LoadCellsAsync()` in `AsyncLoadPipeline` | Use an already prepared reader to admit read windows, call `ChunkReader::get_chunks_async()`, and finalize cells. |
+
+`OpenChunkReadersAsync` takes a shared storage `Reader` and a list of
+`ChunkReaderOpenSpec` entries. Each entry supplies a column-group index and
+shared projected-column names. The returned task is lazy: storage opens start
+when it is awaited. The executor keep-alive and `OpContext` cancellation token
+are captured at call time, and the reader and projections remain owned until
+the opens finish.
+
+For manifest batch loads, the flow is:
+
+```text
+build manifest load tasks and projected-column specs
+  -> capture enableAsyncLoad
+  -> blockingWait(OpenChunkReadersAsync())
+       -> shared priority-aware async-load executor
+       -> collectAllWindowed(max concurrent opens = 16)
+       -> Reader::get_chunk_reader_async(column_group_index, needed_columns)
+       -> validate status and non-null reader
+       -> return readers in spec order
+  -> reuse prepared readers for column-size estimates
+  -> move each reader into its MIDDLE-pool load task
+  -> construct ManifestGroupTranslator with the prepared reader
+  -> load cells on warmup or cache miss
+```
+
+The outer preparation call still waits for the batch before dispatching its
+translator-construction tasks. `PrepareManifestLoadTasks` is shared by the
+regular and external-collection batch paths. It fetches size estimates once per
+column group from a prepared reader, avoiding an additional synchronous reader
+open solely for estimates. The translator retains the mode selected during
+preparation, so a configuration change cannot switch it between stages.
+
+JSON key stats use the same helper: eager loading opens one reader projecting
+all columns; lazy loading batches one projected reader per column and reuses a
+prepared reader for size estimates. These call sites currently pass a null
+`OpContext`, so they do not provide context cancellation to reader preparation.
+
+The concurrency cap is **per `OpenChunkReadersAsync` call**, not process-wide.
+It is separate from the transient-byte admission used by `LoadCellsAsync`;
+reader opens do not acquire that budget, and the cap does not bound cell-read
+windows or total memory across concurrent batches.
+
+Cancellation is checked before each storage factory invocation. The first
+observed open failure cancels pending dispatches; already issued opens are
+drained because the storage factory API provides no way to interrupt them.
+After draining, caller/context cancellation takes precedence over the first
+open failure. Status conversion and non-null validation happen inside each
+child before its slot can issue another open. Only a fully successful batch
+returns readers, in the original spec order.
+
+With the switch disabled, the batch paths retain synchronous estimate reads
+and open each actual reader on its existing worker. This migration does not
+cover every reader-construction entry point: the `LoadColumnGroup` overload
+taking `RuntimeResourceState*` still calls synchronous `get_chunk_reader()`.
+Top-level `Reader::create()` and subsequent metadata access also retain their
+synchronous interfaces.
+
+### Cell-load flow
 
 ```text
 requested cache cell IDs
@@ -293,7 +369,8 @@ state.
 
 ### Load executor
 
-The default executor is a process-wide `folly::CPUThreadPoolExecutor` with:
+Reader preparation and cell loading share the default process-wide
+`folly::CPUThreadPoolExecutor`, resolved through `ResolveAsyncLoadExecutor`, with:
 
 - `max(1, CPU_NUM)` workers;
 - two priority queues;
@@ -368,10 +445,12 @@ Admission has the following semantics:
 - cancellation removes a pending waiter and immediately re-evaluates the queue;
 - a runtime capacity increase or disabling the limit wakes eligible waiters.
 
-The async feature can technically run with capacity `0`, but production
-rollout should configure `common.loadTransientBudgetBytes` to a positive value.
+The async feature can technically run with capacity `0`, but enabling it is
+currently unsupported. Before supported enablement, async loading needs to be
+completed and `common.loadTransientBudgetBytes` needs a non-zero default.
 Otherwise the read-window size limits one storage operation but does not bound
-the number of simultaneously admitted windows across segments.
+the number of simultaneously admitted windows across segments. The reader-open
+concurrency cap does not provide admission for these windows.
 
 ## Finalization and Local File I/O
 
@@ -452,9 +531,14 @@ After the join:
 2. otherwise the first recorded failure is rethrown;
 3. only a failure-free request assembles results.
 
-Arrow and storage statuses are translated through
-`milvus_storage::ToSegcoreError`, preserving typed storage error categories at
-the Segcore boundary.
+Both reader opening and cell loading translate Arrow/storage statuses through
+`milvus_storage::ToSegcoreError`. Their public entry points also classify native
+exceptions from setup and awaited work: `SegcoreError` codes are preserved,
+allocation failures become `MemAllocateFailed`, Folly cancellation becomes
+`FollyCancel`, other Folly future failures become `FollyOtherException`, and
+untyped failures become `UnexpectedError`. Awaited failures are classified after
+draining work and selecting the error to propagate. Categories already flattened
+into an untyped Arrow status upstream cannot be recovered here.
 
 ## Result Ordering and Ownership
 
@@ -480,17 +564,21 @@ remote record batches are not considered consumed until the final
 
 | Parameter | Default | Refresh behavior | Purpose |
 |---|---:|---|---|
-| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured by newly constructed translators | temporary rollout and rollback switch |
+| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured during preparation/construction | internal experimental switch; enabling is currently unsupported |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
 | `common.loadTransientBudgetBytes` | `0` (unlimited) | refreshable | process-wide admitted transient bytes across load paths |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
 The async switch is intentionally not exported in the generated public config
-surface. It is a temporary operational control, not a long-term user-facing
-feature contract.
+surface. Async loading support for data and indexes is incomplete; this document
+describes the implemented field-data stages, not complete async index support.
+Enabling the switch is currently unsupported. Complete async loading support
+and provide a non-zero default transient budget before supporting enablement.
 
-The switch is captured at translator construction. Changing it does not mutate
-translators that already exist:
+Manifest batch loads capture the switch before reader preparation and carry
+that choice into translator construction. JSON key stats similarly use one
+captured value for both stages. Changing it does not mutate translators that
+already exist:
 
 - enabling it affects newly created column-group translators;
 - disabling it stops new translators from selecting the async path;
@@ -502,7 +590,7 @@ positive value affects subsequent loads performed by existing async
 translators. The transient budget is process-wide and also applies immediately
 to subsequent admissions.
 
-Recommended rollout sequence:
+Planned validation sequence after these prerequisites are met:
 
 1. Configure a positive `common.loadTransientBudgetBytes` appropriate for the
    QueryNode memory envelope.
@@ -521,8 +609,9 @@ Recommended rollout sequence:
   not change.
 - Cache keys, cell IDs, warmup policy, and eviction support are unchanged.
 - The legacy path remains the default.
-- Reader construction remains synchronous, limiting the initial scope to chunk
-  reads and finalization.
+- Batch manifest and JSON key-stat paths use async reader opening when the
+  experimental switch is enabled; the outer load interfaces still wait for
+  preparation to finish before installing translators.
 - The async mode is captured per translator, avoiding a mid-load mode switch.
 - Memory and mmap finalization use the same `load_group_chunk()` implementation
   as the legacy path.
@@ -569,16 +658,21 @@ Blocking local writes can occupy the same workers that should resume remote
 read continuations. The optional local-file executor provides isolation while
 retaining a fallback for the default zero-thread configuration.
 
-### Make reader creation asynchronous in the first rollout
+### Keep projected reader creation synchronous
 
-Reader preparation has different metadata and lifetime failure modes. Keeping
-it synchronous reduces the first rollout's scope and makes the async boundary
-start at a fully constructed shared `ChunkReader`.
+This was the initial scope, but it leaves reader-open waits on the synchronous
+path. The implementation now uses a separate bounded reader-preparation stage
+so opens can overlap while retaining ownership and draining on failure. Cell
+loading still starts from a fully constructed shared `ChunkReader`.
 
 ## Testing Strategy
 
-The implementation adds focused tests for the following contracts:
+Focused tests should cover the following contracts:
 
+- async reader opening, projection and result ordering, the per-call concurrency
+  cap, and reuse of prepared readers;
+- reader-open failure stopping pending dispatch, draining issued opens, and
+  caller/context cancellation taking precedence over the first open failure;
 - contiguous window construction, gap splitting, oversized cells, positive
   read-window validation, and original-order restoration;
 - lazy task behavior and execution off the caller thread;
@@ -592,21 +686,22 @@ The implementation adds focused tests for the following contracts:
 - in-memory versus mmap finalization executor selection;
 - local-file pool reconfiguration, draining, concurrency limiting, and write
   error preservation;
-- typed storage error preservation;
+- typed storage error preservation and native exception classification at both
+  reader-open and cell-load entry points;
 - eager and lazy manifest translators, including projected estimates and JSON
   key-stat integration;
 - disabled-switch compatibility with the legacy synchronous reader path.
 
-The PR is verified with the C++ unit-test build, targeted async-load and sealed
-segment tests, and `make verifiers`.
+The validation plan includes the C++ unit-test build, targeted async-load and
+sealed-segment tests, and `make verifiers`.
 
 ## Follow-Up Work
 
 - Add the async scalar-index path described by issue #51245.
 - Add dedicated window/admission/read/finalization latency and in-flight byte
   metrics before broad rollout.
-- Validate production budget and read-window defaults with object-storage and
-  mmap workloads.
+- Choose a non-zero default transient budget and validate it with the read-window
+  default on object-storage and mmap workloads before supported enablement.
 - Decide whether native async storage support must become a hard requirement
   instead of allowing the synchronous `get_chunks_async()` fallback.
 - Consider a storage-aware sparse-window planner only if contiguous windows
@@ -618,11 +713,14 @@ segment tests, and `make verifiers`.
 
 | Area | Files |
 |---|---|
+| bounded async reader preparation | `internal/core/src/segcore/storagev2translator/AsyncChunkReader.{h,cpp}` |
 | coroutine pipeline and window planner | `internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.{h,cpp}` |
+| shared async executor and priority | `internal/core/src/segcore/storagev2translator/AsyncLoadExecutor.{h,cpp}` |
+| native exception classification | `internal/core/src/segcore/storagev2translator/AsyncLoadException.h` |
 | manifest translator integration | `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.{h,cpp}` |
-| per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.h` |
+| per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.{h,cpp}` |
 | cell metadata and size planning | `internal/core/src/segcore/storagev2translator/GroupCTMeta.h` |
-| transient-memory admission | `internal/core/src/storage/EntryStreamUtils.h` |
+| transient-memory admission | `internal/core/src/storage/TransientMemoryBudget.{h,cpp}` |
 | mmap finalization executor | `internal/core/src/storage/LocalFileIOPool.{h,cpp}` |
 | synchronous local file writer and permits | `internal/core/src/storage/FileWriter.{h,cpp}` |
 | sealed segment translator construction | `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp` |
