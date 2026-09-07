@@ -47,6 +47,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ErrPKRangeTooSmall marks the one AssembleImportRequest failure a retry can never
+// fix: the PK range was reserved at broadcast from an upper bound, and preimport
+// has since produced a larger exact row count. Neither number changes by
+// rescheduling, so the task must fail now and keep the precise reason.
+//
+// The scheduler cannot key this off merr classification. ErrImportSysFailed also
+// carries genuinely transient cases ("job %d not found, waiting for import job
+// creation"), and merr.IsNonRetryableErr is a deny-list over ErrIo* sentinels that
+// AssembleImportRequest never returns.
+var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -145,6 +156,20 @@ func GetSegmentMaxSize(job ImportJob, meta *meta) int {
 	return int(getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema()))
 }
 
+func importStorageVersion(isL0Import bool) int64 {
+	if isL0Import {
+		return storage.StorageV2
+	}
+	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+		return storage.StorageV3
+	}
+	return storage.StorageV2
+}
+
+func importUseLoonFFI(isL0Import bool) bool {
+	return !isL0Import && paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()
+}
+
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
 	if err != nil {
@@ -170,10 +195,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
-	storageVersion := storage.StorageV2
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		storageVersion = storage.StorageV3
-	}
+	storageVersion := importStorageVersion(isL0Import)
 
 	// alloc new segments
 	segments := make([]int64, 0)
@@ -350,10 +372,26 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	storageVersion := storage.StorageV2
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		storageVersion = storage.StorageV3
+	// The PK reservation was sized at broadcast from an upper bound; pre-import has
+	// since produced the exact row count. Compare them here, before any segment is
+	// written, instead of letting pkCursor.take trip mid-import on the datanode.
+	for _, fileStat := range task.GetFileStats() {
+		f := fileStat.GetImportFile()
+		r := f.GetPreAllocatedAutoIds()
+		reserved := r.GetEnd() - r.GetBegin()
+		if reserved > 0 && fileStat.GetTotalRows() > reserved {
+			// Marked so the scheduler can tell this apart from the retriable
+			// failures AssembleImportRequest also returns. The merr code stays
+			// ErrImportSysFailed; markers.Mark only adds the sentinel to the chain.
+			return nil, merr.Mark(merr.WrapErrImportSysFailedMsg(
+				"reserved PK range too small for file %v: %d rows, %d ids reserved",
+				f.GetPaths(), fileStat.GetTotalRows(), reserved), ErrPKRangeTooSmall)
+		}
 	}
+
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	storageVersion := importStorageVersion(isL0Import)
+	useLoonFFI := importUseLoonFFI(isL0Import)
 
 	req := &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -372,7 +410,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
+		UseLoonFfi:      useLoonFFI,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
@@ -437,7 +475,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 	quotaInfo := meta.GetQuotaInfo()
 	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
 
-	tasks := importMeta.GetTaskBy(ctx, WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
@@ -471,7 +509,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 }
 
 func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(context.TODO(), jobID, WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
@@ -483,7 +521,7 @@ func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta)
 }
 
 func getPreImportingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
@@ -494,7 +532,7 @@ func getPreImportingProgress(ctx context.Context, jobID int64, importMeta Import
 }
 
 func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
@@ -518,7 +556,7 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	if !enableSortCompaction() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSortedSegmentIDs()
 	})
@@ -540,7 +578,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -623,7 +661,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 
 func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	for _, task := range tasks {
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()

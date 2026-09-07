@@ -16,6 +16,7 @@ subsequent tests start from a known state.
 
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -242,9 +243,9 @@ class TestCDCForcePromote(TestCDCSyncBase):
 
             assert self.wait_for_sync(check_synced, sync_timeout, f"initial sync {c_name}")
 
-            # Kill source
-            logger.info(f"[FAILOVER] Killing source pods (instance={source_cluster_id})...")
-            kubectl_helper.delete_pods(source_cluster_id)
+            # Kill source containers while preserving Pod objects.
+            logger.info(f"[FAILOVER] Killing source containers (instance={source_cluster_id})...")
+            kubectl_helper.kill_containers(source_cluster_id)
 
             # Promote downstream — retry until writable
             self.promote_call_until_writable(
@@ -274,16 +275,26 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after force_promote: count={res}"
         finally:
+            body_failed = sys.exc_info()[0] is not None
             logger.info("[TEARDOWN] Waiting for source pods before topology restore...")
-            kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            try:
+                kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            except Exception as e:
+                logger.error(f"pods not ready before restore, attempting restore anyway: {e}")
             self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
             self.cleanup_resources()
-            self.log_test_end("test_force_promote_basic", True, time.time() - start_time)
+            self.log_test_end(
+                "test_force_promote_basic", restore_error is None and not body_failed, time.time() - start_time
+            )
+            if restore_error is not None and not body_failed:
+                raise restore_error
 
     def test_force_promote_during_target_restart(
         self,
@@ -300,7 +311,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         downstream_token,
         pchannel_num,
     ):
-        """Promote downstream while downstream pods are bouncing.
+        """Promote downstream while downstream containers are restarting.
 
         Mirrors snippets test_restart_b_during_force_promote.py: promote runs
         async, restart happens in main thread mid-promote.
@@ -369,10 +380,10 @@ class TestCDCForcePromote(TestCDCSyncBase):
             th = threading.Thread(target=promote_thread, daemon=True)
             th.start()
 
-            # Mid-promote: kill target pods, wait for them to come back
+            # Mid-promote: kill target containers, wait for them to come back.
             time.sleep(2)
-            logger.info("[FAILOVER] Killing target pods mid-promote...")
-            kubectl_helper.delete_pods(target_cluster_id)
+            logger.info("[FAILOVER] Killing target containers mid-promote...")
+            kubectl_helper.kill_containers(target_cluster_id)
             time.sleep(2)
             kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
 
@@ -407,20 +418,28 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after target restart: {res}"
         finally:
+            body_failed = sys.exc_info()[0] is not None
             logger.info("[TEARDOWN] Waiting for target pods before topology restore...")
-            kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
+            try:
+                kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
+            except Exception as e:
+                logger.error(f"pods not ready before restore, attempting restore anyway: {e}")
             self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
             self.cleanup_resources()
             self.log_test_end(
                 "test_force_promote_during_target_restart",
-                True,
+                restore_error is None and not body_failed,
                 time.time() - start_time,
             )
+            if restore_error is not None and not body_failed:
+                raise restore_error
 
     def test_force_promote_during_source_restart(
         self,
@@ -437,7 +456,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         downstream_token,
         pchannel_num,
     ):
-        """Promote downstream while upstream pods are bouncing.
+        """Promote downstream while upstream containers are restarting.
 
         Mirrors snippets test_restart_a_during_force_promote.py.
         """
@@ -505,8 +524,8 @@ class TestCDCForcePromote(TestCDCSyncBase):
             th.start()
 
             time.sleep(2)
-            logger.info("[FAILOVER] Killing source pods mid-promote...")
-            kubectl_helper.delete_pods(source_cluster_id)
+            logger.info("[FAILOVER] Killing source containers mid-promote...")
+            kubectl_helper.kill_containers(source_cluster_id)
             # Don't wait-ready here — promotion should succeed independently
             # of whether the old primary is back.
 
@@ -540,20 +559,28 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after source restart: {res}"
         finally:
+            body_failed = sys.exc_info()[0] is not None
             logger.info("[TEARDOWN] Waiting for source pods before topology restore...")
-            kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            try:
+                kubectl_helper.wait_for_pods_ready(source_cluster_id, timeout=300)
+            except Exception as e:
+                logger.error(f"pods not ready before restore, attempting restore anyway: {e}")
             self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
             self.cleanup_resources()
             self.log_test_end(
                 "test_force_promote_during_source_restart",
-                True,
+                restore_error is None and not body_failed,
                 time.time() - start_time,
             )
+            if restore_error is not None and not body_failed:
+                raise restore_error
 
     def test_force_promote_with_incomplete_ddl(
         self,
@@ -655,18 +682,23 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after incomplete DDL: {res}"
         finally:
+            body_failed = sys.exc_info()[0] is not None
             self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
             self.cleanup_resources()
             self.log_test_end(
                 "test_force_promote_with_incomplete_ddl",
-                True,
+                restore_error is None and not body_failed,
                 time.time() - start_time,
             )
+            if restore_error is not None and not body_failed:
+                raise restore_error
 
     def _build_partition_manifest(self, source_cluster_id, target_cluster_id, milvus_ns):
         """Return a NetworkChaos dict that bidirectionally partitions source ↔ target."""
@@ -808,6 +840,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after partition+promote: {res}"
         finally:
+            body_failed = sys.exc_info()[0] is not None
             # Remove the partition first so switchover can fan-out across clusters
             logger.info(f"[CHAOS] cleaning up NetworkChaos {chaos_name}")
             subprocess.run(
@@ -822,16 +855,20 @@ class TestCDCForcePromote(TestCDCSyncBase):
             time.sleep(10)
             self.cleanup_downstream_only_collection(c_after)
             logger.info("[TEARDOWN] Restoring A→B topology...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
             self.cleanup_resources()
             self.log_test_end(
                 "test_force_promote_with_network_partition",
-                True,
+                restore_error is None and not body_failed,
                 time.time() - start_time,
             )
+            if restore_error is not None and not body_failed:
+                raise restore_error
 
     def _do_one_endurance_iteration(
         self,
@@ -976,9 +1013,16 @@ class TestCDCForcePromote(TestCDCSyncBase):
                 )
             logger.info(f"PASSED endurance: {iteration} iterations in {duration_minutes}m")
         finally:
+            body_failed = sys.exc_info()[0] is not None
             logger.info("[TEARDOWN] Restoring A→B topology after endurance...")
+            restore_error = None
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as e:
-                logger.warning(f"switchover restore failed: {e}")
-            self.log_test_end("test_endurance_force_promote", True, time.time() - start_time)
+                logger.error(f"switchover restore failed: {e}")
+                restore_error = e
+            self.log_test_end(
+                "test_endurance_force_promote", restore_error is None and not body_failed, time.time() - start_time
+            )
+            if restore_error is not None and not body_failed:
+                raise restore_error

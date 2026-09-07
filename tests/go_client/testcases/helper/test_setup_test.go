@@ -8,6 +8,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -28,9 +30,33 @@ func withManagementRoundTripper(t *testing.T, fn roundTripFunc) {
 func withTestAddr(t *testing.T, value string) {
 	t.Helper()
 	prevAddr := *addr
+	prevURI := *uri
 	*addr = value
+	*uri = ""
 	t.Cleanup(func() {
 		*addr = prevAddr
+		*uri = prevURI
+	})
+}
+
+func withTestConnectionFlags(t *testing.T, addrValue, uriValue, userValue, passwordValue, tokenValue string) {
+	t.Helper()
+	prevAddr, prevURI := *addr, *uri
+	prevUser, prevPassword, prevToken := *user, *password, *token
+	*addr, *uri = addrValue, uriValue
+	*user, *password, *token = userValue, passwordValue, tokenValue
+	t.Cleanup(func() {
+		*addr, *uri = prevAddr, prevURI
+		*user, *password, *token = prevUser, prevPassword, prevToken
+	})
+}
+
+func withTestDefaultClientConfig(t *testing.T, cfg *client.ClientConfig) {
+	t.Helper()
+	prevCfg := defaultClientConfig
+	setDefaultClientConfig(cfg)
+	t.Cleanup(func() {
+		setDefaultClientConfig(prevCfg)
 	})
 }
 
@@ -40,6 +66,103 @@ func managementResponse(statusCode int, body string) *http.Response {
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
+}
+
+func TestURIFromTestArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "addr with equals", args: []string{"test", "-addr=http://localhost:19530"}, want: "http://localhost:19530"},
+		{name: "addr with separate value", args: []string{"test", "--addr", "http://localhost:19530"}, want: "http://localhost:19530"},
+		{name: "uri with equals", args: []string{"test", "--uri=https://cloud.example"}, want: "https://cloud.example"},
+		{name: "uri overrides addr", args: []string{"test", "--addr=http://localhost:19530", "--uri", "https://cloud.example"}, want: "https://cloud.example"},
+		{name: "uri before addr", args: []string{"test", "--uri=https://cloud.example", "--addr=http://localhost:19530"}, want: "https://cloud.example"},
+		{name: "empty uri uses addr", args: []string{"test", "--addr=http://localhost:19530", "--uri="}, want: "http://localhost:19530"},
+		{name: "missing", args: []string{"test", "-test.v"}, want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, URIFromTestArgs(test.args))
+		})
+	}
+}
+
+func TestNewDefaultClientConfig(t *testing.T) {
+	t.Run("uses uri and token", func(t *testing.T) {
+		withTestConnectionFlags(t, "http://localhost:19530", "https://cloud.example", "root", "Milvus", "cloud-token")
+
+		cfg := newDefaultClientConfig()
+		require.Equal(t, "https://cloud.example", cfg.Address)
+		require.Equal(t, "root", cfg.Username)
+		require.Equal(t, "Milvus", cfg.Password)
+		require.Equal(t, "cloud-token", cfg.APIKey)
+	})
+
+	t.Run("falls back to legacy connection flags", func(t *testing.T) {
+		withTestConnectionFlags(t, "http://localhost:19530", "", "legacy-user", "legacy-password", "")
+
+		cfg := newDefaultClientConfig()
+		require.Equal(t, "http://localhost:19530", cfg.Address)
+		require.Equal(t, "legacy-user", cfg.Username)
+		require.Equal(t, "legacy-password", cfg.Password)
+		require.Empty(t, cfg.APIKey)
+	})
+}
+
+func TestInheritDefaultConnectionConfig(t *testing.T) {
+	withTestDefaultClientConfig(t, &client.ClientConfig{
+		Address:  "https://cloud.example",
+		Username: "root",
+		Password: "Milvus",
+		APIKey:   "cloud-token",
+	})
+
+	t.Run("fills empty connection settings", func(t *testing.T) {
+		input := &client.ClientConfig{DBName: "books"}
+		cfg := inheritDefaultConnectionConfig(input)
+
+		require.Equal(t, "https://cloud.example", cfg.Address)
+		require.Equal(t, "root", cfg.Username)
+		require.Equal(t, "Milvus", cfg.Password)
+		require.Equal(t, "cloud-token", cfg.APIKey)
+		require.Empty(t, input.Address)
+		require.Empty(t, input.APIKey)
+	})
+
+	t.Run("adds token for default credentials", func(t *testing.T) {
+		cfg := inheritDefaultConnectionConfig(&client.ClientConfig{
+			Address:  "https://cloud.example",
+			Username: "root",
+			Password: "Milvus",
+		})
+
+		require.Equal(t, "cloud-token", cfg.APIKey)
+	})
+
+	t.Run("preserves custom user credentials", func(t *testing.T) {
+		cfg := inheritDefaultConnectionConfig(&client.ClientConfig{
+			Address:  "https://cloud.example",
+			Username: "test-user",
+			Password: "test-password",
+		})
+
+		require.Empty(t, cfg.APIKey)
+		require.Equal(t, "test-user", cfg.Username)
+		require.Equal(t, "test-password", cfg.Password)
+	})
+
+	t.Run("preserves explicit token", func(t *testing.T) {
+		cfg := inheritDefaultConnectionConfig(&client.ClientConfig{
+			Address: "https://other.example",
+			APIKey:  "other-token",
+		})
+
+		require.Equal(t, "https://other.example", cfg.Address)
+		require.Equal(t, "other-token", cfg.APIKey)
+	})
 }
 
 func TestManagementBaseURL(t *testing.T) {

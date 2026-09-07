@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,11 +20,11 @@ func TestUpdateCheckpoint(t *testing.T) {
 		metrics:          newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 	}
 
-	rs.updateCheckpoint(newAlterReplicateConfigMessage("test1", []string{"test2"}, 1, walimplstest.NewTestMessageID(1)))
+	rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test1", []string{"test2"}, 1, walimplstest.NewTestMessageID(1)))
 	assert.Nil(t, rs.checkpoint.ReplicateCheckpoint)
 	assert.Equal(t, rs.checkpoint.MessageID, walimplstest.NewTestMessageID(1))
 	assert.Equal(t, rs.checkpoint.TimeTick, uint64(1))
-	rs.updateCheckpoint(newAlterReplicateConfigMessage("test2", []string{"test1"}, 1, walimplstest.NewTestMessageID(1)))
+	rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test2", []string{"test1"}, 1, walimplstest.NewTestMessageID(1)))
 	assert.NotNil(t, rs.checkpoint.ReplicateCheckpoint)
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.ClusterID, "test2")
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.PChannel, "test2-rootcoord-dml_0")
@@ -42,17 +43,17 @@ func TestUpdateCheckpoint(t *testing.T) {
 	immutableReplicateMsg := replicateMsg.WithTimeTick(4).
 		WithLastConfirmed(walimplstest.NewTestMessageID(11)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(22))
-	rs.updateCheckpoint(immutableReplicateMsg)
+	rs.updateCheckpoint(context.Background(), immutableReplicateMsg)
 
 	// update with wrong clusterID.
-	rs.updateCheckpoint(immutableReplicateMsg)
+	rs.updateCheckpoint(context.Background(), immutableReplicateMsg)
 	assert.NotNil(t, rs.checkpoint.ReplicateCheckpoint)
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.ClusterID, "test2")
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.PChannel, "test2-rootcoord-dml_0")
 	assert.Nil(t, rs.checkpoint.ReplicateCheckpoint.MessageID)
 	assert.Zero(t, rs.checkpoint.ReplicateCheckpoint.TimeTick)
 
-	rs.updateCheckpoint(newAlterReplicateConfigMessage("test3", []string{"test2", "test1"}, 1, walimplstest.NewTestMessageID(1)))
+	rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test3", []string{"test2", "test1"}, 1, walimplstest.NewTestMessageID(1)))
 	assert.NotNil(t, rs.checkpoint.ReplicateCheckpoint)
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.ClusterID, "test3")
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.PChannel, "test3-rootcoord-dml_0")
@@ -60,7 +61,7 @@ func TestUpdateCheckpoint(t *testing.T) {
 	assert.Zero(t, rs.checkpoint.ReplicateCheckpoint.TimeTick)
 
 	// update with right clusterID.
-	rs.updateCheckpoint(immutableReplicateMsg)
+	rs.updateCheckpoint(context.Background(), immutableReplicateMsg)
 	assert.NotNil(t, rs.checkpoint.ReplicateCheckpoint)
 	assert.Equal(t, rs.checkpoint.MessageID, walimplstest.NewTestMessageID(11))
 	assert.Equal(t, rs.checkpoint.TimeTick, uint64(4))
@@ -69,9 +70,9 @@ func TestUpdateCheckpoint(t *testing.T) {
 	assert.True(t, rs.checkpoint.ReplicateCheckpoint.MessageID.EQ(walimplstest.NewTestMessageID(10)))
 	assert.Equal(t, rs.checkpoint.ReplicateCheckpoint.TimeTick, uint64(3))
 
-	rs.updateCheckpoint(newAlterReplicateConfigMessage("test1", []string{"test2"}, 1, walimplstest.NewTestMessageID(1)))
+	rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test1", []string{"test2"}, 1, walimplstest.NewTestMessageID(1)))
 	assert.Nil(t, rs.checkpoint.ReplicateCheckpoint)
-	rs.updateCheckpoint(immutableReplicateMsg)
+	rs.updateCheckpoint(context.Background(), immutableReplicateMsg)
 }
 
 // newAlterReplicateConfigMessage creates a new alter replicate config message.

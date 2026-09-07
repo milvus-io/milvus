@@ -34,6 +34,7 @@ std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
 std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
     DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
+std::atomic<bool> ENABLE_DRIVER_PREFETCH(DEFAULT_ENABLE_DRIVER_PREFETCH);
 
 std::atomic<bool> JSON_KEY_STATS_ENABLED(DEFAULT_JSON_KEY_STATS_ENABLED);
 
@@ -80,6 +81,13 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
+}
+
+void
+SetDefaultDriverPrefetchEnable(bool val) {
+    ENABLE_DRIVER_PREFETCH.store(val);
+    LOG_INFO("set default driver prefetch enabled: {}",
+             ENABLE_DRIVER_PREFETCH.load());
 }
 
 void

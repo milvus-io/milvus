@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -974,4 +975,49 @@ func TestDescribeDatabase_EmptyProperties(t *testing.T) {
 	assert.Equal(t, "empty_db", resp.GetDbName())
 	assert.Equal(t, int64(2001), resp.GetDbID())
 	assert.Empty(t, resp.GetProperties())
+}
+
+func TestGetFileResources(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("return requested resources in order", func(t *testing.T) {
+		mockMixCoord := mocks.NewMixCoord(t)
+		expected := []*internalpb.FileResourceInfo{
+			{Id: 1, Name: "resource-1", Path: "files/1"},
+			{Id: 2, Name: "resource-2", Path: "files/2"},
+		}
+		mockMixCoord.EXPECT().GetFileResources(mock.Anything, int64(1), int64(2)).Return(expected, nil)
+
+		resources, err := NewCoordinatorBroker(mockMixCoord).GetFileResources(context.Background(), 1, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
+	})
+
+	t.Run("missing resource is internal error", func(t *testing.T) {
+		mockMixCoord := mocks.NewMixCoord(t)
+		expectedErr := merr.WrapErrServiceInternalMsg("file resource 1 not found")
+		mockMixCoord.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(nil, expectedErr)
+
+		resources, err := NewCoordinatorBroker(mockMixCoord).GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("resolver error is preserved", func(t *testing.T) {
+		mockMixCoord := mocks.NewMixCoord(t)
+		expectedErr := merr.WrapErrServiceUnavailable("mixcoord unavailable")
+		mockMixCoord.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(nil, expectedErr)
+
+		resources, err := NewCoordinatorBroker(mockMixCoord).GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	})
+
+	t.Run("empty ids skip request", func(t *testing.T) {
+		mockMixCoord := mocks.NewMixCoord(t)
+
+		resources, err := NewCoordinatorBroker(mockMixCoord).GetFileResources(context.Background())
+		assert.NoError(t, err)
+		assert.Nil(t, resources)
+	})
 }

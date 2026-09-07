@@ -161,6 +161,61 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         prices = [hit.fields[self.price_field] for hit in hits]
         assert prices == sorted(prices)
 
+    @staticmethod
+    def _l2_score(query_vector, vector):
+        return math.fsum((left - right) ** 2 for left, right in zip(query_vector, vector))
+
+    def _expected_brand_aggregation(self, query_vector, bucket_size, top_hit_size):
+        ranked_rows = []
+        for row in self._rows():
+            vector = row[self.vector_field]
+            brand = row[self.brand_field]
+            if vector is None or brand is None:
+                continue
+            ranked_rows.append(
+                (
+                    self._l2_score(query_vector, vector),
+                    row[self.primary_field],
+                    brand,
+                )
+            )
+        ranked_rows.sort()
+
+        expected_groups = {}
+        for score, primary_key, brand in ranked_rows:
+            if brand not in expected_groups:
+                if len(expected_groups) >= bucket_size:
+                    continue
+                expected_groups[brand] = []
+            if len(expected_groups[brand]) < top_hit_size:
+                expected_groups[brand].append((primary_key, score))
+            if len(expected_groups) == bucket_size and all(
+                len(hits) == top_hit_size for hits in expected_groups.values()
+            ):
+                break
+
+        assert len(expected_groups) == bucket_size
+        assert all(len(hits) == top_hit_size for hits in expected_groups.values())
+        return expected_groups
+
+    def _normalize_brand_aggregation(self, buckets):
+        return tuple(
+            (
+                self._key_value(bucket, self.brand_field),
+                bucket.count,
+                bucket.metrics["doc_count"],
+                tuple(
+                    (
+                        hit.pk,
+                        round(float(hit.score), 6),
+                        tuple(sorted(hit.fields.items())),
+                    )
+                    for hit in bucket.hits
+                ),
+            )
+            for bucket in buckets
+        )
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_minimal_parameters(self):
         """
@@ -189,6 +244,81 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             assert len(buckets) == 1
             assert [entry["field_name"] for entry in buckets[0].key] == [self.brand_field]
             assert buckets[0].count >= 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "bucket_size",
+        [2, 4],
+        ids=["two-buckets", "all-four-buckets"],
+    )
+    def test_search_aggregation_limit_and_size_combinations(self, bucket_size):
+        """
+        target: verify ordinary search limit does not change exact search_aggregation buckets or topHits
+        method: compare limit smaller than, equal to, and greater than one bucket size against an independent FLAT/L2 oracle
+        expected: every limit returns identical exact bucket keys, counts, hit IDs, fields, and L2 scores
+        """
+        top_hit_size = 2
+        query_vector = self._query_vectors()[0]
+        limits = [1, bucket_size, bucket_size + 1]
+        expected_groups = self._expected_brand_aggregation(query_vector, bucket_size, top_hit_size)
+        client = self._client(alias=self.shared_alias)
+        normalized_by_limit = {}
+
+        for limit in limits:
+            res, _ = self.search(
+                client,
+                self.collection_name,
+                data=[query_vector],
+                anns_field=self.vector_field,
+                search_params=self._search_params(),
+                limit=limit,
+                filter=self._non_null_expr(self.brand_field),
+                output_fields=[self.brand_field],
+                search_aggregation=SearchAggregation(
+                    fields=[self.brand_field],
+                    size=bucket_size,
+                    metrics={
+                        "doc_count": {"count": "*"},
+                        "score_sum": {"sum": "_score"},
+                        "score_avg": {"avg": "_score"},
+                        "score_min": {"min": "_score"},
+                        "score_max": {"max": "_score"},
+                    },
+                    order=[{"_key": "asc"}],
+                    top_hits=TopHits(size=top_hit_size, sort=[{"_score": "asc"}]),
+                ),
+            )
+
+            assert len(res.agg_buckets) == 1
+            buckets = res.agg_buckets[0]
+            assert len(buckets) == bucket_size
+            keys = [self._key_value(bucket, self.brand_field) for bucket in buckets]
+            assert keys == sorted(expected_groups)
+
+            for bucket in buckets:
+                brand = self._key_value(bucket, self.brand_field)
+                expected_hits = expected_groups[brand]
+                assert bucket.count == top_hit_size
+                assert bucket.metrics["doc_count"] == top_hit_size
+                assert len(bucket.hits) == top_hit_size
+                assert [hit.pk for hit in bucket.hits] == [primary_key for primary_key, _ in expected_hits]
+                assert [hit.score for hit in bucket.hits] == pytest.approx(
+                    [score for _, score in expected_hits],
+                    rel=1e-5,
+                    abs=1e-6,
+                )
+                assert [hit.fields for hit in bucket.hits] == [{self.brand_field: brand}] * top_hit_size
+                self._assert_scores_ascending(bucket.hits)
+                expected_scores = [score for _, score in expected_hits]
+                assert bucket.metrics["score_sum"] == pytest.approx(sum(expected_scores))
+                assert bucket.metrics["score_avg"] == pytest.approx(sum(expected_scores) / len(expected_scores))
+                assert bucket.metrics["score_min"] == pytest.approx(min(expected_scores))
+                assert bucket.metrics["score_max"] == pytest.approx(max(expected_scores))
+
+            normalized_by_limit[limit] = self._normalize_brand_aggregation(buckets)
+
+        baseline = normalized_by_limit[limits[0]]
+        assert all(normalized_by_limit[limit] == baseline for limit in limits[1:])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_range_search(self):
@@ -643,21 +773,66 @@ class TestSearchAggregation(TestMilvusClientV2Base):
     def test_search_aggregation_nullable_metric_field(self):
         """
         target: verify metrics on nullable scalar fields skip NULL values.
-        method: aggregate rows with price values and NULL price values in the same brand bucket.
+        method: aggregate controlled rows with price values and NULL price values in the same brand bucket.
         expected: count(price)/sum(price)/min(price)/max(price) match the non-NULL top_hits only.
         """
         client = self._client(alias=self.shared_alias)
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        controlled_brand = "nullable_metric_brand"
+        query_vector = [0.0] * self.dim
+        rows = [
+            {
+                self.primary_field: 0,
+                self.vector_field: query_vector,
+                self.brand_field: controlled_brand,
+                self.price_field: None,
+            },
+            {
+                self.primary_field: 1,
+                self.vector_field: [0.001] + [0.0] * (self.dim - 1),
+                self.brand_field: controlled_brand,
+                self.price_field: 10,
+            },
+            {
+                self.primary_field: 2,
+                self.vector_field: [0.002] + [0.0] * (self.dim - 1),
+                self.brand_field: controlled_brand,
+                self.price_field: 20,
+            },
+            {
+                self.primary_field: 3,
+                self.vector_field: [0.5] + [0.0] * (self.dim - 1),
+                self.brand_field: "other_brand",
+                self.price_field: 30,
+            },
+        ]
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(field_name=self.primary_field, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=self.vector_field, datatype=DataType.FLOAT_VECTOR, dim=self.dim)
+        schema.add_field(field_name=self.brand_field, datatype=DataType.VARCHAR, max_length=64)
+        schema.add_field(field_name=self.price_field, datatype=DataType.INT64, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=self.vector_field, index_type="FLAT", metric_type=self.metric_type)
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
         res, _ = self.search(
             client,
-            self.collection_name,
-            data=[self._query_vectors()[0]],
+            collection_name,
+            data=[query_vector],
             anns_field=self.vector_field,
             search_params=self._search_params(),
             limit=ct.default_limit,
+            filter=f'{self.brand_field} == "{controlled_brand}"',
             output_fields=[self.brand_field, self.price_field],
             search_aggregation=SearchAggregation(
                 fields=[self.brand_field],
-                size=5,
+                size=1,
                 metrics={
                     "doc_count": {"count": "*"},
                     "price_count": {"count": self.price_field},
@@ -665,24 +840,22 @@ class TestSearchAggregation(TestMilvusClientV2Base):
                     "price_min": {"min": self.price_field},
                     "price_max": {"max": self.price_field},
                 },
-                top_hits=TopHits(size=10, sort=[{"_score": "asc"}]),
+                top_hits=TopHits(size=3, sort=[{"_score": "asc"}]),
             ),
         )
 
         assert len(res.agg_buckets) == 1
-        checked_nullable_metric = False
-        for bucket in res.agg_buckets[0]:
-            prices = [hit.fields.get(self.price_field) for hit in bucket.hits]
-            non_null_prices = [price for price in prices if price is not None]
-            assert bucket.metrics["doc_count"] == bucket.count
-            assert bucket.metrics["price_count"] == len(non_null_prices)
-            if non_null_prices:
-                assert bucket.metrics["price_sum"] == sum(non_null_prices)
-                assert bucket.metrics["price_min"] == min(non_null_prices)
-                assert bucket.metrics["price_max"] == max(non_null_prices)
-            if len(non_null_prices) < len(prices):
-                checked_nullable_metric = True
-        assert checked_nullable_metric
+        assert len(res.agg_buckets[0]) == 1
+        bucket = res.agg_buckets[0][0]
+        prices = [hit.fields.get(self.price_field) for hit in bucket.hits]
+        non_null_prices = [price for price in prices if price is not None]
+        assert self._key_value(bucket, self.brand_field) == controlled_brand
+        assert prices == [None, 10, 20]
+        assert bucket.metrics["doc_count"] == bucket.count == len(prices)
+        assert bucket.metrics["price_count"] == len(non_null_prices)
+        assert bucket.metrics["price_sum"] == sum(non_null_prices)
+        assert bucket.metrics["price_min"] == min(non_null_prices)
+        assert bucket.metrics["price_max"] == max(non_null_prices)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_single_field_top_hits(self):
@@ -1574,9 +1747,9 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_array_element_search_with_primary_key_aggregation(self):
         """
-        target: clarify StructArray element-vector search support when grouped by primary key.
-        method: search structA[embedding] and request aggregation by the primary key field.
-        expected: request succeeds because element-level StructArray search only supports primary-key grouping.
+        target: verify StructArray element results are aggregated exactly by primary key.
+        method: search six elements from three primary keys and request PK buckets with counts and two top hits.
+        expected: all three PK buckets contain exactly their two elements without cross-row mixing or loss.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1603,16 +1776,24 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             params={"M": 8, "efConstruction": 64},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        vectors = cf.gen_vectors(self.nb * 2, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
+        vectors = [
+            [1.0, 0.0] + [0.0] * (dim - 2),
+            [0.9, 0.1] + [0.0] * (dim - 2),
+            [0.0, 1.0] + [0.0] * (dim - 2),
+            [0.1, 0.9] + [0.0] * (dim - 2),
+            [-1.0, 0.0] + [0.0] * (dim - 2),
+            [-0.9, -0.1] + [0.0] * (dim - 2),
+        ]
+        primary_keys = [10, 20, 30]
         rows = [
             {
-                "id": i,
+                "id": primary_key,
                 "structA": [
                     {"embedding": vectors[i * 2], "label": f"label_{i}_0"},
                     {"embedding": vectors[i * 2 + 1], "label": f"label_{i}_1"},
                 ],
             }
-            for i in range(self.nb)
+            for i, primary_key in enumerate(primary_keys)
         ]
         self.insert(client, collection_name, data=rows)
         self.flush(client, collection_name)
@@ -1621,25 +1802,30 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         res, _ = self.search(
             client,
             collection_name,
-            data=[vectors[0]],
+            data=[[0.7, 0.7] + [0.0] * (dim - 2)],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"ef": 32}},
-            limit=10,
-            output_fields=["id"],
+            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+            limit=len(vectors),
+            output_fields=["id", "structA[label]"],
             search_aggregation=SearchAggregation(
                 fields=["id"],
                 size=3,
                 metrics={"doc_count": {"count": "*"}},
-                top_hits=TopHits(size=1),
+                top_hits=TopHits(size=2, sort=[{"_score": "desc"}]),
             ),
         )
 
         assert len(res.agg_buckets) == 1
-        assert 1 <= len(res.agg_buckets[0]) <= 3
+        assert len(res.agg_buckets[0]) == len(primary_keys)
+        buckets_by_id = {bucket.key[0]["value"]: bucket for bucket in res.agg_buckets[0]}
+        assert set(buckets_by_id) == set(primary_keys)
         for bucket in res.agg_buckets[0]:
             assert [entry["field_name"] for entry in bucket.key] == ["id"]
-            assert bucket.metrics["doc_count"] == bucket.count
-            assert len(bucket.hits) == 1
+            primary_key = bucket.key[0]["value"]
+            assert bucket.metrics["doc_count"] == bucket.count == 2
+            assert len(bucket.hits) == 2
+            assert all(hit.pk == primary_key for hit in bucket.hits)
+            assert bucket.hits[0].score >= bucket.hits[1].score
 
 
 @pytest.mark.xdist_group("TestSearchAggregationTextAndBM25")

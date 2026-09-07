@@ -1,27 +1,28 @@
+import hashlib
 import logging
-import time
-import pytest
 import random
-import numpy as np
+import time
 from pathlib import Path
+
+import numpy as np
+import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_k8s import (
-    get_pod_ip_name_pairs,
-    get_milvus_instance_name,
-    get_milvus_deploy_tool
-)
-from utils.util_log import test_log as log
 from common.bulk_insert_data import (
+    DataErrorType,
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_numpy_files,
-    DataField as df,
-    DataErrorType,
 )
-
+from common.bulk_insert_data import (
+    DataField as df,
+)
+from common.common_type import CaseLabel, CheckTasks
+from common.milvus_sys import MilvusSys
+from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
+from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get_pod_ip_name_pairs
+from utils.util_log import test_log as log
 
 default_vec_only_fields = [df.vec_field]
 default_multi_fields = [
@@ -32,6 +33,8 @@ default_multi_fields = [
     df.float_field,
 ]
 default_vec_n_int_fields = [df.vec_field, df.int_field]
+text_lob_dim = 16
+text_lob_analyzer = {"tokenizer": "standard"}
 
 
 # milvus_ns = "chaos-testing"
@@ -48,29 +51,103 @@ def entity_suffix(entities):
     return suffix
 
 
-class TestcaseBaseBulkInsert(TestcaseBase):
+def make_text_lob_bulk_text(size, seed):
+    if size == 0:
+        return ""
+    base = f"{seed} milvus text lob bulk import vector database checksum payload "
+    return (base * ((size // len(base)) + 1))[:size]
 
+
+def text_lob_bulk_vector(pk):
+    rng = random.Random(34971 + pk)
+    return [rng.random() for _ in range(text_lob_dim)]
+
+
+def build_text_lob_bulk_rows():
+    return [
+        {
+            df.pk_field: 0,
+            df.vec_field: text_lob_bulk_vector(0),
+            df.text_field: "bulkimporttoken0 multilingual text lob 中文 日本語 emoji payload",
+        },
+        {
+            df.pk_field: 1,
+            df.vec_field: text_lob_bulk_vector(1),
+            df.text_field: "bulkimporttoken1 " + make_text_lob_bulk_text(64 * 1024 + 17, "bulk-import-large-1"),
+        },
+        {
+            df.pk_field: 2,
+            df.vec_field: text_lob_bulk_vector(2),
+            df.text_field: "bulkimporttoken2 " + make_text_lob_bulk_text(128 * 1024 + 33, "bulk-import-large-2"),
+        },
+    ]
+
+
+def build_text_lob_bulk_schema():
+    fields = [
+        FieldSchema(name=df.pk_field, dtype=DataType.INT64, is_primary=True, auto_id=False),
+        FieldSchema(name=df.vec_field, dtype=DataType.FLOAT_VECTOR, dim=text_lob_dim),
+        FieldSchema(
+            name=df.text_field,
+            dtype=DataType.TEXT,
+            nullable=True,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params=text_lob_analyzer,
+        ),
+        FieldSchema(name=df.bm25_sparse_vec_field, dtype=DataType.SPARSE_FLOAT_VECTOR),
+    ]
+    schema = CollectionSchema(fields=fields, auto_id=False, enable_dynamic_field=False)
+    schema.add_function(
+        Function(
+            name="text_lob_bm25",
+            function_type=FunctionType.BM25,
+            input_field_names=[df.text_field],
+            output_field_names=[df.bm25_sparse_vec_field],
+            params={},
+        )
+    )
+    return schema
+
+
+def sha256_text_lob(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def assert_text_lob_bulk_rows(actual_rows, expected_rows):
+    expected = {
+        row[df.pk_field]: {
+            "sha256": sha256_text_lob(row[df.text_field]),
+            "bytes": len(row[df.text_field].encode("utf-8")),
+        }
+        for row in expected_rows
+    }
+    actual = {row[df.pk_field]: row for row in actual_rows}
+    assert set(actual) == set(expected), f"row ids mismatch: actual={set(actual)}, expected={set(expected)}"
+    for pk, expected_meta in expected.items():
+        actual_text = actual[pk][df.text_field]
+        assert sha256_text_lob(actual_text) == expected_meta["sha256"]
+        assert len(actual_text.encode("utf-8")) == expected_meta["bytes"]
+
+
+class TestcaseBaseBulkInsert(TestcaseBase):
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, host, milvus_ns):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
         self.milvus_ns = milvus_ns
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.instance_name = get_milvus_instance_name(self.milvus_ns, host)
         self.deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
         minio_label = f"release={self.instance_name}, app=minio"
         if self.deploy_tool == "milvus-operator":
             minio_label = f"release={self.instance_name}-minio, app=minio"
-        minio_ip_pod_pair = get_pod_ip_name_pairs(
-            self.milvus_ns, minio_label
-        )
+        minio_ip_pod_pair = get_pod_ip_name_pairs(self.milvus_ns, minio_label)
         ms = MilvusSys()
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
+        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
 
     # def teardown_method(self, method):
     #     log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -78,6 +155,100 @@ class TestcaseBaseBulkInsert(TestcaseBase):
 
 
 class TestBulkInsert(TestcaseBaseBulkInsert):
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "file_type",
+        [BulkFileType.JSON, BulkFileType.CSV, BulkFileType.PARQUET],
+        ids=["json", "csv", "parquet"],
+    )
+    def test_text_lob_bulk_import_json_csv_parquet(self, file_type):
+        """
+        target: verify TEXT LOB payloads can be bulk imported from JSON, CSV, and Parquet
+        method: write deterministic TEXT rows with RemoteBulkWriter, import them, then validate query/BM25/reload
+        expected: import succeeds and exact TEXT payload checksums survive load and release/load
+        """
+        rows = build_text_lob_bulk_rows()
+        c_name = cf.gen_unique_str("bulk_insert_text_lob")
+        schema = build_text_lob_bulk_schema()
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path=f"bulk_data/{c_name}/{file_type.name.lower()}",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name=self.bucket_name,
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=file_type,
+        ) as remote_writer:
+            for row in rows:
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            batch_files = remote_writer.batch_files
+        assert batch_files, f"RemoteBulkWriter did not generate files for {file_type}"
+
+        task_ids = []
+        for files in batch_files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
+            task_ids.append(task_id)
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id],
+                timeout=300,
+            )
+            tt = time.time() - t0
+            log.info(f"text lob bulk insert task {task_id} state:{success} in {tt} with states:{states}")
+            assert success
+        assert len(task_ids) == len(batch_files)
+
+        num_entities = self.collection_wrap.num_entities
+        assert num_entities == len(rows)
+        self.collection_wrap.create_index(
+            field_name=df.vec_field,
+            index_params=ct.default_flat_index,
+            index_name=df.vec_field,
+        )
+        self.collection_wrap.create_index(
+            field_name=df.bm25_sparse_vec_field,
+            index_params=ct.default_text_sparse_inverted_index,
+            index_name=df.bm25_sparse_vec_field,
+        )
+        for index_name in [df.vec_field, df.bm25_sparse_vec_field]:
+            _, success = self.utility_wrap.wait_for_index_building_complete(
+                c_name,
+                index_name=index_name,
+                timeout=300,
+            )
+            assert success
+        self.collection_wrap.load()
+        self.utility_wrap.wait_for_loading_complete(c_name, timeout=300)
+
+        row_ids = [row[df.pk_field] for row in rows]
+        actual_rows, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} in {row_ids}",
+            output_fields=[df.pk_field, df.text_field],
+        )
+        assert_text_lob_bulk_rows(actual_rows, rows)
+
+        search_res, _ = self.collection_wrap.search(
+            data=["bulkimporttoken2"],
+            anns_field=df.bm25_sparse_vec_field,
+            param=ct.default_text_sparse_search_params,
+            limit=3,
+            output_fields=[df.pk_field, df.text_field],
+        )
+        assert 2 in set(search_res[0].ids), f"BM25 search missed imported TEXT row: {search_res[0].ids}"
+
+        self.collection_wrap.release()
+        self.collection_wrap.load()
+        self.utility_wrap.wait_for_loading_complete(c_name, timeout=300)
+        reloaded_rows, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} in {row_ids}",
+            output_fields=[df.pk_field, df.text_field],
+        )
+        assert_text_lob_bulk_rows(reloaded_rows, rows)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -123,9 +294,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task id:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -136,17 +305,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -190,7 +355,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             auto_id=auto_id,
             str_pk=string_pk,
             data_fields=default_vec_only_fields,
-            force=True
+            force=True,
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -202,13 +367,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{completed} in {tt}")
         assert completed
@@ -219,17 +380,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load()
         self.collection_wrap.load(_reshard=True)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 3
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -255,9 +412,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [4])
     @pytest.mark.parametrize("entities", [3000])
-    def test_partition_float_vector_int_scalar(
-        self, is_row_based, auto_id, dim, entities
-    ):
+    def test_partition_float_vector_int_scalar(self, is_row_based, auto_id, dim, entities):
         """
         collection: customized partitions
         collection schema: [pk, float_vectors, int_scalar]
@@ -292,9 +447,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         m_partition, _ = self.collection_wrap.create_partition(partition_name=p_name)
         # build index before bulk insert
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load before bulk insert
         self.collection_wrap.load(partition_names=[p_name])
 
@@ -306,9 +459,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, state = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=120
-        )
+        success, state = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=120)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -318,12 +469,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.debug(state)
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(partition_names=[p_name], _refresh=True)
         time.sleep(10)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         nq = 10
         topk = 5
@@ -385,19 +534,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             "metric_type": "JACCARD",
             "params": {"nlist": 64},
         }
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=binary_index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=binary_index_params)
         # load collection
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name,
-                                                       files=files)
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -406,7 +550,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify num entities
         assert self.collection_wrap.num_entities == entities
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(10)
         search_data = cf.gen_binary_vectors(1, dim)[1]
@@ -427,14 +571,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize(
-        "fields_num_in_file", ["more", "less", "equal"]
-    )  # "equal", "more", "less"
+    @pytest.mark.parametrize("fields_num_in_file", ["more", "less", "equal"])  # "equal", "more", "less"
     @pytest.mark.parametrize("dim", [16])
     @pytest.mark.parametrize("entities", [500])
-    def test_float_vector_multi_scalars(
-        self, is_row_based, auto_id, fields_num_in_file, dim, entities
-    ):
+    def test_float_vector_multi_scalars(self, is_row_based, auto_id, fields_num_in_file, dim, entities):
         """
         collection schema: [pk, float_vector,
                         float_scalar, int_scalar, string_scalar, bool_scalar]
@@ -476,20 +616,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # build index before bulk insert
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         if fields_num_in_file in ["less", "more"]:
@@ -517,7 +651,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             success = self.utility_wrap.wait_index_build_completed(c_name)
             assert success
             # verify search and query
-            log.info(f"wait for load finished and be ready for search")
+            log.info("wait for load finished and be ready for search")
             self.collection_wrap.load(_refresh=True)
             time.sleep(10)
             nq = 3
@@ -541,9 +675,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 assert len(results) == len(ids)
                 if not auto_id:
                     for i in range(len(results)):
-                        assert results[i].get(df.int_field, 0) == results[i].get(
-                            df.pk_field, 1
-                        )
+                        assert results[i].get(df.int_field, 0) == results[i].get(df.pk_field, 1)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("insert_before_bulk_insert", [True, False])
@@ -581,15 +713,12 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             [i for i in range(direct_insert_row)],
             [np.float32(i) for i in range(direct_insert_row)],
             cf.gen_vectors(direct_insert_row, dim=dim),
-
         ]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         if insert_before_bulk_insert:
@@ -598,13 +727,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.num_entities
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -620,7 +745,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         nq = 3
         topk = 10
@@ -679,31 +804,23 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # build index
         if create_index_before_bulk_insert:
             index_params = ct.default_index
-            self.collection_wrap.create_index(
-                field_name=df.vec_field, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         if loaded_before_bulk_insert:
             # load collection
             self.collection_wrap.load()
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
         if not create_index_before_bulk_insert:
             # build index
             index_params = ct.default_index
-            self.collection_wrap.create_index(
-                field_name=df.vec_field, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         if not loaded_before_bulk_insert:
             # load collection
             self.collection_wrap.load()
@@ -715,7 +832,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         nq = 3
         topk = 10
@@ -738,14 +855,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
-    @pytest.mark.parametrize(
-        "fields_num_in_file", ["equal", "more", "less"]
-    )  # "equal", "more", "less"
+    @pytest.mark.parametrize("fields_num_in_file", ["equal", "more", "less"])  # "equal", "more", "less"
     @pytest.mark.parametrize("dim", [16])  # 1024
     @pytest.mark.parametrize("entities", [500])  # 5000
-    def test_string_pk_float_vector_multi_scalars(
-        self, is_row_based, fields_num_in_file, dim, entities
-    ):
+    def test_string_pk_float_vector_multi_scalars(self, is_row_based, fields_num_in_file, dim, entities):
         """
         collection schema: [str_pk, float_vector,
                         float_scalar, int_scalar, string_scalar, bool_scalar]
@@ -788,20 +901,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         if fields_num_in_file in ["less", "more"]:
@@ -824,7 +931,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             success = self.utility_wrap.wait_index_build_completed(c_name)
             assert success
             # verify search and query
-            log.info(f"wait for load finished and be ready for search")
+            log.info("wait for load finished and be ready for search")
             self.collection_wrap.load(_refresh=True)
             time.sleep(10)
             search_data = cf.gen_vectors(1, dim)
@@ -848,9 +955,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [15])
     @pytest.mark.parametrize("entities", [200])
-    def test_float_vector_from_numpy_file(
-        self, auto_id, dim, entities
-    ):
+    def test_float_vector_from_numpy_file(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
         schema 2: [pk, float_vector, int_scalar, string_scalar, float_scalar, bool_scalar]
@@ -891,13 +996,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=120
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=120)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
 
@@ -906,17 +1007,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == entities
         # create index and load
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         result = self.utility_wrap.wait_index_build_completed(c_name)
         assert result is True
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(f"wait for load finished and be ready for search")
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info("wait for load finished and be ready for search")
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         # verify imported data is available for search
         nq = 2
         topk = 5
@@ -976,25 +1073,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert success
         assert self.collection_wrap.num_entities == entities
 
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify imported data is available for search
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
         search_data = cf.gen_vectors(1, dim)
@@ -1008,9 +1099,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_items={"nq": 1, "limit": 1},
         )
         uids = res[0].ids
-        res, _ = self.collection_wrap.query(
-            expr=f"{df.pk_field} in {uids}", output_fields=[df.float_field]
-        )
+        res, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {uids}", output_fields=[df.float_field])
         assert isinstance(res[0].get(df.float_field, 1), np.float32)
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1049,13 +1138,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -1064,11 +1149,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         success = self.utility_wrap.wait_index_build_completed(c_name)
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
@@ -1092,9 +1175,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [6])
     @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("file_nums", [10])
-    def test_multi_numpy_files_from_diff_folders(
-        self, auto_id, dim, entities, file_nums
-    ):
+    def test_multi_numpy_files_from_diff_folders(self, auto_id, dim, entities, file_nums):
         """
         collection schema 1: [pk, float_vector]
         data file: .npy files in different folders
@@ -1116,9 +1197,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
@@ -1133,13 +1212,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 file_nums=1,
                 force=True,
             )
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=files
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
             task_ids.append(task_id)
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=90)
         log.info(f"bulk insert state:{success}")
 
         assert success
@@ -1149,7 +1224,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
@@ -1212,9 +1287,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task id:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -1225,15 +1298,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(10)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -1279,9 +1348,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [13])
     @pytest.mark.parametrize("entities", [300])
     @pytest.mark.parametrize("file_nums", [10])
-    def test_partition_key_on_multi_numpy_files(
-            self, auto_id, dim, entities, file_nums
-    ):
+    def test_partition_key_on_multi_numpy_files(self, auto_id, dim, entities, file_nums):
         """
         collection schema 1: [pk, int64, float_vector, double]
         data file: .npy files in different folders
@@ -1303,9 +1370,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
@@ -1320,13 +1385,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 file_nums=1,
                 force=True,
             )
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=files
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
             task_ids.append(task_id)
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
 
         assert success
@@ -1336,7 +1397,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
@@ -1350,7 +1411,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
 
         # verify data was bulk inserted into different partitions
-        segment_num = len(self.utility_wrap.get_query_segment_info(c_name)[0])
         num_entities = 0
         empty_partition_num = 0
         for p in self.collection_wrap.partitions:
@@ -1361,7 +1421,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
 
 class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_non_existing_file(self):
         """
@@ -1383,16 +1442,13 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=None,
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         assert not success
         failed_reason = f"failed to get file size of '{files[0]}'"
         for state in states.values():
@@ -1439,9 +1495,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         assert success
         # TODO: remove the assert below if issue #25685 was by design
         # assert not success
@@ -1457,9 +1511,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [100])  # 3000
     @pytest.mark.parametrize("file_nums", [32])  # 10
     @pytest.mark.parametrize("multi_folder", [True, False])  # True, False
-    def test_float_vector_from_multi_files(
-        self, is_row_based, auto_id, dim, entities, file_nums, multi_folder
-    ):
+    def test_float_vector_from_multi_files(self, is_row_based, auto_id, dim, entities, file_nums, multi_folder):
         """
         collection: auto_id
         collection schema: [pk, float_vector,
@@ -1493,25 +1545,23 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             cf.gen_int32_field(name=df.int_field),
             cf.gen_string_field(name=df.string_field),
             cf.gen_bool_field(name=df.bool_field),
-            cf.gen_float_field(name=df.float_field)
+            cf.gen_float_field(name=df.float_field),
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         # import data
-        t0 = time.time()
         err_msg = "row-based import, only allow one JSON file each time"
         task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files,
-            check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": err_msg},
+            collection_name=c_name,
+            files=files,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1, "err_msg": err_msg},
         )
-
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1565,9 +1615,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
@@ -1575,8 +1623,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         failed_reason2 = "unsupported file type"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "") or \
-                   failed_reason2 in state.infos.get("failed_reason", "")
+            assert failed_reason in state.infos.get("failed_reason", "") or failed_reason2 in state.infos.get(
+                "failed_reason", ""
+            )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1619,9 +1668,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         assert not success
         if is_row_based:
             value = df.vec_field  # if auto_id else df.pk_field
@@ -1673,9 +1720,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         if auto_id:
@@ -1730,9 +1775,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
 
@@ -1741,7 +1784,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             failed_reason = f"the field '{df.vec_field}' is not defined in collection schema"
         else:
             if auto_id:
-                failed_reason = f"JSON column consumer: row count is 0"
+                failed_reason = "JSON column consumer: row count is 0"
             else:
                 failed_reason = f"field {dismatch_vec_field} row count 0 is not equal to other fields row count"
         for state in states.values():
@@ -1789,9 +1832,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
@@ -1835,13 +1876,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field 'vectors'"
@@ -1925,9 +1962,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [4])
     @pytest.mark.parametrize("entities", [1000])
     @pytest.mark.parametrize("position", [0, 500, 999])  # the index of wrong dim entity
-    def test_wrong_dim_in_one_entities_of_file(
-        self, is_row_based, auto_id, dim, entities, position
-    ):
+    def test_wrong_dim_in_one_entities_of_file(self, is_row_based, auto_id, dim, entities, position):
         """
         collection schema: [pk, float_vectors, int_scalar]
         data file: one of entities has wrong dim data
@@ -1956,18 +1991,12 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = (
-            f"doesn't equal to vector dimension {dim} of field 'vectors'"
-        )
+        failed_reason = f"doesn't equal to vector dimension {dim} of field 'vectors'"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1979,9 +2008,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [16])
     @pytest.mark.parametrize("entities", [300])
     @pytest.mark.parametrize("file_nums", [10])  # max task nums 32? need improve
-    def test_float_vector_with_multi_json_files(
-        self, is_row_based, auto_id, dim, entities, file_nums
-    ):
+    def test_float_vector_with_multi_json_files(self, is_row_based, auto_id, dim, entities, file_nums):
         """
         collection schema: [pk, float_vectors, int_scalar], one of entities has wrong dim data
         data files: multi files,
@@ -2017,13 +2044,12 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
 
         # import data
         task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files,
+            collection_name=c_name,
+            files=files,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1,
-                         "err_msg": "row-based import, only allow one JSON file each time"}
+            check_items={"err_code": 1, "err_msg": "row-based import, only allow one JSON file each time"},
         )
         assert self.collection_wrap.num_entities == 0
-
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -2061,13 +2087,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
 
@@ -2117,13 +2139,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(schema)
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
 
@@ -2168,13 +2186,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
@@ -2224,16 +2238,12 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = f"illegal value"
+        failed_reason = "illegal value"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -2278,16 +2288,12 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = f"failed to convert row value to entity"
+        failed_reason = "failed to convert row value to entity"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -2343,22 +2349,18 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason1 = "illegal value"
         failed_reason2 = "invalid character"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason1 in state.infos.get(
+            assert failed_reason1 in state.infos.get("failed_reason", "") or failed_reason2 in state.infos.get(
                 "failed_reason", ""
-            ) or failed_reason2 in state.infos.get("failed_reason", "")
+            )
         assert self.collection_wrap.num_entities == 0
 
         #
@@ -2376,9 +2378,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [6])
     @pytest.mark.parametrize("entities", [10])
     @pytest.mark.parametrize("file_nums", [2])
-    def test_multi_numpy_files_from_diff_folders_in_one_request(
-        self, auto_id, dim, entities, file_nums
-    ):
+    def test_multi_numpy_files_from_diff_folders_in_one_request(self, auto_id, dim, entities, file_nums):
         """
         collection schema 1: [pk, float_vector]
         data file: .npy files in different folders
@@ -2409,12 +2409,8 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
 
@@ -2464,13 +2460,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = "failed to convert row value to entity"
@@ -2485,9 +2477,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("float_vector", [True, False])
     @pytest.mark.parametrize("dim", [8])
     @pytest.mark.parametrize("entities", [500])
-    def test_data_type_str_on_vector_fields(
-        self, is_row_based, auto_id, float_vector, dim, entities
-    ):
+    def test_data_type_str_on_vector_fields(self, is_row_based, auto_id, float_vector, dim, entities):
         """
         collection schema: [pk, float_vector,
                         float_scalar, int_scalar, string_scalar, bool_scalar]
@@ -2516,43 +2506,39 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         fields = [cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         if not float_vector:
             fields = [cf.gen_binary_vec_field(name=df.vec_field, dim=dim)]
-        fields.extend([
-            cf.gen_int64_field(name=df.pk_field, is_primary=True),
-            cf.gen_int32_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field),
-            cf.gen_bool_field(name=df.bool_field),
-        ])
+        fields.extend(
+            [
+                cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                cf.gen_int32_field(name=df.int_field),
+                cf.gen_float_field(name=df.float_field),
+                cf.gen_string_field(name=df.string_field),
+                cf.gen_bool_field(name=df.bool_field),
+            ]
+        )
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason1 = "failed to parse row value"
         failed_reason2 = "failed to convert row value to entity"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason1 in state.infos.get("failed_reason", "") or \
-                   failed_reason2 in state.infos.get("failed_reason", "")
+            assert failed_reason1 in state.infos.get("failed_reason", "") or failed_reason2 in state.infos.get(
+                "failed_reason", ""
+            )
         assert self.collection_wrap.num_entities == 0
 
 
 @pytest.mark.skip()
 class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
-
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize(
-        "entities", [50000, 500000, 1000000]
-    )  # 1m*3; 50k*20; 2m*3, 500k*4
+    @pytest.mark.parametrize("entities", [50000, 500000, 1000000])  # 1m*3; 50k*20; 2m*3, 500k*4
     def test_float_vector_from_multi_numpy_files(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
@@ -2589,9 +2575,7 @@ class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
         )
         log.info(f"files:{files}")
         for i in range(file_nums):
-            files = [
-                f"{dim}d_{suffix}_{i}/{vec_field}.npy"
-            ]  # npy file name shall be the vector field name
+            files = [f"{dim}d_{suffix}_{i}/{vec_field}.npy"]  # npy file name shall be the vector field name
             if not auto_id:
                 files.append(f"{dim}d_{suffix}_{i}/{df.pk_field}.npy")
             t0 = time.time()
@@ -2602,17 +2586,11 @@ class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
                     check_flag = False
                     break
 
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=files
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=180
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=180)
             tt = time.time() - t0
-            log.info(
-                f"auto_id:{auto_id}, bulk insert{suffix}-{i} state:{success} in {tt}"
-            )
+            log.info(f"auto_id:{auto_id}, bulk insert{suffix}-{i} state:{success} in {tt}")
             assert success is check_flag
 
         # TODO: assert num entities
@@ -2625,11 +2603,9 @@ class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
 
             # verify imported data is available for search
             index_params = ct.default_index
-            self.collection_wrap.create_index(
-                field_name=df.vec_field, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
             self.collection_wrap.load()
-            log.info(f"wait for load finished and be ready for search")
+            log.info("wait for load finished and be ready for search")
             time.sleep(20)
             loaded_segs = len(self.utility_wrap.get_query_segment_info(c_name)[0])
             log.info(f"query seg info: {loaded_segs} segs loaded.")

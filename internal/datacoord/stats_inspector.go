@@ -27,12 +27,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -86,10 +88,42 @@ func newStatsInspector(ctx context.Context,
 }
 
 func (si *statsInspector) Start() {
+	si.warnDeprecatedThrottleConfigs()
 	si.reloadFromMeta()
 	si.loopWg.Add(2)
 	go si.triggerStatsTaskLoop()
 	go si.cleanupStatsTasksLoop()
+}
+
+// warnDeprecatedThrottleConfigs tells operators whose config still carries the
+// old JSON throttle that it no longer has any effect, instead of letting the
+// setting disappear silently on upgrade.
+func (si *statsInspector) warnDeprecatedThrottleConfigs() {
+	for _, item := range []*paramtable.ParamItem{
+		&Params.DataCoordCfg.JSONStatsTriggerCount,
+		&Params.DataCoordCfg.JSONStatsTriggerInterval,
+	} {
+		if item.GetValue() == item.DefaultValue {
+			continue
+		}
+		mlog.Warn(si.ctx, "deprecated config is set and no longer throttles stats tasks, use dataCoord.statsTaskPendingLimit instead",
+			mlog.String("key", item.Key),
+			mlog.String("value", item.GetValue()))
+	}
+	if jsonShreddingDisabledByDeprecatedConfig() {
+		mlog.Warn(si.ctx, "dataCoord.jsonShreddingTriggerCount is 0, keeping JSON key index submission disabled for compatibility",
+			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
+	}
+}
+
+// jsonShreddingDisabledByDeprecatedConfig reports whether the deprecated
+// jsonShreddingTriggerCount is still being used as a kill switch. The removed
+// limiter broke out of the loop once the submitted count reached the configured
+// value, so 0 disabled JSON key-index submission on the very first segment.
+// Silently re-enabling shredding for an operator who had set 0 would undo a
+// deliberate decision, so that one value keeps its meaning.
+func jsonShreddingDisabledByDeprecatedConfig() bool {
+	return Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() == 0
 }
 
 func (si *statsInspector) Stop() {
@@ -105,19 +139,8 @@ func (si *statsInspector) reloadFromMeta() {
 			st.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
-		if si.isExternalCollection(st.GetCollectionID()) {
-			mlog.Info(si.ctx, "skip reloading stats task for external collection",
-				mlog.FieldTaskID(st.GetTaskID()),
-				mlog.FieldCollectionID(st.GetCollectionID()))
-			if err := si.mt.statsTaskMeta.MarkTaskCanRecycle(st.GetTaskID()); err != nil {
-				mlog.Warn(si.ctx, "mark stats task can recycle failed",
-					mlog.FieldTaskID(st.GetTaskID()),
-					mlog.Err(err))
-			}
-			continue
-		}
-		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
 		taskSlot := int64(0)
+		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
 		if segment != nil {
 			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
 		}
@@ -139,19 +162,33 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 
-	lastJSONStatsLastTrigger := time.Now().Unix()
-	maxJSONStatsTaskCount := 0
+	round := 0
 	for {
 		select {
 		case <-si.ctx.Done():
 			mlog.Warn(si.ctx, "DataCoord context done, exit checkStatsTaskLoop...")
 			return
 		case <-ticker.C:
-			si.triggerTextStatsTask()
-			si.triggerBM25StatsTask()
-			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
+			si.triggerStatsTasks(round)
+			round++
 		}
 	}
+}
+
+// triggerStatsTasks runs one discovery round. The sub-jobs share a single
+// admission budget and each trigger returns as soon as it is refused, so
+// whichever runs first claims the capacity. Alternate text and JSON per round,
+// otherwise a long text-index backlog starves JSON shredding for as long as it
+// takes to drain - days on a large collection.
+func (si *statsInspector) triggerStatsTasks(round int) {
+	if round%2 == 0 {
+		si.triggerTextStatsTask()
+		si.triggerJSONKeyIndexStatsTask()
+	} else {
+		si.triggerJSONKeyIndexStatsTask()
+		si.triggerTextStatsTask()
+	}
+	si.triggerBM25StatsTask()
 }
 
 func (si *statsInspector) enableBM25() bool {
@@ -177,9 +214,11 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 	return false
 }
 
-func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
+func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 		return false
 	}
 
@@ -199,9 +238,33 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
+func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
+	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
+}
+
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	// TODO: docking bm25 stats task
 	return false
+}
+
+// canSubmitStatsTask reports whether the global scheduler still has room for a
+// new stats task. The pending queue is shared by every task type, so the count is
+// scoped to stats work: an index or compaction backlog must not starve text-index
+// and JSON-shredding submission. Stats tasks waiting on a retry backoff are
+// counted, because they still occupy queue depth. Discovery re-runs on every
+// TaskCheckInterval tick, so a segment skipped here is picked up again once the
+// stats queue drains.
+func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
+	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats)
+	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
+	if pendingTaskCount > pendingTaskLimit {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
+			mlog.Int("pendingTaskCount", pendingTaskCount),
+			mlog.Int("pendingTaskLimit", pendingTaskLimit),
+			mlog.String("subJobType", subJobType.String()))
+		return false
+	}
+	return true
 }
 
 func (si *statsInspector) triggerTextStatsTask() {
@@ -209,6 +272,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 	for _, collection := range collections {
 		if collection == nil {
 			continue
+		}
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
+			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
@@ -219,14 +285,28 @@ func (si *statsInspector) triggerTextStatsTask() {
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
+		// needDoTextIndex is false for every segment once there is no field to
+		// index, so skip the collection before scanning all of its segments.
+		if len(needTriggerFieldIDs) == 0 {
+			continue
+		}
 		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted)
+			if !needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted) {
+				return false
+			}
+			// A segment whose task is already in meta must not be re-submitted;
+			// filtering it out here keeps the per-tick work proportional to the
+			// segments that still need a task instead of to all of them.
+			// Selection callbacks may run concurrently with cache writes, so keep
+			// this callback read-only.
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_TextIndexJob)
 		}))
 
 		resources := []*internalpb.FileResourceInfo{}
 		var err error
-		if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && len(collection.Schema.GetFileResourceIds()) > 0 {
+		if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+			len(collection.Schema.GetFileResourceIds()) > 0 {
 			resources, err = si.mt.GetFileResources(si.ctx, collection.Schema.GetFileResourceIds()...)
 			if err != nil {
 				mlog.Warn(si.ctx, "get file resources for collection failed, wait for retry", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
@@ -235,6 +315,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 		}
 
 		for _, segment := range segments {
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
+				return
+			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true, resources); err != nil {
 				mlog.Warn(si.ctx, "create stats task with text index for segment failed, wait for retry",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
@@ -244,11 +327,19 @@ func (si *statsInspector) triggerTextStatsTask() {
 	}
 }
 
-func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
+func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
+	if jsonShreddingDisabledByDeprecatedConfig() {
+		mlog.RatedWarn(si.ctx, rate.Limit(0.1), "skip JSON key index stats task, dataCoord.jsonShreddingTriggerCount is set to 0",
+			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
+		return
+	}
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil || collection.IsExternal() {
+		if collection == nil {
 			continue
+		}
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
+			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
@@ -257,33 +348,47 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger 
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
-		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoJSONKeyIndex(seg, needTriggerFieldIDs)
-		}))
-		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
-			lastJSONStatsLastTrigger = time.Now().Unix()
-			maxJSONStatsTaskCount = 0
+		// Same as the text loop: no field to shred means no candidate segment,
+		// which also short-circuits every collection once JSON shredding is off.
+		if len(needTriggerFieldIDs) == 0 {
+			continue
 		}
+		allowUnsorted := collection.IsExternal()
+		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			if collection.IsExternal() && !canBuildExternalJSONKeyIndex(seg) {
+				return false
+			}
+			if !needDoJSONKeyIndex(seg, needTriggerFieldIDs, allowUnsorted) {
+				return false
+			}
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob)
+		}))
 		for _, segment := range segments {
-			if maxJSONStatsTaskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
-				break
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
+				return
 			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true, nil); err != nil {
 				mlog.Warn(si.ctx, "create stats task with json key index for segment failed, wait for retry:",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 				continue
 			}
-			maxJSONStatsTaskCount++
 		}
 	}
-	return lastJSONStatsLastTrigger, maxJSONStatsTaskCount
 }
 
 func (si *statsInspector) triggerBM25StatsTask() {
+	// BM25 stats tasks are not docked yet, so every collection would be scanned
+	// for nothing. Drop out before touching the segment meta at all.
+	if !si.enableBM25() {
+		return
+	}
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil || collection.IsExternal() {
 			continue
+		}
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_BM25Job) {
+			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
@@ -293,10 +398,19 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoBM25(seg, needTriggerFieldIDs)
+			if !seg.GetIsSorted() && !seg.GetIsSortedByNamespace() {
+				return false
+			}
+			if !needDoBM25(seg, needTriggerFieldIDs) {
+				return false
+			}
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_BM25Job)
 		}))
 
 		for _, segment := range segments {
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_BM25Job) {
+				return
+			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true, nil); err != nil {
 				mlog.Warn(si.ctx, "create stats task with bm25 for segment failed, wait for retry",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
@@ -343,12 +457,34 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
-	if si.isExternalCollection(originSegment.GetCollectionID()) && subJobType != indexpb.StatsSubJob_TextIndexJob {
-		mlog.Info(si.ctx,
-			"skip submit stats task for external collection",
+	if si.isExternalCollection(originSegment.GetCollectionID()) {
+		if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob && !canBuildExternalJSONKeyIndex(originSegment) {
+			mlog.Info(si.ctx,
+				"skip submit external json stats task without v3 manifest",
+				mlog.FieldCollectionID(originSegment.GetCollectionID()),
+				mlog.FieldSegmentID(originSegmentID))
+			return nil
+		}
+		if subJobType != indexpb.StatsSubJob_TextIndexJob &&
+			subJobType != indexpb.StatsSubJob_JsonKeyIndexJob {
+			mlog.Info(si.ctx,
+				"skip submit stats task for external collection",
+				mlog.FieldCollectionID(originSegment.GetCollectionID()),
+				mlog.FieldSegmentID(originSegmentID),
+				mlog.String("subJobType", subJobType.String()))
+			return nil
+		}
+	}
+	if si.mt.statsTaskMeta.HasStatsTask(originSegmentID, subJobType) {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "stats task already exists",
 			mlog.FieldCollectionID(originSegment.GetCollectionID()),
 			mlog.FieldSegmentID(originSegmentID),
 			mlog.String("subJobType", subJobType.String()))
+		return nil
+	}
+	// The trigger loops check admission before getting here; this guard covers
+	// callers that reach the StatsInspector interface directly.
+	if !si.canSubmitStatsTask(subJobType) {
 		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())

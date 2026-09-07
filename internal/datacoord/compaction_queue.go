@@ -85,10 +85,22 @@ var (
 type Prioritizer func(t CompactionTask) int
 
 type CompactionQueue struct {
-	pq          PriorityQueue[CompactionTask]
-	lock        lock.RWMutex
-	prioritizer Prioritizer
-	capacity    int
+	pq   PriorityQueue[CompactionTask]
+	lock lock.RWMutex
+	// prioritizer and prioritizerName are guarded by lock.
+	// Prioritizer is a func value and therefore cannot be compared with ==,
+	// so the configuration name is kept alongside it as its identity.
+	//
+	// prioritizerName is nil while prioritizer has not been resolved from the
+	// configuration -- the constructor and UpdatePrioritizer both take a func
+	// directly. It is a pointer rather than a string because "" is itself a
+	// settable configuration value (the RESTful alterConfig contract treats a
+	// present value, including the empty string, as a set and only null as a
+	// reset, and dataCoord.compaction.taskPrioritizer has no Formatter), so a
+	// string zero value cannot stand in for "unset" without colliding with it.
+	prioritizer     Prioritizer
+	prioritizerName *string
+	capacity        int
 }
 
 func NewCompactionQueue(capacity int, prioritizer Prioritizer) *CompactionQueue {
@@ -123,10 +135,30 @@ func (q *CompactionQueue) Dequeue() (CompactionTask, error) {
 	return item.value, nil
 }
 
+// UpdatePrioritizer sets the prioritizer out of band, so the queue no longer
+// knows which configuration value it corresponds to; the next SyncPrioritizer
+// re-adopts from the configuration whatever name it is given.
 func (q *CompactionQueue) UpdatePrioritizer(prioritizer Prioritizer) {
-	q.prioritizer = prioritizer
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	q.prioritizerName = nil
+	q.updatePrioritizerLocked(prioritizer)
+}
+
+// SyncPrioritizer re-prioritizes the queue only when the configured prioritizer
+// actually changed. It is safe to call on every scheduling tick.
+func (q *CompactionQueue) SyncPrioritizer(name string) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	if q.prioritizerName != nil && *q.prioritizerName == name {
+		return
+	}
+	q.prioritizerName = &name
+	q.updatePrioritizerLocked(getPrioritizerByName(name))
+}
+
+func (q *CompactionQueue) updatePrioritizerLocked(prioritizer Prioritizer) {
+	q.prioritizer = prioritizer
 	for i := range q.pq {
 		q.pq[i].priority = q.prioritizer(q.pq[i].value)
 	}
@@ -194,9 +226,12 @@ var (
 	}
 )
 
-func getPrioritizer() Prioritizer {
-	p := Params.DataCoordCfg.CompactionTaskPrioritizer.GetValue()
-	switch p {
+func getPrioritizerName() string {
+	return Params.DataCoordCfg.CompactionTaskPrioritizer.GetValue()
+}
+
+func getPrioritizerByName(name string) Prioritizer {
+	switch name {
 	case "level":
 		return LevelPrioritizer
 	case "mix":
@@ -204,4 +239,8 @@ func getPrioritizer() Prioritizer {
 	default:
 		return DefaultPrioritizer
 	}
+}
+
+func getPrioritizer() Prioritizer {
+	return getPrioritizerByName(getPrioritizerName())
 }

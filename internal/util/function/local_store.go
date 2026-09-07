@@ -17,6 +17,8 @@
 package function
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -83,7 +85,7 @@ func (s *FunctionRunnerLocalStore) FillEmbeddingData(collectionID int64, schema 
 		return err
 	}
 	schemaVersion := schema.GetVersion()
-	_, ok, err := TryMaterialize(collectionID, schemaVersion, body)
+	_, ok, err := GetManager().TryMaterialize(context.Background(), collectionID, schemaVersion, body)
 	if err != nil {
 		return err
 	}

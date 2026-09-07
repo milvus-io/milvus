@@ -18,6 +18,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels (no CChannel) | No | — |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
@@ -27,6 +28,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
+| RefreshExternalCollection | Broadcast: CChannel | No | — |
 
 ## Message Descriptions
 
@@ -36,7 +38,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
-- **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot**: Manages collection snapshots. CChannel-only.
+- **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
@@ -44,6 +46,11 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+
+## Replication Compatibility
+
+Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, and RefreshExternalCollection. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
 
 ## Data Lifecycle Ordering Invariants
 

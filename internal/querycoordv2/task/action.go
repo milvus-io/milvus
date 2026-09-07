@@ -34,7 +34,7 @@ const (
 	ActionTypeReduce
 	ActionTypeUpdate
 	ActionTypeStatsUpdate
-	ActionTypeDropIndex
+	_ // retired action value
 	ActionTypeReopen
 )
 
@@ -43,7 +43,6 @@ var ActionTypeName = map[ActionType]string{
 	ActionTypeReduce:      "Reduce",
 	ActionTypeUpdate:      "Update",
 	ActionTypeStatsUpdate: "StatsUpdate",
-	ActionTypeDropIndex:   "DropIndex",
 	ActionTypeReopen:      "Reopen",
 }
 
@@ -292,34 +291,4 @@ func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	return action.rpcReturned.Load()
-}
-
-type DropIndexAction struct {
-	*BaseAction
-	indexIDs    []int64
-	rpcReturned atomic.Bool
-}
-
-func NewDropIndexAction(nodeID typeutil.UniqueID, typ ActionType, shard string, indexIDs []int64) *DropIndexAction {
-	return &DropIndexAction{
-		BaseAction:  NewBaseAction(nodeID, typ, shard, 0),
-		indexIDs:    indexIDs,
-		rpcReturned: *atomic.NewBool(false),
-	}
-}
-
-func (action *DropIndexAction) IndexIDs() []int64 {
-	return action.indexIDs
-}
-
-func (action *DropIndexAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	return action.rpcReturned.Load()
-}
-
-func (action *DropIndexAction) Desc() string {
-	return fmt.Sprintf("type:%s, node id: %d, index ids: %v", action.Type().String(), action.Node(), action.IndexIDs())
-}
-
-func (action *DropIndexAction) String() string {
-	return action.BaseAction.String() + fmt.Sprintf(`{[indexIDs=%v]}`, action.IndexIDs())
 }

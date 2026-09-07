@@ -29,10 +29,13 @@
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "milvus-storage/thread_pool.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -110,6 +113,11 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     }
 }
 
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable) {
+    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
+}
+
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config) {
     try {
@@ -129,6 +137,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =
@@ -193,6 +202,88 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
                                   c_arrow_reader_config.range_size_limit_bytes);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
+CStatus
+InitLoonReaderThreadPool(int32_t num_threads) {
+    try {
+        if (num_threads < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "loon reader thread pool size must be non-negative");
+        }
+        // 0 = leave the pool uninitialized (loon reads stay sequential,
+        // the pre-existing behavior). Non-zero values resize an existing
+        // pool in either direction, but 0 cannot destroy it, so a rollback
+        // to 0 is a no-op — callers must surface
+        // GetLoonReaderThreadPoolSize() rather than the requested value,
+        // otherwise the rollback looks applied while the old pool is still
+        // serving reads.
+        if (num_threads == 0) {
+            return milvus::SuccessCStatus();
+        }
+        milvus_storage::ThreadPoolHolder::WithSingleton(num_threads);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+int32_t
+GetLoonReaderThreadPoolSize() {
+    return static_cast<int32_t>(
+        milvus_storage::ThreadPoolHolder::GetParallelism());
+}
+
+CStatus
+InitIndexBuildReadWindow(int64_t window_bytes) {
+    try {
+        if (window_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "index build read window must be non-negative");
+        }
+        // milvus-storage validates reader.record_batch_max_size in
+        // [1, 4GB]; reject out-of-range here so a bad config fails at
+        // init/update time instead of at the first build task.
+        constexpr int64_t kMaxWindowBytes = 4LL * 1024 * 1024 * 1024;
+        if (window_bytes > kMaxWindowBytes) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "index build read window must not exceed 4GB");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetIndexBuildReadWindow(window_bytes);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+    try {
+        if (initial_rate == 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "external IOPS initial rate must be greater than zero");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

@@ -1,10 +1,7 @@
 package proxy
 
 import (
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -19,16 +16,12 @@ import (
 )
 
 const (
-	elementScopeKey          = "element_scope"
-	elementCollapseMax       = "max"
-	elementCollapseSum       = "sum"
-	elementCollapseAvg       = "avg"
-	elementCollapseTopKSum   = "topk_sum"
-	elementCollapseTopKAvg   = "topk_avg"
-	hybridElementKeyPrefix   = "__milvus_element_key"
-	hybridElementKeySep      = "\x1f"
-	hybridElementKeyIntPK    = "i"
-	hybridElementKeyStringPK = "s"
+	elementScopeKey        = "element_scope"
+	elementCollapseMax     = "max"
+	elementCollapseSum     = "sum"
+	elementCollapseAvg     = "avg"
+	elementCollapseTopKSum = "topk_sum"
+	elementCollapseTopKAvg = "topk_avg"
 )
 
 type elementCollapseConfig struct {
@@ -226,42 +219,4 @@ func inferElementLevelHybrid(infos []hybridSubSearchInfo) bool {
 		}
 	}
 	return true
-}
-
-func makeHybridElementKey(pk any, elementIndex int64) string {
-	switch v := pk.(type) {
-	case int64:
-		return fmt.Sprintf("%s%s%s%s%d%s%d", hybridElementKeyPrefix, hybridElementKeySep, hybridElementKeyIntPK, hybridElementKeySep, v, hybridElementKeySep, elementIndex)
-	case string:
-		return fmt.Sprintf("%s%s%s%s%s%s%d", hybridElementKeyPrefix, hybridElementKeySep, hybridElementKeyStringPK, hybridElementKeySep, base64.RawStdEncoding.EncodeToString([]byte(v)), hybridElementKeySep, elementIndex)
-	default:
-		return fmt.Sprintf("%s%s%T%s%v%s%d", hybridElementKeyPrefix, hybridElementKeySep, pk, hybridElementKeySep, pk, hybridElementKeySep, elementIndex)
-	}
-}
-
-func parseHybridElementKey(key string) (any, int64, bool) {
-	parts := strings.Split(key, hybridElementKeySep)
-	if len(parts) != 4 || parts[0] != hybridElementKeyPrefix {
-		return nil, 0, false
-	}
-	elementIndex, err := strconv.ParseInt(parts[3], 10, 64)
-	if err != nil {
-		return nil, 0, false
-	}
-	switch parts[1] {
-	case hybridElementKeyIntPK:
-		pk, err := strconv.ParseInt(parts[2], 10, 64)
-		if err != nil {
-			return nil, 0, false
-		}
-		return pk, elementIndex, true
-	case hybridElementKeyStringPK:
-		decoded, err := base64.RawStdEncoding.DecodeString(parts[2])
-		if err != nil {
-			return nil, 0, false
-		}
-		return string(decoded), elementIndex, true
-	default:
-		return nil, 0, false
-	}
 }

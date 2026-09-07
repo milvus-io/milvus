@@ -305,7 +305,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	Wait(ctx, timeout, tasks...)
+	Wait(ctx, tasks...)
 	for _, task := range tasks {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
@@ -1358,6 +1358,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		})
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1458,7 +1459,7 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderSegmentTask(context.TODO(), WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(context.TODO(), 10*time.Second, WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1692,6 +1693,7 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1754,6 +1756,7 @@ func (suite *TaskSuite) TestLeaderTaskUsesLeaderExecutor() {
 
 	task := NewLeaderSegmentTask(
 		ctx,
+		10*time.Second,
 		WrapIDSource(0),
 		suite.collection,
 		suite.replica,
@@ -2260,6 +2263,55 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	suite.False(suite.nodeMgr.IsResourceExhausted(nodeID))
 }
 
+// TestRemoveStartedTaskReturnsError pins that a task dropped while still
+// Started (node down via RemoveByNode, or shutdown via Stop) is canceled with a
+// real error, so a synchronous Wait caller can distinguish it from a
+// successful completion whose err is nil.
+func (suite *TaskSuite) TestRemoveStartedTaskReturnsError() {
+	ctx := context.Background()
+	nodeID := int64(1)
+
+	// A Started task removed via RemoveByNode (its node went down) must surface
+	// a real error, exercising the production entry point rather than calling
+	// scheduler.remove directly.
+	task, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(nodeID, ActionTypeGrow, "ch-0", 999),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.scheduler.RemoveByNode(nodeID)
+
+	suite.Equal(TaskStatusCanceled, task.Status())
+	suite.Error(task.Err())
+	suite.ErrorIs(task.Err(), merr.ErrServiceUnavailable)
+
+	// A task that already finished successfully keeps its nil err on remove.
+	task2, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(nodeID, ActionTypeGrow, "ch-0", 998),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task2))
+	task2.SetStatus(TaskStatusSucceeded)
+
+	suite.scheduler.RemoveByNode(nodeID)
+
+	suite.NoError(task2.Err())
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }
@@ -2315,7 +2367,7 @@ func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Sub(segmentTask)
 	assert.Empty(t, delta.records)
 
-	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
+	base := newBaseTask(context.Background(), 0, WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
 	base.SetID(2)
 	base.actions = []Action{NewChannelAction(1, ActionTypeGrow, "ch")}
 	malformedTask := &SegmentTask{baseTask: base, segmentID: 10}
@@ -2633,6 +2685,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// After fix: checkStale uses leaderID (1, RW), task should NOT be stale
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			replicaWithRONode,
@@ -2669,6 +2722,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// Create task with original replica (all RW nodes)
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -2727,6 +2781,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// Create LeaderAction with Reduce type
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			replicaWithLeaderRO,
@@ -3177,7 +3232,7 @@ func (suite *TaskSuite) TestNodeTaskQueueLeaderActionDualNode() {
 	segmentID := int64(300)
 
 	action := NewLeaderAction(leaderID, workerID, ActionTypeGrow, "ch-0", segmentID, 1)
-	task := NewLeaderSegmentTask(suite.ctx, WrapIDSource(0), suite.collection, suite.replica, leaderID, action)
+	task := NewLeaderSegmentTask(suite.ctx, 10*time.Second, WrapIDSource(0), suite.collection, suite.replica, leaderID, action)
 	task.SetID(20)
 
 	queue.Add(task)
@@ -3263,4 +3318,198 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 		return true
 	})
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
+}
+
+func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
+	channelTask, err := NewChannelTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		NewChannelAction(1, ActionTypeReduce, "test-channel"),
+	)
+	assert.NoError(t, err)
+	defer channelTask.Cancel(nil)
+
+	_, ok := channelTask.Context().Deadline()
+	assert.False(t, ok, "channel task context must not carry a deadline before ActivateDeadline")
+
+	channelTask.ActivateDeadline(0)
+	// A second call must be a no-op and not push the deadline out further.
+	channelTask.ActivateDeadline(0)
+
+	deadline, ok := channelTask.Context().Deadline()
+	assert.True(t, ok, "channel task context must carry the task timeout as a deadline once activated")
+
+	select {
+	case <-channelTask.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel task context did not expire after the task timeout")
+	}
+	assert.ErrorIs(t, channelTask.Context().Err(), context.DeadlineExceeded)
+	assert.WithinDuration(t, time.Now(), deadline, 2*time.Second)
+
+	// Segment tasks are bounded by the same mechanism.
+	segmentTask, err := NewSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer segmentTask.Cancel(nil)
+	_, ok = segmentTask.Context().Deadline()
+	assert.False(t, ok, "segment task context must not carry a deadline before ActivateDeadline")
+	segmentTask.ActivateDeadline(0)
+	_, ok = segmentTask.Context().Deadline()
+	assert.True(t, ok, "segment task context must carry the task timeout as a deadline once activated")
+
+	leaderTask := NewLeaderSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		1,
+		NewLeaderAction(1, 2, ActionTypeGrow, "test-channel", 3, 0),
+	)
+	defer leaderTask.Cancel(nil)
+	_, ok = leaderTask.Context().Deadline()
+	assert.False(t, ok, "leader task context must not carry a deadline before ActivateDeadline")
+	leaderTask.ActivateDeadline(0)
+	_, ok = leaderTask.Context().Deadline()
+	assert.True(t, ok, "leader task context must carry the task timeout as a deadline once activated")
+}
+
+func TestTaskDeadlineExcludesQueueingTime(t *testing.T) {
+	task, err := NewSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	// Simulate the task sitting in the wait queue / being bounced by the
+	// executor's admission cap for longer than its configured timeout.
+	time.Sleep(80 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "queueing time must not count against the deadline")
+
+	task.ActivateDeadline(0)
+	assert.NoError(t, task.Context().Err(), "deadline must not have expired immediately on activation")
+
+	select {
+	case <-task.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("task context did not expire after the task timeout once activated")
+	}
+	assert.ErrorIs(t, task.Context().Err(), context.DeadlineExceeded)
+}
+
+func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
+	task, err := NewSegmentTask(
+		context.Background(),
+		500*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeGrow, "test-channel", 2),
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	task.ActivateDeadline(0)
+	deadline0, _ := task.Context().Deadline()
+
+	// Spend most of step 0's budget before it "finishes" and step 1 is armed.
+	time.Sleep(300 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "step 0 must not have expired yet")
+
+	// Re-arming for the same step must be a no-op: the deadline must not move.
+	task.ActivateDeadline(0)
+	sameDeadline, _ := task.Context().Deadline()
+	assert.Equal(t, deadline0, sameDeadline, "re-arming the same step must not reset its deadline")
+
+	// Moving to step 1 must grant a full fresh budget, not inherit whatever
+	// was left of step 0's -- even though step 0 already used most of it.
+	task.ActivateDeadline(1)
+	deadline1, ok := task.Context().Deadline()
+	assert.True(t, ok)
+	assert.True(t, deadline1.After(deadline0), "step 1's deadline must be later than step 0's, not reuse it")
+
+	time.Sleep(300 * time.Millisecond)
+	assert.NoError(t, task.Context().Err(), "step 1 must have its own fresh 500ms budget, not step 0's leftover ~200ms")
+
+	select {
+	case <-task.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("step 1's context did not expire after its own timeout")
+	}
+	assert.ErrorIs(t, task.Context().Err(), context.DeadlineExceeded)
+}
+
+// TestExecutorActivatesDeadlineOnlyAfterAdmission exercises the real
+// Executor.Execute() wiring end-to-end, rather than calling
+// task.ActivateDeadline() directly the way TestTaskDeadlineExcludesQueueingTime
+// does. It would catch the ActivateDeadline call being removed from Execute,
+// or moved ahead of the admission-cap check, either of which a
+// direct-call-style test cannot detect.
+func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
+	paramtable.Init()
+	nodeMgr := session.NewNodeManager()
+	broker := meta.NewMockBroker(t)
+	// Any error is fine here: the point is to let the background goroutine
+	// Execute() spawns on successful admission exit quickly via task.Fail,
+	// without touching the nil meta/dist/targetMgr/cluster this test doesn't
+	// otherwise set up.
+	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+		Return(nil, merr.WrapErrCollectionNotFound(int64(1))).Maybe()
+
+	executor := NewExecutor(1, nil, nil, broker, nil, nil, nodeMgr)
+
+	task, err := NewSegmentTask(
+		context.Background(),
+		80*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		// Grow routes to loadSegment, which fails gracefully through
+		// getMetaInfo -> getCollectionInfo -> the mocked broker error above.
+		// Reduce routes to releaseSegment, which needs a working dist/cluster
+		// this test doesn't set up and would nil-panic in the background
+		// goroutine instead.
+		NewSegmentAction(1, ActionTypeGrow, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer task.Cancel(nil)
+
+	// Saturate the non-channel admission pool directly so Execute rejects
+	// this task at the capacity gate without ever reaching ActivateDeadline.
+	// (GetNonChannelTaskCap floors to >=1 regardless of config, so it can't
+	// be driven to reject via TaskExecutionCap -- see its doc comment.)
+	executor.nonChannelTaskNum.Store(1 << 20)
+
+	admitted := executor.Execute(task, 0)
+	assert.False(t, admitted, "Execute must reject the task when the admission pool is saturated")
+	_, ok := task.Context().Deadline()
+	assert.False(t, ok, "deadline must not be armed for a task rejected at admission")
+
+	// Clear the pool: the same task, dispatched again, must now be admitted
+	// and get its deadline armed by Execute itself, not by a direct test call.
+	executor.nonChannelTaskNum.Store(0)
+	admitted = executor.Execute(task, 0)
+	assert.True(t, admitted, "Execute must admit the task once the pool is clear")
+	_, ok = task.Context().Deadline()
+	assert.True(t, ok, "Execute must have armed the deadline on successful admission")
 }

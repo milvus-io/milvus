@@ -56,6 +56,13 @@ type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
 	NewFiles WriterOutput
+	// ColumnGroups is the serializable form of new column groups to register
+	// (loon_transaction_add_column_group). It is the RPC-crossable counterpart
+	// of NewFiles: a caller on a different node than the writer (DataCoord
+	// running a schema-bump materialization transaction) supplies these
+	// descriptors instead of the writer-owned C payload. Staged before
+	// DeltaLogs / Stats, matching the NewFiles ordering.
+	ColumnGroups []ColumnGroupEntry
 	// DeltaLogs is the list of delta-log entries to register.
 	DeltaLogs []DeltaLogEntry
 	// Stats is the list of stat entries (bloom filter, bm25, etc.) to
@@ -76,7 +83,7 @@ func (u *ManifestUpdates) isEmpty() bool {
 	if u.NewFiles != nil {
 		return false
 	}
-	return len(u.DeltaLogs) == 0 && len(u.Stats) == 0
+	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
@@ -140,6 +147,10 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
 		}
+	}
+
+	if err := addColumnGroupEntries(handle, updates.ColumnGroups); err != nil {
+		return err
 	}
 
 	for _, entry := range updates.DeltaLogs {

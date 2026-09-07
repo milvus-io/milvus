@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -99,50 +98,6 @@ func registerDefaults() {
 	Register(&Handler{
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
-	})
-	Register(&Handler{
-		Path: ExprPath,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Check if expr endpoint is enabled
-			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
-				return
-			}
-
-			code := req.URL.Query().Get("code")
-			var auth string
-
-			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
-				return
-			}
-
-			if err := CheckExprAuth(req.Context(), req); err != nil {
-				writeJSONError(w, HTTPStatusFromPrivilegeError(err), err.Error())
-				return
-			}
-			// Use bypass since we've already authenticated
-			auth = expr.AuthBypass
-
-			output, err := expr.Exec(code, auth)
-			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError,
-					fmt.Sprintf("failed to execute expression, %s", err.Error()))
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			resp := make(map[string]string)
-			resp["output"] = output
-			json.NewEncoder(w).Encode(resp)
-		}),
-	})
-	Register(&Handler{
-		Path:    StaticPath,
-		Handler: GetStaticHandler(),
 	})
 
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {

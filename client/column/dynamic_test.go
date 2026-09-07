@@ -26,6 +26,49 @@ type ColumnDynamicSuite struct {
 	suite.Suite
 }
 
+func (s *ColumnDynamicSuite) TestSlicePreservesDynamicColumn() {
+	column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{
+		[]byte(`{"field": 1}`),
+		[]byte(`{"field": 2}`),
+	}), "field")
+
+	sliced := column.Slice(1, -1)
+	dynamic, ok := sliced.(*ColumnDynamic)
+	s.Require().True(ok)
+	s.Equal("field", dynamic.Name())
+	value, err := dynamic.GetAsInt64(0)
+	s.Require().NoError(err)
+	s.EqualValues(2, value)
+}
+
+func (s *ColumnDynamicSuite) TestSliceColumnsSharesDynamicJSONBase() {
+	base := NewColumnJSONBytes("$meta", [][]byte{
+		[]byte(`{"color": "red", "price": 10}`),
+		[]byte(`{"color": "blue", "price": 20}`),
+	}).WithIsDynamic(true)
+	color := NewColumnDynamic(base, "color")
+	price := NewColumnDynamic(base, "price")
+
+	sliced := SliceColumns([]Column{base, color, price}, 1, -1)
+	s.Require().Len(sliced, 3)
+	slicedBase, ok := sliced[0].(*ColumnJSONBytes)
+	s.Require().True(ok)
+	slicedColor, ok := sliced[1].(*ColumnDynamic)
+	s.Require().True(ok)
+	slicedPrice, ok := sliced[2].(*ColumnDynamic)
+	s.Require().True(ok)
+
+	s.Same(slicedBase, slicedColor.ColumnJSONBytes)
+	s.Same(slicedBase, slicedPrice.ColumnJSONBytes)
+	s.True(slicedBase.FieldData().GetIsDynamic())
+	colorValue, err := slicedColor.GetAsString(0)
+	s.Require().NoError(err)
+	s.Equal("blue", colorValue)
+	priceValue, err := slicedPrice.GetAsInt64(0)
+	s.Require().NoError(err)
+	s.EqualValues(20, priceValue)
+}
+
 func (s *ColumnDynamicSuite) TestGetInt() {
 	cases := []struct {
 		input       string

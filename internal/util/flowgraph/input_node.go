@@ -19,8 +19,10 @@ package flowgraph
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -39,18 +41,83 @@ const (
 	CloseImmediately bool = false
 )
 
+type inputNodeMetricsKey struct {
+	nodeID       string
+	dataType     string
+	collectionID string
+}
+
+type inputNodeMetricsHandle struct {
+	consumeMsgCount    prometheus.Counter
+	consumeTimeTickLag prometheus.Gauge
+	references         int
+}
+
+var inputNodeMetricsCache = struct {
+	sync.Mutex
+	handles map[inputNodeMetricsKey]*inputNodeMetricsHandle
+}{
+	handles: make(map[inputNodeMetricsKey]*inputNodeMetricsHandle),
+}
+
+func acquireInputNodeMetrics(key inputNodeMetricsKey) *inputNodeMetricsHandle {
+	inputNodeMetricsCache.Lock()
+	defer inputNodeMetricsCache.Unlock()
+
+	handle, ok := inputNodeMetricsCache.handles[key]
+	if !ok {
+		handle = &inputNodeMetricsHandle{
+			consumeMsgCount: metrics.DataNodeConsumeMsgCount.WithLabelValues(
+				key.nodeID,
+				key.dataType,
+				key.collectionID,
+			),
+			consumeTimeTickLag: metrics.DataNodeConsumeTimeTickLag.WithLabelValues(
+				key.nodeID,
+				key.dataType,
+				key.collectionID,
+			),
+		}
+		inputNodeMetricsCache.handles[key] = handle
+	}
+	handle.references++
+	return handle
+}
+
+func releaseInputNodeMetrics(key inputNodeMetricsKey) {
+	inputNodeMetricsCache.Lock()
+	defer inputNodeMetricsCache.Unlock()
+
+	handle, ok := inputNodeMetricsCache.handles[key]
+	if !ok {
+		return
+	}
+	handle.references--
+	if handle.references > 0 {
+		return
+	}
+
+	metrics.DataNodeConsumeMsgCount.DeleteLabelValues(key.nodeID, key.dataType, key.collectionID)
+	metrics.DataNodeConsumeTimeTickLag.DeleteLabelValues(key.nodeID, key.dataType, key.collectionID)
+	delete(inputNodeMetricsCache.handles, key)
+}
+
 // InputNode is the entry point of flowgragh
 type InputNode struct {
 	BaseNode
-	input           <-chan *msgstream.MsgPack
-	lastMsg         *msgstream.MsgPack
-	name            string
-	role            string
-	nodeID          int64
-	nodeIDStr       string
-	collectionID    int64
-	collectionIDStr string
-	dataType        string
+	input              <-chan *msgstream.MsgPack
+	lastMsg            *msgstream.MsgPack
+	name               string
+	role               string
+	nodeID             int64
+	nodeIDStr          string
+	collectionID       int64
+	collectionIDStr    string
+	dataType           string
+	consumeMsgCount    prometheus.Counter
+	consumeTimeTickLag prometheus.Gauge
+	metricsKey         inputNodeMetricsKey
+	metricsReleaseOnce sync.Once
 
 	closeGracefully *atomic.Bool
 
@@ -79,6 +146,15 @@ func (inNode *InputNode) SetCloseMethod(gracefully bool) {
 		mlog.String("node", inNode.Name()),
 		mlog.Int64("collection", inNode.collectionID),
 		mlog.Bool("gracefully", gracefully))
+}
+
+func (inNode *InputNode) Free() {
+	if inNode.role != typeutil.DataNodeRole {
+		return
+	}
+	inNode.metricsReleaseOnce.Do(func() {
+		releaseInputNodeMetrics(inNode.metricsKey)
+	})
 }
 
 // Operate consume a message pack from msgstream and return
@@ -117,13 +193,8 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	inNode.lastMsg = msgPack
 	sub := tsoutil.SubByNow(msgPack.EndTs)
 	if inNode.role == typeutil.DataNodeRole {
-		metrics.DataNodeConsumeMsgCount.
-			WithLabelValues(inNode.nodeIDStr, inNode.dataType, inNode.collectionIDStr).
-			Inc()
-
-		metrics.DataNodeConsumeTimeTickLag.
-			WithLabelValues(inNode.nodeIDStr, inNode.dataType, inNode.collectionIDStr).
-			Set(float64(sub))
+		inNode.consumeMsgCount.Inc()
+		inNode.consumeTimeTickLag.Set(float64(sub))
 	}
 
 	var spans []trace.Span
@@ -187,18 +258,31 @@ func NewInputNode(input <-chan *msgstream.MsgPack, nodeName string, maxQueueLeng
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	return &InputNode{
+	nodeIDStr := fmt.Sprint(nodeID)
+	collectionIDStr := fmt.Sprint(collectionID)
+	node := &InputNode{
 		BaseNode:            baseNode,
 		input:               input,
 		name:                nodeName,
 		role:                role,
 		nodeID:              nodeID,
-		nodeIDStr:           fmt.Sprint(nodeID),
+		nodeIDStr:           nodeIDStr,
 		collectionID:        collectionID,
-		collectionIDStr:     fmt.Sprint(collectionID),
+		collectionIDStr:     collectionIDStr,
 		dataType:            dataType,
 		closeGracefully:     atomic.NewBool(CloseImmediately),
 		skipCount:           0,
 		lastNotTimetickTime: time.Now(),
 	}
+	if role == typeutil.DataNodeRole {
+		node.metricsKey = inputNodeMetricsKey{
+			nodeID:       nodeIDStr,
+			dataType:     dataType,
+			collectionID: collectionIDStr,
+		}
+		handle := acquireInputNodeMetrics(node.metricsKey)
+		node.consumeMsgCount = handle.consumeMsgCount
+		node.consumeTimeTickLag = handle.consumeTimeTickLag
+	}
+	return node
 }

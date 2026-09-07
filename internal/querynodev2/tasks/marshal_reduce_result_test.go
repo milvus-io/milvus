@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMarshalReduceResult_Basic(t *testing.T) {
@@ -205,7 +206,7 @@ func TestMarshalReduceResult_GroupByNullableValidData(t *testing.T) {
 	require.Len(t, data.GetGroupByFieldValues(), 1)
 	gbv := data.GetGroupByFieldValues()[0]
 	assert.Equal(t, []int64{0, 0}, gbv.GetScalars().GetLongData().GetData())
-	assert.Equal(t, []bool{false, true}, gbv.GetValidData())
+	assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(gbv))
 	assert.Equal(t, int64(105), gbv.GetFieldId())
 }
 
@@ -232,7 +233,7 @@ func TestMarshalReduceResult_GroupByTimestamptz(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Timestamptz, gbv.GetType())
 	assert.Equal(t, int64(107), gbv.GetFieldId())
 	assert.Equal(t, []int64{1000, 0}, gbv.GetScalars().GetTimestamptzData().GetData())
-	assert.Equal(t, []bool{true, false}, gbv.GetValidData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(gbv))
 	assert.Empty(t, gbv.GetFieldName())
 }
 
@@ -263,7 +264,7 @@ func TestMarshalReduceResult_GroupByGeometry(t *testing.T) {
 		{},
 	}
 	assert.Equal(t, expectedGeometryData, gbv.GetScalars().GetGeometryData().GetData())
-	assert.Equal(t, []bool{true, false}, gbv.GetValidData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(gbv))
 	assert.Empty(t, gbv.GetFieldName())
 }
 

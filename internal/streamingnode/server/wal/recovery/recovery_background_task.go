@@ -7,12 +7,12 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -32,6 +32,8 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 // promise there's only one consumer of wal.
 // But currently, we don't implement the CAS operation of meta interface.
 // Should be fixed in future.
+// The compound SaveRecoverySnapshot already gathers the whole snapshot into
+// one catalog call, paving the way for a future single-point CAS commit.
 func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
@@ -104,48 +106,26 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		return err
 	}
 
-	futures := make([]*conc.Future[struct{}], 0, 2)
-	if len(snapshot.SegmentAssignments) > 0 {
-		future := conc.Go(func() (struct{}, error) {
-			err := rs.retryOperationWithBackoff(ctx,
-				logger.With(mlog.String("op", "persistSegmentAssignments"), mlog.Int64s("segmentIds", lo.Keys(snapshot.SegmentAssignments))),
-				func(ctx context.Context) error {
-					return resource.Resource().StreamingNodeCatalog().SaveSegmentAssignments(ctx, rs.channel.Name, snapshot.SegmentAssignments)
-				})
-			return struct{}{}, err
-		})
-		futures = append(futures, future)
+	// The catalog persists the whole snapshot as a single compound write, with
+	// the consume checkpoint always the last/commit-marker op - so a
+	// whole-snapshot retry is always safe (every part is an idempotent put).
+	recoverySnapshot := &metastore.WALRecoverySnapshot{
+		SegmentAssignments: snapshot.SegmentAssignments,
+		VChannels:          snapshot.VChannels,
+		ConsumeCheckpoint:  snapshot.Checkpoint.IntoProto(),
 	}
-	if len(snapshot.VChannels) > 0 {
-		future := conc.Go(func() (struct{}, error) {
-			err := rs.retryOperationWithBackoff(ctx,
-				logger.With(mlog.String("op", "persistVChannels"), mlog.Strings("vchannels", lo.Keys(snapshot.VChannels))),
-				func(ctx context.Context) error {
-					return resource.Resource().StreamingNodeCatalog().SaveVChannels(ctx, rs.channel.Name, snapshot.VChannels)
-				})
-			return struct{}{}, err
-		})
-		futures = append(futures, future)
-	}
-	if err := conc.BlockOnAll(futures...); err != nil {
-		return err
-	}
-
-	// Salvage checkpoint must be persisted before the consume checkpoint to guarantee ordering:
-	// if the node crashes between these two writes, the next snapshot retry will re-persist both.
 	if snapshot.SalvageCheckpoint != nil {
-		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
-			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, snapshot.SalvageCheckpoint.IntoProto())
-		}); err != nil {
-			return err
-		}
+		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
 	}
-
-	// checkpoint updates should always be persisted after other updates success.
-	if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistCheckpoint")), func(ctx context.Context) error {
-		return resource.Resource().StreamingNodeCatalog().
-			SaveConsumeCheckpoint(ctx, rs.channel.Name, snapshot.Checkpoint.IntoProto())
-	}); err != nil {
+	if err := rs.retryOperationWithBackoff(ctx,
+		logger.With(
+			mlog.String("op", "persistRecoverySnapshot"),
+			mlog.Int64s("segmentIds", lo.Keys(snapshot.SegmentAssignments)),
+			mlog.Strings("vchannels", lo.Keys(snapshot.VChannels)),
+		),
+		func(ctx context.Context) error {
+			return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, recoverySnapshot)
+		}); err != nil {
 		return err
 	}
 

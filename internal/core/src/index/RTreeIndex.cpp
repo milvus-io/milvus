@@ -19,6 +19,7 @@
 #include <list>
 #include <map>
 #include <mutex>
+#include <new>
 #include <string_view>
 #include <shared_mutex>
 #include <utility>
@@ -72,22 +73,40 @@ ends_with(const std::string& value, const std::string& suffix) {
 template <typename T>
 void
 RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
-    std::string index_file_path;
     if (is_growing) {
-        path_ = "";
-    } else {
-        auto prefix = disk_file_manager_->GetIndexIdentifier();
-        path_ = GetRTreeTempPrefix() + prefix;
-        boost::filesystem::create_directories(path_);
-        index_file_path = path_ + "/index_file";  // base path (no ext)
-        if (boost::filesystem::exists(index_file_path + ".bgi")) {
-            ThrowInfo(IndexBuildError,
-                      "build rtree index temp dir:{} not empty",
-                      path_);
+        // Concurrency model: production currently serializes writes to a
+        // growing segment (one flowgraph consumer per vchannel drives
+        // SegmentGrowingImpl::Insert, and recovery's LoadGrowing completes
+        // before consumption starts). The locking here is defense-in-depth
+        // honoring the segcore-level IndexingRecord::AppendingIndex contract
+        // ("concurrent, reentrant"), not a claim that production exercises
+        // multi-writer inserts today. Writers may still race concurrent
+        // READERS (search on the growing index), so the lazy first-time init
+        // stays idempotent under the write lock: the wrapper is created
+        // exactly once and readers never observe a torn shared_ptr.
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        if (wrapper_) {
+            return;
         }
+        path_ = "";
+        std::string index_file_path;  // empty: in-memory growing wrapper
+        wrapper_ = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
+        return;
     }
 
-    wrapper_ = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
+    // Non-growing (build/load) path runs single-threaded.
+    auto prefix = disk_file_manager_->GetIndexIdentifier();
+    path_ = GetRTreeTempPrefix() + prefix;
+    boost::filesystem::create_directories(path_);
+    std::string index_file_path = path_ + "/index_file";  // base path (no ext)
+    if (boost::filesystem::exists(index_file_path + ".bgi")) {
+        ThrowInfo(
+            IndexBuildError, "build rtree index temp dir:{} not empty", path_);
+    }
+
+    auto wrapper = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
+    std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+    wrapper_ = std::move(wrapper);
 }
 
 template <typename T>
@@ -120,7 +139,7 @@ RTreeIndex<T>::~RTreeIndex() {
 }
 
 static std::string
-GetFileName(const std::string& path) {
+GetRTreeFileName(const std::string& path) {
     auto pos = path.find_last_of('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
@@ -146,11 +165,20 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         auto find_file = [&](const std::string& target) -> auto{
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
-                    return GetFileName(filename) == target;
+                    return GetRTreeFileName(filename) == target;
                 });
         };
 
         auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
+            // null_offset is a size_t[] payload; its byte length must be a
+            // multiple of sizeof(size_t). Otherwise resize() truncates the
+            // destination while FastMemcpy still copies `size` bytes, writing
+            // past the buffer. Reject a malformed/truncated sidecar instead.
+            AssertInfo((size_t)size % sizeof(size_t) == 0,
+                       "corrupt R-Tree null_offset payload: byte size {} is "
+                       "not a multiple of {}",
+                       size,
+                       sizeof(size_t));
             std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
             null_offset_.resize((size_t)size / sizeof(size_t));
             milvus::fastmem::FastMemcpy(
@@ -168,7 +196,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             // sliced case: collect all parts with prefix index_null_offset
             null_offset_files.push_back(*it);
             for (auto& f : files) {
-                auto filename = GetFileName(f);
+                auto filename = GetRTreeFileName(f);
                 static constexpr std::string_view kName = "index_null_offset_";
                 if (filename.size() > kName.size() &&
                     filename.compare(
@@ -262,14 +290,22 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
     path_ = base_path;
 
-    // 5. Instantiate wrapper and load.
-    wrapper_ =
+    // 5. Instantiate wrapper and load it fully BEFORE publishing, then
+    // publish every member under the same lock the readers take (Count /
+    // QueryCandidates / ComputeByteSize snapshot wrapper_ under mutex_):
+    // the no-torn-read invariant only holds if every writer participates,
+    // exactly as the growing publish in InitForBuildIndex does.
+    auto wrapper =
         std::make_shared<RTreeIndexWrapper>(path_, /*is_build_mode=*/false);
-    wrapper_->load();
+    wrapper->load();
 
-    total_num_rows_ =
-        wrapper_->count() + static_cast<int64_t>(null_offset_.size());
-    is_built_ = true;
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = wrapper;
+        total_num_rows_ =
+            wrapper->count() + static_cast<int64_t>(null_offset_.size());
+        is_built_ = true;
+    }
     ComputeByteSize();
 
     LOG_INFO(
@@ -434,10 +470,18 @@ RTreeIndex<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    auto end = std::lower_bound(
-        null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
-    for (auto it = null_offset_.begin(); it != end; ++it) {
-        bitset.set(*it);
+    // null_offset_ is not guaranteed to be sorted by construction: AddGeometry
+    // appends offsets in arrival order, and while production currently
+    // serializes inserts per growing segment (so the order is monotonic
+    // today), nothing in this class enforces it. A std::lower_bound shortcut
+    // would silently rely on that external property and could leave in-range
+    // offsets past the bound (or, worse, iterate offsets >= count).
+    // Bounds-check each element instead so an out-of-range offset can never
+    // write past the bitset.
+    for (auto off : null_offset_) {
+        if (off < static_cast<size_t>(count)) {
+            bitset.set(off);
+        }
     }
     return bitset;
 }
@@ -445,13 +489,23 @@ RTreeIndex<T>::IsNull() {
 template <typename T>
 TargetBitmap
 RTreeIndex<T>::IsNotNull() {
-    int64_t count = Count();
-    TargetBitmap bitset(count, true);
+    return IsNotNull(Count());
+}
+
+template <typename T>
+TargetBitmap
+RTreeIndex<T>::IsNotNull(int64_t row_count) {
+    AssertInfo(row_count >= 0,
+               "R-Tree validity row count must be non-negative, got {}",
+               row_count);
+    TargetBitmap bitset(row_count, true);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    auto end = std::lower_bound(
-        null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
-    for (auto it = null_offset_.begin(); it != end; ++it) {
-        bitset.reset(*it);
+    // See IsNull(): null_offset_ is not sorted by construction, so
+    // bounds-check every offset rather than relying on a sorted-range shortcut.
+    for (auto off : null_offset_) {
+        if (off < static_cast<size_t>(row_count)) {
+            bitset.reset(off);
+        }
     }
     return bitset;
 }
@@ -505,41 +559,69 @@ RTreeIndex<T>::Range(const T& lower_bound_value,
 template <typename T>
 void
 RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
-                               const Geometry query_geometry,
+                               const Geometry& query_geometry,
                                std::vector<int64_t>& candidate_offsets) {
-    AssertInfo(wrapper_ != nullptr, "R-Tree index wrapper is null");
+    // Snapshot wrapper_ under the shared lock: on a growing segment it is
+    // published lazily by InitForBuildIndex() under the write lock, so an
+    // unsynchronized read here could observe a torn shared_ptr.
+    std::shared_ptr<RTreeIndexWrapper> wrapper;
+    {
+        std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper = wrapper_;
+    }
+    AssertInfo(wrapper != nullptr, "R-Tree index wrapper is null");
 
-    // Create GEOS context and ensure it's properly released
-    GEOSContextHandle_t ctx = GEOS_init_r();
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM instead of handing a null context to
+    // query_candidates, and the RAII guard releases the context even when
+    // query_candidates throws (e.g. candidate_offsets growth hitting
+    // bad_alloc, or an AssertInfo on the query geometry) -- a trailing
+    // GEOS_finish_r would leak once per failed query.
+    ScopedGeosResources geos("query_candidates");
 
-    wrapper_->query_candidates(
-        op, query_geometry.GetGeometry(), ctx, candidate_offsets);
-    GEOS_finish_r(ctx);
+    wrapper->query_candidates(
+        op, query_geometry.GetGeometry(), geos.ctx, candidate_offsets);
 }
 
 template <typename T>
 const TargetBitmap
 RTreeIndex<T>::Query(const DatasetPtr& dataset) {
-    AssertInfo(schema_.data_type() == proto::schema::DataType::Geometry,
-               "RTreeIndex can only be queried on geometry field");
-    auto op =
-        dataset->Get<proto::plan::GISFunctionFilterExpr_GISOp>(OPERATOR_TYPE);
-    // Query geometry WKB passed via MATCH_VALUE as std::string
-    auto geometry = dataset->Get<Geometry>(MATCH_VALUE);
+    try {
+        AssertInfo(schema_.data_type() == proto::schema::DataType::Geometry,
+                   "RTreeIndex can only be queried on geometry field");
+        auto op = dataset->Get<proto::plan::GISFunctionFilterExpr_GISOp>(
+            OPERATOR_TYPE);
+        // Query geometry WKB passed via MATCH_VALUE as std::string
+        auto geometry = dataset->Get<Geometry>(MATCH_VALUE);
 
-    // 1) Coarse candidates by R-Tree on MBR
-    std::vector<int64_t> candidate_offsets;
-    QueryCandidates(op, geometry, candidate_offsets);
+        // 1) Coarse candidates by R-Tree on MBR
+        std::vector<int64_t> candidate_offsets;
+        QueryCandidates(op, geometry, candidate_offsets);
 
-    // 2) Build initial bitmap from candidates
-    TargetBitmap res(this->Count());
-    for (auto off : candidate_offsets) {
-        if (off >= 0 && off < res.size()) {
-            res.set(off);
+        // 2) Build initial bitmap from candidates
+        // Count() reports the row space (max(total_num_rows_, indexed)), so a
+        // candidate below the row count can no longer be clipped away. It is
+        // also snapshotted AFTER QueryCandidates() returned, so on a growing
+        // index any row a writer published while the query ran is already
+        // covered by the bitmap size. The `off < res.size()` bound is thus a
+        // pure backstop rather than a race guard. It stays silent instead of
+        // asserting because, should it ever trip, dropping the row is the
+        // safe direction: a candidate the row space does not yet account for
+        // cannot be visible to this query's timestamp either.
+        TargetBitmap res(this->Count());
+        for (auto off : candidate_offsets) {
+            if (off >= 0 && off < res.size()) {
+                res.set(off);
+            }
         }
-    }
 
-    return res;
+        return res;
+    } catch (const SegcoreError&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory querying R-Tree index");
+    }
 }
 
 // ------------------------------------------------------------------
@@ -605,25 +687,52 @@ RTreeIndex<T>::BuildWithStrings(const std::vector<std::string>& geometries) {
 
 template <typename T>
 void
-RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
-    if (!wrapper_) {
-        // Initialize if not already done
-        this->InitForBuildIndex(true);
+RTreeIndex<T>::AddGeometry(const std::string& wkb_data,
+                           int64_t row_offset,
+                           bool is_valid) {
+    // Snapshot wrapper_ under the lock; lazily (and idempotently) initialize it
+    // if this is the first insert. Production serializes inserts per growing
+    // segment (see InitForBuildIndex), but AddGeometry races concurrent
+    // READERS and the AppendingIndex contract permits concurrent writers, so
+    // wrapper_ must never be read or published unlocked.
+    std::shared_ptr<RTreeIndexWrapper> wrapper;
+    {
+        std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper = wrapper_;
+    }
+    if (!wrapper) {
+        this->InitForBuildIndex(true);  // idempotent under the write lock
+        std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper = wrapper_;
     }
 
-    if (!wkb_data.empty()) {
+    // Nullness is decided by is_valid alone, never by the payload: a valid row
+    // with an empty/unparseable WKB gets a placeholder MBR from add_geometry,
+    // keeping growing consistent with the sealed bulk_load classification.
+    if (is_valid) {
         const uint8_t* data_ptr =
             reinterpret_cast<const uint8_t*>(wkb_data.data());
-        wrapper_->add_geometry(data_ptr, wkb_data.size(), row_offset);
+        wrapper->add_geometry(data_ptr, wkb_data.size(), row_offset);
 
-        // Update total row count
-        if (row_offset >= total_num_rows_) {
-            total_num_rows_ = row_offset + 1;
+        // Update total row count under the same lock that guards readers
+        // (Count/NumRows), so the non-null path is symmetric with the null
+        // path below and never races a concurrent search on the growing index.
+        {
+            std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            if (row_offset >= total_num_rows_) {
+                total_num_rows_ = row_offset + 1;
+            }
         }
 
         LOG_DEBUG("Added geometry at row offset {}", row_offset);
     } else {
-        // Handle null geometry
+        // Handle null geometry. Deliberately not deduplicated: no production
+        // path re-drives a failed batch into this same index object (the
+        // insert path panics in the delegator, the growing load path has no
+        // retry loop and a re-issued LoadSegments builds a fresh segment), so
+        // a dedup set would cost one entry per null row forever to guard a
+        // case that cannot occur. See insert_value_locked's note in
+        // RTreeIndexWrapper.h.
         std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         null_offset_.push_back(static_cast<size_t>(row_offset));
 
@@ -711,6 +820,14 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     if (has_null) {
         auto null_entry = reader.ReadEntry("index_null_offset");
+        // See fill_null_offsets in Load(): the payload must be size_t-aligned,
+        // otherwise resize() under-allocates and FastMemcpy overflows.
+        AssertInfo(null_entry.data.size() % sizeof(size_t) == 0,
+                   "corrupt R-Tree null_offset entry: byte size {} is not a "
+                   "multiple of {}",
+                   null_entry.data.size(),
+                   sizeof(size_t));
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         null_offset_.resize(null_entry.data.size() / sizeof(size_t));
         milvus::fastmem::FastMemcpy(null_offset_.data(),
                                     null_entry.data.data(),
@@ -740,13 +857,19 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                "RTreeIndex LoadEntries: cannot determine base path from files");
     path_ = base_path;
 
-    wrapper_ =
+    // Load the wrapper fully BEFORE publishing, then publish under the
+    // readers' lock -- same discipline as Load() above.
+    auto wrapper =
         std::make_shared<RTreeIndexWrapper>(path_, /*is_build_mode=*/false);
-    wrapper_->load();
+    wrapper->load();
 
-    total_num_rows_ =
-        wrapper_->count() + static_cast<int64_t>(null_offset_.size());
-    is_built_ = true;
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = wrapper;
+        total_num_rows_ =
+            wrapper->count() + static_cast<int64_t>(null_offset_.size());
+        is_built_ = true;
+    }
     ComputeByteSize();
     LOG_INFO(
         "LoadEntries RTreeIndex done, file_count: {}, has_null: {}, "

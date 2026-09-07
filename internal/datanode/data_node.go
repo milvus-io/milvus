@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -129,7 +128,6 @@ func NewDataNode(ctx context.Context) *DataNode {
 	node.taskManager = index.NewTaskManager(ctx2)
 	node.externalCollectionManager = external.NewExternalCollectionManager(ctx2, 8)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	expr.Register("datanode", node)
 	return node
 }
 
@@ -196,7 +194,7 @@ func (node *DataNode) Init() error {
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
 
-		fileMode := fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue())
+		fileMode := fileresource.GetLocalMode()
 		if fileMode == fileresource.SyncMode {
 			storageConfig := compaction.CreateStorageConfig()
 			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {

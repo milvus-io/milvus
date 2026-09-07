@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -16,6 +17,7 @@ import (
 // with secondary indexes by collection, channel, and compaction relationship.
 type CachedSegmentsInfo struct {
 	segments *Cache[UniqueID, *SegmentInfo]
+	indexMu  sync.RWMutex
 
 	// secondary indexes: collection/channel -> set of segment IDs
 	coll2Segments    *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, struct{}]]
@@ -79,6 +81,9 @@ func (s *CachedSegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*
 }
 
 func (s *CachedSegmentsInfo) getCandidates(criterion *segmentCriterion) []*SegmentInfo {
+	s.indexMu.RLock()
+	defer s.indexMu.RUnlock()
+
 	if criterion.collectionID > 0 {
 		idSet, ok := s.coll2Segments.Get(criterion.collectionID)
 		if !ok {
@@ -115,6 +120,9 @@ func (s *CachedSegmentsInfo) getCandidates(criterion *segmentCriterion) []*Segme
 }
 
 func (s *CachedSegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	s.indexMu.RLock()
+	defer s.indexMu.RUnlock()
+
 	idSet, ok := s.channel2Segments.Get(channel)
 	if !ok {
 		return nil
@@ -130,6 +138,9 @@ func (s *CachedSegmentsInfo) GetRealSegmentsForChannel(channel string) []*Segmen
 }
 
 func (s *CachedSegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
+	s.indexMu.RLock()
+	defer s.indexMu.RUnlock()
+
 	exist := s.GetSegment(fromSegmentID) != nil
 	compactTos, ok := s.compactionTo.Get(fromSegmentID)
 	if !ok {
@@ -148,6 +159,9 @@ func (s *CachedSegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInf
 }
 
 func (s *CachedSegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo, version int64) (old *SegmentInfo, existed bool) {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+
 	var applied bool
 	old, existed, applied = s.segments.Insert(segmentID, segment, version)
 	if !applied {
@@ -163,6 +177,9 @@ func (s *CachedSegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo
 }
 
 func (s *CachedSegmentsInfo) SetSegmentPreservingLocalState(segmentID UniqueID, base, segment *SegmentInfo, version int64) (old *SegmentInfo, existed bool) {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+
 	old, updated, existed, applied := s.segments.UpdateWithResult(segmentID, func(current *SegmentInfo) bool {
 		applyPersistedSegmentPreservingLocalState(current, base, segment)
 		return true
@@ -195,9 +212,6 @@ func applyPersistedSegmentPreservingLocalState(current, base, persisted *Segment
 	current.lastFlushTime = currentLastFlushTime
 	current.isCompacting = currentIsCompacting
 	current.lastWrittenTime = currentLastWrittenTime
-	current.size.Store(0)
-	current.deltaRowcount.Store(-1)
-	current.earliestTs.Store(0)
 
 	if base == nil {
 		return
@@ -228,6 +242,9 @@ func cloneMsgPosition(pos *msgpb.MsgPosition) *msgpb.MsgPosition {
 
 // DropSegment marks the segment as a tombstone; the version blocks later stale writes.
 func (s *CachedSegmentsInfo) DropSegment(segmentID UniqueID, version int64) {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+
 	if old := s.segments.Erase(segmentID, version); old != nil {
 		s.removeSecondaryIndex(old)
 		s.deleteCompactTo(old)
@@ -273,15 +290,14 @@ func (s *CachedSegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bo
 	s.updateSegment(segmentID, SetIsCompacting(isCompacting))
 }
 
-func (s *CachedSegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	s.updateSegment(segmentID, SetLevel(level))
-}
-
 func (s *CachedSegmentsInfo) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
 	s.updateSegment(segmentID, SetExpireTime(lastExpire))
 }
 
 func (s *CachedSegmentsInfo) GetSegmentsByChannel(channel string) []*SegmentInfo {
+	s.indexMu.RLock()
+	defer s.indexMu.RUnlock()
+
 	idSet, ok := s.channel2Segments.Get(channel)
 	if !ok {
 		return nil
@@ -324,9 +340,15 @@ func (s *CachedSegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 
 	if collSet, ok := s.coll2Segments.Get(collID); ok {
 		collSet.Remove(segment.GetID())
+		if collSet.Len() == 0 {
+			s.coll2Segments.Remove(collID)
+		}
 	}
 	if chSet, ok := s.channel2Segments.Get(channel); ok {
 		chSet.Remove(segment.GetID())
+		if chSet.Len() == 0 {
+			s.channel2Segments.Remove(channel)
+		}
 	}
 }
 
@@ -340,6 +362,20 @@ func (s *CachedSegmentsInfo) addCompactTo(segment *SegmentInfo) {
 
 func (s *CachedSegmentsInfo) deleteCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		s.compactionTo.Remove(from)
+		existing, ok := s.compactionTo.Get(from)
+		if !ok {
+			continue
+		}
+		remaining := make([]UniqueID, 0, len(existing))
+		for _, to := range existing {
+			if to != segment.GetID() {
+				remaining = append(remaining, to)
+			}
+		}
+		if len(remaining) == 0 {
+			s.compactionTo.Remove(from)
+		} else {
+			s.compactionTo.Insert(from, remaining)
+		}
 	}
 }

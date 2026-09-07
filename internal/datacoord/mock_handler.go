@@ -5,6 +5,7 @@ package datacoord
 import (
 	context "context"
 
+	storage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -116,23 +117,23 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 }
 
 // GenSnapshot provides a mock function with given fields: ctx, collectionID
-func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*SnapshotData, error) {
+func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*storage.SnapshotData, error) {
 	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GenSnapshot")
 	}
 
-	var r0 *SnapshotData
+	var r0 *storage.SnapshotData
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (*SnapshotData, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*storage.SnapshotData, error)); ok {
 		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *SnapshotData); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *storage.SnapshotData); ok {
 		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SnapshotData)
+			r0 = ret.Get(0).(*storage.SnapshotData)
 		}
 	}
 
@@ -164,12 +165,12 @@ func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, colle
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *storage.SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64) (*SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64) (*storage.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -43,6 +43,9 @@ type BasicMessage interface {
 	// Should be used with read-only promise.
 	Properties() RProperties
 
+	// IsUnreplicable returns true if the message cannot be replicated to a secondary cluster.
+	IsUnreplicable() bool
+
 	// TimeTick returns the time tick of current message.
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.

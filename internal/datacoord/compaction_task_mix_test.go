@@ -71,53 +71,68 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 	s.ElementsMatch([]int64{200, 201}, segIDs)
 }
 
-// Covers the FileResources branch in BuildCompactionRequest for MixCompaction
-// plans (previously only SortCompaction was wired). Without this, mix-compacted
-// segments with custom analyzers in ref mode would build text indexes using
-// default tokenization → silent search regressions.
-func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResourcesInRefMode() {
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
-	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
-
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 	channel := "Ch-1"
 	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
-		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:            segID,
-			Level:         datapb.SegmentLevel_L1,
-			InsertChannel: channel,
-			State:         commonpb.SegmentState_Flushed,
-			Binlogs:       binLogs,
-		}}
-	}).Once()
-
 	expectedResources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
 	}
-	s.mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
 
-	task := newMixCompactionTask(&datapb.CompactionTask{
-		PlanID:        1,
-		TriggerID:     19530,
-		CollectionID:  1,
-		PartitionID:   10,
-		Type:          datapb.CompactionType_MixCompaction,
-		NodeID:        1,
-		State:         datapb.CompactionTaskState_executing,
-		InputSegments: []int64{200},
-		Schema: &schemapb.CollectionSchema{
-			FileResourceIds: []int64{7},
-		},
-	}, nil, s.mockMeta, newMockVersionManager())
-	alloc := allocator.NewMockAllocator(s.T())
-	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-	task.allocator = alloc
+	for _, testCase := range []struct {
+		name              string
+		mode              string
+		expectResources   bool
+		expectResourceGet bool
+	}{
+		{name: "ref", mode: "ref", expectResources: true, expectResourceGet: true},
+		{name: "sync", mode: "sync", expectResources: false, expectResourceGet: false},
+	} {
+		s.Run(testCase.name, func() {
+			paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, testCase.mode)
+			s.T().Cleanup(func() {
+				paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+			})
 
-	plan, err := task.BuildCompactionRequest()
-	s.Require().NoError(err)
-	s.Equal(expectedResources, plan.GetFileResources(),
-		"FileResources must flow through for MixCompaction plans (issue #50145, PR #50140)")
+			mockMeta := NewMockCompactionMeta(s.T())
+			mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
+				return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+					ID:            segID,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+					State:         commonpb.SegmentState_Flushed,
+					Binlogs:       binLogs,
+				}}
+			}).Once()
+			if testCase.expectResourceGet {
+				mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
+			}
+
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     19530,
+				CollectionID:  1,
+				PartitionID:   10,
+				Type:          datapb.CompactionType_MixCompaction,
+				NodeID:        1,
+				State:         datapb.CompactionTaskState_executing,
+				InputSegments: []int64{200},
+				Schema: &schemapb.CollectionSchema{
+					FileResourceIds: []int64{7},
+				},
+			}, nil, mockMeta, newMockVersionManager())
+			alloc := allocator.NewMockAllocator(s.T())
+			alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
+			task.allocator = alloc
+
+			plan, err := task.BuildCompactionRequest()
+			s.Require().NoError(err)
+			if testCase.expectResources {
+				s.Equal(expectedResources, plan.GetFileResources())
+			} else {
+				s.Empty(plan.GetFileResources())
+			}
+		})
+	}
 }
 
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {

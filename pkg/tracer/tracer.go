@@ -74,7 +74,7 @@ func SetTracerProvider(exp sdk.SpanExporter, traceIDRatio float64) {
 			semconv.ServiceNameKey.String(paramtable.GetRole()),
 			attribute.Int64("NodeID", paramtable.GetNodeID()),
 		)),
-		sdk.WithSampler(sdk.ParentBased(
+		sdk.WithSampler(newClientRequestIDSampler(
 			sdk.TraceIDRatioBased(traceIDRatio),
 		)),
 	)

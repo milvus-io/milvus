@@ -56,6 +56,7 @@ func (e *StreamingError) IsSkippedOperation() bool {
 // Stop resuming retry and report to user.
 func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
+		e.IsInvalidArgument() ||
 		e.IsReplicateViolation() ||
 		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
 }
@@ -91,6 +92,11 @@ func (e *StreamingError) IsSchemaVersionMismatch() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH
 }
 
+// IsInvalidArgument returns true if the error is caused by invalid argument.
+func (e *StreamingError) IsInvalidArgument() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT
+}
+
 // IsOnShutdown returns true if the error is caused by on shutdown.
 func (e *StreamingError) IsOnShutdown() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN
@@ -99,6 +105,11 @@ func (e *StreamingError) IsOnShutdown() bool {
 // IsRateLimitRejected returns true if the error is caused by rate limit rejected.
 func (e *StreamingError) IsRateLimitRejected() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED
+}
+
+// IsPartialUpdateRetryableCAS returns true if the partial update CAS error is retryable.
+func (e *StreamingError) IsPartialUpdateRetryableCAS() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE
 }
 
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
@@ -185,6 +196,11 @@ func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
 // NewRateLimitRejected creates a new StreamingError with code STREAMING_CODE_RATE_LIMIT_REJECTED.
 func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED, format, args...)
+}
+
+// NewPartialUpdateRetryable creates a retryable partial update CAS error.
+func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

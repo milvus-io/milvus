@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -150,7 +149,6 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
-	expr.Register("querycoord", server)
 	return server, nil
 }
 
@@ -871,12 +869,25 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+
+	forceOverrideHandler := config.NewHandler("watchForceOverrideUserReplicaModeChanges", func(e *config.Event) { w.Trigger() })
+	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, forceOverrideHandler)
 }
 
 // GetInternalReplicasByCollection returns replicas for a collection from internal meta.
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
 	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// IsCollectionUserSpecifiedReplicaMode returns whether the collection load config
+// was created from a request with an explicit replica number.
+func (s *Server) IsCollectionUserSpecifiedReplicaMode(ctx context.Context, collectionID int64) bool {
+	if s.meta == nil {
+		return false
+	}
+	collection := s.meta.GetCollection(ctx, collectionID)
+	return collection != nil && collection.UserSpecifiedReplicaMode
 }
 
 // CheckAllReplicasServiceable returns an error if any replica has a non-serviceable
@@ -909,7 +920,11 @@ func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Repl
 				replica.GetID(), replica.GetResourceGroup(), channelName)
 		}
 		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
-			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
+		}
+		if !leader.IsServiceable() {
+			err := merr.WrapErrChannelNotAvailable(channelName, "delegator reported not serviceable")
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
 		}
 	}
 	return nil

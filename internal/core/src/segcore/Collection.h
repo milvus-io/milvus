@@ -75,11 +75,6 @@ class Collection {
         index_meta_ = index_meta;
     }
 
-    const std::string_view
-    get_collection_name() {
-        return collection_name_;
-    }
-
  private:
     std::string collection_name_;
     SchemaPtr schema_;

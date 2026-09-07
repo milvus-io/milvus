@@ -81,7 +81,8 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 	}()
 
-	if streamingutil.IsStreamingServiceEnabled() {
+	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+	if streamingEnabled {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
 		channelPlan := b.balanceChannels(ctx, br, replica)
@@ -114,43 +115,56 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 
 		channelRwNodes := replica.GetChannelRWNodes(channelName)
-		channelRONodes := make([]int64, 0)
-		// mark channel's outbound access node as offline
-		channelRWNode := typeutil.NewUniqueSet(channelRwNodes...)
-		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
-		for _, channel := range channelDist {
-			if !channelRWNode.Contain(channel.Node) {
-				channelRONodes = append(channelRONodes, channel.Node)
+		channelRWNodeSet := typeutil.NewUniqueSet(channelRwNodes...)
+		channelOutboundNodes := typeutil.NewUniqueSet()
+		segmentOutboundNodes := typeutil.NewUniqueSet()
+
+		// Streaming channel placement is handled by score-based channel balance
+		// and stopping balance. Only derive channel outbound nodes from channel
+		// distribution in legacy mode.
+		if !streamingEnabled {
+			channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
+			for _, channel := range channelDist {
+				if !channelRWNodeSet.Contain(channel.Node) {
+					channelOutboundNodes.Insert(channel.Node)
+				}
 			}
 		}
+
+		// Sealed segments outside the channel's exclusive RW node set are true
+		// outbound workloads regardless of whether streaming service is enabled.
 		segmentDist := b.dist.SegmentDistManager.GetByFilter(meta.WithChannel(channelName), meta.WithReplica(replica))
 		for _, segment := range segmentDist {
-			if !channelRWNode.Contain(segment.Node) {
-				channelRONodes = append(channelRONodes, segment.Node)
+			if !channelRWNodeSet.Contain(segment.Node) {
+				segmentOutboundNodes.Insert(segment.Node)
 			}
 		}
 
-		if len(channelRwNodes) == 0 {
-			// no available nodes to balance
-			return nil, nil
+		hasChannelOutbound := channelOutboundNodes.Len() != 0
+		hasSegmentOutbound := segmentOutboundNodes.Len() != 0
+		if channelOutboundNodes.Len() != 0 {
+			channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelOutboundNodes.Collect())...)
 		}
 
-		if len(channelRONodes) != 0 {
-			if !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
-			}
+		outboundSegmentPlans := make([]assign.SegmentAssignPlan, 0)
+		if hasSegmentOutbound && len(channelPlans) == 0 {
+			outboundSegmentPlans = b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, segmentOutboundNodes.Collect())
+			segmentPlans = append(segmentPlans, outboundSegmentPlans...)
+		}
 
-			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
-			}
-		} else {
-			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
-			}
+		// Keep channel outbound evacuation and executable segment outbound plans
+		// ahead of normal balancing. If no segment outbound plan can be generated,
+		// continue with normal segment balancing for the channel.
+		if hasChannelOutbound || (hasSegmentOutbound && (len(channelPlans) != 0 || len(outboundSegmentPlans) != 0)) {
+			continue
+		}
 
-			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
-			}
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingEnabled {
+			channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
+		}
+
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
 		}
 	}
 

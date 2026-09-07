@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel"
@@ -10,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -29,7 +32,7 @@ type insertTask struct {
 
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
-	chMgr           channelsMgr
+	chMgr           channelmgr.ChannelsMgr
 	vChannels       []vChan
 	pChannels       []pChan
 	schema          *schemapb.CollectionSchema
@@ -73,12 +76,12 @@ func (it *insertTask) EndTs() Timestamp {
 	return it.insertMsg.EndTimestamp
 }
 
-func (it *insertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+func (it *insertTask) SetChannels() error {
+	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func (it *insertTask) setChannels() error {
 	return nil
 }
 
-func (it *insertTask) getChannels() []pChan {
+func (it *insertTask) GetChannels() []pChan {
 	return it.pChannels
 }
 
@@ -97,6 +100,25 @@ func (it *insertTask) OnEnqueue() error {
 	it.insertMsg.Base.MsgType = commonpb.MsgType_Insert
 	it.insertMsg.Base.SourceID = paramtable.GetNodeID()
 	return nil
+}
+
+// checkMaxInsertSize rejects a materialized insert message whose protobuf body
+// exceeds quotaAndLimits.limits.maxInsertSize.
+//
+// Both insert and upsert call this after Proxy-side field materialization so
+// generated fields, row IDs, timestamps, and partial-upsert query results are
+// included in the measured size.
+func checkMaxInsertSize(ctx context.Context, op string, size int) error {
+	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
+	if maxInsertSize == -1 || size <= maxInsertSize {
+		return nil
+	}
+	mlog.Warn(ctx, "materialized insert message exceeds maxInsertSize",
+		mlog.String("op", op),
+		mlog.Int("message size", size),
+		mlog.Int("maxInsertSize", maxInsertSize))
+	return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+		fmt.Sprintf("%s materialized message size %d exceeds maxInsertSize %d", op, size, maxInsertSize)))
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
@@ -110,6 +132,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		},
 		Timestamp: it.EndTs(),
 	}
+	if err := validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()); err != nil {
+		return err
+	}
 
 	collectionName := it.insertMsg.CollectionName
 	log := mlog.With(mlog.String("collectionName", collectionName))
@@ -118,39 +143,32 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
-	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
-		log.Warn(ctx, "insert request size exceeds maxInsertSize",
-			mlog.Int("request size", it.insertMsg.Size()), mlog.Int("maxInsertSize", maxInsertSize))
-		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
-	}
-
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.GetMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
 
 	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
+		if it.schemaTimestamp != colInfo.UpdateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
 			log.Info(ctx, "collection schema mismatch",
 				mlog.String("collectionName", collectionName),
 				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
-				mlog.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.UpdateTimestamp),
 				mlog.Err(err))
 			return err
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
+	schema, err := it.GetMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -254,7 +272,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
@@ -271,12 +289,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.insertMsg.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
+			pinfo, err := it.GetMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
-			partitionTag = pinfo.name
+			partitionTag = pinfo.Name
 			it.insertMsg.PartitionName = partitionTag
 		}
 
@@ -286,9 +304,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
+	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
+		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
+	}
+
+	if err := checkMaxInsertSize(ctx, "insert", it.insertMsg.Size()); err != nil {
+		return err
 	}
 
 	log.Debug(ctx, "Proxy Insert PreExecute done")

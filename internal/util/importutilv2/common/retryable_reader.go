@@ -142,6 +142,44 @@ func (r *retryableReader) reopenAtOffset() error {
 	return nil
 }
 
+// ReadAt maps a storage fault to a typed IO error before it leaves the reader.
+//
+// The embedded FileReader would surface the provider's raw SDK error, which
+// carries no merr code, so IsTypedIOErr cannot recognize it and a transient fault
+// (503 SlowDown, connection reset) is classified as corrupt input by
+// WrapDecodeErr rather than as a retriable system error. Arrow reads a parquet
+// footer through ReadAt/Seek, not Read, so this is the only place that
+// classification can be made correct for the file-open path.
+//
+// Retrying ReadAt itself is deliberately not added here: that gap predates this
+// reader, and widening the retry surface belongs with the reopen bookkeeping
+// rather than with an error-classification fix.
+func (r *retryableReader) ReadAt(p []byte, off int64) (int, error) {
+	if r.FileReader == nil {
+		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+	}
+	n, err := r.FileReader.ReadAt(p, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, storage.ToMilvusIoError(r.path, err)
+	}
+	return n, err
+}
+
+// Seek maps a storage fault to a typed IO error, for the same reason as ReadAt.
+// The reader's own offset bookkeeping is intentionally left untouched: it tracks
+// sequential Read progress for reopen, and seeks issued by a random-access
+// consumer such as Arrow must not disturb it.
+func (r *retryableReader) Seek(offset int64, whence int) (int64, error) {
+	if r.FileReader == nil {
+		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+	}
+	pos, err := r.FileReader.Seek(offset, whence)
+	if err != nil {
+		return pos, storage.ToMilvusIoError(r.path, err)
+	}
+	return pos, nil
+}
+
 // Read reads from the underlying FileReader and retries on errors.
 func (r *retryableReader) Read(p []byte) (int, error) {
 	var n int

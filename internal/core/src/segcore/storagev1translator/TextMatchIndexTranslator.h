@@ -29,6 +29,7 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    int64_t num_rows;
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
     std::string shard;

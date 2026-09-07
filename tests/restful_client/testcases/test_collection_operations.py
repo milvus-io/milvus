@@ -1,17 +1,17 @@
 import datetime
 import logging
+import threading
 import time
-from utils.util_log import test_log as logger
-from utils.utils import gen_collection_name
+
 import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
-import threading
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 
 @pytest.mark.L0
 class TestCreateCollection(TestBase):
-
     @pytest.mark.parametrize("vector_field", [None, "vector", "emb"])
     @pytest.mark.parametrize("primary_field", [None, "id", "doc_id"])
     @pytest.mark.parametrize("metric_type", ["L2", "IP"])
@@ -41,15 +41,15 @@ class TestCreateCollection(TestBase):
             del payload["vectorField"]
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
 
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
+        assert rsp["code"] == 200
+        assert rsp["data"]["collectionName"] == name
 
     def test_create_collections_concurrent_with_same_param(self):
         """
@@ -75,7 +75,14 @@ class TestCreateCollection(TestBase):
         client = self.collection_client
         threads = []
         for i in range(10):
-            t = threading.Thread(target=create_collection, args=(name, dim, metric_type,))
+            t = threading.Thread(
+                target=create_collection,
+                args=(
+                    name,
+                    dim,
+                    metric_type,
+                ),
+            )
             threads.append(t)
         for t in threads:
             t.start()
@@ -89,13 +96,13 @@ class TestCreateCollection(TestBase):
         logger.info(concurrent_rsp)
         assert success_cnt == 10
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
-        assert f"FloatVector({dim})" in str(rsp['data']['fields'])
+        assert rsp["code"] == 200
+        assert rsp["data"]["collectionName"] == name
+        assert f"FloatVector({dim})" in str(rsp["data"]["fields"])
 
     def test_create_collections_concurrent_with_different_param(self):
         """
@@ -120,10 +127,24 @@ class TestCreateCollection(TestBase):
         client = self.collection_client
         threads = []
         for i in range(0, 5):
-            t = threading.Thread(target=create_collection, args=(name, dim + i, "L2",))
+            t = threading.Thread(
+                target=create_collection,
+                args=(
+                    name,
+                    dim + i,
+                    "L2",
+                ),
+            )
             threads.append(t)
         for i in range(5, 10):
-            t = threading.Thread(target=create_collection, args=(name, dim + i, "IP",))
+            t = threading.Thread(
+                target=create_collection,
+                args=(
+                    name,
+                    dim + i,
+                    "IP",
+                ),
+            )
             threads.append(t)
         for t in threads:
             t.start()
@@ -137,17 +158,16 @@ class TestCreateCollection(TestBase):
         logger.info(concurrent_rsp)
         assert success_cnt == 1
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
+        assert rsp["code"] == 200
+        assert rsp["data"]["collectionName"] == name
 
 
 @pytest.mark.L1
 class TestCreateCollectionNegative(TestBase):
-
     def test_create_collections_with_invalid_api_key(self):
         """
         target: test create collection with invalid api key(wrong username and password)
@@ -163,10 +183,11 @@ class TestCreateCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
 
-    @pytest.mark.parametrize("name",
-                             [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
+    @pytest.mark.parametrize(
+        "name", [" ", "test_collection_" * 100, "test collection", "test/collection", r"test\collection"]
+    )
     def test_create_collections_with_invalid_collection_name(self, name):
         """
         target: test create collection with invalid collection name
@@ -180,12 +201,11 @@ class TestCreateCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
 
 @pytest.mark.L0
 class TestListCollections(TestBase):
-
     def test_list_collections_default(self):
         """
         target: test list collection with a simple schema
@@ -203,10 +223,10 @@ class TestListCollections(TestBase):
             }
             time.sleep(1)
             rsp = client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
             name_list.append(name)
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         for name in name_list:
             assert name in all_collections
 
@@ -230,17 +250,16 @@ class TestListCollectionsNegative(TestBase):
             }
             time.sleep(1)
             rsp = client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
             name_list.append(name)
         client = self.collection_client
         client.api_key = "illegal_api_key"
         rsp = client.collection_list()
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
 
 
 @pytest.mark.L0
 class TestDescribeCollection(TestBase):
-
     def test_describe_collections_default(self):
         """
         target: test describe collection with a simple schema
@@ -255,15 +274,15 @@ class TestDescribeCollection(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
-        assert f"FloatVector({dim})" in str(rsp['data']['fields'])
+        assert rsp["code"] == 200
+        assert rsp["data"]["collectionName"] == name
+        assert f"FloatVector({dim})" in str(rsp["data"]["fields"])
 
 
 @pytest.mark.L1
@@ -282,14 +301,14 @@ class TestDescribeCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         illegal_client = CollectionClient(self.url, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -305,14 +324,14 @@ class TestDescribeCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # describe collection
         invalid_name = "invalid_name"
         rsp = client.collection_describe(invalid_name)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
 
 @pytest.mark.L0
@@ -327,16 +346,16 @@ class TestDropCollection(TestBase):
         clo_list = []
         for i in range(5):
             time.sleep(1)
-            name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
+            name = "test_collection_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
             payload = {
                 "collectionName": name,
                 "dimension": 128,
             }
             rsp = self.collection_client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
             clo_list.append(name)
         rsp = self.collection_client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         for name in clo_list:
             assert name in all_collections
         for name in clo_list:
@@ -345,9 +364,9 @@ class TestDropCollection(TestBase):
                 "collectionName": name,
             }
             rsp = self.collection_client.collection_drop(payload)
-            assert rsp['code'] == 200
+            assert rsp["code"] == 200
         rsp = self.collection_client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         for name in clo_list:
             assert name not in all_collections
 
@@ -368,9 +387,9 @@ class TestDropCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # drop collection
         payload = {
@@ -378,9 +397,9 @@ class TestDropCollectionNegative(TestBase):
         }
         illegal_client = CollectionClient(self.url, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
 
     def test_drop_collections_with_invalid_collection_name(self):
@@ -397,9 +416,9 @@ class TestDropCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = client.collection_list()
-        all_collections = rsp['data']
+        all_collections = rsp["data"]
         assert name in all_collections
         # drop collection
         invalid_name = "invalid_name"
@@ -407,4 +426,4 @@ class TestDropCollectionNegative(TestBase):
             "collectionName": invalid_name,
         }
         rsp = client.collection_drop(payload)
-        assert rsp['code'] == 100
+        assert rsp["code"] == 100

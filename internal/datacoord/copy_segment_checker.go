@@ -286,19 +286,35 @@ func (c *copySegmentChecker) LogTaskStats() {
 //   - Full segment metadata (binlogs, indexes) is fetched by DataNode when executing
 //   - Keeps task metadata small and efficient to persist
 //
-// Idempotency:
-//   - Safe to call multiple times - only creates tasks on first call
-//   - Subsequent calls return early if tasks already exist
+// Idempotency and crash recovery:
+//   - Task creation is a multi-step sequence (per-group AllocID + AddTask, then
+//     the Executing transition), each step persisted individually. A failure
+//     mid-way (etcd hiccup, DataCoord restart) leaves the job Pending with only
+//     a subset of tasks persisted.
+//   - To be resume-safe, each round creates tasks only for source segments not
+//     yet covered by persisted tasks, then (re-)applies the idempotent
+//     Pending → Executing transition.
 func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
-	// Step 1: Check if tasks already created (idempotent operation)
-	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
-	if len(tasks) > 0 {
+	// Step 0: Re-read the cached job. The `job` argument is a snapshot taken
+	// before this function ran, but tasks of a Pending job can already be
+	// dispatched (the inspector does not filter by job state) and a concurrent
+	// failure (markTaskAndJobFailed) may have moved the job to a terminal
+	// state and released its snapshot pin. Creating more tasks for such a job
+	// would be wasted work at best.
+	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
+	if current == nil {
+		log.Info(c.ctx, "job no longer exists, skip pending check")
+		return
+	}
+	if current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPending {
+		log.Info(c.ctx, "job is no longer pending, skip pending check",
+			mlog.String("currentState", current.GetState().String()))
 		return
 	}
 
-	// Step 2: Validate job has segment mappings
+	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
@@ -310,9 +326,23 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
-	// Step 3: Split mappings into groups (max segments per task)
+	// Step 2: Compute source segments already covered by persisted tasks,
+	// so a partially created job resumes instead of duplicating tasks.
+	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
+	coveredSourceIDs := make(map[int64]struct{})
+	for _, task := range tasks {
+		for _, mapping := range task.GetIdMappings() {
+			coveredSourceIDs[mapping.GetSourceSegmentId()] = struct{}{}
+		}
+	}
+	pendingMappings := lo.Filter(idMappings, func(mapping *datapb.CopySegmentIDMapping, _ int) bool {
+		_, covered := coveredSourceIDs[mapping.GetSourceSegmentId()]
+		return !covered
+	})
+
+	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
-	groups := lo.Chunk(idMappings, maxSegmentsPerTask)
+	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
 
 	// Step 4: Create task for each group
 	for i, group := range groups {
@@ -357,16 +387,28 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			mlog.Int("segmentCount", len(group)))
 	}
 
-	// Step 5: Update job state to Executing
-	err := c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
+	// Step 5: Update job state to Executing. This also runs when all segments
+	// were already covered (groups is empty), retrying a transition that a
+	// previous round failed to persist.
+	// The transition is state-guarded (Pending -> Executing only): a task
+	// dispatched during Step 4 can fail concurrently, and markTaskAndJobFailed
+	// then moves the job to Failed and releases its snapshot pin. An
+	// unconditional update here would resurrect that Failed job as Executing.
+	updated, err := c.copyMeta.UpdateJobInState(c.ctx, job.GetJobId(),
+		datapb.CopySegmentJobState_CopySegmentJobPending,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting),
-		UpdateCopyJobProgress(0, int64(len(idMappings))))
+		UpdateCopyJobTotalSegments(int64(len(idMappings))))
 	if err != nil {
 		log.Warn(c.ctx, "failed to update job state to Executing", mlog.Err(err))
 		return
 	}
+	if !updated {
+		log.Info(c.ctx, "job left Pending state concurrently, skip transition to Executing")
+		return
+	}
 	log.Info(c.ctx, "copy segment job started",
-		mlog.Int("taskCount", len(groups)),
+		mlog.Int("newTaskCount", len(groups)),
+		mlog.Int("resumedTaskCount", len(tasks)),
 		mlog.Int("totalSegments", len(idMappings)))
 }
 

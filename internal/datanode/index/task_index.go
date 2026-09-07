@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -118,6 +121,19 @@ func (it *indexBuildTask) Name() string {
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+// SetStateWithCost stores the final state/failReason together with the
+// execution-end cost bookkeeping in one TaskManager critical section, so a
+// concurrent QueryTask can never observe a final cost paired with a stale
+// in-progress state.
+func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+func (it *indexBuildTask) observeStateMetrics(state indexpb.JobState) {
 	if state == indexpb.JobState_JobStateFinished {
 		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
 		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
@@ -223,6 +239,25 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb.BuildIndexInfo {
+	if params == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(params).(*indexcgopb.BuildIndexInfo)
+	if config := redacted.GetStorageConfig(); config != nil {
+		redactStorageCredentialsForLog(
+			&config.AccessKeyID,
+			&config.SecretAccessKey,
+			&config.SslCACert,
+			&config.GcpCredentialJSON,
+		)
+	}
+	redacted.ExternalSource = externalspec.RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = externalspec.RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
+}
+
 func (it *indexBuildTask) Execute(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
@@ -273,6 +308,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		Region:            it.req.GetStorageConfig().GetRegion(),
 		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
 		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:    it.req.GetStorageConfig().GetMaxConnections(),
 		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
@@ -326,7 +362,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.ExternalSource = it.req.GetExternalSource()
 		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
-	log.Info(ctx, "create index", mlog.Any("buildIndexParams", buildIndexParams))
+	log.Info(ctx, "create index", mlog.Any("buildIndexParams", redactBuildIndexParamsForLog(buildIndexParams)))
 
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {

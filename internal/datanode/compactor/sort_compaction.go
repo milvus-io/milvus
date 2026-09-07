@@ -268,10 +268,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)
-	defer rr.Close()
 	initReaderCost := time.Since(phaseStart)
 
 	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
+	defer rr.Close()
 	rrs := []storage.RecordReader{rr}
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
@@ -386,6 +386,13 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,
+			// Stats: insert aggregates from the freshly emitted insert
+			// logs, stats footprint from the writer's tracked counter.
+			// The counter covers both V2 (statslog FieldBinlog memory)
+			// and V3 (manifest-embedded blob bytes); the FieldBinlog
+			// arrays would silently report zero for V3 since stats
+			// live in the manifest.
+			Stats: buildCompactionOutputStats(insertLogs, nil, srw.GetStatsBlobSize()),
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{

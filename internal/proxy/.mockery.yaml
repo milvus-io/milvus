@@ -13,7 +13,9 @@ packages:
         config:
           mockname: mockTimestampAllocator
           filename: mock_tso_test.go
-      channelsMgr:
+  github.com/milvus-io/milvus/internal/proxy/channelmgr:
+    interfaces:
+      ChannelsMgr:
         config:
           mockname: MockChannelsMgr
           filename: mock_channels_manager.go

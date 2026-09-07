@@ -165,6 +165,80 @@ func TestReadTextFieldData(t *testing.T) {
 	assert.Equal(t, numRows, insertData.Data[fieldID].RowNum())
 }
 
+func TestReadNullableGeometryDataFillsDefaultAndValidData(t *testing.T) {
+	const (
+		pkFieldID   = int64(100)
+		geomFieldID = int64(101)
+		numRows     = 3
+		defaultWKT  = "POINT (1 2)"
+	)
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  geomFieldID,
+				Name:     "geom",
+				DataType: schemapb.DataType_Geometry,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+				},
+			},
+		},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "geom", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	filePath := fmt.Sprintf("/tmp/test_%d_nullable_geometry_default_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	pkArr := pkBuilder.NewArray()
+	defer pkArr.Release()
+
+	geomBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer geomBuilder.Release()
+	geomBuilder.Append("POINT (0 0)")
+	geomBuilder.AppendNull()
+	geomBuilder.Append("POINT (3 3)")
+	geomArr := geomBuilder.NewArray()
+	defer geomArr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, geomArr}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	require.NoError(t, err)
+	geomData := insertData.Data[geomFieldID].(*storage.GeometryFieldData)
+	require.Equal(t, []bool{true, true, true}, geomData.ValidData)
+	require.Equal(t, defaultWKB, geomData.Data[1])
+	require.NotEmpty(t, geomData.Data[1])
+	_, err = common.ConvertWKBToWKT(geomData.Data[1])
+	require.NoError(t, err)
+}
+
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function
 func TestParseSparseFloatRowVector(t *testing.T) {
 	tests := []struct {

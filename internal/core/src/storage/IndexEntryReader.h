@@ -43,8 +43,22 @@ struct Entry {
     std::vector<uint8_t> data;
 };
 
+struct EntryStreamLoadInfo {
+    // Exact encrypted-stream task bounds derived from persisted V3 directory
+    // slice metadata. Plaintext files leave both byte counts at zero.
+    bool encrypted{false};
+    size_t total_transient_bytes{0};
+    size_t max_task_transient_bytes{0};
+};
+
 class IndexEntryReader {
  public:
+    static EntryStreamLoadInfo
+    InspectStreamLoadInfo(std::shared_ptr<milvus::InputStream> input,
+                          int64_t file_size,
+                          folly::CancellationToken cancellation_token =
+                              folly::CancellationToken());
+
     static std::unique_ptr<IndexEntryReader>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t file_size,
@@ -52,6 +66,11 @@ class IndexEntryReader {
          ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
+
+    const EntryStreamLoadInfo&
+    GetStreamLoadInfo() const {
+        return stream_load_info_;
+    }
 
     std::vector<std::string>
     GetEntryNames() const;
@@ -211,6 +230,12 @@ class IndexEntryReader {
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
+    static size_t
+    DownloadRangeCount(uint64_t size);
+
+    static size_t
+    DownloadTaskCount(const EntryMeta& meta);
+
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
@@ -225,6 +250,9 @@ class IndexEntryReader {
     SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
                                    EntryStreamDownloadState& state,
                                    std::vector<std::future<void>>& futures);
+
+    static size_t
+    StreamDownloadTaskCount(const EntryMeta& meta);
 
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
@@ -243,6 +271,7 @@ class IndexEntryReader {
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
     std::unordered_map<std::string, EntryMeta> entry_index_;
+    EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;

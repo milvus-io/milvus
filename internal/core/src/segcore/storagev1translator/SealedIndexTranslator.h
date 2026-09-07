@@ -61,7 +61,9 @@ class SealedIndexTranslator
 
  private:
     LoadResourceRequest
-    EstimateLoadResource() const;
+    EstimateLoadResource(
+        std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info,
+        bool* use_shared_memory_overhead_group) const;
 
     struct IndexLoadInfo {
         bool enable_mmap;

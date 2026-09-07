@@ -39,13 +39,9 @@ const (
 	scoreFieldName = types.ScoreFieldName
 	segOffsetCol   = types.SegOffsetFieldName
 
-	// elementIndicesCol is a segment-specific column carrying per-row element
-	// indices for element-level (Struct Array) search. The C++ Arrow exporter
-	// populates it when SearchResult::element_level_ is true; the reduce
-	// pipeline propagates it and marshal writes it to
-	// SearchResultData.ElementIndices. It lives here (not in the generic chain
-	// package) because its semantics are specific to segment search results.
-	elementIndicesCol = "$element_indices"
+	// Keep the task-local alias so existing QueryNode reduce code and tests stay
+	// concise; the system-column contract is owned by function/chain/types.
+	elementIndicesCol = types.ElementIndicesFieldName
 )
 
 // groupByOptions configures GroupBy mode for heapMergeReduce.
@@ -356,26 +352,6 @@ type stringElementDedupKey struct {
 	elementIndex int32
 }
 
-func int64DedupKey(e *mergeEntry) any {
-	if e.elementIdx == nil {
-		return e.idInt64Val()
-	}
-	return int64ElementDedupKey{
-		pk:           e.idInt64Val(),
-		elementIndex: e.elementIndexVal(),
-	}
-}
-
-func stringDedupKey(e *mergeEntry) any {
-	if e.elementIdx == nil {
-		return e.idStringVal()
-	}
-	return stringElementDedupKey{
-		pk:           e.idStringVal(),
-		elementIndex: e.elementIndexVal(),
-	}
-}
-
 // mergeChunkInt64Pk performs the k-way merge for one chunk with int64 PK.
 func mergeChunkInt64Pk(
 	pool memory.Allocator,
@@ -486,30 +462,54 @@ func mergeChunkStringPk(
 
 // mergeStandardInt64Pk performs standard k-way merge for one NQ (int64 PK).
 func mergeStandardInt64Pk(h *mergeHeapInt64Pk, topK int64) ([]int64, []float32, []segmentSource) {
-	dedupSet := make(map[any]struct{}, topK)
+	if h.Len() > 0 && (*h)[0].elementIdx != nil {
+		return mergeStandardInt64ElementPk(h, topK)
+	}
+
+	dedupSet := make(map[int64]struct{}, topK)
 	ids := make([]int64, 0, topK)
 	scores := make([]float32, 0, topK)
 	sources := make([]segmentSource, 0, topK)
 
 	for int64(len(ids)) < topK && h.Len() > 0 {
-		e := heap.Pop(h).(*mergeEntry)
+		e := (*h)[0]
 		pk := e.idInt64Val()
-		dedupKey := int64DedupKey(e)
-
-		if _, dup := dedupSet[dedupKey]; !dup {
+		if _, dup := dedupSet[pk]; !dup {
 			ids = append(ids, pk)
 			scores = append(scores, e.scoreVal())
-			dedupSet[dedupKey] = struct{}{}
+			dedupSet[pk] = struct{}{}
 			sources = append(sources, segmentSource{
 				InputIdx:    e.inputIdx,
 				SegOffset:   e.segOffsetVal(),
 				OriginalIdx: e.cursor,
 			})
 		}
+		h.advanceRoot()
+	}
+	return ids, scores, sources
+}
 
-		if e.advance() {
-			heap.Push(h, e)
+func mergeStandardInt64ElementPk(h *mergeHeapInt64Pk, topK int64) ([]int64, []float32, []segmentSource) {
+	dedupSet := make(map[int64ElementDedupKey]struct{}, topK)
+	ids := make([]int64, 0, topK)
+	scores := make([]float32, 0, topK)
+	sources := make([]segmentSource, 0, topK)
+
+	for int64(len(ids)) < topK && h.Len() > 0 {
+		e := (*h)[0]
+		pk := e.idInt64Val()
+		key := int64ElementDedupKey{pk: pk, elementIndex: e.elementIndexVal()}
+		if _, dup := dedupSet[key]; !dup {
+			ids = append(ids, pk)
+			scores = append(scores, e.scoreVal())
+			dedupSet[key] = struct{}{}
+			sources = append(sources, segmentSource{
+				InputIdx:    e.inputIdx,
+				SegOffset:   e.segOffsetVal(),
+				OriginalIdx: e.cursor,
+			})
 		}
+		h.advanceRoot()
 	}
 	return ids, scores, sources
 }
@@ -524,23 +524,22 @@ func mergeGroupByInt64Pk(
 		ids, scores, sources := mergeStandardInt64Pk(h, topK)
 		return ids, scores, sources, nil
 	}
-	totalLimit := topK * groupSize
-	dedupSet := make(map[any]struct{}, totalLimit)
-	counter := newCompositeGroupCounter(topK, groupSize)
+	if h.Len() > 0 && (*h)[0].elementIdx != nil {
+		return mergeGroupByInt64ElementPk(h, topK, groupSize, numGroupFields)
+	}
 
+	totalLimit := topK * groupSize
+	dedupSet := make(map[int64]struct{}, totalLimit)
+	counter := newCompositeGroupCounter(topK, groupSize)
 	ids := make([]int64, 0, totalLimit)
 	scores := make([]float32, 0, totalLimit)
 	sources := make([]segmentSource, 0, totalLimit)
 
 	for int64(len(ids)) < totalLimit && h.Len() > 0 {
-		e := heap.Pop(h).(*mergeEntry)
+		e := (*h)[0]
 		pk := e.idInt64Val()
-		dedupKey := int64DedupKey(e)
-
-		if _, dup := dedupSet[dedupKey]; dup {
-			if e.advance() {
-				heap.Push(h, e)
-			}
+		if _, dup := dedupSet[pk]; dup {
+			h.advanceRoot()
 			continue
 		}
 
@@ -549,15 +548,13 @@ func mergeGroupByInt64Pk(
 			return nil, nil, nil, err
 		}
 		if !counter.shouldAccept(values) {
-			if e.advance() {
-				heap.Push(h, e)
-			}
+			h.advanceRoot()
 			continue
 		}
 
 		ids = append(ids, pk)
 		scores = append(scores, e.scoreVal())
-		dedupSet[dedupKey] = struct{}{}
+		dedupSet[pk] = struct{}{}
 		sources = append(sources, segmentSource{
 			InputIdx:    e.inputIdx,
 			SegOffset:   e.segOffsetVal(),
@@ -566,40 +563,107 @@ func mergeGroupByInt64Pk(
 		if counter.allSaturated() {
 			break
 		}
+		h.advanceRoot()
+	}
+	return ids, scores, sources, nil
+}
 
-		if e.advance() {
-			heap.Push(h, e)
+func mergeGroupByInt64ElementPk(
+	h *mergeHeapInt64Pk,
+	topK, groupSize int64,
+	numGroupFields int,
+) ([]int64, []float32, []segmentSource, error) {
+	totalLimit := topK * groupSize
+	dedupSet := make(map[int64ElementDedupKey]struct{}, totalLimit)
+	counter := newCompositeGroupCounter(topK, groupSize)
+	ids := make([]int64, 0, totalLimit)
+	scores := make([]float32, 0, totalLimit)
+	sources := make([]segmentSource, 0, totalLimit)
+
+	for int64(len(ids)) < totalLimit && h.Len() > 0 {
+		e := (*h)[0]
+		pk := e.idInt64Val()
+		key := int64ElementDedupKey{pk: pk, elementIndex: e.elementIndexVal()}
+		if _, dup := dedupSet[key]; dup {
+			h.advanceRoot()
+			continue
 		}
+
+		values, err := extractCompositeGroupValues(e, numGroupFields)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if !counter.shouldAccept(values) {
+			h.advanceRoot()
+			continue
+		}
+
+		ids = append(ids, pk)
+		scores = append(scores, e.scoreVal())
+		dedupSet[key] = struct{}{}
+		sources = append(sources, segmentSource{
+			InputIdx:    e.inputIdx,
+			SegOffset:   e.segOffsetVal(),
+			OriginalIdx: e.cursor,
+		})
+		if counter.allSaturated() {
+			break
+		}
+		h.advanceRoot()
 	}
 	return ids, scores, sources, nil
 }
 
 // mergeStandardStringPk performs standard k-way merge for one NQ (string PK).
 func mergeStandardStringPk(h *mergeHeapStringPk, topK int64) ([]string, []float32, []segmentSource) {
-	dedupSet := make(map[any]struct{}, topK)
+	if h.Len() > 0 && (*h)[0].elementIdx != nil {
+		return mergeStandardStringElementPk(h, topK)
+	}
+
+	dedupSet := make(map[string]struct{}, topK)
 	ids := make([]string, 0, topK)
 	scores := make([]float32, 0, topK)
 	sources := make([]segmentSource, 0, topK)
 
 	for int64(len(ids)) < topK && h.Len() > 0 {
-		e := heap.Pop(h).(*mergeEntry)
+		e := (*h)[0]
 		pk := e.idStringVal()
-		dedupKey := stringDedupKey(e)
-
-		if _, dup := dedupSet[dedupKey]; !dup {
+		if _, dup := dedupSet[pk]; !dup {
 			ids = append(ids, pk)
 			scores = append(scores, e.scoreVal())
-			dedupSet[dedupKey] = struct{}{}
+			dedupSet[pk] = struct{}{}
 			sources = append(sources, segmentSource{
 				InputIdx:    e.inputIdx,
 				SegOffset:   e.segOffsetVal(),
 				OriginalIdx: e.cursor,
 			})
 		}
+		h.advanceRoot()
+	}
+	return ids, scores, sources
+}
 
-		if e.advance() {
-			heap.Push(h, e)
+func mergeStandardStringElementPk(h *mergeHeapStringPk, topK int64) ([]string, []float32, []segmentSource) {
+	dedupSet := make(map[stringElementDedupKey]struct{}, topK)
+	ids := make([]string, 0, topK)
+	scores := make([]float32, 0, topK)
+	sources := make([]segmentSource, 0, topK)
+
+	for int64(len(ids)) < topK && h.Len() > 0 {
+		e := (*h)[0]
+		pk := e.idStringVal()
+		key := stringElementDedupKey{pk: pk, elementIndex: e.elementIndexVal()}
+		if _, dup := dedupSet[key]; !dup {
+			ids = append(ids, pk)
+			scores = append(scores, e.scoreVal())
+			dedupSet[key] = struct{}{}
+			sources = append(sources, segmentSource{
+				InputIdx:    e.inputIdx,
+				SegOffset:   e.segOffsetVal(),
+				OriginalIdx: e.cursor,
+			})
 		}
+		h.advanceRoot()
 	}
 	return ids, scores, sources
 }
@@ -614,23 +678,22 @@ func mergeGroupByStringPk(
 		ids, scores, sources := mergeStandardStringPk(h, topK)
 		return ids, scores, sources, nil
 	}
-	totalLimit := topK * groupSize
-	dedupSet := make(map[any]struct{}, totalLimit)
-	counter := newCompositeGroupCounter(topK, groupSize)
+	if h.Len() > 0 && (*h)[0].elementIdx != nil {
+		return mergeGroupByStringElementPk(h, topK, groupSize, numGroupFields)
+	}
 
+	totalLimit := topK * groupSize
+	dedupSet := make(map[string]struct{}, totalLimit)
+	counter := newCompositeGroupCounter(topK, groupSize)
 	ids := make([]string, 0, totalLimit)
 	scores := make([]float32, 0, totalLimit)
 	sources := make([]segmentSource, 0, totalLimit)
 
 	for int64(len(ids)) < totalLimit && h.Len() > 0 {
-		e := heap.Pop(h).(*mergeEntry)
+		e := (*h)[0]
 		pk := e.idStringVal()
-		dedupKey := stringDedupKey(e)
-
-		if _, dup := dedupSet[dedupKey]; dup {
-			if e.advance() {
-				heap.Push(h, e)
-			}
+		if _, dup := dedupSet[pk]; dup {
+			h.advanceRoot()
 			continue
 		}
 
@@ -639,15 +702,13 @@ func mergeGroupByStringPk(
 			return nil, nil, nil, err
 		}
 		if !counter.shouldAccept(values) {
-			if e.advance() {
-				heap.Push(h, e)
-			}
+			h.advanceRoot()
 			continue
 		}
 
 		ids = append(ids, pk)
 		scores = append(scores, e.scoreVal())
-		dedupSet[dedupKey] = struct{}{}
+		dedupSet[pk] = struct{}{}
 		sources = append(sources, segmentSource{
 			InputIdx:    e.inputIdx,
 			SegOffset:   e.segOffsetVal(),
@@ -656,10 +717,53 @@ func mergeGroupByStringPk(
 		if counter.allSaturated() {
 			break
 		}
+		h.advanceRoot()
+	}
+	return ids, scores, sources, nil
+}
 
-		if e.advance() {
-			heap.Push(h, e)
+func mergeGroupByStringElementPk(
+	h *mergeHeapStringPk,
+	topK, groupSize int64,
+	numGroupFields int,
+) ([]string, []float32, []segmentSource, error) {
+	totalLimit := topK * groupSize
+	dedupSet := make(map[stringElementDedupKey]struct{}, totalLimit)
+	counter := newCompositeGroupCounter(topK, groupSize)
+	ids := make([]string, 0, totalLimit)
+	scores := make([]float32, 0, totalLimit)
+	sources := make([]segmentSource, 0, totalLimit)
+
+	for int64(len(ids)) < totalLimit && h.Len() > 0 {
+		e := (*h)[0]
+		pk := e.idStringVal()
+		key := stringElementDedupKey{pk: pk, elementIndex: e.elementIndexVal()}
+		if _, dup := dedupSet[key]; dup {
+			h.advanceRoot()
+			continue
 		}
+
+		values, err := extractCompositeGroupValues(e, numGroupFields)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if !counter.shouldAccept(values) {
+			h.advanceRoot()
+			continue
+		}
+
+		ids = append(ids, pk)
+		scores = append(scores, e.scoreVal())
+		dedupSet[key] = struct{}{}
+		sources = append(sources, segmentSource{
+			InputIdx:    e.inputIdx,
+			SegOffset:   e.segOffsetVal(),
+			OriginalIdx: e.cursor,
+		})
+		if counter.allSaturated() {
+			break
+		}
+		h.advanceRoot()
 	}
 	return ids, scores, sources, nil
 }

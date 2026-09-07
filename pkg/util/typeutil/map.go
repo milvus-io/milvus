@@ -136,5 +136,9 @@ func (m *ConcurrentMap[K, V]) CompareAndSwap(key K, old, new V) bool {
 }
 
 func (m *ConcurrentMap[K, V]) CompareAndDelete(key K, old V) bool {
-	return m.inner.CompareAndDelete(key, old)
+	if !m.inner.CompareAndDelete(key, old) {
+		return false
+	}
+	m.len.Dec()
+	return true
 }

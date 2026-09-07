@@ -23,9 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -75,6 +77,38 @@ func Test_NewInputNode(t *testing.T) {
 	assert.Equal(t, node.maxParallelism, maxParallelism)
 }
 
+func TestInputNodeMetricsHandlesSurvivePartialCleanup(t *testing.T) {
+	metrics.DataNodeConsumeMsgCount.Reset()
+	metrics.DataNodeConsumeTimeTickLag.Reset()
+
+	const (
+		nodeID       = int64(10101)
+		collectionID = int64(20202)
+	)
+	node1 := NewInputNode(nil, "input-node-1", 0, 1, typeutil.DataNodeRole, nodeID, collectionID, metrics.AllLabel)
+	node2 := NewInputNode(nil, "input-node-2", 0, 1, typeutil.DataNodeRole, nodeID, collectionID, metrics.AllLabel)
+
+	node1.consumeMsgCount.Inc()
+	node1.consumeTimeTickLag.Set(100)
+	node1.Free()
+	node1.Free()
+
+	// Closing one channel still runs collection cleanup. The surviving InputNode
+	// must keep updating the exported AllLabel metrics with its cached handles.
+	metrics.CleanupDataNodeCollectionMetrics(nodeID, collectionID, "unused-channel")
+	node2.consumeMsgCount.Inc()
+	node2.consumeTimeTickLag.Set(200)
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(node2.consumeMsgCount))
+	assert.Equal(t, float64(200), testutil.ToFloat64(node2.consumeTimeTickLag))
+	assert.Equal(t, 1, testutil.CollectAndCount(metrics.DataNodeConsumeMsgCount))
+	assert.Equal(t, 1, testutil.CollectAndCount(metrics.DataNodeConsumeTimeTickLag))
+
+	node2.Free()
+	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataNodeConsumeMsgCount))
+	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataNodeConsumeTimeTickLag))
+}
+
 func Test_InputNodeSkipMode(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/Test_InputNodeSkipMode")
 	factory := dependency.NewDefaultFactory(true)
@@ -93,7 +127,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 	nodeName := "input_node"
 	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
 	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, typeutil.DataNodeRole, 0, 0, "")
-	defer inputNode.Close()
+	defer inputNode.Free()
 
 	outputCount := 0
 	go func() {

@@ -361,6 +361,20 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotProtectedSegment(
 	s.Empty(events[TriggerTypeBumpSchemaVersion])
 }
 
+func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsExternalCollection() {
+	ctx := context.Background()
+	collID := int64(100)
+	coll := newBumpSchemaVersionTestCollection(collID, 2)
+	// IsExternalCollection is true when any field carries an external field mapping.
+	coll.Schema.Fields[1].ExternalField = "src_text"
+	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"), 0)
+
+	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
+	s.NoError(err)
+	s.Empty(events[TriggerTypeBumpSchemaVersion])
+}
+
 func (s *BumpSchemaVersionPolicySuite) TestName() {
 	// Test Name method
 	s.Equal("BumpSchemaVersion", s.bumpSchemaVersionPolicy.Name())

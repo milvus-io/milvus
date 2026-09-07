@@ -46,7 +46,7 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
         LogicalElementFunc<LogicalOpType::Or> func;
         func(lview, rview, size);
     } else {
-        ThrowInfo(OpTypeInvalid,
+        ThrowInfo(UnexpectedError,
                   "unsupported logical operator: {}",
                   expr_->GetOpTypeString());
     }

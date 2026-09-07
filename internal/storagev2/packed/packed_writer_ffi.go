@@ -49,6 +49,9 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    paramtable.Get().LocalStorageCfg.Path.GetValue(),
 			StorageType: paramtable.Get().CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
@@ -66,6 +69,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
@@ -183,11 +187,14 @@ func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
 	return pw
 }
 
-// Destroy releases writer resources without committing pending output.
+// Destroy releases writer resources without committing pending output. It
+// also marks the writer closed, so a later Close reports the misuse instead
+// of handing a null handle to the FFI as an "invalid arguments" error.
 func (pw *FFIPackedWriter) Destroy() {
 	if pw == nil {
 		return
 	}
+	pw.closed = true
 	if pw.cWriterHandle != 0 {
 		C.loon_writer_destroy(pw.cWriterHandle)
 		pw.cWriterHandle = 0
@@ -273,16 +280,7 @@ func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 		return nil, merr.WrapErrServiceInternalMsg("FFIPackedWriter already closed")
 	}
 	pw.closed = true
-	defer func() {
-		if pw.cWriterHandle != 0 {
-			C.loon_writer_destroy(pw.cWriterHandle)
-			pw.cWriterHandle = 0
-		}
-		if pw.cProperties != nil {
-			C.loon_properties_free(pw.cProperties)
-			pw.cProperties = nil
-		}
-	}()
+	defer pw.Destroy()
 	var cColumnGroups *C.LoonColumnGroups
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {

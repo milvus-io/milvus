@@ -75,6 +75,8 @@ type statsTask struct {
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
+	pluginContext *indexcgopb.StoragePluginContext
+
 	logIDOffset  int64
 	currentTime  time.Time
 	manifestPath string // current manifest version, updated after each AddStatsToManifest
@@ -92,18 +94,20 @@ func NewStatsTask(ctx context.Context,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
 	cm storage.ChunkManager,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *statsTask {
 	return &statsTask{
-		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:         ctx,
-		cancel:      cancel,
-		req:         req,
-		manager:     manager,
-		binlogIO:    io.NewBinlogIO(cm),
-		cm:          cm,
-		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
-		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
-		logIDOffset: 0,
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:           ctx,
+		cancel:        cancel,
+		req:           req,
+		manager:       manager,
+		binlogIO:      io.NewBinlogIO(cm),
+		cm:            cm,
+		pluginContext: pluginContext,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
+		logIDOffset:   0,
 	}
 }
 
@@ -141,6 +145,29 @@ func (st *statsTask) GetSlot() int64 {
 
 func (st *statsTask) IsVectorIndex() bool {
 	return false
+}
+
+func redactStorageCredentialsForLog(accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON *string) {
+	for _, secret := range []*string{accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON} {
+		if *secret != "" {
+			*secret = "<redacted>"
+		}
+	}
+}
+
+func redactStorageConfigForLog(config *indexpb.StorageConfig) *indexpb.StorageConfig {
+	if config == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(config).(*indexpb.StorageConfig)
+	redactStorageCredentialsForLog(
+		&redacted.AccessKeyID,
+		&redacted.SecretAccessKey,
+		&redacted.SslCACert,
+		&redacted.GcpCredentialJSON,
+	)
+	return redacted
 }
 
 func (st *statsTask) PreExecute(ctx context.Context) error {
@@ -182,7 +209,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		mlog.FieldSegmentID(st.req.GetSegmentID()),
 		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
 		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		mlog.Any("storageConfig", st.req.StorageConfig),
+		mlog.Any("storageConfig", redactStorageConfigForLog(st.req.GetStorageConfig())),
 	)
 	return nil
 }
@@ -362,7 +389,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	if len(insertLogs) == 0 {
+	if len(insertLogs) == 0 && st.manifestPath == "" {
 		mlog.Info(ctx,
 			"there is no insertBinlogs, skip creating text index")
 		return nil
@@ -428,6 +455,7 @@ func (st *statsTask) Reset() {
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
+	st.pluginContext = nil
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -525,11 +553,12 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		mu            sync.Mutex
 		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
 	)
+	baseManifest := st.req.GetManifestPath()
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(st.req.GetFileResources()) > 0 {
+	if len(st.req.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
 		if err != nil {
 			return err
@@ -562,7 +591,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, statsBasePath)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, statsBasePath, st.pluginContext)
 			buildIndexParams.IndexParams = []*commonpb.KeyValuePair{
 				{Key: "index_type", Value: "INVERTED"},
 				{Key: "is_text_match", Value: "true"},
@@ -618,10 +647,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return err
 	}
 
-	// When manifest_path is set, register text index stats in manifest.
-	// TextStatsLogs already carries full object keys for mixed-version compatibility;
-	// AddStatsToManifest stores the manifest-relative representation at commit time.
-	if st.manifestPath != "" && len(textIndexLogs) > 0 {
+	// The Sort sub-job bakes text index stats into the freshly written target-segment
+	// manifest inline. A standalone TextIndexJob instead ships textIndexLogs to
+	// DataCoord, which runs the manifest transaction itself (CommitSegmentManifest,
+	// rebased onto the segment's current manifest); baking here would commit against a
+	// base that may already be stale, so the worker skips it. TextStatsLogs carries
+	// full object keys either way; the loon transaction stores the manifest-relative
+	// representation at commit time.
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort && st.manifestPath != "" && len(textIndexLogs) > 0 {
 		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
@@ -641,6 +674,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs,
+		baseManifest,
 		st.manifestPath)
 	totalElapse := st.tr.RecordSpan()
 	log.Info(ctx, "create text index done",
@@ -714,6 +748,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		mu                sync.Mutex
 		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
 	)
+	baseManifest := st.req.GetManifestPath()
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -743,7 +778,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath, st.pluginContext)
 
 			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
 			if err != nil {
@@ -782,12 +817,16 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		return err
 	}
 
-	// When manifest_path is set, register JSON key stats in manifest.
+	// The Sort sub-job bakes JSON key stats into the freshly written target-segment
+	// manifest inline. A standalone JsonKeyIndexJob instead ships jsonKeyIndexStats to
+	// DataCoord, which runs the manifest transaction itself (CommitSegmentManifest,
+	// rebased onto the segment's current manifest) and reconstructs the absolute paths
+	// there; baking here would commit against a possibly stale base, so the worker skips it.
 	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
 	// before registering with manifest (loon library expects absolute paths).
 	// Use a separate copy for manifest so the original stats retain relative paths
 	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
-	if st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort && st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
 			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
@@ -821,6 +860,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		jsonKeyIndexStats,
+		baseManifest,
 		st.manifestPath)
 
 	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
@@ -863,6 +903,7 @@ func buildIndexParams(
 	storageConfig *indexcgopb.StorageConfig,
 	options *BuildIndexOptions,
 	statsBasePath string,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *indexcgopb.BuildIndexInfo {
 	if options == nil {
 		options = &BuildIndexOptions{}
@@ -885,6 +926,9 @@ func buildIndexParams(
 		JsonStatsWriteBatchSize:          options.JSONStatsWriteBatchSize,
 		Manifest:                         req.GetManifestPath(),
 		StatsBasePath:                    statsBasePath,
+	}
+	if pluginContext != nil {
+		params.StoragePluginContext = pluginContext
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 || req.GetStorageVersion() == storage.StorageV3 {

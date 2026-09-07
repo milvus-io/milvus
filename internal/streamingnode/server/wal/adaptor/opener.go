@@ -190,6 +190,9 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
 	})
+	resources := &walOpenResources{roWAL: roWAL}
+	defer resources.Close()
+
 	cpProto, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(ctx, opt.Channel.Name)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get checkpoint from catalog")
@@ -199,20 +202,19 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	// recover the wal state.
 	param, err := buildInterceptorParams(ctx, l, cp)
 	if err != nil {
-		roWAL.Close()
 		return nil, errors.Wrap(err, "when building interceptor params")
 	}
+	resources.param = param
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(ctx, newRecoveryStreamBuilder(roWAL), cp, param.LastTimeTickMessage)
 	if err != nil {
-		param.Clear()
-		roWAL.Close()
 		return nil, errors.Wrap(err, "when recovering recovery storage")
 	}
+	resources.recoveryStorage = rs
 
 	// Handle alter WAL if found in snapshot
 	// This flushes all remaining data and triggers WAL switch to the target implementation
 	if snapshot.AlterWALInfo != nil && snapshot.AlterWALInfo.FoundAlterWALMsg {
-		return o.handleAlterWAL(ctx, l, opt, roWAL, param, rs, snapshot)
+		return o.handleAlterWAL(ctx, opt, roWAL, rs, resources, snapshot)
 	}
 
 	param.LastConfirmedMessageID = determineLastConfirmedMessageID(param.LastTimeTickMessage.MessageID(), snapshot.TxnBuffer)
@@ -254,10 +256,13 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 			ChannelInfo:        l.Channel(),
 			RecoverySnapshot:   snapshot,
 			RateLimitComponent: roWAL.WALRateLimitComponent,
+			OnFatal:            roWAL.markUnavailable,
 		})
+		resources.flusher = flusher
 	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
 	o.walInstances.Insert(id, wal)
+	resources.Release()
 	return wal, nil
 }
 
@@ -279,8 +284,9 @@ func determineLastConfirmedMessageID(lastTimeTickMessageID message.MessageID, tx
 // Stage 1 (FLUSHING): Flush all growing segments and wait for completion
 // Stage 2 (ADVANCE_CHECKPOINT): Update vchannel checkpoints and pchannel consume checkpoint
 // Returns an error to trigger WAL re-opening after successful switch
-func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption,
-	roWAL *roWALAdaptorImpl, param *interceptors.InterceptorBuildParam, rs recovery.RecoveryStorage, snapshot *recovery.RecoverySnapshot,
+func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, opt *wal.OpenOption,
+	roWAL *roWALAdaptorImpl, rs recovery.RecoveryStorage,
+	resources *walOpenResources, snapshot *recovery.RecoverySnapshot,
 ) (wal.WAL, error) {
 	mlog.Info(ctx, "detected alter WAL message in snapshot",
 		mlog.String("channel", opt.Channel.String()),
@@ -291,7 +297,7 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 		mlog.Any("alterWALConfig", snapshot.AlterWALInfo.AlterWALConfig))
 
 	if snapshot.Checkpoint.AlterWalState != nil && snapshot.Checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_FLUSHING {
-		flushingErr := o.handleAlterWALFlushingStage(ctx, opt, roWAL, param, rs, snapshot)
+		flushingErr := o.handleAlterWALFlushingStage(ctx, opt, roWAL, rs, resources, snapshot)
 		if flushingErr != nil {
 			return nil, errors.Wrap(flushingErr, "failed to handle alter WAL flushing stage")
 		}
@@ -309,7 +315,8 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 }
 
 func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt *wal.OpenOption, roWAL *roWALAdaptorImpl,
-	param *interceptors.InterceptorBuildParam, rs recovery.RecoveryStorage, snapshot *recovery.RecoverySnapshot,
+	rs recovery.RecoveryStorage,
+	resources *walOpenResources, snapshot *recovery.RecoverySnapshot,
 ) error {
 	// Start flusher to flush all growing segments
 	var flusher *flusherimpl.WALFlusherImpl
@@ -323,7 +330,9 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 			ChannelInfo:        roWAL.Channel(),
 			RecoverySnapshot:   snapshot,
 			RateLimitComponent: roWAL.WALRateLimitComponent,
+			OnFatal:            roWAL.markUnavailable,
 		})
+		resources.flusher = flusher
 	}
 
 	// Wait for all data up to target time tick to be flushed
@@ -336,8 +345,12 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	const defaultWALSwitchFlushTimeout = 1 * time.Minute
-
+	// There is deliberately no internal wall-clock deadline on this wait. It
+	// ends when the target checkpoint is reached, the recovered WAL becomes
+	// unavailable, or the caller's Open context is canceled. The caller owns
+	// the overall assignment/open deadline, while a backlog that is still
+	// draining must be allowed to keep making progress within that lifetime.
+	//
 	// Periodically check flush progress until target time tick is reached
 	var flusherCP *utility.WALCheckpoint
 	for flusherCP == nil || flusherCP.TimeTick < targetTimeTick {
@@ -362,11 +375,8 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 				mlog.Uint64("currentTS", flusherCP.TimeTick),
 				mlog.Uint64("targetTS", targetTimeTick),
 				mlog.Uint64("remainingTS", remaining))
-		case <-time.After(defaultWALSwitchFlushTimeout):
-			mlog.Warn(ctx, "timeout waiting for flush completion",
-				mlog.String("channel", opt.Channel.Name),
-				mlog.Duration("timeout", defaultWALSwitchFlushTimeout))
-			return status.NewInner("timeout waiting for flush completion during WAL switch")
+		case <-roWAL.Unavailable():
+			return status.NewInner("wal became unavailable while waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			mlog.Warn(ctx, "context canceled while waiting for flush completion", mlog.String("channel", opt.Channel.Name), mlog.Err(ctx.Err()))
 			return errors.Wrap(ctx.Err(), "context canceled during WAL switch flush waiting")
@@ -375,12 +385,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 
 	// Close recovery storage and related resources to persist final state
 	mlog.Info(ctx, "closing recovery storage to persist WAL switch snapshot")
-	rs.Close()
-	if flusher != nil {
-		flusher.Close()
-	}
-	param.Clear()
-	roWAL.Close()
+	resources.Close()
 
 	// Update checkpoint stage to ADVANCE_CHECKPOINT and persist to catalog
 	snapshot.Checkpoint.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
@@ -471,10 +476,11 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	// Update pchannel checkpoint: reset alterWALState and set position to new WAL initial position
 	finalCheckpoint := snapshot.Checkpoint.Clone()
 	finalCheckpoint.AlterWalState = nil
+	// Only the local checkpoint moves to the new backend. The replicate checkpoint
+	// holds the position this cluster has reached in the SOURCE cluster's WAL, so a
+	// local backend migration must leave it alone: the two message IDs belong to
+	// different clusters and therefore to different ID spaces.
 	finalCheckpoint.MessageID = msgadaptor.MustGetMessageIDFromMQWrapperID(newWALInitialMsgID)
-	if finalCheckpoint.ReplicateCheckpoint != nil {
-		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
-	}
 
 	// Persist final checkpoint to catalog
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {

@@ -100,6 +100,7 @@ type mockMetaTable struct {
 	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
+	GetAvailableCollectionCountFunc  func(ctx context.Context, dbID int64) (int, int, bool)
 	CreatePrivilegeGroupFunc         func(ctx context.Context, groupName string) error
 	DropPrivilegeGroupFunc           func(ctx context.Context, groupName string) error
 	IsCustomPrivilegeGroupFunc       func(ctx context.Context, groupName string) (bool, error)
@@ -110,6 +111,10 @@ type mockMetaTable struct {
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
 	return m.DescribeDatabaseFunc(ctx, dbName)
+}
+
+func (m mockMetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (int, int, bool) {
+	return m.GetAvailableCollectionCountFunc(ctx, dbID)
 }
 
 func (m mockMetaTable) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {

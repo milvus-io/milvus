@@ -14,10 +14,31 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+// generatedFieldIDBase is the offset newTestSchema adds to each schemapb.DataType
+// enum value to derive that type's field ID, so the generated block spans
+// generatedFieldIDBase+0 .. generatedFieldIDBase+max(DataType) and grows on its
+// own whenever a DataType is added.
+const generatedFieldIDBase = 100
+
+// Field IDs for the fields newTestSchema writes by hand. They must stay clear of
+// the generated block above: these used to start at 130, which collided the
+// moment DataType gained values 30 and 31 (Decimal, UUID). Keep them well past
+// generatedFieldIDBase+max(DataType) -- 301 today, via DataType_Struct(201).
+const (
+	dynamicFieldID      = 1000
+	stringArrayFieldID  = 1001
+	structArrayFieldID  = 1002
+	structSubStrFieldID = 1003
+	structSubIntFieldID = 1004
+	legacyNullFieldID   = 1005
 )
 
 func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
@@ -28,7 +49,7 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 	for name, value := range schemapb.DataType_value {
 		dataType := schemapb.DataType(value)
 		newField := &schemapb.FieldSchema{
-			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+			FieldID: int64(generatedFieldIDBase + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
 		}
 		if dataType == schemapb.DataType_Array {
 			newField.ElementType = schemapb.DataType_Int64
@@ -37,26 +58,26 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 	}
 	if EnableDynamicField {
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: 130, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
+			FieldID: dynamicFieldID, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
 			IsDynamic: true,
 		})
 	}
 
 	fields = append(fields, &schemapb.FieldSchema{
-		FieldID: 131, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
+		FieldID: stringArrayFieldID, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
 	})
 
 	structArrayField := &schemapb.StructArrayFieldSchema{
-		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
+		FieldID: structArrayFieldID, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
-				FieldID: 133, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
+				FieldID: structSubStrFieldID, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_VarChar,
 			},
 			{
-				FieldID: 134, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
+				FieldID: structSubIntFieldID, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Int32,
 			},
@@ -135,6 +156,150 @@ func TestExpr_Term(t *testing.T) {
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
+}
+
+// assertNullLiteralRejected checks that the expression is rejected specifically
+// because of the bare-NULL reserved-word guard, i.e. it returns the actionable
+// message rather than the misleading "field NULL not exist" (issue #50882).
+func assertNullLiteralRejected(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
+	_, err := ParseExpr(helper, exprStr, nil)
+	if assert.Error(t, err, exprStr) {
+		assert.Contains(t, err.Error(), "NULL literal is not supported in expressions", exprStr)
+	}
+}
+
+func TestExpr_NullLiteral(t *testing.T) {
+	// NULL is not a value literal. It is lexed as a bare identifier, so it must be
+	// rejected wherever it appears in column/value position (issue #50882). The
+	// behavior must be identical whether or not a dynamic field is present: without
+	// one a bare NULL fails a field lookup; with one it would otherwise be silently
+	// mistaken for a dynamic JSON key named "NULL". Use `<field> is null` /
+	// `is not null` to compare against null instead.
+	rejected := []string{
+		// inside an `in [...]` value list (the exact shape from the issue)
+		`Int64Field in [6560, NULL, 6722, -7856, -6757]`,
+		`Int64Field in [null]`,
+		`Int64Field in [NULL]`,
+		`Int64Field not in [1, Null]`,
+		`VarCharField in ["a", null, "b"]`,
+		`(not (not ((Int64Field is not null) and (Int64Field in [1, NULL, 2]))))`,
+		// NULL as the tested column on the left of `in`
+		`NULL in [1, 2]`,
+		// binary comparison, either side
+		`Int64Field == NULL`,
+		`NULL == Int64Field`,
+		`NULL > 5`,
+		`Int64Field != NULL`,
+		// range comparison
+		`1 < NULL < 5`,
+		`NULL < Int64Field < 5`,
+		`1 < Int64Field < NULL`,
+		`Int64Field < NULL`,
+		// logical / unary operands
+		`NULL and Int64Field > 0`,
+		`Int64Field > 0 or NULL`,
+		`not NULL`,
+		// function arguments
+		`array_length(NULL) > 0`,
+		`array_contains(NULL, 1)`,
+		// `is null` / `is not null` with NULL as the target (nonsensical)
+		`NULL is null`,
+		`NULL is not null`,
+		// NULL as a JSON / array subscript base — a separate lookup path
+		// (getColumnInfoFromJSONIdentifier) that bypasses translateIdentifier
+		`NULL["x"] == 1`,
+		`NULL[0] > 1`,
+		// case-insensitive: any casing of the reserved word is rejected
+		`Int64Field == Null`,
+		`Int64Field == nUlL`,
+		`Int64Field == NuLL`,
+	}
+
+	// Valid expressions that must NOT be affected by the guard.
+	validBoth := []string{
+		// the real "is null" predicates the guard points users to
+		`Int64Field is null`,
+		`Int64Field is not null`,
+		`JSONField["a"] is null`,
+		// a JSON key literally named "null" stays reachable via quoting: the base
+		// identifier is the field name, not "null"
+		`JSONField["null"] == 1`,
+		`JSONField['null'] == 1`,
+		// the string literal "null" is a value, not an identifier
+		`VarCharField == "null"`,
+		`VarCharField in ["null", "NULL"]`,
+	}
+	// Only valid when the dynamic field exists.
+	validDynamicOnly := []string{
+		`$meta["null"] == 1`,
+		`A == 1`, // sanity: an arbitrary dynamic key still resolves
+	}
+
+	for _, dynamic := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dynamic=%v", dynamic), func(t *testing.T) {
+			helper, err := typeutil.CreateSchemaHelper(newTestSchema(dynamic))
+			assert.NoError(t, err)
+
+			for _, exprStr := range rejected {
+				assertNullLiteralRejected(t, helper, exprStr)
+			}
+			for _, exprStr := range validBoth {
+				assertValidExpr(t, helper, exprStr)
+			}
+			if dynamic {
+				for _, exprStr := range validDynamicOnly {
+					assertValidExpr(t, helper, exprStr)
+				}
+			}
+		})
+	}
+}
+
+// TestExpr_NullLiteral_LegacyNullField locks the schema-aware side of the
+// bare-NULL guard: "null" only became a create-time keyword together with this
+// guard, so a legacy collection may own a field literally named "null", and the
+// bare identifier is the ONLY syntax that can reference a top-level scalar
+// field (quoting like field["null"] reaches JSON sub-keys only). Such a field
+// must stay queryable; the strict GetFieldFromName check makes it resolve while
+// everything else keeps the reserved-word rejection (see errNullLiteral).
+func TestExpr_NullLiteral_LegacyNullField(t *testing.T) {
+	withNullField := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
+		schema := newTestSchema(true)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: legacyNullFieldID, Name: "null", Description: "legacy field literally named null", DataType: dataType,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		return helper
+	}
+
+	t.Run("scalar field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_Int64)
+
+		// The bare identifier resolves to the declared field, as before the guard.
+		assertValidExpr(t, helper, `null > 5`)
+		assertValidExpr(t, helper, `null in [1, 2]`)
+		assertValidExpr(t, helper, `Int64Field == null`)
+		// The guard previously rejected these outright; schema-aware turns them
+		// into valid "is the null-named field NULL?" predicates.
+		assertValidExpr(t, helper, `null is null`)
+		assertValidExpr(t, helper, `null is not null`)
+		// Strict lookup is exact-case: a differently-cased NULL does not match the
+		// declared field and keeps the reserved-word rejection (pre-guard it would
+		// have been misparsed as the dynamic JSON key $meta["NULL"]).
+		assertNullLiteralRejected(t, helper, `NULL > 5`)
+		assertNullLiteralRejected(t, helper, `Int64Field == Null`)
+	})
+
+	t.Run("json field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_JSON)
+
+		// The subscript base resolves via the same schema-aware guard in
+		// getColumnInfoFromJSONIdentifier.
+		assertValidExpr(t, helper, `null["x"] == 1`)
+		assertValidExpr(t, helper, `null["x"] is null`)
+		assertNullLiteralRejected(t, helper, `NULL["x"] == 1`)
+	})
 }
 
 func TestExpr_Call(t *testing.T) {
@@ -766,6 +931,138 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_TextMatchFuzzy(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// the field must enable match first, otherwise fuzzy match is rejected.
+	assertInvalidExpr(t, helper, `text_match_fuzzy(VarCharField, "query", max_edit_distance=1)`)
+	enableMatch(schema)
+
+	for _, v := range []int64{0, 1, 2} {
+		expr := fmt.Sprintf(`text_match_fuzzy(VarCharField, "query", max_edit_distance=%d)`, v)
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "query", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, v, extra[0].GetInt64Val())
+	}
+
+	{
+		// a templated query is filled at plan time and the edit distance survives.
+		expr := `text_match_fuzzy(VarCharField, {q}, max_edit_distance=2)`
+		mv := map[string]*schemapb.TemplateValue{
+			"q": generateTemplateValue(schemapb.DataType_VarChar, "hello"),
+		}
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:       10,
+			MetricType: "L2",
+		}, mv, nil)
+		assert.NoError(t, err, expr)
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "hello", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, int64(2), extra[0].GetInt64Val())
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=3)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_edit_distance should be in [0, 2]")
+	}
+
+	{
+		// the distance argument is required by the grammar.
+		expr := `text_match_fuzzy(VarCharField, "query")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=1.5)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=9223372036854775808)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid max_edit_distance value")
+	}
+
+	unsupported := []string{
+		`text_match_fuzzy(not_exist, "query", max_edit_distance=1)`,
+		`text_match_fuzzy(BoolField, "query", max_edit_distance=1)`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_TextMatchFuzzy_SoftKeyword(t *testing.T) {
+	// A wrong option name is rejected: the option name is a soft keyword, so
+	// only "max_edit_distance" (any case) is accepted.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", fuzziness=1)`
+		_, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "expected max_edit_distance")
+	}
+
+	// The option name is case-insensitive.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", MAX_EDIT_DISTANCE=1)`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+	}
+
+	// max_edit_distance is a soft keyword, not a reserved word: a scalar field
+	// literally named "max_edit_distance" stays usable in an ordinary filter
+	// (issue #51058 — hard-keywording it would break such collections).
+	{
+		schema := newTestSchema(false)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 9999, Name: "max_edit_distance", DataType: schemapb.DataType_Int64,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `max_edit_distance > 1`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+	}
+}
+
 func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	enableMatch(schema)
@@ -1138,7 +1435,7 @@ func TestExpr_StructArrayParentIsNull(t *testing.T) {
 	nullExpr := expr.GetNullExpr()
 	require.NotNil(t, nullExpr)
 	assert.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
-	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), nullExpr.GetColumnInfo().GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, nullExpr.GetColumnInfo().GetElementType())
 	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
@@ -1148,7 +1445,7 @@ func TestExpr_StructArrayParentIsNull(t *testing.T) {
 	nullExpr = expr.GetNullExpr()
 	require.NotNil(t, nullExpr)
 	assert.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
-	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), nullExpr.GetColumnInfo().GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
 	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
 }
@@ -1272,6 +1569,61 @@ func TestExpr_BinaryRange(t *testing.T) {
 	}
 }
 
+func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for name, exprStr := range map[string]string{
+		"range":         `9007199254740992.0 <= A < 9007199254740993`,
+		"reverse range": `9007199254740993 > A >= 9007199254740992.0`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expr, err := ParseExpr(helper, exprStr, nil)
+			require.NoError(t, err)
+
+			binaryRange := expr.GetBinaryRangeExpr()
+			require.NotNil(t, binaryRange)
+			assert.IsType(t, &planpb.GenericValue_FloatVal{}, binaryRange.GetLowerValue().GetVal())
+			assert.Equal(t, float64(9007199254740992), binaryRange.GetLowerValue().GetFloatVal())
+			assert.IsType(t, &planpb.GenericValue_Int64Val{}, binaryRange.GetUpperValue().GetVal())
+			assert.Equal(t, int64(9007199254740993), binaryRange.GetUpperValue().GetInt64Val())
+			assert.True(t, binaryRange.GetLowerInclusive())
+			assert.False(t, binaryRange.GetUpperInclusive())
+		})
+	}
+
+	for name, exprStr := range map[string]string{
+		"range lower greater than upper":         `9007199254740994.0 <= A < 9007199254740993`,
+		"reverse range lower greater than upper": `9007199254740993 > A >= 9007199254740994.0`,
+		"equal bounds with open upper":           `9007199254740992.0 <= A < 9007199254740992`,
+		"equal bounds with open lower":           `9007199254740992.0 < A <= 9007199254740992`,
+		"same-type strings in reverse order":     `"z" <= A < "a"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseExpr(helper, exprStr, nil)
+			assert.Error(t, err)
+		})
+	}
+
+	for _, exprStr := range []string{
+		`1 <= A < "z"`,
+		`"z" > A >= 1`,
+		`false < A < true`,
+		`[1] < A < [2]`,
+	} {
+		_, err := ParseExpr(helper, exprStr, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, exprStr)
+		assert.Contains(t, err.Error(), "bounds are not comparable", exprStr)
+	}
+
+	// Separate comparisons keep their own JSON dynamic-type semantics and must
+	// not be rejected or merged into a mixed-type BinaryRangeExpr.
+	expr, err := ParseExpr(helper, `A >= 1 AND A < "z"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
 func TestExpr_castValue(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -1329,6 +1681,21 @@ func TestExpr_BinaryArith(t *testing.T) {
 		// to int64 and treats non-numeric / missing values as non-matching).
 		`(JSONField["A"] & 4) == 4`,
 		`(JSONField["B"] | 2) != 0`,
+		// shift operators on integer / JSON / array-element fields
+		`(Int64Field << 2) == 8`,
+		`(Int64Field >> 1) >= 5`,
+		`(Int32Field << 3) != 0`,
+		`(JSONField["A"] << 1) == 4`,
+		`(ArrayField[0] >> 2) < 4`,
+		`Int64Field == (1 << 3)`,
+		`Int64Field == (256 >> 2)`,
+		// bitwise NOT: constant folds; over a field it is rewritten to (x ^ -1)
+		`Int64Field == ~5`,
+		`~5 == Int64Field`,
+		`~Int64Field == 0`,
+		`~Int32Field != 0`,
+		`~JSONField["A"] == 0`,
+		`~ArrayField[0] >= 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1360,6 +1727,31 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`(Int64Field & Int32Field) == 4`,
 		`(Int64Field | Int32Field) != 0`,
 		`(Int64Field ^ Int32Field) == 0`,
+		// shifts on non-integer fields are invalid
+		`(FloatField << 1) == 0`,
+		`(DoubleField >> 1) == 0`,
+		// a negative or too-large shift amount is rejected at plan time
+		`(Int64Field << 64) == 0`,
+		`(Int64Field << -1) == 0`,
+		`(Int64Field >> 64) == 0`,
+		`Int64Field == (1 << 64)`,
+		`Int64Field == (1 >> 64)`,
+		// folding a shift over non-integer literals is invalid (integer-only)
+		`Int64Field == (1.5 << 1)`,
+		`Int64Field == (1.5 >> 1)`,
+		// shift between two fields is unsupported (right operand must be a constant)
+		`(Int64Field << Int32Field) == 0`,
+		// bitwise NOT on non-integer fields is invalid
+		`~FloatField == 0`,
+		`~DoubleField == 0`,
+		`~BoolField == 0`,
+		`~VarCharField == 0`,
+		// folding ~ over a non-integer literal is invalid (integer-only)
+		`Int64Field == ~1.5`,
+		// nested arithmetic (two arith ops before the comparison) is unsupported,
+		// consistent with the other arithmetic / bitwise operators
+		`(Int64Field >> 2) * 2 == 4`,
+		`(~Int64Field) + 1 == 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1395,6 +1787,13 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		// reverse form (constant on the left) for the symmetric == / != ops
 		{`4 == (Int64Field & 4)`, planpb.ArithOpType_BitAnd, planpb.OpType_Equal, 4, 4},
 		{`0 != (Int32Field | 2)`, planpb.ArithOpType_BitOr, planpb.OpType_NotEqual, 2, 0},
+		// shift operators fuse the same way, carrying the shift amount as the operand
+		{`(Int64Field << 2) == 8`, planpb.ArithOpType_Shl, planpb.OpType_Equal, 2, 8},
+		{`(Int64Field >> 1) >= 5`, planpb.ArithOpType_Shr, planpb.OpType_GreaterEqual, 1, 5},
+		{`(Int32Field << 3) != 0`, planpb.ArithOpType_Shl, planpb.OpType_NotEqual, 3, 0},
+		// ~field is rewritten to (field ^ -1); it fuses as BitXor with operand -1
+		{`~Int64Field == 0`, planpb.ArithOpType_BitXor, planpb.OpType_Equal, -1, 0},
+		{`~Int32Field != 5`, planpb.ArithOpType_BitXor, planpb.OpType_NotEqual, -1, 5},
 	}
 	for _, c := range cases {
 		expr, err := ParseExpr(helper, c.expr, nil)
@@ -1417,9 +1816,12 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		expected int64
 	}
 	foldCases := []foldCase{
-		{`Int64Field == (7 & 3)`, 3}, // 7 & 3 = 3
-		{`Int64Field == (5 | 2)`, 7}, // 5 | 2 = 7
-		{`Int64Field == (6 ^ 3)`, 5}, // 6 ^ 3 = 5
+		{`Int64Field == (7 & 3)`, 3},     // 7 & 3 = 3
+		{`Int64Field == (5 | 2)`, 7},     // 5 | 2 = 7
+		{`Int64Field == (6 ^ 3)`, 5},     // 6 ^ 3 = 5
+		{`Int64Field == (1 << 3)`, 8},    // 1 << 3 = 8
+		{`Int64Field == (256 >> 2)`, 64}, // 256 >> 2 = 64
+		{`Int64Field == ~5`, -6},         // ~5 = -6
 	}
 	for _, c := range foldCases {
 		expr, err := ParseExpr(helper, c.expr, nil)
@@ -2277,6 +2679,43 @@ func Test_JSONContainsAll(t *testing.T) {
 	}
 }
 
+func Test_JSONContainsStructFieldUsesSubFieldNullable(t *testing.T) {
+	for _, testcase := range []struct {
+		name           string
+		parentNullable bool
+		childNullable  bool
+		wantNullable   bool
+	}{
+		{name: "child nullable", childNullable: true, wantNullable: true},
+		{name: "parent nullable only", parentNullable: true, wantNullable: false},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			schema := newTestSchema(true)
+			schema.StructArrayFields[0].Nullable = testcase.parentNullable
+			schema.StructArrayFields[0].Fields[1].Nullable = testcase.childNullable
+			helper, err := typeutil.CreateSchemaHelper(schema)
+			require.NoError(t, err)
+
+			plan, err := CreateSearchPlan(helper, `json_contains_all(struct_array[sub_int], [])`, "FloatVectorField", &planpb.QueryInfo{
+				Topk:         0,
+				MetricType:   "",
+				SearchParams: "",
+				RoundDecimal: 0,
+			}, nil, nil)
+			require.NoError(t, err)
+
+			jsonContainsExpr := plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr()
+			require.NotNil(t, jsonContainsExpr)
+			columnInfo := jsonContainsExpr.GetColumnInfo()
+			require.NotNil(t, columnInfo)
+			assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
+			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+			assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+			assert.Equal(t, testcase.wantNullable, columnInfo.GetNullable())
+		})
+	}
+}
+
 func Test_JSONContainsAny(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	expr := ""
@@ -2329,6 +2768,12 @@ func Test_ArrayExpr(t *testing.T) {
 
 	exprs := []string{
 		`ArrayField == [1,2,3,4]`,
+		`ArrayField != [1,2,3,4]`,
+		`[1,2,3,4] == ArrayField`,
+		`ArrayField == []`,
+		`ArrayField != []`,
+		`[] == ArrayField`,
+		`[] != ArrayField`,
 		`ArrayField[0] == 1`,
 		`ArrayField[0] > 1`,
 		`1 < ArrayField[0] < 3`,
@@ -2369,6 +2814,25 @@ func Test_ArrayExpr(t *testing.T) {
 		assert.NoError(t, err, expr)
 	}
 
+	unsupportedFieldComparisons := []string{
+		`ArrayField == ArrayField`,
+		`ArrayField != ArrayField`,
+		`ArrayField == Int64Field`,
+		`Int64Field != ArrayField`,
+		`ArrayField[0] == Int64Field`,
+		`ArrayField[0] < Int64Field`,
+	}
+	for _, expr = range unsupportedFieldComparisons {
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+		assert.Contains(t, err.Error(), "field-to-field comparison involving ARRAY fields is not supported", expr)
+	}
+
 	invalidExprs := []string{
 		`ArrayField == ["abc", "def"]`,
 		`"abc" < ArrayField[0] < "def"`,
@@ -2391,7 +2855,6 @@ func Test_ArrayExpr(t *testing.T) {
 		`ArrayField[] == 1`,
 		`A[] == 1`,
 		`ArrayField[0] + ArrayField[1] == 1`,
-		`ArrayField == []`,
 	}
 	for _, expr = range invalidExprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -2402,6 +2865,53 @@ func Test_ArrayExpr(t *testing.T) {
 		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
+}
+
+func Test_EmptyArrayComparisonNormalization(t *testing.T) {
+	schema := newTestSchema(true)
+	for _, field := range schema.GetFields() {
+		if field.GetName() == "ArrayField" {
+			field.Nullable = true
+		}
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	testcases := []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{expr: `ArrayField == []`, op: planpb.OpType_Equal},
+		{expr: `[] == ArrayField`, op: planpb.OpType_Equal},
+		{expr: `ArrayField != []`, op: planpb.OpType_NotEqual},
+		{expr: `[] != ArrayField`, op: planpb.OpType_NotEqual},
+		{expr: `StringArrayField == []`, op: planpb.OpType_Equal},
+	}
+	for _, testcase := range testcases {
+		t.Run(testcase.expr, func(t *testing.T) {
+			expr, err := ParseExpr(helper, testcase.expr, nil)
+			require.NoError(t, err)
+			arrayLength := expr.GetBinaryArithOpEvalRangeExpr()
+			require.NotNil(t, arrayLength)
+			require.Equal(t, planpb.ArithOpType_ArrayLength, arrayLength.GetArithOp())
+			require.Equal(t, testcase.op, arrayLength.GetOp())
+			require.Equal(t, int64(0), arrayLength.GetValue().GetInt64Val())
+			require.Empty(t, arrayLength.GetColumnInfo().GetNestedPath())
+			require.False(t, arrayLength.GetColumnInfo().GetIsElementLevel())
+			if testcase.expr == `ArrayField == []` {
+				require.True(t, arrayLength.GetColumnInfo().GetNullable())
+			}
+		})
+	}
+
+	_, err = ParseExpr(helper, `ArrayField[0] == []`, nil)
+	require.Error(t, err)
+	_, err = ParseExpr(helper, `ArrayField > []`, nil)
+	require.Error(t, err)
+
+	jsonExpr, err := ParseExpr(helper, `JSONField["array"] == []`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, jsonExpr.GetUnaryRangeExpr(), "JSON array comparison must not be rewritten as ARRAY length")
 }
 
 func Test_ArrayLength(t *testing.T) {
@@ -2460,6 +2970,94 @@ func Test_ArrayLength(t *testing.T) {
 			RoundDecimal: 0,
 		}, nil, nil)
 		assert.Error(t, err, expr)
+	}
+}
+
+func Test_ArrayLengthNestedArray(t *testing.T) {
+	schema := newTestSchema(true)
+	nestedType := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	nestedFieldType := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: nestedType},
+	}
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:     10000,
+		Name:        "NestedArrayField",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema:  nestedFieldType,
+	})
+	schema.StructArrayFields[0].Fields = append(
+		[]*schemapb.FieldSchema{{
+			FieldID:     10001,
+			Name:        "struct_array[nested]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema:  nestedFieldType,
+		}},
+		schema.StructArrayFields[0].Fields...,
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	validRowLevelExprs := []string{
+		`array_length(NestedArrayField) == 1`,
+		`array_length(struct_array[nested]) == 1`,
+	}
+	for _, expr := range validRowLevelExprs {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+	}
+
+	rowLevelExpr, err := ParseExpr(helper, validRowLevelExprs[0], nil)
+	require.NoError(t, err)
+	rowLevelLengthExpr := rowLevelExpr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, rowLevelLengthExpr)
+	rowLevelColumnInfo := rowLevelLengthExpr.GetColumnInfo()
+	require.NotNil(t, rowLevelColumnInfo)
+	assert.Equal(t, int64(10000), rowLevelColumnInfo.GetFieldId())
+	assert.False(t, rowLevelColumnInfo.GetIsElementLevel())
+
+	_, err = CreateSearchPlan(helper, `array_length(struct_array) == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	require.NoError(t, err)
+
+	validMatchExprs := []string{
+		`MATCH_ANY(struct_array, array_length($[nested]) == 1)`,
+		`MATCH_ALL(struct_array, array_length($[nested]) >= 0)`,
+		`MATCH_LEAST(struct_array, array_length($[nested]) > 0, threshold=1)`,
+		`MATCH_MOST(struct_array, array_length($[nested]) <= 1, threshold=1)`,
+		`MATCH_EXACT(struct_array, array_length($[nested]) != 0, threshold=1)`,
+	}
+	for _, expr := range validMatchExprs {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+	}
+
+	expr, err := ParseExpr(helper, validMatchExprs[0], nil)
+	require.NoError(t, err)
+	matchExpr := expr.GetMatchExpr()
+	require.NotNil(t, matchExpr)
+	lengthExpr := matchExpr.GetPredicate().GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, lengthExpr)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, lengthExpr.GetArithOp())
+	columnInfo := lengthExpr.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetElementType())
+	assert.True(t, columnInfo.GetIsElementLevel())
+
+	for _, expr := range []string{
+		`array_length($[nested]) == 1`,
+		`MATCH_ANY(struct_array, array_length($[sub_int]) == 1)`,
+	} {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.Error(t, err, expr)
 	}
 }
 
@@ -2558,6 +3156,58 @@ func Test_SegmentScorers(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, plan)
 		assert.Equal(t, 2, len(plan.Scorers))
+	})
+
+	t.Run("ok - membership scorer filters", func(t *testing.T) {
+		roaringBlob, err := clientroaring.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		bloomTemplate, _ := bloomBytesTemplate(t, 0.01, 1, 2, 3)
+
+		for _, tc := range []struct {
+			name   string
+			filter string
+			values map[string]*schemapb.TemplateValue
+			kind   string
+		}{
+			{
+				name:   "bloom",
+				filter: "membership_match(Int64Field, {bf}, type=bloom)",
+				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
+				kind:   "bloom",
+			},
+			{
+				name:   "roaring",
+				filter: "membership_match(Int64Field, {rb}, type=roaring)",
+				values: map[string]*schemapb.TemplateValue{
+					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
+				},
+				kind: "roaring",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fs := &schemapb.FunctionScore{
+					Functions: []*schemapb.FunctionSchema{
+						makeBoostRanker(tc.filter, "1.0"),
+					},
+				}
+				plan, err := CreateSearchPlan(
+					schema,
+					"",
+					"FloatVectorField",
+					&planpb.QueryInfo{GroupByFieldId: -1},
+					tc.values,
+					fs,
+				)
+				require.NoError(t, err)
+				require.Len(t, plan.GetScorers(), 1)
+				filter := plan.GetScorers()[0].GetFilter()
+				if tc.kind == "bloom" {
+					assert.NotNil(t, filter.GetBloomFilterExpr())
+				} else {
+					assert.NotNil(t, filter.GetRoaringFilterExpr())
+				}
+			})
+		}
 	})
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {
@@ -3324,6 +3974,26 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ALL(struct_array, MATCH_ANY(struct_array, $[sub_int] > 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] > 1 && MATCH_ALL(struct_array, $[sub_str] == "1"))`,
 
+		// MATCH predicates must be evaluated at element level
+		`MATCH_ALL(struct_array, Int64Field > 0)`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1 && Int64Field > 0)`,
+		`MATCH_LEAST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_MOST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_EXACT(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_ALL(struct_array, $[sub_int] > Int64Field)`,
+		`MATCH_ALL(struct_array, true)`,
+		`MATCH_ANY(struct_array, ($[sub_int] == 2) && (true || $[sub_int] == 1))`,
+		`MATCH_ANY(struct_array, $[sub_int] == $[sub_int])`,
+
+		// Raw element columns and function calls are not supported by C++ MATCH execution
+		`MATCH_ANY(struct_array, $[sub_int])`,
+		`MATCH_ANY(struct_array, empty($[sub_str]))`,
+
+		// Contains executors still produce row-level bitmaps
+		`MATCH_ANY(struct_array, array_contains($[sub_int], 1))`,
+		`MATCH_ANY(struct_array, array_contains_any($[sub_int], [1, 2]))`,
+		`MATCH_ANY(struct_array, array_contains_all($[sub_int], [1, 2]))`,
+
 		// $[field] syntax outside match context
 		`$[sub_int] > 1`,
 		`Int64Field > 0 && $[sub_int] > 1`,
@@ -3370,6 +4040,160 @@ func TestExpr_ArrayContains(t *testing.T) {
 
 	for _, expr := range validExprs {
 		assertValidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_NestedArrayContainsInMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.StructArrayFields[0].Fields = append(
+		schema.StructArrayFields[0].Fields,
+		&schemapb.FieldSchema{
+			FieldID:     10001,
+			Name:        "struct_array[nested]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{
+									LeafType: schemapb.DataType_VarChar,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		&schemapb.FieldSchema{
+			FieldID:     10002,
+			Name:        "struct_array[deeper]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_ArrayElement{
+									ArrayElement: &schemapb.TypeSchema{
+										Kind: &schemapb.TypeSchema_LeafType{
+											LeafType: schemapb.DataType_Int64,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		expr string
+		op   planpb.JSONContainsExpr_JSONOp
+	}{
+		{
+			name: "contains",
+			expr: `MATCH_ANY(struct_array, array_contains($[nested], "abc"))`,
+			op:   planpb.JSONContainsExpr_Contains,
+		},
+		{
+			name: "contains any",
+			expr: `MATCH_ANY(struct_array, array_contains_any($[nested], ["abc", "efg"]))`,
+			op:   planpb.JSONContainsExpr_ContainsAny,
+		},
+		{
+			name: "contains all",
+			expr: `MATCH_ALL(struct_array, array_contains_all($[nested], ["abc"]))`,
+			op:   planpb.JSONContainsExpr_ContainsAll,
+		},
+		{
+			name: "contains any empty",
+			expr: `MATCH_ANY(struct_array, array_contains_any($[nested], []))`,
+			op:   planpb.JSONContainsExpr_ContainsAny,
+		},
+		{
+			name: "contains all empty",
+			expr: `MATCH_ALL(struct_array, array_contains_all($[nested], []))`,
+			op:   planpb.JSONContainsExpr_ContainsAll,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expr, err := ParseExpr(helper, test.expr, nil)
+			require.NoError(t, err)
+
+			contains := expr.GetMatchExpr().GetPredicate().GetJsonContainsExpr()
+			require.NotNil(t, contains)
+			assert.Equal(t, test.op, contains.GetOp())
+
+			columnInfo := contains.GetColumnInfo()
+			require.NotNil(t, columnInfo)
+			assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+			assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+			assert.True(t, columnInfo.GetIsElementLevel())
+		})
+	}
+
+	t.Run("template values use logical leaf type", func(t *testing.T) {
+		expr, err := ParseExpr(
+			helper,
+			`MATCH_ANY(struct_array, array_contains_any($[nested], {values}))`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(
+					schemapb.DataType_Array,
+					generateTemplateArrayValue(
+						schemapb.DataType_VarChar,
+						[]string{"abc", "efg"},
+					),
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		contains := expr.GetMatchExpr().GetPredicate().GetJsonContainsExpr()
+		require.NotNil(t, contains)
+		require.Len(t, contains.GetElements(), 2)
+		assert.Equal(t, "abc", contains.GetElements()[0].GetStringVal())
+		assert.Equal(t, "efg", contains.GetElements()[1].GetStringVal())
+
+		_, err = ParseExpr(
+			helper,
+			`MATCH_ANY(struct_array, array_contains_any($[nested], {values}))`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(
+					schemapb.DataType_Array,
+					generateTemplateArrayValue(
+						schemapb.DataType_Int64,
+						[]int64{1, 2},
+					),
+				),
+			},
+		)
+		require.Error(t, err)
+	})
+
+	invalidExprs := []string{
+		`MATCH_ANY(struct_array, array_contains($[sub_int], 1))`,
+		`MATCH_ANY(struct_array, array_contains_any($[deeper], [1]))`,
+		`MATCH_ANY(struct_array, array_contains_any($[nested], [1]))`,
+		`MATCH_ANY(struct_array, $[nested] == "abc")`,
+		`MATCH_ANY(struct_array, $[nested] > "abc")`,
+		`MATCH_ANY(struct_array, $[nested] in ["abc"])`,
+		`array_contains(struct_array[nested], "abc")`,
+		`array_contains_any(struct_array[nested], ["abc"])`,
+		`array_contains_any(struct_array[nested], [])`,
+		`array_contains_all(struct_array[nested], [])`,
+	}
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
 	}
 }
 
@@ -3435,7 +4259,7 @@ func TestExpr_StructIndexField_PlanShape(t *testing.T) {
 
 	columnInfo := ure.GetColumnInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 	assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath())
@@ -3452,7 +4276,7 @@ func TestExpr_StructIndexField_PlanShape(t *testing.T) {
 
 	columnInfo = te.GetColumnInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(133), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
 	assert.Equal(t, []string{"1"}, columnInfo.GetNestedPath())
@@ -3473,7 +4297,7 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 
 	columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(133), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubStrFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
 	assert.Empty(t, columnInfo.GetNestedPath())
@@ -3490,7 +4314,7 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 
 	columnInfo = bae.GetLeft().GetColumnExpr().GetInfo()
 	require.NotNil(t, columnInfo)
-	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 	assert.Empty(t, columnInfo.GetNestedPath())
@@ -3624,7 +4448,7 @@ func TestExpr_StructIndexField_RangeForms(t *testing.T) {
 
 		columnInfo := bre.GetColumnInfo()
 		require.NotNil(t, columnInfo, tc.expr)
-		assert.Equal(t, int64(134), columnInfo.GetFieldId(), tc.expr)
+		assert.Equal(t, int64(structSubIntFieldID), columnInfo.GetFieldId(), tc.expr)
 		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), tc.expr)
 		assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType(), tc.expr)
 		assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath(), tc.expr)
@@ -3775,6 +4599,28 @@ func TestExpr_Power(t *testing.T) {
 	for _, expr := range invalidExprs {
 		assertInvalidExpr(t, schema, expr)
 	}
+}
+
+func TestExpr_TimestamptzFieldToField(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  2000,
+		Name:     "TimestamptzField2",
+		DataType: schemapb.DataType_Timestamptz,
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	expr, err := ParseExpr(helper, "TimestamptzField > TimestamptzField2", nil)
+	require.NoError(t, err)
+	compare := expr.GetCompareExpr()
+	require.NotNil(t, compare)
+	assert.Equal(t, schemapb.DataType_Timestamptz, compare.GetLeftColumnInfo().GetDataType())
+	assert.Equal(t, schemapb.DataType_Timestamptz, compare.GetRightColumnInfo().GetDataType())
+	assert.Equal(t, planpb.OpType_GreaterThan, compare.GetOp())
+
+	_, err = ParseExpr(helper, "TimestamptzField > Int64Field", nil)
+	require.Error(t, err)
 }
 
 // ============================================================================

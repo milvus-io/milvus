@@ -434,6 +434,31 @@ var (
 			Name:      "snapshot_active_pins",
 			Help:      "number of active (un-expired) pins on a given source snapshot",
 		}, []string{collectionIDLabelName, "snapshot_name"})
+
+	DataCoordSnapshotExportActiveJobs = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_active_jobs",
+			Help:      "number of snapshot export jobs currently executing",
+		})
+
+	DataCoordSnapshotExportTerminalJobs = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_terminal_jobs_total",
+			Help:      "number of snapshot export jobs that reached a terminal state",
+		}, []string{statusLabelName})
+
+	DataCoordSnapshotExportJobLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_job_latency",
+			Help:      "total latency of snapshot export jobs in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{statusLabelName})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -473,6 +498,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
 	registry.MustRegister(DataCoordSnapshotActivePins)
+	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
+	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
+	registry.MustRegister(DataCoordSnapshotExportJobLatency)
 	registerStreamingCoord(registry)
 }
 

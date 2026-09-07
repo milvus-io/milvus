@@ -52,8 +52,8 @@ func (e *partialCommitError) Is(target error) bool {
 	return target == ErrPartialCommit
 }
 
-// OptimisticTxnPersist is a bytes-only persist layer with atomic multi-key
-// transactions. Typed callers wrap this (see SegmentTxnWrapper) to add
+// OptimisticTxnPersist is a bytes-only persist layer for ordered optimistic
+// write batches. Typed callers wrap this (see SegmentTxnWrapper) to add
 // marshaling and domain logic.
 type OptimisticTxnPersist interface {
 	Txn(ctx context.Context) Txn
@@ -61,7 +61,12 @@ type OptimisticTxnPersist interface {
 	Scan(ctx context.Context, prefix string) (keys []string, values [][]byte, versions []int64, err error)
 }
 
-// Txn collects operations and commits them atomically.
+// Txn collects operations and commits them in order. An implementation may
+// split the logical write into bounded backend transactions. Each backend
+// transaction is atomic, but the complete logical write is not: if a later
+// batch fails, Commit returns ErrPartialCommit together with results that mark
+// the committed prefix (uncommitted entries have Version == 0), so callers can
+// compensate and retry the remainder.
 //
 // Strict ops fail the commit if their precondition is violated:
 //   - Insert: key must not exist.
@@ -71,8 +76,6 @@ type OptimisticTxnPersist interface {
 // Unconditional ops always succeed:
 //   - Put: create-or-overwrite.
 //   - Remove: delete-if-exists.
-//
-// Every op in a Txn commits in a single atomic backend transaction.
 type Txn interface {
 	Insert(key string, value []byte)
 	Update(key string, value []byte, expectedVersion int64)
@@ -142,7 +145,13 @@ func (p *etcdPersist) Scan(ctx context.Context, prefix string) ([]string, [][]by
 	var vers []int64
 
 	for {
-		resp, err := p.cli.Get(ctx, key, clientv3.WithRange(end), clientv3.WithLimit(batchSize), clientv3.WithSerializable())
+		// The returned ModRevisions become later CAS preconditions, so this
+		// startup scan must be linearizable. Explicit key ordering also makes
+		// the last-key pagination cursor deterministic.
+		resp, err := p.cli.Get(ctx, key,
+			clientv3.WithRange(end),
+			clientv3.WithLimit(batchSize),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 		if err != nil {
 			return nil, nil, nil, err
 		}

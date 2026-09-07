@@ -264,65 +264,6 @@ TEST_F(BsonViewTest, ParseBsonFieldTest) {
     bson_destroy(&doc);
 }
 
-TEST_F(BsonViewTest, GetValueFromElementTest) {
-    // Create a BSON document with various types
-    bson_t doc;
-    bson_init(&doc);
-    bson_append_int32(&doc, "int32_field", -1, 42);
-    bson_append_double(&doc, "double_field", -1, 3.14159);
-    bson_append_bool(&doc, "bool_field", -1, true);
-    bson_append_utf8(&doc, "string_field", -1, "test string", -1);
-
-    milvus::bson::document_view view(bson_get_data(&doc), doc.len);
-
-    // Collect elements by key for lookup
-    auto find_elem = [&](std::string_view key) -> milvus::bson::element {
-        for (auto&& e : view) {
-            if (e.key() == key) {
-                return e;
-            }
-        }
-        return milvus::bson::element();
-    };
-
-    // Test int32
-    auto int32_val =
-        BsonView::GetValueFromElement<int32_t>(find_elem("int32_field"));
-    EXPECT_TRUE(int32_val.has_value());
-    EXPECT_EQ(int32_val.value(), 42);
-
-    // Test double
-    auto double_val =
-        BsonView::GetValueFromElement<double>(find_elem("double_field"));
-    EXPECT_TRUE(double_val.has_value());
-    EXPECT_DOUBLE_EQ(double_val.value(), 3.14159);
-
-    // Test bool
-    auto bool_val =
-        BsonView::GetValueFromElement<bool>(find_elem("bool_field"));
-    EXPECT_TRUE(bool_val.has_value());
-    EXPECT_TRUE(bool_val.value());
-
-    // Test string
-    auto string_val =
-        BsonView::GetValueFromElement<std::string>(find_elem("string_field"));
-    EXPECT_TRUE(string_val.has_value());
-    EXPECT_EQ(string_val.value(), "test string");
-
-    // Test string_view
-    auto string_view_val = BsonView::GetValueFromElement<std::string_view>(
-        find_elem("string_field"));
-    EXPECT_TRUE(string_view_val.has_value());
-    EXPECT_EQ(string_view_val.value(), "test string");
-
-    // Test invalid type conversion
-    auto invalid_val =
-        BsonView::GetValueFromElement<std::string>(find_elem("int32_field"));
-    EXPECT_FALSE(invalid_val.has_value());
-
-    bson_destroy(&doc);
-}
-
 TEST_F(BsonViewTest, GetValueFromBsonViewTest) {
     // Create a BSON document with various types
     bson_t doc;

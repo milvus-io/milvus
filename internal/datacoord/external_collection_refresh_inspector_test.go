@@ -70,10 +70,9 @@ func TestExternalCollectionRefreshInspector_NewInspector(t *testing.T) {
 	assert.NoError(t, err)
 
 	scheduler := newStubScheduler()
-	alloc := &stubAllocator{}
 	closeChan := make(chan struct{})
 
-	inspector := newRefreshInspector(ctx, refreshMeta, nil, scheduler, alloc, closeChan)
+	inspector := newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
 	assert.NotNil(t, inspector)
 }
 
@@ -86,17 +85,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -112,17 +110,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateRetry},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -138,17 +135,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -164,17 +160,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -190,17 +185,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -219,17 +213,16 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 			{TaskId: 1004, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001, 1002, 1003, 1004}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -237,6 +230,34 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		// Should be called twice: once for Init and once for Retry
 		assert.Equal(t, 2, scheduler.GetEnqueueCount())
+	})
+
+	t.Run("skip_unpublished_tasks", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
+			{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateInit},
+		}
+
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		scheduler := newStubScheduler()
+		closeChan := make(chan struct{})
+
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
+		inspector.inspect()
+
+		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+		if assert.Len(t, scheduler.enqueuedTasks, 1) {
+			assert.Equal(t, int64(1001), scheduler.enqueuedTasks[0].GetTaskID())
+		}
 	})
 }
 
@@ -249,17 +270,16 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -275,17 +295,16 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateRetry},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -298,20 +317,27 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 	t.Run("reload_in_progress_tasks", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
-			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
+			{
+				TaskId:               1001,
+				JobId:                1,
+				State:                indexpb.JobState_JobStateInProgress,
+				FileIndexBegin:       3,
+				FileIndexEnd:         8,
+				OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+				OwnedSegmentIds:      []int64{10, 20},
+			},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -319,6 +345,12 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		// Should have called Enqueue for InProgress task (for recovery)
 		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+		if assert.Len(t, scheduler.enqueuedTasks, 1) {
+			reloaded := scheduler.enqueuedTasks[0].(*refreshExternalCollectionTask)
+			assert.Equal(t, int64(3), reloaded.GetFileIndexBegin())
+			assert.Equal(t, int64(8), reloaded.GetFileIndexEnd())
+			assert.Equal(t, []int64{10, 20}, reloaded.GetOwnedSegmentIds())
+		}
 	})
 
 	t.Run("skip_finished_tasks", func(t *testing.T) {
@@ -327,17 +359,16 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -353,17 +384,16 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -383,17 +413,16 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 			{TaskId: 1005, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001, 1002, 1003, 1004, 1005}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -401,5 +430,44 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		// Should be called 3 times: Init, Retry, InProgress
 		assert.Equal(t, 3, scheduler.GetEnqueueCount())
+	})
+
+	t.Run("failed_job_recovers_only_in_progress_tasks_on_startup", func(t *testing.T) {
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
+			{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateRetry},
+			{TaskId: 1003, JobId: 1, State: indexpb.JobState_JobStateInProgress},
+			{TaskId: 1004, JobId: 1, State: indexpb.JobState_JobStateFinished},
+			{TaskId: 1005, JobId: 1, State: indexpb.JobState_JobStateFailed},
+		}
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId:   1,
+				State:   indexpb.JobState_JobStateFailed,
+				TaskIds: []int64{1001, 1002, 1003, 1004, 1005},
+			}},
+			tasks: tasks,
+		}
+		ctx := context.Background()
+		refreshMeta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		scheduler := newStubScheduler()
+		inspector := newRefreshInspector(
+			ctx,
+			refreshMeta,
+			scheduler,
+			make(chan struct{}),
+		)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
+
+		inspector.inspect()
+		assert.Equal(t, 0, scheduler.GetEnqueueCount())
+
+		inspector.reloadFromMeta()
+		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+		if assert.Len(t, scheduler.enqueuedTasks, 1) {
+			assert.Equal(t, int64(1003), scheduler.enqueuedTasks[0].GetTaskID())
+		}
 	})
 }

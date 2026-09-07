@@ -44,16 +44,6 @@ class PlanNodeIdGenerator {
         return fmt::format("{}", next_id_++);
     }
 
-    void
-    Set(int id) {
-        next_id_ = id;
-    }
-
-    void
-    ReSet() {
-        next_id_ = 0;
-    }
-
  private:
     int next_id_;
 };

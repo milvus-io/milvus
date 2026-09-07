@@ -59,7 +59,11 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	partitionIDs := msg.Header().PartitionIds
 	vchannel := msg.VChannel()
 	timetick := msg.TimeTick()
-	schema := msg.MustBody().GetCollectionSchema()
+	body := msg.MustBody()
+	schema := body.GetCollectionSchema()
+	if schema == nil && len(body.GetSchema()) > 0 {
+		schema = messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
+	}
 	logger := m.Logger().With(mlog.FieldMessage(msg))
 
 	m.mu.Lock()
@@ -71,13 +75,13 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 
 	collectionInfo := newCollectionInfo(vchannel, partitionIDs)
-	// Set schema when creating collection
+	// Set schema when creating collection.
 	if schema != nil {
-		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+		collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
 			CheckpointTimeTick: timetick,
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
-		}
+		})
 	}
 	m.collections[collectionID] = collectionInfo
 
@@ -180,11 +184,11 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
 		collectionInfo := m.collections[collectionID]
-		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+		collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
 			CheckpointTimeTick: timetick,
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
-		}
+		})
 		logger.Info(context.TODO(), "updated collection schema in shard manager",
 			mlog.Int64("collectionID", collectionID),
 			mlog.Int32("schemaVersion", schema.GetVersion()),
@@ -195,8 +199,8 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 }
 
 func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	return m.checkIfCollectionSchemaVersionMatch(header)
 }
@@ -233,8 +237,8 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 }
 
 func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
@@ -251,9 +255,32 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
 }
 
+// GetPrimaryKeyDescriptor returns immutable PK schema data without cloning the
+// complete collection schema.
+func (m *shardManagerImpl) GetPrimaryKeyDescriptor(collectionID int64, schemaVersion int32) (PrimaryKeyDescriptor, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		return PrimaryKeyDescriptor{}, ErrCollectionNotFound
+	}
+	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
+		return PrimaryKeyDescriptor{}, ErrCollectionSchemaNotFound
+	}
+	collectionSchemaVersion := collectionInfo.SchemaVersion()
+	if schemaVersion != latestCollectionSchemaVersion && collectionSchemaVersion != schemaVersion {
+		return PrimaryKeyDescriptor{}, ErrCollectionSchemaVersionNotMatch
+	}
+	if collectionInfo.primaryKey != nil {
+		return *collectionInfo.primaryKey, nil
+	}
+	return primaryKeyDescriptorFromSchema(collectionInfo.Schema.GetSchema())
+}
+
 func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSchemaInfo {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	infos := make(map[int64]CollectionSchemaInfo)
 	for collectionID, collectionInfo := range m.collections {

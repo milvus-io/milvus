@@ -66,6 +66,69 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeTimeTick.IsDMLMessageType())
 }
 
+func TestMessageUnreplicableProperty(t *testing.T) {
+	insertMsg := NewInsertMessageBuilderV1().
+		WithHeader(&InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{ShardName: "v1"}).
+		WithVChannel("v1").
+		MustBuildMutable()
+	assert.False(t, insertMsg.IsUnreplicable())
+
+	createCollectionMsg := NewCreateCollectionMessageBuilderV1().
+		WithHeader(&CreateCollectionMessageHeader{}).
+		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+	assert.False(t, createCollectionMsg.IsUnreplicable())
+
+	assert.False(t, NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&CreateSnapshotMessageHeader{}).
+		WithBody(&CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast().
+		IsUnreplicable())
+	assert.True(t, NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&CreateSnapshotMessageHeader{}).
+		WithBody(&CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		WithUnreplicable().
+		MustBuildBroadcast().
+		IsUnreplicable())
+	assert.True(t, NewDropSnapshotMessageBuilderV2().
+		WithHeader(&DropSnapshotMessageHeader{}).
+		WithBody(&DropSnapshotMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		WithUnreplicable().
+		MustBuildBroadcast().
+		IsUnreplicable())
+	assert.True(t, NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&RestoreSnapshotMessageHeader{}).
+		WithBody(&RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		WithUnreplicable().
+		MustBuildBroadcast().
+		IsUnreplicable())
+	assert.True(t, NewBatchUpdateManifestMessageBuilderV2().
+		WithHeader(&BatchUpdateManifestMessageHeader{}).
+		WithBody(&BatchUpdateManifestMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		WithUnreplicable().
+		MustBuildBroadcast().
+		IsUnreplicable())
+	assert.True(t, NewRefreshExternalCollectionMessageBuilderV2().
+		WithHeader(&RefreshExternalCollectionMessageHeader{}).
+		WithBody(&RefreshExternalCollectionMessageBody{}).
+		WithBroadcast([]string{"v1"}).
+		WithUnreplicable().
+		MustBuildBroadcast().
+		IsUnreplicable())
+
+	legacySnapshotMsg := NewMutableMessageBeforeAppend(nil, map[string]string{
+		messageTypeKey: MessageTypeCreateSnapshot.marshal(),
+	})
+	assert.False(t, legacySnapshotMsg.IsUnreplicable())
+}
+
 func TestVersion(t *testing.T) {
 	v := newMessageVersionFromString("")
 	assert.Equal(t, VersionOld, v)

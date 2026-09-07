@@ -41,9 +41,6 @@ void
 future_destroy(CFuture* future);
 
 void
-executor_set_thread_num(int thread_num);
-
-void
 executor_set_search_thread_num(int thread_num);
 
 void

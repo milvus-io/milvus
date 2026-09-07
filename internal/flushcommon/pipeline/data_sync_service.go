@@ -281,6 +281,12 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList := []flowgraph.Node{}
 
 	dmStreamNode := newDmInputNode(config, input)
+	inputNodeOwnedByFlowgraph := false
+	defer func() {
+		if !inputNodeOwnedByFlowgraph {
+			dmStreamNode.Free()
+		}
+	}()
 	nodeList = append(nodeList, dmStreamNode)
 
 	// 1.ddNode
@@ -314,15 +320,21 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	// Register channel after channel pipeline is ready.
 	// This'll reject any FlushChannel and FlushSegments calls to prevent inconsistency between DN and DC over flushTs
 	// if fail to init flowgraph nodes.
-	err = params.WriteBufferManager.Register(channelName, metacache,
+	writeBufferOptions := []writebuffer.WriteBufferOption{
 		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
 		writebuffer.WithIDAllocator(params.Allocator),
-		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback))
+		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback),
+	}
+	if params.FlushSourceModeNotifier != nil {
+		writeBufferOptions = append(writeBufferOptions, writebuffer.WithFlushSourceModeNotifier(params.FlushSourceModeNotifier))
+	}
+	err = params.WriteBufferManager.Register(channelName, metacache, writeBufferOptions...)
 	if err != nil {
 		mlog.Warn(initCtx, "failed to register channel buffer", mlog.String("channel", channelName), mlog.Err(err))
 		return nil, err
 	}
 
+	inputNodeOwnedByFlowgraph = true
 	return ds, nil
 }
 

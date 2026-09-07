@@ -152,14 +152,6 @@ BsonHexDebugString(const uint8_t* data, size_t size) {
     return oss.str();
 }
 
-// may lose precision for big int64_t more than 2^53
-inline bool
-CanConvertToInt64(double x) {
-    return std::trunc(x) == x &&
-           x >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
-           x <= static_cast<double>(std::numeric_limits<int64_t>::max());
-}
-
 class BsonView {
  public:
     explicit BsonView(const std::vector<uint8_t>& data)
@@ -230,15 +222,6 @@ class BsonView {
     ToString() const {
         milvus::bson::document_view view(data_, size_);
         return milvus::bson::to_json(view);
-    }
-
-    bool
-    IsNullAtOffset(size_t offset) {
-        const uint8_t* ptr = data_ + offset;
-        AssertInfo(offset < size_, "bson offset out of range");
-
-        auto type_tag = static_cast<milvus::bson::type>(*ptr++);
-        return type_tag == milvus::bson::type::k_null;
     }
 
     template <typename T>
@@ -474,39 +457,6 @@ class BsonView {
         ptr += key_len + 1;
 
         return BsonRawField{type_tag, key_cstr, ptr};
-    }
-
-    template <typename T>
-    static std::optional<T>
-    GetValueFromElement(const milvus::bson::element& element) {
-        if constexpr (std::is_same_v<T, int32_t>) {
-            if (element.type() == milvus::bson::type::k_int32) {
-                return element.get_int32().value;
-            }
-        } else if constexpr (std::is_same_v<T, int64_t>) {
-            if (element.type() == milvus::bson::type::k_int64) {
-                return element.get_int64().value;
-            }
-        } else if constexpr (std::is_same_v<T, double>) {
-            if (element.type() == milvus::bson::type::k_double) {
-                return element.get_double().value;
-            }
-        } else if constexpr (std::is_same_v<T, bool>) {
-            if (element.type() == milvus::bson::type::k_bool) {
-                return element.get_bool().value;
-            }
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            if (element.type() == milvus::bson::type::k_string) {
-                return std::string(element.get_string().value.data(),
-                                   element.get_string().value.size());
-            }
-        } else if constexpr (std::is_same_v<T, std::string_view>) {
-            if (element.type() == milvus::bson::type::k_string) {
-                return std::string_view(element.get_string().value.data(),
-                                        element.get_string().value.size());
-            }
-        }
-        return std::nullopt;
     }
 
     template <typename T>

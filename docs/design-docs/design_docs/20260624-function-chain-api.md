@@ -11,13 +11,14 @@
 
 Function Chain introduces a typed, ordered, stage-aware pipeline for scoring and reranking search results. A chain is sent as structured protobuf, not as an opaque JSON string, so Milvus can validate dependencies, fetch required fields internally, execute built-in scoring functions, and project final search results back through the existing result schema.
 
-The first release focuses on ordinary `SearchRequest` L2 rerank:
+Ordinary `SearchRequest` supports three rerank stages at distinct execution boundaries:
 
-- Users build an L2 chain in SDKs and pass it through `function_chains`.
-- Proxy validates the request, plans required rerank input fields, and reuses the existing rerank pipeline.
-- The function-chain runtime executes `map`, `sort`, and `limit` operators on a DataFrame converted from reduced search results.
+- L0 executes independently on each segment result in the worker QueryNode before cross-segment reduction.
+- L1 executes on each worker QueryNode after its cross-segment reduction and before results are returned to the shard leader.
+- L2 executes in Proxy after distributed/global reduction and reuses the existing rerank pipeline.
+- L0 supports `map`; the first L1 release supports `map`, `sort`, and `limit`; L2 uses the generic function-chain runtime operators allowed by validation.
 - Final `$score` is serialized through the existing search score/distance field.
-- Intermediate variables and internally fetched fields are not returned unless requested by normal search output projection.
+- Intermediate variables, internally fetched fields, and internal provenance columns are not returned unless requested through normal search output projection.
 
 ## Motivation
 
@@ -43,8 +44,9 @@ Representing this as typed operations gives Milvus:
 
 - Add public protobuf messages for a function-chain logical plan.
 - Add SDK builder APIs that compile to the protobuf plan.
-- Support ordinary Search L2 rerank through `SearchRequest.function_chains`.
-- Reuse the existing Proxy rerank pipeline rather than adding a separate search pipeline operator.
+- Support ordinary Search L0, L1, and L2 rerank through `SearchRequest.function_chains`.
+- Execute L0 per segment, L1 after each worker QueryNode reduction, and L2 after Proxy global reduction.
+- Reuse the existing Proxy rerank pipeline for L2 rather than adding a separate search pipeline operator.
 - Fetch function-chain-required schema fields internally even when users do not request them in `output_fields`.
 - Keep final search response projection Search-owned.
 - Support first-version built-in expressions:
@@ -58,15 +60,16 @@ Representing this as typed operations gives Milvus:
 
 The first release does not include:
 
-- `function_chains` support for hybrid search execution;
+- `function_chains` support for hybrid or advanced search execution;
 - insert/upsert/ingestion function chains;
-- L0/L1 pushdown to QueryNode or Segcore;
+- L1 execution at the shard-leader reduction boundary or at multiple QueryNode reduction levels;
+- L1 `filter`, `select`, or `group_by` operators;
 - arbitrary user-defined expression language;
 - returning intermediate chain variables as user-facing result fields;
 - replacing `function_score` or legacy rank parameters;
 - client-side execution of external model calls.
 
-The public stage enum reserves room for future stages, but ordinary Search initially accepts only `L2_RERANK`.
+The public stage enum also reserves room for ingestion, preprocessing, and postprocessing. Ordinary Search accepts at most one chain at each of `L0_RERANK`, `L1_RERANK`, and `L2_RERANK`.
 
 ## Public Interfaces
 
@@ -148,11 +151,13 @@ client.search(..., function_chains=chain)
 client.search(..., function_chains=[chain])
 ```
 
-SDK and server validation reject ambiguous combinations:
+SDK and server validation reject ambiguous or unsupported combinations:
 
 - `function_chains` with SDK `ranker` / proto `function_score`;
-- non-L2 chains for ordinary Search;
-- `function_chains` for hybrid search in the first release.
+- stages other than L0, L1, and L2 for ordinary Search;
+- `function_chains` for hybrid or advanced search;
+- Function rerank with Search Iterator or `order_by`;
+- L1 with search aggregation.
 
 ### Protobuf
 
@@ -253,7 +258,32 @@ Representation:
 | Runtime | score register / DataFrame column |
 | Search result | existing distance/score field |
 
-`$id` is also available as a read-only system value for tie-breaking. Other `$xxx` system names are rejected in first-version L2 rerank.
+`$id` is also available as a read-only system value for tie-breaking. For public L0 and L1 chains, `$id` and `$score` are the only readable system columns and `$score` is the only writable system column. Internal columns used for segment offsets, grouping, element metadata, or L1 provenance are not part of the public chain namespace and must never be exposed in result fields.
+
+### Stage execution semantics
+
+The stages form one distributed rerank pipeline:
+
+```text
+segment ANN result
+  -> L0 per-segment chain
+  -> worker QueryNode cross-segment reduce / PK dedup / group-aware merge
+  -> L1 per-worker merged-candidate chain
+  -> shard-leader reduce
+  -> Proxy global reduce
+  -> L2 Proxy chain
+  -> final projection
+```
+
+L1 runs exactly once for each worker QueryNode's merged result. It does not run again at the shard leader. This boundary lets L1 compare candidates across segments handled by one worker while preserving the existing distributed reducer and wire protocol.
+
+| Stage | Execution boundary | First-version operators |
+|-------|--------------------|-------------------------|
+| L0 | Each segment result in worker QueryNode, before cross-segment reduce | `map` |
+| L1 | Each worker QueryNode result, after cross-segment reduce | `map`, `sort`, `limit` |
+| L2 | Proxy result, after distributed/global reduce | Generic runtime operators accepted by stage validation |
+
+A function used by an operator must also declare that it is runnable at that stage. For example, an expression restricted to L0 or L2 is not made valid in L1 merely because it appears in an allowed `map` operator.
 
 ### Operators
 
@@ -261,9 +291,10 @@ Representation:
 
 `map(output, expr)` evaluates an expression and writes the result to `output`.
 
-- `output` may be a temporary variable such as `freshness`.
+- L0, L1, and L2 may write a temporary variable such as `freshness` for use by later operators in the same chain.
+- L0 and L1 may also overwrite ordinary collection columns within their stage-local DataFrames.
 - `output` may be writable system value `$score`.
-- First-version L2 rerank does not allow writing `$id` or unknown `$xxx` values.
+- First-version rerank does not allow writing `$id` or unknown `$xxx` values.
 
 #### `sort`
 
@@ -277,7 +308,11 @@ Representation:
 
 `limit(limit, offset=0)` trims each query chunk after previous operators.
 
-This is part of the user-provided plan. Search does not append implicit `limit` or `offset` operators to public function chains.
+This is part of the user-provided plan. Search does not append an implicit public `limit` or `offset` operator.
+
+For L1, `limit` is an intermediate candidate budget applied independently for each worker and each query-vector chunk. It is not the final client Search limit. A candidate discarded by a worker cannot reappear at the shard leader or Proxy, so L1 `limit` can reduce recall. Users must size it for the expected worker fan-out and desired recall.
+
+When an L1 chain contains both user `sort` and `limit`, the limit observes the user-defined ordering. After the complete user chain, QueryNode applies an internal normalization sort by `$score` descending with `$id` ascending as the tie-break. This internal step is not a public chain operator; it restores the ordering contract required by downstream shard and Proxy reducers without changing which candidates the user's L1 `limit` selected.
 
 ### Built-in expressions
 
@@ -360,17 +395,21 @@ Intermediate variables such as `freshness` are not returned to the user.
 ```text
 SearchRequest.function_chains
   -> SDK serialization
-  -> Proxy request validation
-  -> chain.ProtoChainToRepr
-  -> Proxy L2 input planning
-  -> normal search/reduce/requery pipeline
-  -> rerankOperator builds DataFrame
-  -> chain.FuncChainFromRepr
-  -> FuncChain.Execute
+  -> Proxy request validation and stage split
+  -> L0/L1 serialized into PlanNode.querynode_function_chains
+  -> L2 retained as Proxy rerank metadata
+  -> worker QueryNode exports per-segment Arrow DataFrames
+  -> L0 executes on each segment DataFrame
+  -> worker QueryNode cross-segment reduce
+  -> L1 materializes required fields and executes on the merged DataFrame
+  -> shard-leader and Proxy reductions
+  -> L2 rerankOperator builds and executes a DataFrame chain
   -> Search-owned final projection
 ```
 
-Function Chain L2 rerank is treated as a rerank source. It reuses the existing `rerankOperator` rather than adding a separate `functionChainOperator`.
+No new protobuf transport is required for L1. It uses the existing `PlanNode.querynode_function_chains` field together with L0 and is distinguished by `FunctionChain.stage`.
+
+Function Chain L2 rerank is treated as a Proxy rerank source. It reuses the existing `rerankOperator` rather than adding a separate `functionChainOperator`. L1 is part of worker QueryNode Go reduction and does not create a new Proxy pipeline operator.
 
 ### Internal representation
 
@@ -418,6 +457,60 @@ First-version supported schema input field types:
 
 Unsupported input field types include vector fields, JSON, Array, Geometry, and dynamic field subkeys.
 
+### QueryNode L0/L1 preparation
+
+Proxy serializes both L0 and L1 chains into the physical plan. Worker QueryNode parses the `planpb.PlanNode` once, converts public chains to `ChainRepr`, validates each chain according to its stage, and plans L0 and L1 schema inputs separately. Legacy `function_score` is also normalized during this preparation pass into an L0 prepared configuration containing its scorers and resolved score-combine modes. The protobuf plan is not retained by L0 or L1 execution; segment-specific boost-score runners are bound only when L0 executes.
+
+Only public L0 input fields are exported with each segment search result before reduction. A prepared legacy boost score needs only the existing segment offsets and does not add collection fields to this export. L1 input fields are materialized after cross-segment reduction for the surviving worker candidates.
+
+L0 retains its segment-local behavior and accepts only `map`; ordinary temporary and collection columns may be written within its segment-local DataFrame. L1 accepts `map`, `sort`, and `limit`; ordinary temporary and collection columns may also be written within the L1 chain. Among public system columns, only `$score` is writable in either stage; `$id` and other `$xxx` system columns are read-only. Both stages use the same scalar input type set listed above.
+
+### L1 input materialization
+
+The worker cross-segment reducer produces a merged DataFrame containing ranking and reduction metadata plus a parallel source map:
+
+```go
+type segmentSource struct {
+    InputIdx    int
+    SegOffset   int64
+    OriginalIdx int
+}
+
+type mergeResult struct {
+    DF      *chain.DataFrame
+    Sources [][]segmentSource
+}
+```
+
+Ordinary scalar fields required only by L1 are not exported with all segment ANN candidates and are not copied during heap merge. Before L1 execution, QueryNode flattens the merged result's source map and reads only the surviving candidates from their source segments:
+
+```text
+Sources[query chunk][row].{InputIdx, SegOffset}
+  -> ordered segment field read for L1 required field IDs
+  -> Arrow RecordBatch in merged-row order
+  -> L1 input DataFrame with mergedDF chunk sizes
+```
+
+The read API groups requested offsets by segment, performs field subscripts against each segment, and scatters the values back into the exact caller-provided order. `OriginalIdx` remains useful to the reducer for pre-reduce metadata columns but is not part of the L1 field-materialization contract.
+
+Materialization must preserve Arrow type, field ID/type/nullability metadata, null values, chunk count, and row count. Missing fields, invalid source indexes or offsets, malformed Arrow metadata, or mismatched DataFrame/source shapes indicate an internal result-contract failure rather than invalid request content.
+
+### L1 provenance and late materialization
+
+`Sources` is later consumed by `FillOutputFieldsOrdered` to materialize requested output fields in final result order. Therefore, transforming only `mergeResult.DF` with L1 `sort` or `limit` would corrupt the row-to-segment mapping.
+
+Before L1 execution, QueryNode attaches a hidden per-chunk source-index column. Each token is the row's index in that chunk's current `Sources` slice. All Function Chain row operators transform every column, so the token follows each row through user `map`, `sort`, and `limit`, as well as the internal normalization sort. After execution, QueryNode uses the transformed token to rebuild `Sources` and then removes the hidden column.
+
+A PK must not be used as the provenance token. Element-level search may contain multiple rows with the same PK, and source reconstruction by PK would be ambiguous. The hidden token is internal-only: public chains cannot read it, and it must not appear in `SearchResultData.FieldsData` or final output projection.
+
+The following invariants must hold before late materialization:
+
+1. The DataFrame and `Sources` have the same number of query chunks.
+2. Each DataFrame chunk has exactly one corresponding source entry per row.
+3. Every provenance token is non-null, has the internal integer type, and is in range for the original source chunk.
+4. Rebuilt `Sources` is in exactly the same order as the final L1 DataFrame.
+5. The provenance token and L1-only temporary input columns are removed before wire serialization.
+
 ### Request-level rules
 
 #### `function_score` conflict
@@ -434,15 +527,21 @@ SDK `ranker` maps to legacy rerank/function-score behavior, so SDK rejects `rank
 
 #### Stage uniqueness
 
-The same `FunctionChainStage` may appear at most once in one request.
+The same `FunctionChainStage` may appear at most once in one request. One L0, one L1, and one L2 chain may coexist, and their execution order is fixed by stage rather than request-list order.
 
-The first release supports only one ordinary Search stage:
+Users who need multiple steps at one stage should put multiple ordered ops in that stage's chain instead of sending duplicate chains.
 
-```text
-FunctionChainStageL2Rerank
-```
+#### L1 compatibility
 
-Users who need multiple rerank steps should put multiple ops in one L2 chain instead of sending multiple L2 chains.
+The first L1 release has these request-level restrictions:
+
+- L1 is not supported for hybrid or advanced search.
+- L1 is not supported with Search Iterator (legacy or v2).
+- L1 is not supported with `order_by`, because both define ordering behavior.
+- L1 is not supported with search aggregation.
+- Search-level group-by may be combined with L1 `map`, `sort`, or `limit`, matching L2 compatibility. Function Chain operators may reorder or trim grouped rows without rebuilding the original group count or `group_size` contract.
+
+These validations occur before execution so an unsupported combination does not silently produce incomplete distributed results.
 
 #### Hybrid search
 
@@ -485,16 +584,9 @@ The chain builder dispatches by rerank metadata type:
 
 ### Tail behavior
 
-A public `FunctionChain` is executed as sent.
+A public `FunctionChain` is executed in its declared operator order. Milvus does not implicitly append public operators such as `limit`, group-by, or round-decimal.
 
-Milvus does not implicitly append tail operators such as:
-
-- sort;
-- limit;
-- group-by;
-- round-decimal.
-
-Users or SDK helpers must add explicit ops when they want those effects.
+L2 is executed as sent and does not receive an implicit sort. L0 and L1 are internal inputs to downstream score-merge reducers, so QueryNode appends a non-public normalization sort by `$score` descending and `$id` ascending after the user chain. For L1 this normalization occurs after every user operator, including `limit`, and therefore does not change which candidates the user plan selected.
 
 ## Validation Rules
 
@@ -508,15 +600,18 @@ First-version validation includes:
 6. Column references and input/output names must be non-empty.
 7. Expr args must be either column refs or supported literals.
 8. Parameter values must be typed and convertible to runtime values.
-9. L2 input system names are restricted to `$id` and `$score`.
-10. L2 system outputs are restricted to `$score`.
+9. L0/L1/L2 public input system names are restricted to `$id` and `$score`.
+10. Public system outputs are restricted to `$score`.
 11. Non-system required inputs must be supported collection fields.
-12. Unknown operators and functions are rejected.
-13. A function must be runnable at the chain stage.
-14. Function-specific parameters must pass validation.
-15. External rerank model query count must match query chunk count.
+12. L0 accepts only `map`; L1 accepts only `map`, `sort`, and `limit`.
+13. Unknown operators and functions are rejected.
+14. A function must be runnable at the chain stage.
+15. Function-specific parameters must pass validation.
+16. External rerank model query count must match query chunk count.
+17. L1 is rejected with search aggregation.
+18. Function rerank is rejected with Search Iterator (legacy or v2) and `order_by`.
 
-Additional ordering constraints such as "at most one sort" or "sort must be last" can be considered as future stricter validation. The first release executes the ordered plan as sent unless a runtime operator rejects it.
+Additional ordering constraints such as "at most one sort" or "sort must be last" can be considered as future stricter validation. The first release executes the user's ordered plan as sent unless an operator rejects it, then applies only the internal L0/L1 reducer normalization described above.
 
 ## Compatibility, Deprecation, and Migration Plan
 
@@ -550,7 +645,9 @@ Security requirements:
 
 ## Observability
 
-Initial observability reuses existing search/function error paths and provider HTTP errors.
+QueryNode reuses `milvus_querynode_function_chain_latency` for L0 and L1 execution. L1 records `chain_level="l1"` and the existing success/failure status label. The timed L1 phase includes required-field materialization, chain construction and execution, provenance reconstruction, and internal normalization. Metric labels must remain bounded; field names, expressions, collection names, and chain names are not metric labels.
+
+Runtime errors use the existing typed error paths. Invalid user plans and unsupported combinations are input errors. Missing internal fields, malformed DataFrames, invalid source indexes, provenance corruption, and result-shape violations are system/internal failures. When adding context to an existing typed error, implementations use `merr.Wrap` or `merr.Wrapf` so the original code survives.
 
 Useful follow-up metrics:
 
@@ -563,38 +660,68 @@ Useful follow-up metrics:
 
 ### SDK tests
 
-1. Builder serialization for `map`, `sort`, `limit`.
+1. Builder serialization for `map`, `sort`, `limit`, and all supported stages.
 2. Typed parameter serialization for scalar, bytes, arrays, and nested objects.
 3. `col(...)` validation.
 4. Helper validation for `decay`, `num_combine`, `round_decimal`, and `rerank_model`.
-5. Search request encoding with single chain and list of chains.
+5. Search request encoding with one chain and with L0/L1/L2 chains.
 6. Reject `function_chains` plus `ranker`.
-7. Reject non-L2 chains for ordinary Search.
+7. Reject unsupported stages for ordinary Search.
 8. Reject `function_chains` for hybrid search.
 
 ### Proxy and chain planning tests
 
 1. `function_score` plus `function_chains` is rejected.
-2. Duplicate L2 chains are rejected.
-3. Non-L2 chain stages are rejected in ordinary Search.
-4. Hybrid Search with `function_chains` is rejected.
-5. `$score`-only chain succeeds with no schema input fields.
-6. `field + $score` chain fetches only required schema fields.
-7. A previous op output used by a later op is not fetched as a schema field.
-8. Unknown non-system input is rejected.
-9. Unsupported `$xxx` system input is rejected.
-10. Unsupported system output is rejected.
-11. Unsupported schema input field type is rejected.
+2. Duplicate chains at each stage are rejected.
+3. L0, L1, and L2 route to the correct execution component and may coexist.
+4. Unsupported stages and hybrid/advanced Search are rejected.
+5. Iterator v2 and `order_by` conflicts are rejected.
+6. L1 with search aggregation is rejected.
+7. Search group-by accepts L1 `map`, `sort`, and `limit`, matching L2 request compatibility.
+8. `$score`-only chains succeed with no schema input fields.
+9. `field + $score` chains fetch only required schema fields.
+10. L0 and L1 required field IDs are planned separately; pre-reduce Arrow export receives only L0 field IDs.
+11. A previous op output used by a later L1 op is not fetched as a schema field; L0 allows temporary and collection-column outputs while restricting system outputs to `$score`.
+12. Unknown inputs, unsupported `$xxx` names, invalid system outputs, and unsupported field types are rejected.
 
-### Rerank path tests
+### QueryNode L1 tests
+
+1. L1 accepts `map`, `sort`, and `limit`; it rejects `filter`, `select`, and `group_by`.
+2. L1 functions must be runnable at `L1_RERANK`.
+3. Scalar inputs, including null values, are materialized from the source segment rows.
+4. Int64 and string PK results preserve source identity.
+5. Element-level results with duplicate PKs preserve distinct source rows.
+6. User sort determines the candidates selected by user limit.
+7. Internal score-descending/ID-ascending normalization runs after the user chain.
+8. Ragged TopKs and empty query chunks retain valid DataFrame/source shapes.
+9. Missing fields, Arrow type mismatches, invalid source indexes, and malformed provenance tokens return typed internal errors.
+10. The hidden provenance column and L1-only inputs are absent from serialized result fields.
+11. Success and failure paths record the L1 latency metric exactly once and release Arrow resources.
+
+### Reduction and late-materialization tests
+
+1. Both worker Go-reduce paths execute L1 before late materialization.
+2. L1 sort and limit reorder `mergeResult.Sources` together with IDs and scores.
+3. Requested output fields remain attached to the correct hit after L1 reordering and trimming.
+4. Merged SearchTasks with mixed NQ/topK preserve per-request slicing after L1.
+5. Group-by and element metadata remain aligned.
+6. Shard-leader reduction correctly merges score-normalized L1 outputs from multiple workers.
+7. Worker-local limit behavior is explicit: discarded candidates do not reappear downstream.
+
+### L2 and regression tests
 
 1. `buildChainFromMeta` builds a `FuncChain` from `functionChainRerankMeta`.
 2. Existing `rerankOperator` executes a proto-derived chain through DataFrame.
 3. A chain that maps and sorts `$score` changes result order and scores.
 4. A chain with `limit` updates per-query TopKs.
 5. Chain-required fields are available after requery but are not exposed in final response fields.
-6. Existing `function_score` and legacy rank behavior remain unchanged.
-7. Optional external provider test for `rerank_model`, such as VoyageAI, gated on server-side credentials.
+6. L0 + L1 + L2 execute in stage order.
+7. Existing `function_score` and legacy rank behavior remain unchanged.
+8. Optional external provider test for `rerank_model`, gated on server-side credentials.
+
+### End-to-end tests
+
+Python and REST tests cover L1 score mapping, hidden scalar inputs, sort plus limit, L0/L1/L2 composition, incompatibility validation, output-field alignment, and worker-local candidate-budget semantics. Test data must distinguish segment-local L0, worker-level L1, and Proxy-global L2 so a passing result proves the selected execution boundary rather than only the final arithmetic.
 
 ### Regression checks
 
@@ -602,8 +729,11 @@ Run targeted Go tests with Milvus test flags:
 
 ```bash
 go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/util/function/chain/...
-go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/proxy/... -run 'FunctionChain|Rerank'
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/proxy/... -run 'FunctionChain|Rerank|L1'
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/querynodev2/tasks/... -run 'FunctionChain|L1|GoReduce'
 ```
+
+Because L1 changes distributed ordering, provenance, and late materialization, verification also includes the full Go test suite and end-to-end failure-mode tracing. A green success-path search alone is not evidence that source alignment or worker-local limit semantics are correct.
 
 Run SDK tests from the PyMilvus repository or local checkout as appropriate.
 
@@ -636,7 +766,8 @@ Rejected because only the caller knows whether a name is a schema field, request
 ## Open Questions
 
 1. What is the best public API for hybrid search support: top-level post-merge chain, per-sub-search chains, or both?
-2. Which functions should be allowed in future L0/L1 stages, and where should they execute?
-3. Should strict operator ordering rules be enforced, such as one `sort` and only as the last ordering op?
-4. Should users be able to return intermediate variables explicitly in future APIs?
-5. Should provider-specific metrics be standardized across embedding and rerank model providers?
+2. Which additional functions and operators should be allowed in future L0/L1 stages?
+3. Should L1 eventually support a shard-leader execution mode in addition to worker post-reduce execution?
+4. Should strict operator ordering rules be enforced, such as one `sort` and only as the last ordering op?
+5. Should users be able to return intermediate variables explicitly in future APIs?
+6. Should provider-specific metrics be standardized across embedding and rerank model providers?

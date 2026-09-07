@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -30,11 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-)
-
-const (
-	ExprAuthModeRootOnly = "rootOnly"
-	ExprAuthModeRBAC     = "rbac"
 )
 
 // getUserRoleFunc is a callback function to get user roles.
@@ -78,49 +72,6 @@ func (e *ErrServiceUnavailable) Error() string {
 // Supports HTTP Basic Auth format only.
 func parseHTTPAuth(req *http.Request) (username, password string, ok bool) {
 	return req.BasicAuth()
-}
-
-// CheckExprAuth authenticates and authorizes access to the /expr endpoint.
-func CheckExprAuth(ctx context.Context, req *http.Request) error {
-	mode := paramtable.Get().CommonCfg.ExprAuthMode.GetValue()
-	switch strings.ToLower(mode) {
-	case "", strings.ToLower(ExprAuthModeRootOnly):
-		return checkExprRootAuth(ctx, req)
-	case ExprAuthModeRBAC:
-		if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
-			return &ErrPermissionDenied{msg: "authorization must be enabled when common.security.exprAuthMode is rbac"}
-		}
-		return CheckPrivilege(
-			ctx,
-			req,
-			commonpb.ObjectType_Global,
-			util.PrivilegeExpr,
-			util.AnyWord,
-			util.DefaultDBName,
-		)
-	default:
-		return &ErrPermissionDenied{msg: fmt.Sprintf("invalid expr auth mode %q", mode)}
-	}
-}
-
-func checkExprRootAuth(ctx context.Context, req *http.Request) error {
-	username, password, ok := parseHTTPAuth(req)
-	if !ok || username == "" || password == "" {
-		return &ErrAuthentication{msg: "authentication required. Use HTTP Basic Auth with root credentials"}
-	}
-	if username != util.UserRoot {
-		mlog.Warn(ctx, "non-root user attempted to access /expr", mlog.String("username", username))
-		return &ErrPermissionDenied{msg: "only root user can access /expr endpoint"}
-	}
-	if passwordVerifyFunc == nil {
-		return &ErrServiceUnavailable{msg: "password verification not available"}
-	}
-	if !passwordVerifyFunc(ctx, username, password) {
-		mlog.Warn(ctx, "invalid root password for /expr access")
-		return &ErrAuthentication{msg: "invalid root password"}
-	}
-	mlog.Info(ctx, "root user authenticated for /expr access")
-	return nil
 }
 
 // CheckPrivilege checks if the authenticated user has the specified privilege.

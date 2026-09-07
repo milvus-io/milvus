@@ -5,11 +5,11 @@ package mocks
 import (
 	context "context"
 
+	mock "github.com/stretchr/testify/mock"
+
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	federpb "github.com/milvus-io/milvus-proto/go-api/v3/federpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	mock "github.com/stretchr/testify/mock"
-
 	types "github.com/milvus-io/milvus/internal/types"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1799,6 +1799,65 @@ func (_c *MockProxy_CreateIndex_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+// CreateNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateNamespace(_a0 context.Context, _a1 *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateNamespace")
+	}
+
+	var r0 *milvuspb.CreateNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest) *milvuspb.CreateNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CreateNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_CreateNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNamespace'
+type MockProxy_CreateNamespace_Call struct {
+	*mock.Call
+}
+
+// CreateNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateNamespaceRequest
+func (_e *MockProxy_Expecter) CreateNamespace(_a0 interface{}, _a1 interface{}) *MockProxy_CreateNamespace_Call {
+	return &MockProxy_CreateNamespace_Call{Call: _e.mock.On("CreateNamespace", _a0, _a1)}
+}
+
+func (_c *MockProxy_CreateNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateNamespaceRequest)) *MockProxy_CreateNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_CreateNamespace_Call) Return(_a0 *milvuspb.CreateNamespaceResponse, _a1 error) *MockProxy_CreateNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_CreateNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error)) *MockProxy_CreateNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreatePartition provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CreatePartition(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2376,6 +2435,65 @@ func (_c *MockProxy_DeleteCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// DeleteRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DeleteRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DeleteRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRLSPrincipalTags'
+type MockProxy_DeleteRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// DeleteRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) DeleteRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteRLSPrincipalTags_Call {
+	return &MockProxy_DeleteRLSPrincipalTags_Call{Call: _e.mock.On("DeleteRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest)) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteUserTags provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) DeleteUserTags(_a0 context.Context, _a1 *milvuspb.DeleteUserTagsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2667,6 +2785,124 @@ func (_c *MockProxy_DescribeIndex_Call) Return(_a0 *milvuspb.DescribeIndexRespon
 }
 
 func (_c *MockProxy_DescribeIndex_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)) *MockProxy_DescribeIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DescribeNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeNamespace(_a0 context.Context, _a1 *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeNamespace")
+	}
+
+	var r0 *milvuspb.DescribeNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest) *milvuspb.DescribeNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribeNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeNamespace'
+type MockProxy_DescribeNamespace_Call struct {
+	*mock.Call
+}
+
+// DescribeNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeNamespaceRequest
+func (_e *MockProxy_Expecter) DescribeNamespace(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeNamespace_Call {
+	return &MockProxy_DescribeNamespace_Call{Call: _e.mock.On("DescribeNamespace", _a0, _a1)}
+}
+
+func (_c *MockProxy_DescribeNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeNamespaceRequest)) *MockProxy_DescribeNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribeNamespace_Call) Return(_a0 *milvuspb.DescribeNamespaceResponse, _a1 error) *MockProxy_DescribeNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DescribeNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error)) *MockProxy_DescribeNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DescribePrewarmTask provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribePrewarmTask(_a0 context.Context, _a1 *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribePrewarmTask")
+	}
+
+	var r0 *milvuspb.DescribePrewarmTaskResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribePrewarmTaskRequest) *milvuspb.DescribePrewarmTaskResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribePrewarmTaskResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribePrewarmTaskRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribePrewarmTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribePrewarmTask'
+type MockProxy_DescribePrewarmTask_Call struct {
+	*mock.Call
+}
+
+// DescribePrewarmTask is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribePrewarmTaskRequest
+func (_e *MockProxy_Expecter) DescribePrewarmTask(_a0 interface{}, _a1 interface{}) *MockProxy_DescribePrewarmTask_Call {
+	return &MockProxy_DescribePrewarmTask_Call{Call: _e.mock.On("DescribePrewarmTask", _a0, _a1)}
+}
+
+func (_c *MockProxy_DescribePrewarmTask_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribePrewarmTaskRequest)) *MockProxy_DescribePrewarmTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribePrewarmTaskRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribePrewarmTask_Call) Return(_a0 *milvuspb.DescribePrewarmTaskResponse, _a1 error) *MockProxy_DescribePrewarmTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DescribePrewarmTask_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error)) *MockProxy_DescribePrewarmTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3139,6 +3375,65 @@ func (_c *MockProxy_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *Moc
 }
 
 func (_c *MockProxy_DropIndex_Call) RunAndReturn(run func(context.Context, *milvuspb.DropIndexRequest) (*commonpb.Status, error)) *MockProxy_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropNamespace(_a0 context.Context, _a1 *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropNamespace")
+	}
+
+	var r0 *milvuspb.DropNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest) *milvuspb.DropNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DropNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DropNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropNamespace'
+type MockProxy_DropNamespace_Call struct {
+	*mock.Call
+}
+
+// DropNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropNamespaceRequest
+func (_e *MockProxy_Expecter) DropNamespace(_a0 interface{}, _a1 interface{}) *MockProxy_DropNamespace_Call {
+	return &MockProxy_DropNamespace_Call{Call: _e.mock.On("DropNamespace", _a0, _a1)}
+}
+
+func (_c *MockProxy_DropNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropNamespaceRequest)) *MockProxy_DropNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DropNamespace_Call) Return(_a0 *milvuspb.DropNamespaceResponse, _a1 error) *MockProxy_DropNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DropNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error)) *MockProxy_DropNamespace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4179,6 +4474,65 @@ func (_c *MockProxy_GetDdChannel_Call) RunAndReturn(run func(context.Context, *i
 	return _c
 }
 
+// GetExportSnapshotState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetExportSnapshotState(_a0 context.Context, _a1 *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExportSnapshotState")
+	}
+
+	var r0 *milvuspb.GetExportSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) *milvuspb.GetExportSnapshotStateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetExportSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetExportSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExportSnapshotState'
+type MockProxy_GetExportSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetExportSnapshotState is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetExportSnapshotStateRequest
+func (_e *MockProxy_Expecter) GetExportSnapshotState(_a0 interface{}, _a1 interface{}) *MockProxy_GetExportSnapshotState_Call {
+	return &MockProxy_GetExportSnapshotState_Call{Call: _e.mock.On("GetExportSnapshotState", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetExportSnapshotStateRequest)) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetExportSnapshotStateRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) Return(_a0 *milvuspb.GetExportSnapshotStateResponse, _a1 error) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error)) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4769,6 +5123,65 @@ func (_c *MockProxy_GetMetrics_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
+// GetNamespaceStats provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetNamespaceStats(_a0 context.Context, _a1 *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNamespaceStats")
+	}
+
+	var r0 *milvuspb.GetNamespaceStatsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) *milvuspb.GetNamespaceStatsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetNamespaceStatsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetNamespaceStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNamespaceStats'
+type MockProxy_GetNamespaceStats_Call struct {
+	*mock.Call
+}
+
+// GetNamespaceStats is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetNamespaceStatsRequest
+func (_e *MockProxy_Expecter) GetNamespaceStats(_a0 interface{}, _a1 interface{}) *MockProxy_GetNamespaceStats_Call {
+	return &MockProxy_GetNamespaceStats_Call{Call: _e.mock.On("GetNamespaceStats", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetNamespaceStats_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetNamespaceStatsRequest)) *MockProxy_GetNamespaceStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetNamespaceStatsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetNamespaceStats_Call) Return(_a0 *milvuspb.GetNamespaceStatsResponse, _a1 error) *MockProxy_GetNamespaceStats_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetNamespaceStats_Call) RunAndReturn(run func(context.Context, *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error)) *MockProxy_GetNamespaceStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitionStatistics provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetPartitionStatistics(_a0 context.Context, _a1 *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5060,6 +5473,65 @@ func (_c *MockProxy_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetrics
 }
 
 func (_c *MockProxy_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MockProxy_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPrincipalTags")
+	}
+
+	var r0 *milvuspb.GetRLSPrincipalTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) *milvuspb.GetRLSPrincipalTagsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetRLSPrincipalTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSPrincipalTags'
+type MockProxy_GetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// GetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) GetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_GetRLSPrincipalTags_Call {
+	return &MockProxy_GetRLSPrincipalTags_Call{Call: _e.mock.On("GetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest)) *MockProxy_GetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) Return(_a0 *milvuspb.GetRLSPrincipalTagsResponse, _a1 error) *MockProxy_GetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)) *MockProxy_GetRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5707,6 +6179,65 @@ func (_c *MockProxy_HasCollection_Call) Return(_a0 *milvuspb.BoolResponse, _a1 e
 }
 
 func (_c *MockProxy_HasCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)) *MockProxy_HasCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) HasNamespace(_a0 context.Context, _a1 *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasNamespace")
+	}
+
+	var r0 *milvuspb.HasNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest) *milvuspb.HasNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.HasNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_HasNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasNamespace'
+type MockProxy_HasNamespace_Call struct {
+	*mock.Call
+}
+
+// HasNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasNamespaceRequest
+func (_e *MockProxy_Expecter) HasNamespace(_a0 interface{}, _a1 interface{}) *MockProxy_HasNamespace_Call {
+	return &MockProxy_HasNamespace_Call{Call: _e.mock.On("HasNamespace", _a0, _a1)}
+}
+
+func (_c *MockProxy_HasNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasNamespaceRequest)) *MockProxy_HasNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.HasNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_HasNamespace_Call) Return(_a0 *milvuspb.HasNamespaceResponse, _a1 error) *MockProxy_HasNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_HasNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error)) *MockProxy_HasNamespace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6700,6 +7231,65 @@ func (_c *MockProxy_ListIndexedSegment_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// ListNamespaces provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListNamespaces(_a0 context.Context, _a1 *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListNamespaces")
+	}
+
+	var r0 *milvuspb.ListNamespacesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest) *milvuspb.ListNamespacesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListNamespacesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListNamespacesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListNamespaces_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListNamespaces'
+type MockProxy_ListNamespaces_Call struct {
+	*mock.Call
+}
+
+// ListNamespaces is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListNamespacesRequest
+func (_e *MockProxy_Expecter) ListNamespaces(_a0 interface{}, _a1 interface{}) *MockProxy_ListNamespaces_Call {
+	return &MockProxy_ListNamespaces_Call{Call: _e.mock.On("ListNamespaces", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListNamespaces_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListNamespacesRequest)) *MockProxy_ListNamespaces_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListNamespacesRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListNamespaces_Call) Return(_a0 *milvuspb.ListNamespacesResponse, _a1 error) *MockProxy_ListNamespaces_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListNamespaces_Call) RunAndReturn(run func(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error)) *MockProxy_ListNamespaces_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListPrivilegeGroups provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) ListPrivilegeGroups(_a0 context.Context, _a1 *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6755,6 +7345,65 @@ func (_c *MockProxy_ListPrivilegeGroups_Call) Return(_a0 *milvuspb.ListPrivilege
 }
 
 func (_c *MockProxy_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)) *MockProxy_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRLSPrincipals provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListRLSPrincipals(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPrincipals")
+	}
+
+	var r0 *milvuspb.ListRLSPrincipalsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) *milvuspb.ListRLSPrincipalsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRLSPrincipalsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListRLSPrincipals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPrincipals'
+type MockProxy_ListRLSPrincipals_Call struct {
+	*mock.Call
+}
+
+// ListRLSPrincipals is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRLSPrincipalsRequest
+func (_e *MockProxy_Expecter) ListRLSPrincipals(_a0 interface{}, _a1 interface{}) *MockProxy_ListRLSPrincipals_Call {
+	return &MockProxy_ListRLSPrincipals_Call{Call: _e.mock.On("ListRLSPrincipals", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest)) *MockProxy_ListRLSPrincipals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRLSPrincipalsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) Return(_a0 *milvuspb.ListRLSPrincipalsResponse, _a1 error) *MockProxy_ListRLSPrincipals_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)) *MockProxy_ListRLSPrincipals_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -7640,6 +8289,65 @@ func (_c *MockProxy_PinSnapshotData_Call) Return(_a0 *milvuspb.PinSnapshotDataRe
 }
 
 func (_c *MockProxy_PinSnapshotData_Call) RunAndReturn(run func(context.Context, *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error)) *MockProxy_PinSnapshotData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Prewarm provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Prewarm(_a0 context.Context, _a1 *milvuspb.PrewarmRequest) (*milvuspb.PrewarmResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 *milvuspb.PrewarmResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PrewarmRequest) (*milvuspb.PrewarmResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PrewarmRequest) *milvuspb.PrewarmResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.PrewarmResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.PrewarmRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MockProxy_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.PrewarmRequest
+func (_e *MockProxy_Expecter) Prewarm(_a0 interface{}, _a1 interface{}) *MockProxy_Prewarm_Call {
+	return &MockProxy_Prewarm_Call{Call: _e.mock.On("Prewarm", _a0, _a1)}
+}
+
+func (_c *MockProxy_Prewarm_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.PrewarmRequest)) *MockProxy_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.PrewarmRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_Prewarm_Call) Return(_a0 *milvuspb.PrewarmResponse, _a1 error) *MockProxy_Prewarm_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_Prewarm_Call) RunAndReturn(run func(context.Context, *milvuspb.PrewarmRequest) (*milvuspb.PrewarmResponse, error)) *MockProxy_Prewarm_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -8850,6 +9558,65 @@ func (_c *MockProxy_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context
 	return _c
 }
 
+// SetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_SetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRLSPrincipalTags'
+type MockProxy_SetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// SetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SetRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) SetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_SetRLSPrincipalTags_Call {
+	return &MockProxy_SetRLSPrincipalTags_Call{Call: _e.mock.On("SetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest)) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.SetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetRates provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) SetRates(_a0 context.Context, _a1 *proxypb.SetRatesRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -9113,6 +9880,65 @@ func (_c *MockProxy_Stop_Call) Return(_a0 error) *MockProxy_Stop_Call {
 }
 
 func (_c *MockProxy_Stop_Call) RunAndReturn(run func() error) *MockProxy_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SyncFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SyncFileResource(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.SyncFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_SyncFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncFileResource'
+type MockProxy_SyncFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.SyncFileResourceRequest
+func (_e *MockProxy_Expecter) SyncFileResource(_a0 interface{}, _a1 interface{}) *MockProxy_SyncFileResource_Call {
+	return &MockProxy_SyncFileResource_Call{Call: _e.mock.On("SyncFileResource", _a0, _a1)}
+}
+
+func (_c *MockProxy_SyncFileResource_Call) Run(run func(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest)) *MockProxy_SyncFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.SyncFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_SyncFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_SyncFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_SyncFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)) *MockProxy_SyncFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -9589,6 +10415,65 @@ func (_c *MockProxy_UpdateResourceGroups_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// UpdateRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) UpdateRowPolicy(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_UpdateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRowPolicy'
+type MockProxy_UpdateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// UpdateRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateRowPolicyRequest
+func (_e *MockProxy_Expecter) UpdateRowPolicy(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateRowPolicy_Call {
+	return &MockProxy_UpdateRowPolicy_Call{Call: _e.mock.On("UpdateRowPolicy", _a0, _a1)}
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest)) *MockProxy_UpdateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_UpdateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)) *MockProxy_UpdateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateStateCode provides a mock function with given fields: stateCode
 func (_m *MockProxy) UpdateStateCode(stateCode commonpb.StateCode) {
 	_m.Called(stateCode)
@@ -9686,8 +10571,7 @@ func (_c *MockProxy_Upsert_Call) RunAndReturn(run func(context.Context, *milvusp
 func NewMockProxy(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockProxy {
+}) *MockProxy {
 	mock := &MockProxy{}
 	mock.Mock.Test(t)
 

@@ -11,15 +11,9 @@
 
 #pragma once
 
-#include <map>
-#include <unordered_map>
 #include <memory>
-#include <shared_mutex>
-#include <utility>
-#include <tbb/concurrent_hash_map.h>
 
 #include "common/Types.h"
-#include "common/EasyAssert.h"
 #include "index/Index.h"
 #include "index/VectorIndex.h"
 
@@ -31,59 +25,5 @@ struct SealedIndexingEntry {
 };
 
 using SealedIndexingEntryPtr = std::shared_ptr<SealedIndexingEntry>;
-
-struct SealedIndexingRecord {
-    void
-    append_field_indexing(FieldId field_id,
-                          const MetricType& metric_type,
-                          index::CacheIndexBasePtr indexing) {
-        auto ptr = std::make_unique<SealedIndexingEntry>();
-        ptr->indexing_ = std::move(indexing);
-        ptr->metric_type_ = metric_type;
-        std::unique_lock lck(mutex_);
-        field_indexings_[field_id] = std::move(ptr);
-    }
-
-    const SealedIndexingEntryPtr
-    get_field_indexing(FieldId field_id) const {
-        std::shared_lock lck(mutex_);
-        AssertInfo(field_indexings_.count(field_id), "field_id not found");
-        return field_indexings_.at(field_id);
-    }
-
-    void
-    drop_field_indexing(FieldId field_id) {
-        std::unique_lock lck(mutex_);
-        auto it = field_indexings_.find(field_id);
-        if (it != field_indexings_.end()) {
-            if (it->second && it->second->indexing_) {
-                it->second->indexing_->CancelWarmup();
-            }
-            field_indexings_.erase(it);
-        }
-    }
-
-    bool
-    is_ready(FieldId field_id) const {
-        std::shared_lock lck(mutex_);
-        return field_indexings_.count(field_id);
-    }
-
-    void
-    clear() {
-        std::unique_lock lck(mutex_);
-        for (auto& [_, entry] : field_indexings_) {
-            if (entry && entry->indexing_) {
-                entry->indexing_->CancelWarmup();
-            }
-        }
-        field_indexings_.clear();
-    }
-
- private:
-    // field_offset -> SealedIndexingEntry
-    std::unordered_map<FieldId, SealedIndexingEntryPtr> field_indexings_;
-    mutable std::shared_mutex mutex_;
-};
 
 }  // namespace milvus::segcore

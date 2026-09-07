@@ -69,8 +69,7 @@ GcpNativeClientManager::BucketExists(const std::string& bucket_name) {
         if (metadata.status().code() == google::cloud::StatusCode::kNotFound) {
             return false;
         } else {
-            throw std::runtime_error(
-                GetGcpNativeError(std::move(metadata).status()));
+            ThrowGcpNativeStatus(metadata.status());
         }
     }
     return true;
@@ -81,8 +80,7 @@ GcpNativeClientManager::ListBuckets() {
     std::vector<std::string> buckets;
     for (auto&& metadata : client_->ListBuckets()) {
         if (!metadata) {
-            throw std::runtime_error(
-                GetGcpNativeError(std::move(metadata).status()));
+            ThrowGcpNativeStatus(metadata.status());
         }
 
         buckets.emplace_back(metadata->name());
@@ -97,8 +95,7 @@ GcpNativeClientManager::CreateBucket(const std::string& bucket_name) {
     }
     auto metadata = client_->CreateBucket(bucket_name, gcs::BucketMetadata());
     if (!metadata) {
-        throw std::runtime_error(
-            GetGcpNativeError(std::move(metadata).status()));
+        ThrowGcpNativeStatus(metadata.status());
     }
     return true;
 }
@@ -110,7 +107,7 @@ GcpNativeClientManager::DeleteBucket(const std::string& bucket_name) {
         if (status.code() == google::cloud::StatusCode::kNotFound) {
             return false;
         } else {
-            throw std::runtime_error(GetGcpNativeError(std::move(status)));
+            ThrowGcpNativeStatus(status);
         }
     }
     return true;
@@ -124,8 +121,7 @@ GcpNativeClientManager::ObjectExists(const std::string& bucket_name,
         if (metadata.status().code() == google::cloud::StatusCode::kNotFound) {
             return false;
         } else {
-            throw std::runtime_error(
-                GetGcpNativeError(std::move(metadata).status()));
+            ThrowGcpNativeStatus(metadata.status());
         }
     }
     return true;
@@ -136,8 +132,7 @@ GcpNativeClientManager::GetObjectSize(const std::string& bucket_name,
                                       const std::string& object_name) {
     auto metadata = client_->GetObjectMetadata(bucket_name, object_name);
     if (!metadata) {
-        throw std::runtime_error(
-            GetGcpNativeError(std::move(metadata).status()));
+        ThrowGcpNativeStatus(metadata.status());
     }
     return metadata->size();
 }
@@ -151,7 +146,7 @@ GcpNativeClientManager::DeleteObject(const std::string& bucket_name,
         if (status.code() == google::cloud::StatusCode::kNotFound) {
             return false;
         } else {
-            throw std::runtime_error(GetGcpNativeError(std::move(status)));
+            ThrowGcpNativeStatus(status);
         }
     }
     return true;
@@ -166,7 +161,7 @@ GcpNativeClientManager::PutObjectBuffer(const std::string& bucket_name,
     stream.write(reinterpret_cast<const char*>(buf), size);
     stream.Close();
     if (stream.bad()) {
-        throw std::runtime_error(GetGcpNativeError(stream.metadata().status()));
+        ThrowGcpNativeStatus(stream.metadata().status());
     }
     return true;
 }
@@ -178,7 +173,7 @@ GcpNativeClientManager::GetObjectBuffer(const std::string& bucket_name,
                                         uint64_t size) {
     auto stream = client_->ReadObject(bucket_name, object_name);
     if (stream.bad()) {
-        throw std::runtime_error(GetGcpNativeError(stream.status()));
+        ThrowGcpNativeStatus(stream.status());
     }
 
     stream.read(reinterpret_cast<char*>(buf), size);
@@ -195,8 +190,7 @@ GcpNativeClientManager::ListObjects(const std::string& bucket_name,
     for (auto&& metadata :
          client_->ListObjects(bucket_name, gcs::Prefix(prefix))) {
         if (!metadata) {
-            throw std::runtime_error(
-                GetGcpNativeError(std::move(metadata).status()));
+            ThrowGcpNativeStatus(metadata.status());
         }
         objects_vec.emplace_back(metadata->name());
     }

@@ -16,9 +16,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
+#include "common/Types.h"
 #include "exec/Driver.h"
 #include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
@@ -26,6 +28,12 @@
 
 namespace milvus {
 namespace exec {
+
+bool
+ConvertPredicateToFilteredBitset(TargetBitmapView data,
+                                 TargetBitmapView valid,
+                                 size_t size);
+
 class PhyFilterBitsNode : public Operator {
  public:
     PhyFilterBitsNode(

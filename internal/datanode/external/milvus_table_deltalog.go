@@ -490,11 +490,9 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 			deletedSourcePKKeys,
 			sourcePKOffsets,
 		); err != nil {
-			record.Release()
 			return err
 		}
 		sourceOffset += int64(record.Len())
-		record.Release()
 	}
 	return nil
 }
@@ -572,11 +570,9 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 			deletedSourcePKKeys,
 			&deletes.events,
 		); err != nil {
-			record.Release()
 			_ = reader.Close()
 			return milvusTableSourceDeltalogDeletes{}, nil, err
 		}
-		record.Release()
 	}
 	if err := reader.Close(); err != nil {
 		return milvusTableSourceDeltalogDeletes{}, nil, err
@@ -591,6 +587,7 @@ func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
 ) (storage.RecordReader, error) {
 	if packed.IsMilvusTableStorageV3DeltalogPath(ref.sourcePath) {
 		return storage.NewDeltalogReader(
+			ctx,
 			sourcePKType,
 			[]string{ref.sourcePath},
 			storage.WithVersion(storage.StorageV3),
@@ -602,6 +599,7 @@ func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
 		return nil, err
 	}
 	return storage.NewDeltalogReader(
+		ctx,
 		sourcePKType,
 		[]string{ref.sourcePath},
 		storage.WithVersion(storage.StorageV1),

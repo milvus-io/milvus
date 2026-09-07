@@ -93,9 +93,14 @@ func getServerHandlerOpts() []otelgrpc.Option {
 	return []otelgrpc.Option{
 		otelgrpc.WithInterceptorFilter(filterFunc),
 		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
+		// Order matters: the W3C propagator runs first so a real traceparent always wins,
+		// and clientRequestIDPropagator's "already have a span context" guard becomes
+		// meaningful. With the previous order that guard could never fire, and the two
+		// propagators only happened to compose correctly because the later one overwrote
+		// the earlier one's span context.
 		otelgrpc.WithPropagators(propagation.NewCompositeTextMapPropagator(
-			clientRequestIDPropagator{},
 			otel.GetTextMapPropagator(),
+			clientRequestIDPropagator{},
 		)),
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -63,6 +64,20 @@ func Release() error {
 // WAL is the entrance to interact with the milvus write ahead log.
 func WAL() WALAccesser {
 	return singleton
+}
+
+type pchannelInfoResolver interface {
+	ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error)
+}
+
+// ResolvePChannelInfo returns the current pchannel assignment without
+// expanding WALAccesser for callers that do not need assignment discovery.
+func ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	resolver, ok := singleton.(pchannelInfoResolver)
+	if !ok {
+		return types.PChannelInfo{}, status.NewUnrecoverableError("wal accesser does not support pchannel assignment discovery")
+	}
+	return resolver.ResolvePChannelInfo(ctx, vchannel)
 }
 
 // AppendOption is the option for append operation.
@@ -173,11 +188,6 @@ type WALAccesser interface {
 	// Local returns the local services.
 	Local() Local
 
-	// PrepareReleaseManualFlush prepares process-local release handoff.
-	// Returns false when the current process is not the local flush owner or
-	// the channel does not need growing-source retention.
-	PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
-
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 
@@ -203,6 +213,10 @@ type Local interface {
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
+	// PrepareReleaseManualFlushIfLocal prepares process-local release handoff.
+	// If the wal is located at remote, it will return false, error.
+	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
 
 	// GetMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

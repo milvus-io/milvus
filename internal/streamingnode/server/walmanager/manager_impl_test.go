@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -22,6 +24,22 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	m.Run()
+}
+
+func TestOpenManager(t *testing.T) {
+	resource.InitForTest(t)
+
+	m, err := OpenManager()
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+	m.Close()
+}
+
+func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
+	builders := newInterceptorBuilders()
+	assert.Len(t, builders, 6)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[5])
 }
 
 func TestManager(t *testing.T) {

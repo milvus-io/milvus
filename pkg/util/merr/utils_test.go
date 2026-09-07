@@ -85,6 +85,16 @@ func TestIsRetryableErrWrapped(t *testing.T) {
 	assert.False(t, IsRetryableErr(nonRetryableErr))
 }
 
+func TestWrapErrServiceUnavailableErrPreservesCause(t *testing.T) {
+	cause := errors.New("transport failed")
+	err := WrapErrServiceUnavailableErr(cause, "dependency unavailable")
+
+	assert.ErrorIs(t, err, ErrServiceUnavailable)
+	assert.ErrorIs(t, err, cause)
+	assert.Equal(t, Code(ErrServiceUnavailable), Code(err))
+	assert.True(t, IsRetryableErr(err))
+}
+
 func TestChannelTSafeStalledStatus(t *testing.T) {
 	err := WrapErrChannelTSafeStalled("channel-1", "lag 3s")
 	assert.ErrorIs(t, err, ErrChannelTSafeStalled)

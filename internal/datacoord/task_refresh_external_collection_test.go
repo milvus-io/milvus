@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,6 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -47,6 +51,16 @@ type stubCatalog struct {
 	tasks           []*datapb.ExternalCollectionRefreshTask
 	alterSegmentErr error
 	alteredSegments []*datapb.SegmentInfo
+
+	updateErr     error
+	updateActions [][]metastore.UpdateAction
+}
+
+// Update records the actions passed to it (so tests can assert on the
+// composite write a caller issued) and returns updateErr.
+func (s *stubCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	s.updateActions = append(s.updateActions, actions)
+	return s.updateErr
 }
 
 func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
@@ -62,14 +76,6 @@ func (s *stubCatalog) SaveExternalCollectionRefreshJob(ctx context.Context, job 
 }
 
 func (s *stubCatalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error {
-	return nil
-}
-
-func (s *stubCatalog) DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error {
-	return nil
-}
-
-func (s *stubCatalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error {
 	return nil
 }
 
@@ -102,7 +108,9 @@ func (s *stubAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, e
 // stubCluster is a simple stub implementation of Cluster for testing
 type stubCluster struct {
 	session.Cluster
-	refreshReq *datapb.RefreshExternalCollectionTaskRequest
+	refreshReq    *datapb.RefreshExternalCollectionTaskRequest
+	droppedNodeID int64
+	droppedTaskID int64
 }
 
 func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
@@ -117,13 +125,15 @@ func (s *stubCluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID in
 }
 
 func (s *stubCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
+	s.droppedNodeID = nodeID
+	s.droppedTaskID = taskID
 	return nil
 }
 
 // ==================== Helper Functions ====================
 
 // newTestCollections creates a collections map with a single external collection
-// that has one VChannel and one partition, as expected by SetJobInfo.
+// that has one VChannel and one partition, as required by segment apply.
 func newTestCollections(collectionID int64) *typeutil.ConcurrentMap[UniqueID, *collectionInfo] {
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	collections.Insert(collectionID, &collectionInfo{
@@ -154,6 +164,15 @@ func newTestExternalRefreshSegment(segmentID, collectionID, numRows int64) *data
 	}
 }
 
+func addOwnershipTestRefreshTask(
+	t *testing.T,
+	refreshMeta *externalCollectionRefreshMeta,
+	task *datapb.ExternalCollectionRefreshTask,
+) {
+	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersion
+	assert.NoError(t, refreshMeta.AddTask(task))
+}
+
 func createTestRefreshTaskWithStubs(t *testing.T, taskID, jobID, collectionID int64) (*refreshExternalCollectionTask, *externalCollectionRefreshMeta) {
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -171,20 +190,6 @@ func createTestRefreshTaskWithStubs(t *testing.T, taskID, jobID, collectionID in
 	alloc := &stubAllocator{nextID: 99999}
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
 	return task, refreshMeta
-}
-
-func createTestRefreshTaskWithMetaAndStubs(t *testing.T, taskID, jobID, collectionID int64, mt *meta, refreshMeta *externalCollectionRefreshMeta) *refreshExternalCollectionTask {
-	protoTask := &datapb.ExternalCollectionRefreshTask{
-		TaskId:         taskID,
-		JobId:          jobID,
-		CollectionId:   collectionID,
-		State:          indexpb.JobState_JobStateInit,
-		ExternalSource: "s3://bucket/path",
-		ExternalSpec:   "iceberg",
-	}
-
-	alloc := &stubAllocator{nextID: 99999}
-	return newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 }
 
 // ==================== Basic Interface Tests ====================
@@ -440,236 +445,48 @@ func TestRefreshExternalCollectionTask_UpdateProgressWithMeta(t *testing.T) {
 	})
 }
 
-// ==================== SetJobInfo Tests ====================
-
-func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("meta_is_nil", func(t *testing.T) {
-		task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
-		// task.mt is nil
-
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			KeptSegments:    []int64{1, 2},
-			UpdatedSegments: []*datapb.SegmentInfo{},
-		}
-
-		err := task.SetJobInfo(ctx, resp)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "meta is nil")
-	})
-
-	t.Run("safety_check_drop_all_segments", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		// Create segments info
-		segments := NewCachedSegmentsInfo()
-		segments.SetSegment(1, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-			},
-		}, 0)
-		segments.SetSegment(2, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-			},
-		}, 0)
-
-		mt := &meta{
-			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		}
-
-		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
-
-		// Try to drop all segments without replacement
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			KeptSegments:    []int64{},               // Keep none
-			UpdatedSegments: []*datapb.SegmentInfo{}, // Add none
-		}
-
-		err = task.SetJobInfo(ctx, resp)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "safety check failed")
-	})
-
-	t.Run("success_drop_and_add_segments", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		// Create segments info with existing segments
-		segments := NewCachedSegmentsInfo()
-		segments.SetSegment(1, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-				NumOfRows:    500,
-			},
-		}, 0)
-		segments.SetSegment(2, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-				NumOfRows:    600,
-			},
-		}, 0)
-		segments.SetSegment(3, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           3,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Dropped, // already dropped
-				NumOfRows:    100,
-			},
-		}, 0)
-
-		mt := newTestMetaFromCache(t, segments, nil)
-		mt.catalog = catalog
-		mt.collections = newTestCollections(100)
-
-		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
-
-		// Keep segment 1, drop segment 2, add segment 10
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			KeptSegments: []int64{1},
-			UpdatedSegments: []*datapb.SegmentInfo{
-				newTestExternalRefreshSegment(10, 100, 1000),
-			},
-		}
-
-		err = task.SetJobInfo(ctx, resp)
-		assert.NoError(t, err)
-		newSegment := mt.segments.GetSegment(10)
-		assert.NotNil(t, newSegment)
-		assert.False(t, newSegment.GetIsSorted())
-		assert.Equal(t, commonpb.SegmentState_Flushed, newSegment.GetState())
-		assert.Equal(t, "by-dev-rootcoord-dml_0_v1", newSegment.GetInsertChannel())
-		assert.Equal(t, int64(1), newSegment.GetPartitionID())
-	})
-
-	t.Run("success_update_existing_segment_manifest", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		segments := NewCachedSegmentsInfo()
-		segments.SetSegment(1, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:             1,
-				CollectionID:   100,
-				PartitionID:    1,
-				InsertChannel:  "by-dev-rootcoord-dml_0_v1",
-				State:          commonpb.SegmentState_Flushed,
-				NumOfRows:      500,
-				ManifestPath:   "old-manifest",
-				StorageVersion: 3,
-			},
-		}, 0)
-
-		mt := newTestMetaFromCache(t, segments, nil)
-		mt.catalog = catalog
-		mt.collections = newTestCollections(100)
-
-		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
-		updated := newTestExternalRefreshSegment(1, 100, 500)
-		updated.ManifestPath = "new-manifest"
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			UpdatedSegments: []*datapb.SegmentInfo{updated},
-		}
-
-		err = task.SetJobInfo(ctx, resp)
-		assert.NoError(t, err)
-		segment := mt.segments.GetSegment(1)
-		assert.NotNil(t, segment)
-		assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
-		assert.Equal(t, "new-manifest", segment.GetManifestPath())
-		assert.Equal(t, uint64(0), segment.GetDroppedAt())
-	})
-
-	t.Run("high_drop_ratio_warning", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		// Create 10 segments
-		segments := NewCachedSegmentsInfo()
-		for i := int64(1); i <= 10; i++ {
-			segments.SetSegment(i, &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           i,
-					CollectionID: 100,
-					State:        commonpb.SegmentState_Flushed,
-					NumOfRows:    100,
-				},
-			}, 0)
-		}
-
-		mt := newTestMetaFromCache(t, segments, nil)
-		mt.catalog = catalog
-		mt.collections = newTestCollections(100)
-
-		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
-
-		// Keep only 1 segment (drop 9 out of 10 = 90% drop ratio, triggers warning)
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			KeptSegments: []int64{1},
-			UpdatedSegments: []*datapb.SegmentInfo{
-				newTestExternalRefreshSegment(20, 100, 2000),
-			},
-		}
-
-		err = task.SetJobInfo(ctx, resp)
-		assert.NoError(t, err)
-	})
-
-	t.Run("update_segments_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		// Create segments info
-		segments := NewCachedSegmentsInfo()
-		mt := newTestMetaFromCache(t, segments, nil)
-		mt.catalog = catalog
-		mt.collections = newTestCollections(100)
-		mt.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("alter segments failed")})
-
-		protoTask := &datapb.ExternalCollectionRefreshTask{
-			TaskId:         1001,
-			JobId:          1,
-			CollectionId:   100,
-			State:          indexpb.JobState_JobStateInit,
-			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
-		}
-
-		alloc := &stubAllocator{}
-		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
-
-		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			KeptSegments: []int64{},
-			UpdatedSegments: []*datapb.SegmentInfo{
-				newTestExternalRefreshSegment(1, 100, 1000),
-			},
-		}
-
-		err = task.SetJobInfo(ctx, resp)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "alter segments failed")
-	})
-}
-
 // ==================== CreateTaskOnWorker Tests ====================
 
 func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
+	newOwnershipTask := func(
+		t *testing.T,
+		planVersion int32,
+		ownedSegmentIDs []int64,
+	) (*refreshExternalCollectionTask, *externalCollectionRefreshMeta, *stubCluster) {
+		t.Helper()
+		refreshMeta := createTestRefreshMeta(t)
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInit,
+			ExternalSource:       "s3://bucket/path",
+			ExternalSpec:         "iceberg",
+			OwnershipPlanVersion: planVersion,
+			OwnedSegmentIds:      ownedSegmentIDs,
+		}
+		assert.NoError(t, refreshMeta.AddTask(protoTask))
+
+		segments := NewCachedSegmentsInfo()
+		for _, segmentID := range []int64{1, 2} {
+			segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:           segmentID,
+				CollectionID: 100,
+				State:        commonpb.SegmentState_Flushed,
+			}}, 0)
+		}
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID:         100,
+			Schema:     &schemapb.CollectionSchema{Name: "test_coll"},
+			Partitions: []int64{10},
+		})
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.collections = collections
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, &stubAllocator{nextID: 99999})
+		return task, refreshMeta, &stubCluster{}
+	}
+
 	t.Run("meta_is_nil", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -683,8 +500,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
+		addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 		alloc := &stubAllocator{nextID: 99999}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc) // mt is nil
@@ -717,8 +533,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
+		addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 		alloc := &stubAllocator{nextID: 99999}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
@@ -746,8 +561,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
+		addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 		segments := NewCachedSegmentsInfo()
 		mt := &meta{
@@ -784,8 +598,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
+		addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 		segments := NewCachedSegmentsInfo()
 		mt := &meta{
@@ -818,8 +631,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
+		addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 		segments := NewCachedSegmentsInfo()
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
@@ -851,54 +663,91 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
-		assert.NoError(t, err)
+		const targetRowsPerSegmentKey = "dataNode.externalCollection.targetRowsPerSegment"
+		paramtable.Get().Save(targetRowsPerSegmentKey, "12345")
+		defer paramtable.Get().Reset(targetRowsPerSegmentKey)
 
-		protoTask := &datapb.ExternalCollectionRefreshTask{
-			TaskId:         1001,
-			JobId:          1,
-			CollectionId:   100,
-			State:          indexpb.JobState_JobStateInit,
-			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
-		}
-		err = refreshMeta.AddTask(protoTask)
-		assert.NoError(t, err)
-
-		segments := NewCachedSegmentsInfo()
-		segments.SetSegment(1, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-			},
-		}, 0)
-
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{
-			ID:         100,
-			Schema:     &schemapb.CollectionSchema{Name: "test_coll"},
-			Partitions: []int64{10},
-		})
-		mt := &meta{
-			segments:    segments,
-			collections: collections,
-		}
-
-		alloc := &stubAllocator{nextID: 99999}
-		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
-
-		cluster := &stubCluster{}
-
+		task, refreshMeta, cluster := newOwnershipTask(
+			t,
+			externalRefreshOwnershipPlanVersion,
+			[]int64{1},
+		)
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as in progress
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
 		assert.NotNil(t, cluster.refreshReq)
+		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster.refreshReq.GetClusterID())
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
+		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
 	})
+
+	t.Run("legacy_task", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, 0, nil)
+		task.CreateTaskOnWorker(1, cluster)
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "unsupported ownership plan version 0")
+		assert.Nil(t, cluster.refreshReq)
+	})
+
+	for _, test := range []struct {
+		name            string
+		ownedSegmentIDs []int64
+		prepare         func(*refreshExternalCollectionTask)
+		wantSegmentIDs  []int64
+		wantError       string
+	}{
+		{name: "owned_segments_only", ownedSegmentIDs: []int64{1}, wantSegmentIDs: []int64{1}},
+		{name: "empty_ownership", wantSegmentIDs: []int64{}},
+		{name: "missing_owned_segment", ownedSegmentIDs: []int64{3}, wantError: "owned segment 3 not found"},
+		{
+			name:            "dropped_owned_segment",
+			ownedSegmentIDs: []int64{1},
+			prepare: func(task *refreshExternalCollectionTask) {
+				task.mt.segments.GetSegment(1).State = commonpb.SegmentState_Dropped
+			},
+			wantError: "owned segment 1 is not active",
+		},
+		{
+			name:            "foreign_owned_segment",
+			ownedSegmentIDs: []int64{1},
+			prepare: func(task *refreshExternalCollectionTask) {
+				task.mt.segments.GetSegment(1).CollectionID = 200
+			},
+			wantError: "belongs to collection 200",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			task, refreshMeta, cluster := newOwnershipTask(
+				t,
+				externalRefreshOwnershipPlanVersion,
+				test.ownedSegmentIDs,
+			)
+			if test.prepare != nil {
+				test.prepare(task)
+			}
+			task.CreateTaskOnWorker(1, cluster)
+
+			metaTask := refreshMeta.GetTask(1001)
+			if test.wantError != "" {
+				assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+				assert.Contains(t, metaTask.GetFailReason(), test.wantError)
+				assert.Nil(t, cluster.refreshReq)
+				return
+			}
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
+			if assert.NotNil(t, cluster.refreshReq) {
+				assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
+				gotSegmentIDs := make([]int64, 0, len(cluster.refreshReq.GetCurrentSegments()))
+				for _, segment := range cluster.refreshReq.GetCurrentSegments() {
+					gotSegmentIDs = append(gotSegmentIDs, segment.GetID())
+				}
+				assert.Equal(t, test.wantSegmentIDs, gotSegmentIDs)
+			}
+		})
+	}
 }
 
 // ==================== QueryTaskOnWorker Tests ====================
@@ -972,6 +821,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "job canceled")
+		assert.Equal(t, int64(1), cluster.droppedNodeID)
+		assert.Equal(t, int64(1001), cluster.droppedTaskID)
 	})
 
 	t.Run("query_failed", func(t *testing.T) {
@@ -1447,7 +1298,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          1,
 		CollectionId:   100,
-		State:          indexpb.JobState_JobStateInProgress,
+		State:          indexpb.JobState_JobStateInit,
 		ExternalSource: "s3://bucket/path",
 		ExternalSpec:   "iceberg",
 	}
@@ -1471,10 +1322,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 		ExternalSource: "s3://bucket/path",
 		ExternalSpec:   "iceberg",
 	}
-	assert.NoError(t, refreshMeta.AddTask(task1))
-	assert.NoError(t, refreshMeta.AddTask(task2))
-	assert.NoError(t, refreshMeta.AddTaskIDToJob(1, 1001))
-	assert.NoError(t, refreshMeta.AddTaskIDToJob(1, 1002))
+	assert.NoError(t, refreshMeta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{task1, task2}))
 
 	mt := &meta{
 		catalog:     catalog,
@@ -1507,7 +1355,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 	assert.Equal(t, 0, updateCalls)
 }
 
-func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	partitionID := int64(1)
@@ -1556,10 +1404,11 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 		}},
 	}}
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1576,7 +1425,228 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 	assert.ElementsMatch(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_MissingPatchTargetAfterCASRetry(t *testing.T) {
+	ctx := context.Background()
+	const (
+		collectionID = int64(100)
+		segmentID    = int64(10)
+	)
+	base := "files/insert_log/100/1/10"
+	segments := NewCachedSegmentsInfo()
+	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
+	segments.SetSegment(segmentID, NewSegmentInfo(baseline), 0)
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(collectionID)
+
+	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
+	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
+	patch.SchemaVersion++
+
+	failing := newFailOnceCASPersist(mt.segmentPersist.inner)
+	failing.onFailure = func() {
+		require.NoError(t, mt.DropSegment(ctx, segmentID))
+	}
+	mt.segmentPersist = NewSegmentTxnWrapper(failing).WithMetaRootPath(mt.metaRootPath)
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "baseline segment 10 not found")
+	assert.Nil(t, mt.segments.GetSegment(segmentID))
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	segmentID := int64(10)
+	manifestBasePath := "files/insert_log/100/1/10"
+	catalog := &stubCatalog{}
+	mt := newTestMetaFromCache(t, NewCachedSegmentsInfo(), nil)
+	mt.collections = newTestCollections(collectionID)
+	mt.catalog = catalog
+	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	incoming.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 1)
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		nil,
+		[]*datapb.SegmentInfo{incoming},
+	)
+	assert.NoError(t, err)
+
+	// Match the V3 catalog representation after a DataCoord restart: the
+	// manifest and aggregate stats survive, while fake binlogs do not. Also
+	// advance the manifest to model a later stats/index update.
+	persisted := mt.segments.GetSegment(segmentID).Clone()
+	persisted.Binlogs = nil
+	persisted.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 2)
+	persisted.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
+	persisted.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
+	mt.segments.SetSegment(segmentID, persisted, 0)
+	catalog.alteredSegments = nil
+
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		nil,
+		[]*datapb.SegmentInfo{incoming},
+	)
+	assert.NoError(t, err)
+	assert.Nil(t, catalog.alteredSegments)
+	assert.Equal(t, packed.MarshalManifestPath(manifestBasePath, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+	assert.Empty(t, mt.segments.GetSegment(segmentID).GetBinlogs())
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1))
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetJsonKeyStats(), int64(2))
+
+	differentBaseReplay := proto.Clone(incoming).(*datapb.SegmentInfo)
+	differentBaseReplay.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/999", 1)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		nil,
+		[]*datapb.SegmentInfo{differentBaseReplay},
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collides with existing metadata")
+
+	newerReplay := proto.Clone(incoming).(*datapb.SegmentInfo)
+	newerReplay.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 3)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		nil,
+		[]*datapb.SegmentInfo{newerReplay},
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collides with existing metadata")
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSegment(t *testing.T) {
+	// A replayed patch is not harmless: applyExternalRefreshPatch clears
+	// TextStatsLogs and JsonKeyStats unconditionally, so writing the same
+	// result twice discards a text index or JSON key stats built between the
+	// two applies and orphans their files. New segments have always had this
+	// short-circuit; patches need it for the same reason.
+	ctx := context.Background()
+	collectionID := int64(100)
+	segmentID := int64(10)
+	base := "files/insert_log/100/1/10"
+	catalog := &stubCatalog{}
+	segments := NewCachedSegmentsInfo()
+
+	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
+	segments.SetSegment(segmentID, NewSegmentInfo(baseline), 0)
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(collectionID)
+	mt.catalog = catalog
+
+	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
+	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
+	patch.SchemaVersion = 2
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+
+	// Model what the index wait exists to let happen: indexes built on the
+	// freshly patched segment.
+	mt.segments.updateSegment(segmentID, func(indexed *SegmentInfo) {
+		indexed.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
+		indexed.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
+	})
+	catalog.alteredSegments = nil
+
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
+		"a replayed patch must not discard a text index built since the first apply")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetJsonKeyStats(), int64(2))
+
+	// The short-circuit keys on the manifest, not on "seen before": a later
+	// refresh installs a strictly newer manifest and must still apply.
+	newer := proto.Clone(patch).(*datapb.SegmentInfo)
+	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
+	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
+		"a genuine patch still invalidates the stats it supersedes")
+}
+
+func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
+	oldManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
+	newManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 2)
+
+	oldSeg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             300,
+			CollectionID:   100,
+			PartitionID:    200,
+			NumOfRows:      1000,
+			ManifestPath:   oldManifest,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  1,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				500: {
+					FieldID: 500,
+					Version: 1,
+					BuildID: 10,
+					Files:   []string{"files/insert_log/100/200/300/_stats/text_index.500/tokenizer.json"},
+				},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				500: {
+					FieldID:                500,
+					Version:                1,
+					BuildID:                10,
+					Files:                  []string{"shared_key_index/.managed.json_0"},
+					JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+				},
+			},
+		},
+	}
+	incoming := &datapb.SegmentInfo{
+		ID:             300,
+		CollectionID:   100,
+		PartitionID:    200,
+		NumOfRows:      1000,
+		ManifestPath:   newManifest,
+		StorageVersion: storage.StorageV3,
+		SchemaVersion:  2,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100, 500},
+			Binlogs: []*datapb.Binlog{{
+				LogID:      300,
+				EntriesNum: 1000,
+				MemorySize: 4096,
+				LogSize:    4096,
+			}},
+		}},
+	}
+
+	patched := applyExternalRefreshPatch(oldSeg, incoming)
+	assert.Equal(t, newManifest, patched.GetManifestPath())
+	assert.Empty(t, patched.GetTextStatsLogs())
+	assert.Empty(t, patched.GetJsonKeyStats())
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChange(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1611,10 +1681,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testi
 	patched.NumOfRows = 101
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1622,7 +1693,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testi
 	assert.Contains(t, err.Error(), "row count changed")
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectDroppedSegmentPatch(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDCollidingWithDroppedSegment(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1658,19 +1729,20 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedSegmentPatch(t *testi
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
 	patched.SchemaVersion = 4
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
 		nil,
+		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot patch dropped segment")
+	assert.Contains(t, err.Error(), "collides with existing metadata")
 	assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(segmentID).GetState())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentCollectionMismatch(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentCollectionMismatch(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1679,10 +1751,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentCollectionMismatch
 		catalog:     &stubCatalog{},
 	}
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		nil,
 		[]*datapb.SegmentInfo{{
 			ID:             10,
@@ -1707,7 +1780,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentCollectionMismatch
 	assert.Nil(t, mt.segments.GetSegment(10))
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentEmptyManifest(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyManifest(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1718,10 +1791,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentEmptyManifest(t *t
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
 	seg.ManifestPath = ""
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -1730,7 +1804,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewSegmentEmptyManifest(t *t
 	assert.Nil(t, mt.segments.GetSegment(10))
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectSegmentIDFromOtherCollection(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDCollidingWithOtherCollection(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1761,22 +1835,23 @@ func TestApplyExternalCollectionSegmentUpdate_RejectSegmentIDFromOtherCollection
 	}), 0)
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
 		nil,
+		nil,
 		[]*datapb.SegmentInfo{incoming},
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "collection mismatch")
+	assert.Contains(t, err.Error(), "collides with existing metadata")
 	got := mt.segments.GetSegment(segmentID)
 	assert.NotNil(t, got)
 	assert.Equal(t, collectionID+1, got.GetCollectionID())
 	assert.Equal(t, `{"base_path":"other","ver":1}`, got.GetManifestPath())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectInvalidKeptSegment(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectKeptSegmentOutsideBaseline(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1791,19 +1866,20 @@ func TestApplyExternalCollectionSegmentUpdate_RejectInvalidKeptSegment(t *testin
 		NumOfRows:    100,
 	}), 0)
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{1},
 		[]int64{999},
 		nil,
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "kept segment 999 not found")
+	assert.Contains(t, err.Error(), "kept segment 999 is outside the refresh baseline")
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(1).GetState())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectKeptSegmentFromOtherCollection(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectForeignKeptSegmentOutsideBaseline(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1818,19 +1894,20 @@ func TestApplyExternalCollectionSegmentUpdate_RejectKeptSegmentFromOtherCollecti
 		NumOfRows:    100,
 	}), 0)
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		[]int64{10},
 		nil,
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "collection mismatch")
+	assert.Contains(t, err.Error(), "kept segment 10 is outside the refresh baseline")
 	assert.Equal(t, collectionID+1, mt.segments.GetSegment(10).GetCollectionID())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectDroppedKeptSegment(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectDroppedKeptSegmentOutsideBaseline(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1845,19 +1922,20 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedKeptSegment(t *testin
 		NumOfRows:    100,
 	}), 0)
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		[]int64{10},
 		nil,
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot keep dropped segment")
+	assert.Contains(t, err.Error(), "kept segment 10 is outside the refresh baseline")
 	assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(10).GetState())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_NormalizeNewSegmentCollection(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_NormalizeNewSegmentCollection(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := newTestMetaFromCache(t, nil, nil)
@@ -1865,10 +1943,11 @@ func TestApplyExternalCollectionSegmentUpdate_NormalizeNewSegmentCollection(t *t
 	mt.catalog = &stubCatalog{}
 	seg := newTestExternalRefreshSegment(10, 0, 100)
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -1885,7 +1964,7 @@ func TestApplyExternalCollectionSegmentUpdate_NormalizeNewSegmentCollection(t *t
 	assert.Equal(t, commonpb.SegmentState_Flushed, got.GetState())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectPatchBinlogRowCountMismatch(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchBinlogRowCountMismatch(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1904,10 +1983,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchBinlogRowCountMismatch(
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
 	patched.Binlogs[0].Binlogs[0].EntriesNum = 99
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1916,7 +1996,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchBinlogRowCountMismatch(
 	assert.Equal(t, `{"base_path":"new","ver":1}`, mt.segments.GetSegment(segmentID).GetManifestPath())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectNewBinlogRowCountMismatch(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewBinlogRowCountMismatch(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1927,10 +2007,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewBinlogRowCountMismatch(t 
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
 	seg.Binlogs[0].Binlogs[0].EntriesNum = 99
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -1939,7 +2020,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewBinlogRowCountMismatch(t 
 	assert.Nil(t, mt.segments.GetSegment(10))
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectPatchEmptyNestedBinlogs(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchEmptyNestedBinlogs(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1958,10 +2039,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchEmptyNestedBinlogs(t *t
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
 	patched.Binlogs = []*datapb.FieldBinlog{{FieldID: 0}}
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1970,7 +2052,7 @@ func TestApplyExternalCollectionSegmentUpdate_RejectPatchEmptyNestedBinlogs(t *t
 	assert.Equal(t, `{"base_path":"new","ver":1}`, mt.segments.GetSegment(segmentID).GetManifestPath())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectNewEmptyNestedBinlogs(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewEmptyNestedBinlogs(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	mt := &meta{
@@ -1981,10 +2063,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectNewEmptyNestedBinlogs(t *tes
 	seg := newTestExternalRefreshSegment(10, collectionID, 100)
 	seg.Binlogs = []*datapb.FieldBinlog{{FieldID: 0}}
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2131,155 +2214,6 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_JobNotFoundNodeIdZero(t
 	assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 }
 
-// ==================== SetJobInfo Additional Tests ====================
-
-func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing.T) {
-	ctx := context.Background()
-
-	catalog := &stubCatalog{}
-	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	assert.NoError(t, err)
-
-	// Create existing segments
-	segments := NewCachedSegmentsInfo()
-	segments.SetSegment(1, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: 100,
-			State:        commonpb.SegmentState_Flushed,
-			NumOfRows:    1000,
-		},
-	}, 0)
-	segments.SetSegment(2, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:           2,
-			CollectionID: 100,
-			State:        commonpb.SegmentState_Flushed,
-			NumOfRows:    2000,
-		},
-	}, 0)
-
-	mt := newTestMetaFromCache(t, segments, nil)
-	mt.collections = newTestCollections(100)
-
-	alloc := &stubAllocator{nextID: 99999}
-	protoTask := &datapb.ExternalCollectionRefreshTask{
-		TaskId:         1001,
-		JobId:          1,
-		CollectionId:   100,
-		State:          indexpb.JobState_JobStateInProgress,
-		ExternalSource: "s3://bucket/path",
-		ExternalSpec:   "iceberg",
-	}
-	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
-
-	// Keep segment 1, drop segment 2, add a new segment
-	resp := &datapb.RefreshExternalCollectionTaskResponse{
-		KeptSegments: []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{
-			newTestExternalRefreshSegment(999, 100, 3000),
-		},
-	}
-
-	// Mock UpdateSegmentsInfo to succeed
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(nil).Build()
-	defer mockUpdate.UnPatch()
-
-	err = task.SetJobInfo(ctx, resp)
-	assert.NoError(t, err)
-}
-
-func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testing.T) {
-	ctx := context.Background()
-	paramtable.Init()
-
-	catalog := &stubCatalog{}
-	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	assert.NoError(t, err)
-
-	// Create 10 existing segments
-	segments := NewCachedSegmentsInfo()
-	for i := int64(1); i <= 10; i++ {
-		segments.SetSegment(i, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           i,
-				CollectionID: 100,
-				State:        commonpb.SegmentState_Flushed,
-				NumOfRows:    1000,
-			},
-		}, 0)
-	}
-
-	mt := newTestMetaFromCache(t, segments, nil)
-	mt.collections = newTestCollections(100)
-
-	alloc := &stubAllocator{nextID: 99999}
-	protoTask := &datapb.ExternalCollectionRefreshTask{
-		TaskId:         1001,
-		JobId:          1,
-		CollectionId:   100,
-		State:          indexpb.JobState_JobStateInProgress,
-		ExternalSource: "s3://bucket/path",
-		ExternalSpec:   "iceberg",
-	}
-	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
-
-	// Keep only 1 out of 10 segments (90% drop ratio) → triggers warning
-	resp := &datapb.RefreshExternalCollectionTaskResponse{
-		KeptSegments: []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{
-			newTestExternalRefreshSegment(999, 100, 5000),
-		},
-	}
-
-	// Mock UpdateSegmentsInfo to succeed
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(nil).Build()
-	defer mockUpdate.UnPatch()
-
-	err = task.SetJobInfo(ctx, resp)
-	assert.NoError(t, err)
-}
-
-func TestRefreshExternalCollectionTask_SetJobInfo_UpdateSegmentsInfoFailed(t *testing.T) {
-	ctx := context.Background()
-
-	catalog := &stubCatalog{}
-	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	assert.NoError(t, err)
-
-	segments := NewCachedSegmentsInfo()
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
-
-	alloc := &stubAllocator{nextID: 99999}
-	protoTask := &datapb.ExternalCollectionRefreshTask{
-		TaskId:         1001,
-		JobId:          1,
-		CollectionId:   100,
-		State:          indexpb.JobState_JobStateInProgress,
-		ExternalSource: "s3://bucket/path",
-		ExternalSpec:   "iceberg",
-	}
-	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
-
-	resp := &datapb.RefreshExternalCollectionTaskResponse{
-		KeptSegments: []int64{},
-		UpdatedSegments: []*datapb.SegmentInfo{
-			newTestExternalRefreshSegment(1, 100, 1000),
-		},
-	}
-
-	// Mock UpdateSegmentsInfo to fail
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(errors.New("update segments failed")).Build()
-	defer mockUpdate.UnPatch()
-
-	err = task.SetJobInfo(ctx, resp)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update segments failed")
-}
-
 // ==================== CreateTaskOnWorker Additional Tests ====================
 
 func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersionUpdate(t *testing.T) {
@@ -2295,8 +2229,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersi
 		ExternalSource: "s3://bucket/path",
 		ExternalSpec:   "iceberg",
 	}
-	err = refreshMeta.AddTask(protoTask)
-	assert.NoError(t, err)
+	addOwnershipTestRefreshTask(t, refreshMeta, protoTask)
 
 	segments := NewCachedSegmentsInfo()
 	mt := &meta{

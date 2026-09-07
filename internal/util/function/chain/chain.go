@@ -325,11 +325,6 @@ func (fc *FuncChain) Filter(fn types.FunctionExpr, inputCols []string) *FuncChai
 	return fc.addWithError(op, err)
 }
 
-// Select selects specific columns from the DataFrame.
-func (fc *FuncChain) Select(columns ...string) *FuncChain {
-	return fc.Add(NewSelectOp(columns))
-}
-
 // Sort sorts the DataFrame by a column, breaking ties by tieBreakCol ascending.
 func (fc *FuncChain) Sort(column string, desc bool, tieBreakCol string) *FuncChain {
 	return fc.Add(newSortOp(column, desc, tieBreakCol))

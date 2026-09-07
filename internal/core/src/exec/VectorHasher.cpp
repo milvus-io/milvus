@@ -44,7 +44,7 @@ VectorHasher::hashValues(const ColumnVectorPtr& column_data,
                          uint64_t* result) {
     if constexpr (Type == DataType::ROW || Type == DataType::ARRAY ||
                   Type == DataType::JSON) {
-        ThrowInfo(milvus::DataTypeInvalid,
+        ThrowInfo(milvus::UnexpectedError,
                   "hash not supported for complex types ROW/ARRAY/JSON: {}",
                   Type);
     } else {

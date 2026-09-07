@@ -183,14 +183,15 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 
 func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
-	// default max message size 5M
-	newConf.SetKey("message.max.bytes", 10485760)
 	newConf.SetKey("compression.codec", "zstd")
 	// we want to ensure tt send out as soon as possible
 	newConf.SetKey("linger.ms", 2)
 
 	// special producer config
 	kc.specialExtraConfig(newConf, kc.producerConfig)
+	// producerConfig contains the raw kafka.producer.message.max.bytes entry.
+	// Apply the normalized ParamItem last so it remains authoritative.
+	newConf.SetKey("message.max.bytes", paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.GetAsInt())
 
 	return newConf
 }

@@ -373,16 +373,16 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	if err != nil {
 		return 0, err
 	}
-	physicalTs, logicalTs := tsoutil.ParseTS(ts)
-	expirePhysicalTs := physicalTs.Add(time.Duration(Params.DataCoordCfg.SegAssignmentExpiration.GetAsFloat()) * time.Millisecond)
-	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
-	return expireTs, nil
+	return tsoutil.AddPhysicalDurationOnTs(
+		ts,
+		Params.DataCoordCfg.SegAssignmentExpiration.GetAsDuration(time.Millisecond),
+	), nil
 }
 
 // AllocNewGrowingSegment allocates segment for streaming node.
 func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, req AllocNewGrowingSegmentRequest) (*SegmentInfo, error) {
-	// s.channelLock.Lock(req.ChannelName)
-	// defer s.channelLock.Unlock(req.ChannelName)
+	s.channelLock.Lock(req.ChannelName)
+	defer s.channelLock.Unlock(req.ChannelName)
 	return s.openNewSegmentWithGivenSegmentID(ctx, req)
 }
 
@@ -469,8 +469,8 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Drop-Segment")
 	defer sp.End()
 
-	// s.channelLock.Lock(channel)
-	// defer s.channelLock.Unlock(channel)
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
 
 	if growing, ok := s.channel2Growing.Get(channel); ok {
 		growing.Remove(segmentID)

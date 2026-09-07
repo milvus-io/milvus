@@ -95,19 +95,13 @@ func (m *analyzeMeta) AddAnalyzeTask(task *indexpb.AnalyzeTask) error {
 	return m.saveTask(task)
 }
 
-func (m *analyzeMeta) DropAnalyzeTask(ctx context.Context, taskID int64) error {
-	m.Lock()
-	defer m.Unlock()
-
-	mlog.Info(ctx, "drop analyze task", mlog.FieldTaskID(taskID))
-	if err := m.catalog.DropAnalyzeTask(ctx, taskID); err != nil {
-		mlog.Warn(ctx, "drop analyze task by catalog failed", mlog.FieldTaskID(taskID),
-			mlog.Err(err))
-		return err
-	}
-
+// dropTaskFromMemoryLocked removes taskID from in-memory state only, issuing
+// no catalog write. The caller must hold m's write lock. It is used by
+// callers (e.g. partition-stats-and-analyze-task cleanup) that persist the
+// drop via a composite catalog.Update and must not mutate memory until that
+// write has already succeeded.
+func (m *analyzeMeta) dropTaskFromMemoryLocked(taskID int64) {
 	delete(m.tasks, taskID)
-	return nil
 }
 
 func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {

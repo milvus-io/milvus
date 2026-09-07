@@ -21,16 +21,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -50,6 +53,18 @@ type statsTaskSuite struct {
 	segID    int64
 	taskID   int64
 	targetID int64
+}
+
+type mockeyDataCoordCatalog struct {
+	metastore.DataCoordCatalog
+}
+
+type mockeyStatsCluster struct {
+	session.Cluster
+}
+
+type mockeyChunkManager struct {
+	storage.ChunkManager
 }
 
 func Test_statsTaskSuite(t *testing.T) {
@@ -92,8 +107,8 @@ func (s *statsTaskSuite) SetupSuite() {
 				State:         commonpb.SegmentState_Flushed,
 				MaxRowNum:     65535,
 				Level:         datapb.SegmentLevel_L2,
+				Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
 			},
-			size: *atomic.NewInt64(512 * 1024 * 1024),
 		},
 	})
 	s.mt = newTestMetaFromCache(s.T(), segments, nil)
@@ -382,6 +397,76 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 	})
 }
 
+func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifest() {
+	restoreCollection := s.installStatsTaskCollection(true)
+	defer restoreCollection()
+
+	segmentID := int64(3179)
+	taskID := int64(4179)
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			InsertChannel:  "ch1",
+			NumOfRows:      1024,
+			State:          commonpb.SegmentState_Flushed,
+			MaxRowNum:      2048,
+			Level:          datapb.SegmentLevel_L1,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+	s.mt.segments.SetSegment(segmentID, segment, 0)
+	defer func() {
+		s.mt.segments.DropSegment(segmentID, 1)
+		s.mt.segments.PruneSegment(segmentID)
+	}()
+
+	statsTask := &indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       segmentID,
+		TargetSegmentID: segmentID,
+		InsertChannel:   "ch1",
+		TaskID:          taskID,
+		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
+		State:           indexpb.JobState_JobStateInit,
+	}
+	s.mt.statsTaskMeta.tasks.Insert(taskID, statsTask)
+	s.mt.statsTaskMeta.segmentID2Tasks.Insert(
+		createSecondaryIndexKey(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob.String()),
+		statsTask,
+	)
+
+	dropped := make([]int64, 0)
+	catalog := &mockeyDataCoordCatalog{}
+	mockDropStatsTask := mockey.Mock((*mockeyDataCoordCatalog).DropStatsTask).To(
+		func(*mockeyDataCoordCatalog, context.Context, int64) error {
+			dropped = append(dropped, taskID)
+			return nil
+		}).Build()
+	defer mockDropStatsTask.UnPatch()
+	s.mt.statsTaskMeta.catalog = catalog
+
+	created := 0
+	cluster := &mockeyStatsCluster{}
+	mockCreateStats := mockey.Mock((*mockeyStatsCluster).CreateStats).To(
+		func(*mockeyStatsCluster, int64, *workerpb.CreateStatsRequest) error {
+			created++
+			return nil
+		}).Build()
+	defer mockCreateStats.UnPatch()
+
+	st := newStatsTask(statsTask, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+	st.CreateTaskOnWorker(1, cluster)
+
+	s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Equal([]int64{taskID}, dropped)
+	s.Zero(created)
+}
+
 func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 	st := newStatsTask(&indexpb.StatsTask{
 		TaskID:     s.taskID,
@@ -493,6 +578,562 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		err = st.SetJobInfo(context.Background(), result)
 		s.NoError(err)
 	})
+}
+
+func (s *statsTaskSuite) TestSetJobInfoDiscardsMissingSegment() {
+	originalSegments := s.mt.segments
+	s.mt.segments = newTestCachedSegmentsInfo(map[int64]*SegmentInfo{})
+	defer func() {
+		s.mt.segments = originalSegments
+	}()
+
+	err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID:       s.taskID,
+		CollectionID: s.collID,
+		PartitionID:  s.partID,
+		SegmentID:    s.segID,
+		Channel:      "ch1",
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			500: {FieldID: 500, BuildID: s.taskID},
+		},
+	})
+
+	s.ErrorIs(err, errStatsResultDiscarded)
+}
+
+// TestSetJobInfoJSONStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone JsonKeyIndexJob: DataCoord rebuilds the JSON key
+// StatEntries from the worker's raw result and runs the manifest transaction
+// itself, rebasing on the segment's CURRENT manifest.
+func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
+
+	// The worker ships manifest-relative paths (kept relative in SegmentInfo for
+	// read reconstruction); DataCoord rebuilds the absolute form for the manifest.
+	relativeFiles := []string{"shared_key_index/.managed.json_0"}
+	absoluteFiles := []string{basePath + "/_stats/json_stats.500/shared_key_index/.managed.json_0"}
+	freshStats := map[int64]*datapb.JsonKeyStats{
+		500: {
+			FieldID:                500,
+			Version:                1,
+			BuildID:                s.taskID,
+			Files:                  relativeFiles,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		preStats       map[int64]*datapb.JsonKeyStats
+		logs           map[int64]*datapb.JsonKeyStats
+		expectCommit   bool
+		expectManifest string
+		expectStats    bool
+	}{
+		{
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
+		},
+		{
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.JsonKeyStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
+			expectStats:    true,
+		},
+		{
+			name:           "empty_stats_noop",
+			logs:           map[int64]*datapb.JsonKeyStats{},
+			expectCommit:   false,
+			expectManifest: currentManifest,
+			expectStats:    false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(currentManifest)
+			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+					segment.JsonKeyStats = testCase.preStats
+				})
+			}
+			_, beforeVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
+
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(basePath, base)
+					s.EqualValues(2, version)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("json_stats.500", updates.Stats[0].Key)
+					// Manifest stores absolute paths reconstructed from the relative result.
+					s.Equal(absoluteFiles, updates.Stats[0].Files)
+					return committedManifest, nil
+				}).Build()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					catalogWrites++
+					return nil
+				}).Build()
+			defer mockUpdate.UnPatch()
+
+			err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:           s.taskID,
+				CollectionID:     s.collID,
+				PartitionID:      s.partID,
+				SegmentID:        s.segID,
+				Channel:          "ch1",
+				JsonKeyStatsLogs: testCase.logs,
+			})
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
+
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			_, afterVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+			if testCase.expectStats {
+				s.Require().Contains(segment.GetJsonKeyStats(), int64(500))
+				s.Equal(s.taskID, segment.GetJsonKeyStats()[500].GetBuildID())
+			} else {
+				s.Empty(segment.GetJsonKeyStats())
+			}
+			if testCase.expectCommit {
+				s.Greater(afterVersion, beforeVersion)
+				// The SegmentInfo dual-write keeps paths relative; only the manifest
+				// entry carries the reconstructed absolute form.
+				s.Equal(relativeFiles, segment.GetJsonKeyStats()[500].GetFiles())
+			} else {
+				s.Equal(beforeVersion, afterVersion)
+			}
+			s.Equal(0, catalogWrites, "segment publication must use the optimistic persistence path, not the legacy catalog update")
+		})
+	}
+}
+
+// TestSetJobInfoTextStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone TextIndexJob: DataCoord rebuilds the text-index
+// StatEntries from the worker's raw result (pinning the scalar index version the
+// index was built with) and runs the manifest transaction itself, rebasing on the
+// segment's CURRENT manifest.
+func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
+
+	files := []string{basePath + "/_stats/text_index.500/tokenizer.json"}
+	freshStats := map[int64]*datapb.TextIndexStats{
+		500: {
+			FieldID:                   500,
+			Version:                   1,
+			BuildID:                   s.taskID,
+			Files:                     files,
+			CurrentScalarIndexVersion: 7,
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		preStats       map[int64]*datapb.TextIndexStats
+		logs           map[int64]*datapb.TextIndexStats
+		expectCommit   bool
+		expectManifest string
+		expectStats    bool
+	}{
+		{
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
+		},
+		{
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.TextIndexStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
+			expectStats:    true,
+		},
+		{
+			name:           "empty_stats_noop",
+			logs:           map[int64]*datapb.TextIndexStats{},
+			expectCommit:   false,
+			expectManifest: currentManifest,
+			expectStats:    false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(currentManifest)
+			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+					segment.TextStatsLogs = testCase.preStats
+				})
+			}
+			_, beforeVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
+
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(basePath, base)
+					s.EqualValues(2, version)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("text_index.500", updates.Stats[0].Key)
+					s.Equal(files, updates.Stats[0].Files)
+					// Scalar index version pinned to the value the worker built with.
+					s.Equal("7", updates.Stats[0].Metadata["current_scalar_index_version"])
+					return committedManifest, nil
+				}).Build()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					catalogWrites++
+					return nil
+				}).Build()
+			defer mockUpdate.UnPatch()
+
+			err := s.newTextStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:        s.taskID,
+				CollectionID:  s.collID,
+				PartitionID:   s.partID,
+				SegmentID:     s.segID,
+				Channel:       "ch1",
+				TextStatsLogs: testCase.logs,
+			})
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
+
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			_, afterVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+			if testCase.expectStats {
+				s.Require().Contains(segment.GetTextStatsLogs(), int64(500))
+				s.Equal(s.taskID, segment.GetTextStatsLogs()[500].GetBuildID())
+			} else {
+				s.Empty(segment.GetTextStatsLogs())
+			}
+			if testCase.expectCommit {
+				s.Greater(afterVersion, beforeVersion)
+			} else {
+				s.Equal(beforeVersion, afterVersion)
+			}
+			s.Equal(0, catalogWrites, "segment publication must use the optimistic persistence path, not the legacy catalog update")
+		})
+	}
+}
+
+func (s *statsTaskSuite) TestClassifyStatsManifestCommitError() {
+	s.Nil(classifyStatsManifestCommitError(nil))
+
+	transient := merr.WrapErrServiceUnavailableMsg("object storage temporarily unavailable")
+	classified := classifyStatsManifestCommitError(transient)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.NotErrorIs(classified, errStatsResultStale)
+
+	conflict := staleSegmentManifestError(s.segID, "manifest-1", "manifest-2")
+	classified = classifyStatsManifestCommitError(conflict)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.ErrorIs(classified, errSegmentManifestStale)
+	s.ErrorIs(classified, errStatsResultStale)
+}
+
+func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
+	baseManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	s.Run("collect text and json stats files", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			BaseManifest: baseManifest,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"},
+				},
+			},
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					Files: []string{"shared_key_index/.managed.json_0"},
+				},
+			},
+		})
+
+		s.NoError(err)
+		s.ElementsMatch([]string{
+			"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
+			"files/insert_log/1/2/1179/_stats/json_stats.102/shared_key_index/.managed.json_0",
+		}, files)
+	})
+
+	s.Run("deduplicate text stats files without json stats", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{
+						"",
+						"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
+						"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
+					},
+				},
+			},
+		})
+
+		s.NoError(err)
+		s.Equal([]string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"}, files)
+	})
+
+	s.Run("json stats without manifest returns typed error", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					Files: []string{"shared_key_index/.managed.json_0"},
+				},
+			},
+		})
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "manifest is empty for rejected json stats result")
+	})
+
+	s.Run("json stats with invalid manifest returns error", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			BaseManifest: "invalid",
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					Files: []string{"shared_key_index/.managed.json_0"},
+				},
+			},
+		})
+
+		s.Empty(files)
+		s.Error(err)
+	})
+}
+
+func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
+	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
+	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+
+	resultFiles := []string{"files/insert_log/1/2/1179/_stats/text_index.500/tokenizer.json"}
+	testCases := []struct {
+		name          string
+		external      bool
+		expectCleanup bool
+	}{
+		{
+			name:     "internal_collection_skips_file_cleanup",
+			external: false,
+		},
+		{
+			name:          "external_collection_cleans_files",
+			external:      true,
+			expectCleanup: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restoreSegment := s.installJSONStatsSegment(currentManifest)
+			defer restoreSegment()
+			restoreCollection := s.installStatsTaskCollection(testCase.external)
+			defer restoreCollection()
+
+			// The delta commit rebases on the current manifest under the per-segment
+			// lock, so it does not itself reject on a concurrent advance; this guards
+			// the remaining defensive wiring: if CommitSegmentManifest ever surfaces a
+			// classified stale conflict, QueryTaskOnWorker must discard (not retry) the
+			// obsolete worker result. Mock the commit to return that classified error.
+			mockCommit := mockey.Mock((*meta).CommitSegmentManifest).Return(
+				staleSegmentManifestError(s.segID, oldManifest, currentManifest)).Build()
+			defer mockCommit.UnPatch()
+
+			task := &indexpb.StatsTask{
+				CollectionID:    s.collID,
+				PartitionID:     s.partID,
+				SegmentID:       s.segID,
+				TargetSegmentID: s.segID,
+				InsertChannel:   "ch1",
+				TaskID:          s.taskID + 1000,
+				SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+				State:           indexpb.JobState_JobStateInProgress,
+				NodeID:          11,
+			}
+			origStatsTaskMeta := s.mt.statsTaskMeta
+			droppedStatsTasks := make([]int64, 0)
+			statsCatalog := &mockeyDataCoordCatalog{}
+			mockSaveStatsTask := mockey.Mock((*mockeyDataCoordCatalog).SaveStatsTask).Return(nil).Build()
+			defer mockSaveStatsTask.UnPatch()
+			mockDropStatsTask := mockey.Mock((*mockeyDataCoordCatalog).DropStatsTask).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, taskID int64) error {
+					droppedStatsTasks = append(droppedStatsTasks, taskID)
+					return nil
+				}).Build()
+			defer mockDropStatsTask.UnPatch()
+			s.mt.statsTaskMeta = &statsTaskMeta{
+				keyLock:         lock.NewKeyLock[UniqueID](),
+				ctx:             context.Background(),
+				catalog:         statsCatalog,
+				tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+				segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
+			}
+			s.NoError(s.mt.statsTaskMeta.AddStatsTask(task))
+			defer func() {
+				s.mt.statsTaskMeta = origStatsTaskMeta
+			}()
+
+			removedFiles := make([]string, 0)
+			chunkManager := &mockeyChunkManager{}
+			mockMultiRemove := mockey.Mock((*mockeyChunkManager).MultiRemove).To(
+				func(_ *mockeyChunkManager, _ context.Context, filePaths []string) error {
+					removedFiles = append(removedFiles, filePaths...)
+					return nil
+				}).Build()
+			defer mockMultiRemove.UnPatch()
+			origChunkManager := s.mt.chunkManager
+			s.mt.chunkManager = chunkManager
+			defer func() {
+				s.mt.chunkManager = origChunkManager
+			}()
+
+			result := &workerpb.StatsResult{
+				TaskID:        task.GetTaskID(),
+				State:         indexpb.JobState_JobStateFinished,
+				CollectionID:  s.collID,
+				PartitionID:   s.partID,
+				SegmentID:     s.segID,
+				Channel:       "ch1",
+				BaseManifest:  oldManifest,
+				Manifest:      resultManifest,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{500: {Files: resultFiles}},
+			}
+			cluster := &mockeyStatsCluster{}
+			mockQueryStats := mockey.Mock((*mockeyStatsCluster).QueryStats).Return(
+				&workerpb.StatsResults{Results: []*workerpb.StatsResult{result}}, nil).Build()
+			defer mockQueryStats.UnPatch()
+			droppedWorkerTasks := make([]int64, 0)
+			mockDropStats := mockey.Mock((*mockeyStatsCluster).DropStats).To(
+				func(_ *mockeyStatsCluster, _ int64, taskID int64) error {
+					droppedWorkerTasks = append(droppedWorkerTasks, taskID)
+					return nil
+				}).Build()
+			defer mockDropStats.UnPatch()
+			st := newStatsTask(task, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+			st.QueryTaskOnWorker(cluster)
+
+			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+			s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(s.segID, indexpb.StatsSubJob_TextIndexJob))
+			s.Equal([]int64{task.GetTaskID()}, droppedStatsTasks)
+			s.Equal([]int64{task.GetTaskID()}, droppedWorkerTasks)
+			if testCase.expectCleanup {
+				s.ElementsMatch(resultFiles, removedFiles)
+			} else {
+				s.Empty(removedFiles)
+			}
+		})
+	}
+}
+
+func (s *statsTaskSuite) installStatsTaskCollection(external bool) func() {
+	origCollections := s.mt.collections
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	if external {
+		schema.Fields[0].ExternalField = "pk"
+	}
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(s.collID, &collectionInfo{
+		ID:     s.collID,
+		Schema: schema,
+	})
+	s.mt.collections = collections
+	return func() {
+		s.mt.collections = origCollections
+	}
+}
+
+func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
+	origSegment := s.mt.segments.GetSegment(s.segID).Clone()
+	origCatalog := s.mt.catalog
+	s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+		segment.SegmentInfo = &datapb.SegmentInfo{
+			ID:             s.segID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			InsertChannel:  "ch1",
+			NumOfRows:      1024,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			ManifestPath:   manifest,
+			StorageVersion: 3,
+		}
+	})
+	return func() {
+		s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+			segment.SegmentInfo = origSegment.Clone().SegmentInfo
+		})
+		s.mt.catalog = origCatalog
+	}
+}
+
+func (s *statsTaskSuite) newJSONStatsTask() *statsTask {
+	return newStatsTask(&indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.segID,
+		InsertChannel:   "ch1",
+		TaskID:          s.taskID,
+		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+}
+
+func (s *statsTaskSuite) newTextStatsTask() *statsTask {
+	return newStatsTask(&indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.segID,
+		InsertChannel:   "ch1",
+		TaskID:          s.taskID,
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }
 
 // TestPrepareJobRequest tests edge cases of prepareJobRequest

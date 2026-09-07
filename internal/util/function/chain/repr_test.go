@@ -95,12 +95,6 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 				},
 			},
 			{
-				Op: "select",
-				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("id"), stringParam("score"), stringParam("name")),
-				},
-			},
-			{
 				Op:     "sort",
 				Inputs: []string{"score"},
 				Params: map[string]*schemapb.FunctionParamValue{
@@ -122,12 +116,11 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 	assert.NotNil(t, chain)
 	assert.Equal(t, "test-chain", chain.name)
 	assert.Equal(t, types.StageL2Rerank, chain.Stage())
-	assert.Len(t, chain.operators, 4)
+	assert.Len(t, chain.operators, 3)
 
 	assert.IsType(t, &FilterOp{}, chain.operators[0])
-	assert.IsType(t, &SelectOp{}, chain.operators[1])
-	assert.IsType(t, &SortOp{}, chain.operators[2])
-	assert.IsType(t, &LimitOp{}, chain.operators[3])
+	assert.IsType(t, &SortOp{}, chain.operators[1])
+	assert.IsType(t, &LimitOp{}, chain.operators[2])
 }
 
 func TestParseFuncChainProto_UnknownOperator(t *testing.T) {
@@ -145,9 +138,9 @@ func TestParseFuncChainProto_MissingStage(t *testing.T) {
 	_, err := ParseFuncChainProto(&schemapb.FunctionChain{
 		Ops: []*schemapb.FunctionChainOp{
 			{
-				Op: "select",
+				Op: "limit",
 				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("test")),
+					"limit": intParam(10),
 				},
 			},
 		},
@@ -188,14 +181,6 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 				Ops:   []*schemapb.FunctionChainOp{{Op: "sort"}},
 			},
 			errMsg: "sort_op: column is required",
-		},
-		{
-			name: "select missing columns",
-			chain: &schemapb.FunctionChain{
-				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
-				Ops:   []*schemapb.FunctionChainOp{{Op: "select"}},
-			},
-			errMsg: "select_op: columns is required",
 		},
 		{
 			name: "limit invalid limit",
@@ -330,6 +315,50 @@ func TestProtoChainToReprBuildsInfo(t *testing.T) {
 	assert.Equal(t, []string{"score1"}, repr.Info.Ops[0].WriteNames)
 	assert.Equal(t, []string{"score1", "$score"}, repr.Info.Ops[1].ReadNames)
 	assert.Equal(t, []string{"$score"}, repr.Info.Ops[1].WriteNames)
+}
+
+func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
+	tests := []struct {
+		name           string
+		op             OperatorRepr
+		wantReads      []string
+		wantWrites     []string
+		wantRequired   []string
+		wantAllWritten []string
+	}{
+		{
+			name:           "sort uses explicit inputs only",
+			op:             OperatorRepr{Type: types.OpTypeSort, Inputs: []string{types.ScoreFieldName}},
+			wantReads:      []string{types.ScoreFieldName},
+			wantWrites:     nil,
+			wantRequired:   []string{types.ScoreFieldName},
+			wantAllWritten: []string{},
+		},
+		{
+			name: "group by has no declared field dependencies",
+			op: OperatorRepr{Type: types.OpTypeGroupBy, Params: map[string]*schemapb.FunctionParamValue{
+				"field":      stringParam("$group_by_101"),
+				"group_size": intParam(2),
+				"limit":      intParam(10),
+			}},
+			wantReads:      nil,
+			wantWrites:     nil,
+			wantRequired:   []string{},
+			wantAllWritten: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repr := &ChainRepr{Operators: []OperatorRepr{test.op}}
+			require.NoError(t, repr.RefreshInfo())
+			require.Len(t, repr.Info.Ops, 1)
+			assert.Equal(t, test.wantReads, repr.Info.Ops[0].ReadNames)
+			assert.Equal(t, test.wantWrites, repr.Info.Ops[0].WriteNames)
+			assert.Equal(t, test.wantRequired, repr.Info.RequiredInputs)
+			assert.Equal(t, test.wantAllWritten, repr.Info.WrittenNames)
+		})
+	}
 }
 
 func TestProtoStageToReprStage(t *testing.T) {
@@ -506,12 +535,6 @@ func TestFuncChainFromRepr(t *testing.T) {
 				Inputs: []string{"score"},
 			},
 			{
-				Type: types.OpTypeSelect,
-				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("a"), stringParam("b")),
-				},
-			},
-			{
 				Type:   types.OpTypeSort,
 				Inputs: []string{"a"},
 				Params: map[string]*schemapb.FunctionParamValue{
@@ -532,7 +555,7 @@ func TestFuncChainFromRepr(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, chain)
 	assert.Equal(t, "repr-chain", chain.name)
-	assert.Len(t, chain.operators, 4)
+	assert.Len(t, chain.operators, 3)
 }
 
 func columnArg(name string) *schemapb.FunctionChainExprArg {

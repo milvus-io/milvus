@@ -108,7 +108,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 
 	s.Error(err)
 	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
-	// (must not be bucketed as fail_input).
+	// (must not be bucketed as a user-caused failure).
 	s.True(errors.Is(err, merr.ErrImportSysFailed))
 	s.Contains(err.Error(), "The number of jobs has reached the limit")
 }
@@ -967,6 +967,35 @@ func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
 	updatedJob := importMeta.GetJob(ctx, 11)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+	assert.Nil(t, importMeta.GetJob(ctx, 13))
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      13,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err = importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 13)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
 func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {

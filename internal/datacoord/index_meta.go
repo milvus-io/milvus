@@ -486,7 +486,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 			// Client-caused conflict, same family as the "one distinct index per
 			// field" case above: return an input-class error rather than
 			// ServiceInternal (code 5, "never return out of Milvus") so the
-			// caller is not blamed with a system error / counted as fail_system.
+			// caller is not blamed with a system error / counted as a system-caused failure.
 			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 	}
@@ -1292,11 +1292,16 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	m.fieldIndexLock.RUnlock()
 
 	for _, segID := range segmentIDs {
-		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes.Get(segID)
 		if !ok || segIndexInfos.Len() == 0 {
+			// Leave the entry out rather than storing an empty map. Both
+			// callers read it as `states[indexID]`, which behaves identically
+			// on a missing key and on an empty map - and a caller that scans
+			// every flushed segment of a large collection on a timer would
+			// otherwise allocate one map per segment per pass.
 			continue
 		}
+		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
 		for _, segIdx := range segIndexInfos.Values() {
 			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {

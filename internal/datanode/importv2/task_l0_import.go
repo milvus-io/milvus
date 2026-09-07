@@ -141,7 +141,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		mlog.Int("bufferSize", bufferSize),
 		mlog.Int64("taskSlot", t.GetSlots()),
 		mlog.Any("files", t.req.GetFiles()),
-		mlog.Any("schema", t.GetSchema()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -252,7 +252,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
-			nil, t.req.GetStorageVersion(), false, t.req.GetStorageConfig())
+			nil, storage.StorageV2, false, t.req.GetStorageConfig())
 		if err != nil {
 			return nil, nil, err
 		}

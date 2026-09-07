@@ -256,6 +256,10 @@ func Test_canBeComparedDataType(t *testing.T) {
 		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Array, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Timestamptz, true},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Timestamptz, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_JSON, false},
 	}
 
 	for _, c := range cases {
@@ -1228,6 +1232,8 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		planpb.ArithOpType_BitAnd,
 		planpb.ArithOpType_BitOr,
 		planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl,
+		planpb.ArithOpType_Shr,
 	}
 	for _, op := range bitwiseOps {
 		op := op

@@ -12,8 +12,12 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <new>
+#include <vector>
+
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
+#include "mmap/ChunkVector.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
@@ -22,23 +26,84 @@
 
 using namespace milvus::segcore;
 using namespace milvus;
+
+namespace {
+
+class ThrowOnceChunk {
+ public:
+    explicit ThrowOnceChunk(size_t size) {
+        if (fail_next_) {
+            fail_next_ = false;
+            throw std::bad_alloc();
+        }
+        data_.resize(size);
+    }
+
+    ThrowOnceChunk(ThrowOnceChunk&&) noexcept = default;
+    ThrowOnceChunk&
+    operator=(ThrowOnceChunk&&) noexcept = default;
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() const {
+        return data_.size();
+    }
+
+    int&
+    operator[](size_t index) {
+        return data_[index];
+    }
+
+    static void
+    FailNextConstruction() {
+        fail_next_ = true;
+    }
+
+ private:
+    inline static bool fail_next_ = false;
+    std::vector<int> data_;
+};
+
+}  // namespace
+
 class ChunkVectorTest : public ::testing::TestWithParam<bool> {
  public:
     void
     SetUp() override {
         auto& mmap_config =
             milvus::storage::MmapManager::GetInstance().GetMmapConfig();
-        mmap_config.SetEnableGrowingMmap(true);
+        mmap_config.growing_enable_mmap = true;
     }
     void
     TearDown() override {
         auto& mmap_config =
             milvus::storage::MmapManager::GetInstance().GetMmapConfig();
-        mmap_config.SetEnableGrowingMmap(false);
+        mmap_config.growing_enable_mmap = false;
     }
     knowhere::MetricType metric_type = "IP";
     milvus::segcore::SegcoreConfig config;
 };
+
+TEST(ChunkVectorExceptionSafety, FailedConstructionDoesNotPublishAHole) {
+    ThreadSafeChunkVector<int, ThrowOnceChunk> chunks;
+
+    ThrowOnceChunk::FailNextConstruction();
+    EXPECT_THROW(chunks.emplace_to_at_least(1, 4), std::bad_alloc);
+    EXPECT_EQ(chunks.size(), 0);
+    EXPECT_EQ(chunks.acquire().count, 0);
+
+    EXPECT_NO_THROW(chunks.emplace_to_at_least(1, 4));
+    EXPECT_EQ(chunks.size(), 1);
+    EXPECT_EQ(chunks.acquire().count, 1);
+
+    EXPECT_NO_THROW(chunks.emplace_to_at_least(2, 4));
+    EXPECT_EQ(chunks.size(), 2);
+    EXPECT_EQ(chunks.acquire().count, 2);
+}
 
 TEST_F(ChunkVectorTest, FillDataWithMmap) {
     auto schema = std::make_shared<Schema>();

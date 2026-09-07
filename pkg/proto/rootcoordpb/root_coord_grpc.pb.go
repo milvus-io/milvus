@@ -98,6 +98,7 @@ const (
 	RootCoord_GetClientTelemetry_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetClientTelemetry"
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
 	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
+	RootCoord_ListClientCommands_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ListClientCommands"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -255,6 +256,7 @@ type RootCoordClient interface {
 	GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
+	ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error)
 }
 
 type rootCoordClient struct {
@@ -940,6 +942,15 @@ func (c *rootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.
 	return out, nil
 }
 
+func (c *rootCoordClient) ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error) {
+	out := new(ListClientCommandsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListClientCommands_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -1095,6 +1106,7 @@ type RootCoordServer interface {
 	GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
+	ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1325,6 +1337,9 @@ func (UnimplementedRootCoordServer) PushClientCommand(context.Context, *milvuspb
 }
 func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteClientCommand not implemented")
+}
+func (UnimplementedRootCoordServer) ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListClientCommands not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2688,6 +2703,24 @@ func _RootCoord_DeleteClientCommand_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_ListClientCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListClientCommandsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListClientCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListClientCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListClientCommands(ctx, req.(*ListClientCommandsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2994,6 +3027,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteClientCommand",
 			Handler:    _RootCoord_DeleteClientCommand_Handler,
+		},
+		{
+			MethodName: "ListClientCommands",
+			Handler:    _RootCoord_ListClientCommands_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

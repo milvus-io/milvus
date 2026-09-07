@@ -48,6 +48,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
@@ -71,6 +72,13 @@ SetIdxToOffset(std::vector<int32_t>& idx_to_offsets,
                               idx_to_offsets.size()));
     }
     idx_to_offsets[row_id] = unique_idx;
+}
+
+bool
+IsStringArrayField(const storage::FileManagerContext& file_manager_context) {
+    return file_manager_context.Valid() &&
+           file_manager_context.fieldDataMeta.field_schema.data_type() ==
+               proto::schema::DataType::Array;
 }
 
 }  // namespace
@@ -132,16 +140,17 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
 
 const std::string STRING_INDEX_SORT_FILE = "string_index_sort";
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t STRING_SORT_ALIGNMENT = 32;  // 32-byte alignment
 
-const uint64_t MMAP_INDEX_PADDING = 1;
+const uint64_t STRING_SORT_MMAP_INDEX_PADDING = 1;
 
 StringIndexSort::StringIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : StringIndex(ASCENDING_SORT),
       is_built_(false),
-      is_nested_index_(is_nested_index) {
+      is_nested_index_(is_nested_index),
+      is_array_field_(IsStringArrayField(file_manager_context)) {
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
         this->file_manager_ =
@@ -390,8 +399,10 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
     // Deserialize is_nested_index (optional for backward compatibility)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
+        bool loaded_is_nested_index = false;
         milvus::fastmem::FastMemcpy(
-            &is_nested_index_, is_nested_data->data.get(), sizeof(bool));
+            &loaded_is_nested_index, is_nested_data->data.get(), sizeof(bool));
+        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -609,7 +620,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -663,13 +674,14 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                 "index_data",
                 [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
 
-            auto aligned =
-                ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            auto aligned = ((data_size + STRING_SORT_ALIGNMENT - 1) /
+                            STRING_SORT_ALIGNMENT) *
+                           STRING_SORT_ALIGNMENT;
             if (aligned > data_size) {
                 std::vector<uint8_t> padding(aligned - data_size, 0);
                 fw.Write(padding.data(), padding.size());
             }
-            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
+            std::vector<uint8_t> mmap_pad(STRING_SORT_MMAP_INDEX_PADDING, 0);
             fw.Write(mmap_pad.data(), mmap_pad.size());
             fw.Finish();
         }
@@ -1413,7 +1425,9 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
-    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+        STRING_SORT_ALIGNMENT;
     {
         auto file_writer = storage::FileWriter(mmap_filepath_);
         file_writer.Write(data, data_size);
@@ -1423,7 +1437,7 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
             file_writer.Write(padding.data(), padding.size());
         }
         // write padding in case of all null values
-        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        std::vector<uint8_t> padding(STRING_SORT_MMAP_INDEX_PADDING, 0);
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
@@ -1479,14 +1493,16 @@ StringIndexSortMmapImpl::MmapAndParse(size_t data_size,
                                       TargetBitmap& valid_bitset,
                                       std::vector<int32_t>& idx_to_offsets,
                                       bool skip_idx_to_offsets) {
-    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+        STRING_SORT_ALIGNMENT;
 
     auto fd = open(mmap_filepath_.c_str(), O_RDONLY);
     if (fd == -1) {
         ThrowInfo(DataFormatBroken, "Failed to open mmap file");
     }
 
-    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    mmap_size_ = aligned_size + STRING_SORT_MMAP_INDEX_PADDING;
     data_size_ = data_size;
     mmap_data_ = static_cast<char*>(
         mmap(nullptr, mmap_size_, PROT_READ, MAP_PRIVATE, fd, 0));

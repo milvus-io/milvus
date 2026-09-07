@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,8 +35,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +47,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func captureStatsTaskLogs(t *testing.T) *mlog.TestSink {
+	t.Helper()
+
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	})
+}
+
+func statsLogSentinel(parts ...string) string {
+	return strings.Join(parts, "_")
+}
+
+func statsLogCredentialJSON(value string) string {
+	return `{"private_key":"` + value + `"}`
+}
 
 func TestTaskStatsSuite(t *testing.T) {
 	suite.Run(t, new(TaskStatsSuite))
@@ -80,7 +103,7 @@ func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
 
 	v := storage.Value{
 		PK:        storage.NewInt64PrimaryKey(magic),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(magic),
 	}
 	err = segWriter.Write(&v)
@@ -125,7 +148,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -177,7 +200,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -185,6 +208,49 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		_, err = task.sort(ctx)
 		s.Error(err)
 	})
+}
+
+func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	accessKey := statsLogSentinel("STORAGE", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("STORAGE", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("STORAGE", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("GCP", "CREDENTIAL", "JSON", "SENTINEL")
+
+	manager := NewTaskManager(ctx)
+	task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:    s.clusterID,
+		TaskID:       100,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		SegmentID:    102,
+		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
+			StorageType:       "s3",
+			BucketName:        "stats-bucket",
+			RootPath:          "stats/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
+		},
+	}, manager, s.mockChunkManager, nil)
+
+	err := task.PreExecute(ctx)
+	s.Require().NoError(err)
+	output := logs.String()
+	s.NotContains(output, accessKey)
+	s.NotContains(output, secretKey)
+	s.NotContains(output, caCert)
+	s.NotContains(output, gcpCredential)
+	s.Contains(output, "storageConfig")
+	s.Contains(output, "storage.example.test")
+	s.Contains(output, "stats-bucket")
+	s.Contains(output, "stats/root")
+	s.Contains(output, "s3")
+	s.Contains(output, "<redacted>")
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {
@@ -207,13 +273,19 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			JSONStatsShreddingRatio:      0.3,
 			JSONStatsWriteBatchSize:      81920,
 		}
-		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "")
+		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "", nil)
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.NotNil(params.SegmentInsertFiles)
+		s.Nil(params.GetStoragePluginContext())
 	})
 
 	s.Run("test external source spec params", func() {
+		pluginContext := &indexcgopb.StoragePluginContext{
+			EncryptionZoneId: 17,
+			CollectionId:     2,
+			EncryptionKey:    "unsafe-key",
+		}
 		req := &workerpb.CreateStatsRequest{
 			TaskID:                    1,
 			CollectionID:              2,
@@ -222,6 +294,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			TaskVersion:               5,
 			CurrentScalarIndexVersion: int32(1),
 			StorageVersion:            storage.StorageV3,
+			ManifestPath:              "manifest-path",
 			InsertLogs:                []*datapb.FieldBinlog{},
 			StorageConfig:             &indexpb.StorageConfig{RootPath: "/test/path"},
 			Schema: &schemapb.CollectionSchema{
@@ -230,11 +303,219 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			},
 		}
 
-		params := buildIndexParams(req, nil, nil, &indexcgopb.StorageConfig{}, nil, "")
+		params := buildIndexParams(req, nil, nil, &indexcgopb.StorageConfig{}, nil, "stats-base-path", pluginContext)
 
 		s.Equal(req.GetSchema().GetExternalSource(), params.GetExternalSource())
 		s.Equal(req.GetSchema().GetExternalSpec(), params.GetExternalSpec())
+		s.Equal(req.GetManifestPath(), params.GetManifest())
+		s.Equal("stats-base-path", params.GetStatsBasePath())
+		s.Equal(pluginContext, params.GetStoragePluginContext())
 	})
+}
+
+func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
+	const fieldID = int64(101)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     s.collectionID,
+		EncryptionKey:    "unsafe-key",
+	}
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:       s.clusterID,
+		TaskID:          100,
+		CollectionID:    s.collectionID,
+		PartitionID:     s.partitionID,
+		TargetSegmentID: 102,
+		TaskVersion:     1,
+		NumRows:         10,
+		StorageVersion:  storage.StorageV2,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    s.T().TempDir(),
+			StorageType: "local",
+		},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "json",
+				DataType: schemapb.DataType_JSON,
+			},
+		}},
+		InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+	}
+	manager := NewTaskManager(ctx)
+	manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), &StatsTaskInfo{})
+	task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext)
+
+	var captured *indexcgopb.BuildIndexInfo
+	buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+			captured = info
+			return &indexcgowrapper.JSONKeyStatsResult{
+				MemSize: 10,
+				Files:   map[string]int64{"json-stats": 10},
+			}, nil
+		}).Build()
+	defer buildMock.UnPatch()
+
+	err := task.createJSONKeyStats(
+		ctx,
+		req.GetStorageConfig(),
+		req.GetCollectionID(),
+		req.GetPartitionID(),
+		req.GetTargetSegmentID(),
+		req.GetTaskVersion(),
+		req.GetTaskID(),
+		common.JSONStatsDataFormatVersion,
+		req.GetInsertLogs(),
+		256,
+		0.3,
+		81920,
+	)
+	s.Require().NoError(err)
+	s.Require().NotNil(captured)
+	s.Equal(pluginContext, captured.GetStoragePluginContext())
+}
+
+// TestStandaloneJSONKeyJobSkipsManifestBake verifies the worker side of the
+// structured-delta migration: a standalone JsonKeyIndexJob ships raw stats and
+// leaves the manifest pointer at its base (DataCoord runs the manifest
+// transaction), while the Sort sub-job still bakes stats into the target-segment
+// manifest inline.
+func TestStandaloneJSONKeyJobSkipsManifestBake(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(500)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:              clusterID,
+			TaskID:                 taskID,
+			CollectionID:           1,
+			PartitionID:            2,
+			SegmentID:              103,
+			TargetSegmentID:        103,
+			TaskVersion:            1,
+			NumRows:                10,
+			StorageVersion:         storage.StorageV3,
+			SubJobType:             sub,
+			ManifestPath:           baseManifest,
+			EnableJsonKeyStats:     true,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			StorageConfig:          &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		// Execute() seeds manifestPath from the request; call the sub-job directly here.
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+				return &indexcgowrapper.JSONKeyStatsResult{MemSize: 10, Files: map[string]int64{"json-stats": 10}}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
+			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
+		require.NoError(t, err)
+		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+	}
+
+	baked, storedManifest := run(indexpb.StatsSubJob_JsonKeyIndexJob)
+	require.False(t, baked, "standalone JsonKeyIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+
+	baked, _ = run(indexpb.StatsSubJob_Sort)
+	require.True(t, baked, "Sort sub-job must bake stats into the target-segment manifest inline")
+}
+
+// TestStandaloneTextIndexJobSkipsManifestBake is the text-index analog of
+// TestStandaloneJSONKeyJobSkipsManifestBake: a standalone TextIndexJob ships raw
+// stats without baking, while Sort bakes inline.
+func TestStandaloneTextIndexJobSkipsManifestBake(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(101)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob) (baked bool, storedManifest string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       clusterID,
+			TaskID:          taskID,
+			CollectionID:    1,
+			PartitionID:     2,
+			SegmentID:       103,
+			TargetSegmentID: 103,
+			TaskVersion:     1,
+			NumRows:         10,
+			StorageVersion:  storage.StorageV3,
+			SubJobType:      sub,
+			ManifestPath:    baseManifest,
+			StorageConfig:   &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    fieldID,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}},
+				},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+				return statsFakeTextIndex{}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createTextIndex(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID, st.req.GetInsertLogs())
+		require.NoError(t, err)
+		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+	}
+
+	baked, storedManifest := run(indexpb.StatsSubJob_TextIndexJob)
+	require.False(t, baked, "standalone TextIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+
+	baked, _ = run(indexpb.StatsSubJob_Sort)
+	require.True(t, baked, "Sort sub-job must bake text stats into the target-segment manifest inline")
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
@@ -288,7 +569,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),
@@ -332,7 +613,7 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -385,7 +666,7 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -398,4 +679,52 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 		insertBinlogs, 256, 0.3, 81920)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "field binlog not found for field 201")
+}
+
+// A recovered StorageV3 segment reloads with empty InsertLogs but an
+// authoritative ManifestPath. The empty-InsertLogs guard must not skip the
+// text-index build: the V3 build path reads the manifest, so gating only on an
+// empty ManifestPath lets the manifest-aware build proceed.
+func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mgr := NewTaskManager(ctx)
+	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:       "c1",
+		TaskID:          1,
+		CollectionID:    100,
+		PartitionID:     101,
+		TargetSegmentID: 102,
+		SegmentID:       103,
+		InsertChannel:   "ch",
+		TaskVersion:     1,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "/root"},
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		StorageVersion:  storage.StorageV3,
+		ManifestPath:    "files/manifest/103/1", // manifest is authoritative for V3
+		InsertLogs:      nil,                    // empty after a DataCoord restart
+		NumRows:         10,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
+
+	var called bool
+	m := mockey.Mock((*statsTask).createTextIndex).To(
+		func(_ *statsTask, _ context.Context, _ *indexpb.StorageConfig, _, _, _, _, _ int64, _ []*datapb.FieldBinlog) error {
+			called = true
+			return nil
+		}).Build()
+	defer m.UnPatch()
+
+	err := st.Execute(ctx)
+	require.NoError(t, err)
+	require.True(t, called, "text index build must proceed for a manifest-backed V3 segment with empty InsertLogs")
 }

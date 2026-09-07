@@ -415,32 +415,32 @@ func TestNewArrayCapacityError(t *testing.T) {
 // row as null and silently drop the merged payload.
 func TestUpdateArrayFieldByColumnWithOp_FlipsValidDataOnMerge(t *testing.T) {
 	base := arrayField([]*schemapb.ScalarField{longRow(), longRow(1, 2)}, schemapb.DataType_Int64)
-	base.ValidData = []bool{false, true}
+	SetFieldDataValidData(base, []bool{false, true})
 	update := arrayField([]*schemapb.ScalarField{longRow(5, 6), longRow(3)}, schemapb.DataType_Int64)
 
 	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0, 1}, []int64{0, 1},
 		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{true, true}, base.ValidData)
+	assert.Equal(t, []bool{true, true}, GetFieldDataValidData(base))
 	rows := base.GetScalars().GetArrayData().GetData()
 	assert.Equal(t, []int64{5, 6}, rows[0].GetLongData().GetData())
 	assert.Equal(t, []int64{1, 2, 3}, rows[1].GetLongData().GetData())
 }
 
-// Regression: a null upsert payload row (update.ValidData[i]=false) must
+// Regression: a null upsert payload row must
 // leave the base row and its ValidData bit untouched.
 func TestUpdateArrayFieldByColumnWithOp_SkipsNullUpdatePayload(t *testing.T) {
 	base := arrayField([]*schemapb.ScalarField{longRow(1, 2)}, schemapb.DataType_Int64)
-	base.ValidData = []bool{true}
+	SetFieldDataValidData(base, []bool{true})
 	update := arrayField([]*schemapb.ScalarField{longRow(9)}, schemapb.DataType_Int64)
-	update.ValidData = []bool{false}
+	SetFieldDataValidData(update, []bool{false})
 
 	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0}, []int64{0},
 		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
 	require.NoError(t, err)
 	rows := base.GetScalars().GetArrayData().GetData()
 	assert.Equal(t, []int64{1, 2}, rows[0].GetLongData().GetData())
-	assert.Equal(t, []bool{true}, base.ValidData)
+	assert.Equal(t, []bool{true}, GetFieldDataValidData(base))
 }
 
 // Regression: a malformed FieldData (type=Array but ArrayData=nil) must

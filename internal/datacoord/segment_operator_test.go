@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -48,6 +49,18 @@ func (s *TestSegmentOperatorSuite) TestSetMaxRowCount() {
 
 func TestSegmentOperators(t *testing.T) {
 	suite.Run(t, new(TestSegmentOperatorSuite))
+}
+
+func TestUpdateManifestPathIfNewerAdoptsFirstManifest(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 3})
+
+	assert.NoError(t, updateManifestPathIfNewer(segment, manifestPath))
+	assert.Equal(t, manifestPath, segment.GetManifestPath())
+
+	segment = NewSegmentInfo(&datapb.SegmentInfo{ID: 3})
+	assert.Error(t, updateManifestPathIfNewer(segment, "not-a-manifest"))
+	assert.Empty(t, segment.GetManifestPath())
 }
 
 func TestUpdateImportSegmentPosition(t *testing.T) {

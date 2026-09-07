@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,6 +31,7 @@
 #include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
@@ -40,6 +42,19 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
+
+using ColumnSizeEstimateMatrix = std::vector<std::vector<uint64_t>>;
+
+struct ColumnSizeEstimateResult {
+    std::shared_ptr<const ColumnSizeEstimateMatrix> sizes;
+    std::string error;
+};
+
+/**
+ * @brief Fetch the complete column-by-chunk estimate matrix once.
+ */
+ColumnSizeEstimateResult
+FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader);
 
 /**
  * @brief Translator for loading column groups from milvus storage manifest
@@ -59,6 +74,8 @@ class ManifestGroupTranslator
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
+     * @param column_group_columns Logical column-group names in estimate order
+     * @param projected_columns Physical column names projected by chunk_reader
      * @param use_mmap Whether to use memory mapping for data loading
      * @param mmap_populate Whether to populate data into memory mapping
      * @param mmap_dir_path Directory path for memory mapping
@@ -71,6 +88,8 @@ class ManifestGroupTranslator
         int64_t column_group_index,
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const std::vector<std::string>& column_group_columns,
+        const std::vector<std::string>& projected_columns,
         bool use_mmap,
         bool mmap_populate,
         const std::string& mmap_dir_path,
@@ -80,7 +99,11 @@ class ManifestGroupTranslator
         const std::string& warmup_policy,
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,
-        std::string shard = "");
+        std::string shard = "",
+        std::optional<ColumnSizeEstimateResult> column_size_estimate =
+            std::nullopt,
+        MmapChunkWritebackMode writeback_mode =
+            MmapChunkWritebackMode::Disabled);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -200,6 +223,7 @@ class ManifestGroupTranslator
     bool mmap_populate_;
     bool has_array_field_{false};
     std::string mmap_dir_path_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };

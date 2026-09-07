@@ -177,9 +177,9 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_NullDecayFactorTreatedAs
 		Type:      schemapb.DataType_Int64,
 		FieldName: "distance",
 		FieldId:   100,
-		ValidData: []bool{true, false},
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false},
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{100, 0},

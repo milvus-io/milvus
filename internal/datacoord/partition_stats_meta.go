@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -101,13 +100,40 @@ func (psm *partitionStatsMeta) ListPartitionStatsInfos(collectionID int64, parti
 	return res
 }
 
-func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+// SavePartitionStatsAndVersion persists a newly-computed partition-stats info
+// together with the current-version pointer bump as a single composite catalog
+// write, then applies the in-memory bookkeeping of both. It replaces the two
+// sequential catalog writes a clustering-compaction completion used to do
+// (SavePartitionStatsInfo followed by SaveCurrentPartitionStatsVersion), which
+// left the current-version pointer disagreeing with the persisted stats set on
+// a crash between them.
+//
+// The info is written before the version pointer, which is the logical commit
+// marker: a persisted current version always references a persisted stats
+// info. It is always exactly two ops, so it always fits a single atomic txn
+// (the chunked fallback never triggers). In-memory state is applied only after
+// the write succeeds, so a failed write never desyncs memory from disk.
+func (psm *partitionStatsMeta) SavePartitionStatsAndVersion(info *datapb.PartitionStatsInfo, currentVersion int64) error {
 	psm.Lock()
 	defer psm.Unlock()
-	if err := psm.catalog.SavePartitionStatsInfo(context.TODO(), info); err != nil {
-		mlog.Error(psm.ctx, "meta update: update PartitionStatsInfo info fail", mlog.Err(err))
+
+	if err := psm.catalog.Update(psm.ctx,
+		metastore.AddPartitionStats(info),
+		metastore.SavePartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), currentVersion),
+	); err != nil {
+		mlog.Error(psm.ctx, "meta update: save PartitionStatsInfo and current version fail",
+			mlog.FieldCollectionID(info.GetCollectionID()),
+			mlog.FieldPartitionID(info.GetPartitionID()),
+			mlog.FieldVChannel(info.GetVChannel()),
+			mlog.Int64("version", info.GetVersion()),
+			mlog.Err(err))
 		return err
 	}
+
+	// Apply SavePartitionStatsInfo's in-memory bookkeeping (insert info),
+	// then innerSaveCurrentPartitionStatsVersion's (set currentVersion). The
+	// insert runs first so the (vchannel, partition) entry exists when the
+	// version is set - mirroring the original two-call ordering.
 	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
 		psm.partitionStatsInfos[info.GetVChannel()] = make(map[int64]*partitionStatsInfo)
 	}
@@ -116,46 +142,66 @@ func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStat
 			infos: make(map[int64]*datapb.PartitionStatsInfo),
 		}
 	}
-
 	psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos[info.GetVersion()] = info
+	psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].currentVersion = currentVersion
 	return nil
 }
 
-func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
-	psm.Lock()
-	defer psm.Unlock()
-	// if the dropping partitionStats is the current version, should update currentPartitionStats
+// getRollbackVersionLocked returns the current-partition-stats-version
+// rollback target for dropping info: the max known version below info's
+// version, if info's version is the current one for its (collection,
+// partition, vchannel); nil if dropping info requires no rollback (info is
+// not the current version, or there is no current version at all).
+//
+// The caller must hold psm's write lock. Callers that persist a
+// partition-stats drop via a composite catalog.Update (rather than through
+// DropPartitionStatsInfo) compute the rollback under the SAME lock hold that
+// spans the catalog write and applyDropLocked, so a concurrent
+// SaveCurrentPartitionStatsVersion (e.g. a clustering-compaction completion
+// for the same coll/part/vchannel) cannot interleave between compute and
+// apply and get clobbered.
+func (psm *partitionStatsMeta) getRollbackVersionLocked(info *datapb.PartitionStatsInfo) *int64 {
 	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
-	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
-		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
-		if len(infos) > 0 {
-			var maxVersion int64 = 0
-			for version := range infos {
-				if version > maxVersion && version < currentVersion {
-					maxVersion = version
-				}
-			}
-			err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
-			if err != nil {
-				return err
+	if currentVersion != info.GetVersion() || currentVersion == emptyPartitionStatsVersion {
+		return nil
+	}
+	infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
+	if len(infos) == 0 {
+		return nil
+	}
+	var maxVersion int64
+	for version := range infos {
+		if version > maxVersion && version < currentVersion {
+			maxVersion = version
+		}
+	}
+	return &maxVersion
+}
+
+// applyDropLocked applies the in-memory bookkeeping for a partition-stats
+// drop - the current-version rollback (when rollbackVersion is non-nil, as
+// computed by getRollbackVersionLocked earlier in the same lock hold) and the
+// removal of info from local state.
+//
+// The caller must hold psm's write lock across the whole
+// getRollbackVersionLocked -> catalog.Update -> applyDropLocked sequence, and
+// must only reach applyDropLocked after the catalog write has succeeded, so
+// memory is never updated on a failed write and no concurrent version bump
+// can interleave between the rollback compute and its application.
+func (psm *partitionStatsMeta) applyDropLocked(info *datapb.PartitionStatsInfo, rollbackVersion *int64) {
+	if rollbackVersion != nil {
+		if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; ok {
+			if _, ok := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()]; ok {
+				psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].currentVersion = *rollbackVersion
 			}
 		}
 	}
 
-	if err := psm.catalog.DropPartitionStatsInfo(ctx, info); err != nil {
-		mlog.Error(ctx, "meta update: drop PartitionStatsInfo info fail",
-			mlog.FieldCollectionID(info.GetCollectionID()),
-			mlog.FieldPartitionID(info.GetPartitionID()),
-			mlog.FieldVChannel(info.GetVChannel()),
-			mlog.Int64("version", info.GetVersion()),
-			mlog.Err(err))
-		return err
-	}
 	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
-		return nil
+		return
 	}
 	if _, ok := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()]; !ok {
-		return nil
+		return
 	}
 	delete(psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos, info.GetVersion())
 	if len(psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos) == 0 {
@@ -164,35 +210,6 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 	if len(psm.partitionStatsInfos[info.GetVChannel()]) == 0 {
 		delete(psm.partitionStatsInfos, info.GetVChannel())
 	}
-	return nil
-}
-
-func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
-	psm.Lock()
-	defer psm.Unlock()
-	return psm.innerSaveCurrentPartitionStatsVersion(collectionID, partitionID, vChannel, currentPartitionStatsVersion)
-}
-
-func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
-	mlog.Info(psm.ctx, "update current partition stats version", mlog.FieldCollectionID(collectionID),
-		mlog.FieldPartitionID(partitionID),
-		mlog.String("vChannel", vChannel), mlog.Int64("currentPartitionStatsVersion", currentPartitionStatsVersion))
-
-	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
-		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion",
-			merr.WrapErrServiceInternalMsg("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
-	}
-	if _, ok := psm.partitionStatsInfos[vChannel][partitionID]; !ok {
-		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion",
-			merr.WrapErrServiceInternalMsg("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
-	}
-
-	if err := psm.catalog.SaveCurrentPartitionStatsVersion(psm.ctx, collectionID, partitionID, vChannel, currentPartitionStatsVersion); err != nil {
-		return err
-	}
-
-	psm.partitionStatsInfos[vChannel][partitionID].currentVersion = currentPartitionStatsVersion
-	return nil
 }
 
 func (psm *partitionStatsMeta) GetCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string) int64 {

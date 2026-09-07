@@ -56,7 +56,7 @@ SetCellTargetSizeBytes(int64_t v) {
 // close to cell_target_size_bytes.
 // Templated so it accepts both std::vector<int64_t> (built locally by
 // GroupChunkTranslator) and std::vector<uint64_t>/size_t (returned by
-// milvus-storage's chunk_reader->get_chunk_size()).
+// milvus-storage's chunk_reader->get_chunk_estimated_size()).
 template <typename T>
 inline size_t
 ComputeRowGroupsPerCell(const std::vector<T>& row_group_sizes,

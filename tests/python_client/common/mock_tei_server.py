@@ -32,11 +32,10 @@ Usage with standalone server (for environments without pytest-httpserver):
 """
 
 import json
+import socket
 import threading
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional, Callable, Any
-import socket
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 def generate_mock_embedding(text: str, dim: int) -> list:
@@ -52,6 +51,7 @@ def generate_mock_embedding(text: str, dim: int) -> list:
 # =============================================================================
 # pytest-httpserver based implementation (recommended)
 # =============================================================================
+
 
 class MockTEIHandler:
     """
@@ -89,16 +89,14 @@ class MockTEIHandler:
 
     def setup_embed(self):
         """Setup /embed endpoint to return mock embeddings."""
+
         def handle_embed(request):
             data = request.json
             inputs = data.get("inputs", [])
             embeddings = [generate_mock_embedding(text, self.dim) for text in inputs]
             return json.dumps(embeddings)
 
-        self.httpserver.expect_request(
-            "/embed",
-            method="POST"
-        ).respond_with_handler(handle_embed)
+        self.httpserver.expect_request("/embed", method="POST").respond_with_handler(handle_embed)
 
         return self
 
@@ -114,23 +112,15 @@ class MockTEIHandler:
 
         error_response = json.dumps({"error": message})
 
-        self.httpserver.expect_request(
-            "/embed",
-            method="POST"
-        ).respond_with_data(
-            error_response,
-            status=status_code,
-            content_type="application/json"
+        self.httpserver.expect_request("/embed", method="POST").respond_with_data(
+            error_response, status=status_code, content_type="application/json"
         )
 
         return self
 
     def setup_health(self):
         """Setup /health endpoint."""
-        self.httpserver.expect_request(
-            "/health",
-            method="GET"
-        ).respond_with_json({"status": "ok"})
+        self.httpserver.expect_request("/health", method="GET").respond_with_json({"status": "ok"})
 
         return self
 
@@ -144,6 +134,7 @@ class MockTEIHandler:
 # Standalone server implementation (fallback for environments without pytest-httpserver)
 # =============================================================================
 
+
 def create_handler_class(server_state: dict):
     """Create a handler class with instance-specific state."""
 
@@ -155,37 +146,37 @@ def create_handler_class(server_state: dict):
 
         def _send_json(self, data, status: int = 200):
             self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(data).encode('utf-8'))
+            self.wfile.write(json.dumps(data).encode("utf-8"))
 
         def do_POST(self):
-            if server_state.get('error_mode', False):
+            if server_state.get("error_mode", False):
                 self._send_json(
-                    {"error": server_state.get('error_message', 'Service unavailable')},
-                    server_state.get('error_status_code', 500)
+                    {"error": server_state.get("error_message", "Service unavailable")},
+                    server_state.get("error_status_code", 500),
                 )
                 return
 
-            if self.path == '/embed':
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                inputs = body.get('inputs', [])
-                dim = server_state.get('dim', 768)
+            if self.path == "/embed":
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                inputs = body.get("inputs", [])
+                dim = server_state.get("dim", 768)
                 embeddings = [generate_mock_embedding(text, dim) for text in inputs]
                 self._send_json(embeddings)
             else:
                 self._send_json({"error": "Not found"}, 404)
 
         def do_GET(self):
-            if server_state.get('error_mode', False):
+            if server_state.get("error_mode", False):
                 self._send_json(
-                    {"error": server_state.get('error_message', 'Service unavailable')},
-                    server_state.get('error_status_code', 500)
+                    {"error": server_state.get("error_message", "Service unavailable")},
+                    server_state.get("error_status_code", 500),
                 )
                 return
 
-            if self.path == '/health':
+            if self.path == "/health":
                 self._send_json({"status": "ok"})
             else:
                 self._send_json({"error": "Not found"}, 404)
@@ -201,12 +192,12 @@ def get_local_ip() -> str:
     # Method 1: get IP from socket connection to external host
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
+        s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-        if not ip.startswith('127.'):
+        if not ip.startswith("127."):
             return ip
-    except (OSError, socket.error):
+    except OSError:
         # Socket connection failed, try next method
         pass
 
@@ -214,13 +205,13 @@ def get_local_ip() -> str:
     try:
         hostname = socket.gethostname()
         ip = socket.gethostbyname(hostname)
-        if not ip.startswith('127.'):
+        if not ip.startswith("127."):
             return ip
-    except (OSError, socket.error, socket.gaierror):
+    except (OSError, socket.gaierror):
         # Hostname resolution failed, fall back to localhost
         pass
 
-    return '127.0.0.1'
+    return "127.0.0.1"
 
 
 def get_docker_host() -> str:
@@ -231,11 +222,12 @@ def get_docker_host() -> str:
     - Linux: returns the host's IP address (containers need --add-host or host network)
     """
     import platform
+
     system = platform.system().lower()
 
-    if system in ('darwin', 'windows'):
+    if system in ("darwin", "windows"):
         # Docker Desktop provides this special DNS name
-        return 'host.docker.internal'
+        return "host.docker.internal"
     else:
         # Linux: use host IP
         return get_local_ip()
@@ -266,20 +258,20 @@ class MockTEIServer:
         server = MockTEIServer(dim=768, host='0.0.0.0', external_host='192.168.1.100')
     """
 
-    def __init__(self, port: int = 0, dim: int = 768, host: str = '127.0.0.1', external_host: str = None):
+    def __init__(self, port: int = 0, dim: int = 768, host: str = "127.0.0.1", external_host: str = None):
         self.host = host
         self.port = port
         self.dim = dim
         self._external_host = external_host
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._running = False
         # Instance-specific state (not shared between servers)
         self._state = {
-            'dim': dim,
-            'error_mode': False,
-            'error_status_code': 500,
-            'error_message': 'Service unavailable'
+            "dim": dim,
+            "error_mode": False,
+            "error_status_code": 500,
+            "error_message": "Service unavailable",
         }
 
     @property
@@ -288,9 +280,9 @@ class MockTEIServer:
             raise RuntimeError("Server not started")
         # Use external_host for endpoint URL if specified
         if self._external_host:
-            if self._external_host == 'auto':
+            if self._external_host == "auto":
                 host = get_local_ip()
-            elif self._external_host == 'docker':
+            elif self._external_host == "docker":
                 host = get_docker_host()
             else:
                 host = self._external_host
@@ -326,7 +318,7 @@ class MockTEIServer:
                     sock.close()
                     return
                 sock.close()
-            except (OSError, socket.error):
+            except OSError:
                 # Connection not ready yet, retry
                 pass
             time.sleep(0.1)
@@ -343,9 +335,9 @@ class MockTEIServer:
         self._running = False
 
     def set_error_mode(self, enabled: bool, status_code: int = 500, message: str = "Service unavailable"):
-        self._state['error_mode'] = enabled
-        self._state['error_status_code'] = status_code
-        self._state['error_message'] = message
+        self._state["error_mode"] = enabled
+        self._state["error_status_code"] = status_code
+        self._state["error_message"] = message
 
     def __enter__(self):
         self.start()
@@ -360,6 +352,7 @@ class MockTEIServer:
 # Pytest fixtures
 # =============================================================================
 
+
 def pytest_httpserver_fixture(dim: int = 768):
     """
     Create a pytest fixture for MockTEIHandler.
@@ -373,16 +366,18 @@ def pytest_httpserver_fixture(dim: int = 768):
             handler.setup_embed()
             yield handler
     """
+
     def fixture(httpserver):
         handler = MockTEIHandler(httpserver, dim=dim)
         handler.setup_embed()
         yield handler
+
     return fixture
 
 
-if __name__ == '__main__':
-    import urllib.request
+if __name__ == "__main__":
     import urllib.error
+    import urllib.request
 
     print("Testing standalone MockTEIServer...")
     with MockTEIServer(port=8080, dim=768) as server:
@@ -392,7 +387,7 @@ if __name__ == '__main__':
         req = urllib.request.Request(
             f"{server.endpoint}/embed",
             data=json.dumps({"inputs": ["Hello", "World"]}).encode(),
-            headers={'Content-Type': 'application/json'}
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req) as resp:
             result = json.loads(resp.read())

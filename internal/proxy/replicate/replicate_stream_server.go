@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const replicateRespChanLength = 128
@@ -114,13 +115,20 @@ func (p *ReplicateStreamServer) recvLoop() (err error) {
 func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRequest_ReplicateMessage) error {
 	p.wg.Add(1)
 	defer p.wg.Done()
+	if req == nil || req.ReplicateMessage == nil {
+		return merr.WrapErrParameterMissing("replicate_message")
+	}
 	reqMsg := req.ReplicateMessage.GetMessage()
 	msg, err := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
 	if err != nil {
 		return err
 	}
+	ctx := message.ExtractTraceContext(p.streamServer.Context(), msg)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameReplicateSecondary)
+	message.OverwriteTraceContext(ctx, msg)
+	defer span.End()
+
 	sourceTs := msg.ReplicateHeader().TimeTick
-	ctx := p.streamServer.Context()
 	mlog.Debug(ctx, "recv replicate message from client",
 		mlog.String("messageID", reqMsg.GetId().GetId()),
 		mlog.Uint64("sourceTimeTick", sourceTs),
@@ -138,6 +146,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
+	span.RecordError(err)
 	// unexpected error, will close the stream and wait for client to reconnect.
 	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
 	return err

@@ -107,6 +107,65 @@ func (h *mergeHeapInt64Pk) Pop() interface{} {
 	return item
 }
 
+// advanceRoot consumes the current root and moves that entry to its next row.
+// It deliberately preserves the legacy heap.Pop -> advance -> heap.Push
+// ordering: first remove the current root and repair the remaining heap, then
+// advance and reinsert the entry if it still has rows. This two-phase repair is
+// required because the epsilon-based score comparator is not a strict weak
+// ordering, so advancing the root in place and performing a single sift-down
+// can produce a different result from the legacy merge path.
+func (h *mergeHeapInt64Pk) advanceRoot() {
+	entries := *h
+	entry := entries[0]
+
+	last := len(entries) - 1
+	if last == 0 {
+		entries[0] = nil
+		entries = entries[:0]
+	} else {
+		entries[0] = entries[last]
+		entries[last] = nil
+		entries = entries[:last]
+		siftDownInt64Pk(entries, 0)
+	}
+
+	if entry.advance() {
+		entries = append(entries, entry)
+		siftUpInt64Pk(entries, len(entries)-1)
+	}
+	*h = entries
+}
+
+func siftDownInt64Pk(h mergeHeapInt64Pk, root int) {
+	for {
+		left := root*2 + 1
+		if left >= len(h) {
+			return
+		}
+		best := left
+		right := left + 1
+		if right < len(h) && h[right].greaterInt64Pk(h[left]) {
+			best = right
+		}
+		if !h[best].greaterInt64Pk(h[root]) {
+			return
+		}
+		h[root], h[best] = h[best], h[root]
+		root = best
+	}
+}
+
+func siftUpInt64Pk(h mergeHeapInt64Pk, child int) {
+	for child > 0 {
+		parent := (child - 1) / 2
+		if !h[child].greaterInt64Pk(h[parent]) {
+			return
+		}
+		h[parent], h[child] = h[child], h[parent]
+		child = parent
+	}
+}
+
 // mergeHeapStringPk implements heap.Interface for max-heap with varchar PK.
 type mergeHeapStringPk []*mergeEntry
 
@@ -125,4 +184,57 @@ func (h *mergeHeapStringPk) Pop() interface{} {
 	old[n-1] = nil
 	*h = old[:n-1]
 	return item
+}
+
+// advanceRoot is the varchar counterpart of mergeHeapInt64Pk.advanceRoot.
+func (h *mergeHeapStringPk) advanceRoot() {
+	entries := *h
+	entry := entries[0]
+
+	last := len(entries) - 1
+	if last == 0 {
+		entries[0] = nil
+		entries = entries[:0]
+	} else {
+		entries[0] = entries[last]
+		entries[last] = nil
+		entries = entries[:last]
+		siftDownStringPk(entries, 0)
+	}
+
+	if entry.advance() {
+		entries = append(entries, entry)
+		siftUpStringPk(entries, len(entries)-1)
+	}
+	*h = entries
+}
+
+func siftDownStringPk(h mergeHeapStringPk, root int) {
+	for {
+		left := root*2 + 1
+		if left >= len(h) {
+			return
+		}
+		best := left
+		right := left + 1
+		if right < len(h) && h[right].greaterStringPk(h[left]) {
+			best = right
+		}
+		if !h[best].greaterStringPk(h[root]) {
+			return
+		}
+		h[root], h[best] = h[best], h[root]
+		root = best
+	}
+}
+
+func siftUpStringPk(h mergeHeapStringPk, child int) {
+	for child > 0 {
+		parent := (child - 1) / 2
+		if !h[child].greaterStringPk(h[parent]) {
+			return
+		}
+		h[parent], h[child] = h[child], h[parent]
+		child = parent
+	}
 }

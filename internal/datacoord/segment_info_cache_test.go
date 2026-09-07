@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -126,4 +127,50 @@ func TestCachedSegmentsInfo_SetSegmentPreservingLocalState(t *testing.T) {
 	assert.Equal(t, []*Allocation{{SegmentID: 6, NumOfRows: 8}}, updated.allocations)
 	assert.Equal(t, localFlushTime, updated.lastFlushTime)
 	assert.EqualValues(t, 123, updated.GetNumOfRows(), "local row count should survive when the persisted mutation did not change row count")
+}
+
+func TestCachedSegmentsInfo_CompactionRelationPreservesOtherTargets(t *testing.T) {
+	cache := NewCachedSegmentsInfo()
+	cache.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1}}, 10)
+	cache.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, CompactionFrom: []int64{1}}}, 11)
+	cache.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, CompactionFrom: []int64{1}}}, 12)
+
+	cache.DropSegment(2, 20)
+	compactTo, exists := cache.GetCompactionTo(1)
+	require.True(t, exists)
+	require.Len(t, compactTo, 1)
+	assert.EqualValues(t, 3, compactTo[0].GetID())
+
+	cache.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3}}, 21)
+	compactTo, exists = cache.GetCompactionTo(1)
+	require.True(t, exists)
+	assert.Empty(t, compactTo)
+}
+
+func TestCachedSegmentsInfo_ConcurrentAllocations(t *testing.T) {
+	cache := NewCachedSegmentsInfo()
+	cache.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:    1,
+		State: commonpb.SegmentState_Growing,
+	}), 10)
+
+	const allocationCount = 100
+	var wg sync.WaitGroup
+	for i := 1; i <= allocationCount; i++ {
+		wg.Add(1)
+		go func(expire Timestamp) {
+			defer wg.Done()
+			cache.AddAllocation(1, &Allocation{SegmentID: 1, NumOfRows: 1, ExpireTime: expire})
+		}(Timestamp(i))
+	}
+	wg.Wait()
+
+	segment := cache.GetSegment(1)
+	require.NotNil(t, segment)
+	require.Len(t, segment.allocations, allocationCount)
+	expires := make(map[Timestamp]struct{}, allocationCount)
+	for _, allocation := range segment.allocations {
+		expires[allocation.ExpireTime] = struct{}{}
+	}
+	assert.Len(t, expires, allocationCount)
 }

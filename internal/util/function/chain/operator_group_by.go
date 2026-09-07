@@ -532,5 +532,5 @@ func compareValues(a, b any) int {
 }
 
 func init() {
-	MustRegisterOperator(types.OpTypeGroupBy, NewGroupByOpFromRepr)
+	MustRegisterOperator(types.OpTypeGroupBy, statelessOperatorFactory(NewGroupByOpFromRepr))
 }

@@ -172,16 +172,18 @@ func (c *consumerImpl) recvLoop() (err error) {
 				resp.Consume.GetMessage().GetPayload(),
 				resp.Consume.GetMessage().GetProperties(),
 			)
+			msgCtx := message.ExtractTraceContext(c.ctx, newImmutableMsg)
 			if newImmutableMsg.TxnContext() != nil {
-				if err := c.handleTxnMessage(newImmutableMsg); err != nil {
+				if err := c.handleTxnMessage(msgCtx, newImmutableMsg); err != nil {
 					return err
 				}
 			} else {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
+				msgCtx = startDistConsumeSpanForMessage(msgCtx, newImmutableMsg)
 				if result := c.msgHandler.Handle(message.HandleParam{
-					Ctx:     c.ctx,
+					Ctx:     msgCtx,
 					Message: newImmutableMsg,
 				}); result.Error != nil {
 					c.logger.Warn(c.ctx, "message handle canceled", mlog.Err(err))
@@ -222,7 +224,7 @@ func (c *consumerImpl) createVChannelConsumer() error {
 	return nil
 }
 
-func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
+func (c *consumerImpl) handleTxnMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
 		if c.txnBuilder != nil {
@@ -250,8 +252,10 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn(c.ctx, "failed to build txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
+		ctx = startDistConsumeSpanForMessage(ctx, msg)
+		overwriteTxnMessagesTraceContext(ctx, message.AsImmutableTxnMessage(msg))
 		if result := c.msgHandler.Handle(message.HandleParam{
-			Ctx:     c.ctx,
+			Ctx:     ctx,
 			Message: msg,
 		}); result.Error != nil {
 			c.logger.Warn(c.ctx, "message handle canceled at txn", mlog.Err(result.Error))
@@ -264,4 +268,20 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 		c.txnBuilder.Add(msg)
 	}
 	return nil
+}
+
+func startDistConsumeSpanForMessage(ctx context.Context, msg message.ImmutableMessage) context.Context {
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistConsume)
+	message.OverwriteTraceContext(ctx, msg)
+	span.End()
+	return ctx
+}
+
+func overwriteTxnMessagesTraceContext(ctx context.Context, txnMsg message.ImmutableTxnMessage) {
+	message.OverwriteTraceContext(ctx, txnMsg.Begin())
+	_ = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		message.OverwriteTraceContext(ctx, msg)
+		return nil
+	})
+	message.OverwriteTraceContext(ctx, txnMsg.Commit())
 }

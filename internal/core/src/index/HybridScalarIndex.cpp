@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <map>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -52,10 +53,54 @@
 namespace milvus {
 namespace index {
 
+namespace {
+
+// V3 packed filenames encode the physical index type (lowercased
+// ScalarIndexType, see ScalarIndex::UploadUnified): e.g.
+// "milvus_packed_stlsort_index.v3". The writer chose the name from
+// GetIndexType(), so it is an authoritative discriminator and stays correct
+// as new physical index types are added (their meta keys may reuse names like
+// "version" or "file_names", which would break meta-key-only inference).
+// Returns nullopt for the proper hybrid name ("milvus_packed_hybrid_index.v3")
+// and for unknown names, so callers fall back to the file meta.
+std::optional<ScalarIndexType>
+ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
+    const std::string prefix = "milvus_packed_";
+    const std::string suffix = "_index.v3";
+    if (filename.size() < prefix.size() + suffix.size() ||
+        filename.compare(0, prefix.size(), prefix) != 0 ||
+        filename.compare(
+            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return std::nullopt;
+    }
+    auto type_str = filename.substr(
+        prefix.size(), filename.size() - prefix.size() - suffix.size());
+    if (type_str == "stlsort") {
+        return ScalarIndexType::STLSORT;
+    } else if (type_str == "inverted") {
+        return ScalarIndexType::INVERTED;
+    } else if (type_str == "bitmap") {
+        return ScalarIndexType::BITMAP;
+    } else if (type_str == "marisa") {
+        return ScalarIndexType::MARISA;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
     uint32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context)
+    : HybridScalarIndex(tantivy_index_version, file_manager_context, false) {
+}
+
+template <typename T>
+HybridScalarIndex<T>::HybridScalarIndex(
+    uint32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context,
+    bool is_nested_index)
     : ScalarIndex<T>(HYBRID_INDEX_TYPE),
       is_built_(false),
       tantivy_index_version_(tantivy_index_version),
@@ -63,7 +108,8 @@ HybridScalarIndex<T>::HybridScalarIndex(
           DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
       low_cardinality_index_type_(ScalarIndexType::BITMAP),
       high_cardinality_index_type_(ScalarIndexType::STLSORT),
-      file_manager_context_(file_manager_context) {
+      file_manager_context_(file_manager_context),
+      is_nested_index_(is_nested_index) {
     if (file_manager_context.Valid()) {
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -148,11 +194,21 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
             }
         }
     }
-    // For array types, always use BITMAP for low cardinality and INVERTED for high cardinality.
-    // These are hardcoded because STL_SORT doesn't support arrays, and BITMAP is the only
-    // suitable choice for low cardinality arrays. Config parameters don't apply to arrays.
+    // For array types, always use BITMAP for low cardinality. For high
+    // cardinality, nested indexes index the flattened scalar elements, so the
+    // sort index can serve them and STL_SORT replaces INVERTED once the whole
+    // cluster is guaranteed to run scalar_index_version_ >=
+    // kNestedHybridStlSortMinVersion; below that, an older reader's
+    // ScalarIndexSort predates nested-index support and cannot load a nested
+    // STL_SORT physical index. Regular array fields keep INVERTED because the
+    // sort index cannot handle array values. These are hardcoded and config
+    // parameters don't apply to arrays.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::INVERTED;
+        internal_index_type_ =
+            (is_nested_index_ &&
+             scalar_index_version_ >= kNestedHybridStlSortMinVersion)
+                ? ScalarIndexType::STLSORT
+                : ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -181,14 +237,18 @@ HybridScalarIndex<T>::GetInternalIndex() {
         return internal_index_;
     }
     if (internal_index_type_ == ScalarIndexType::BITMAP) {
-        internal_index_ =
-            std::make_shared<BitmapIndex<T>>(this->file_manager_context_);
+        internal_index_ = std::make_shared<BitmapIndex<T>>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ =
-            std::make_shared<ScalarIndexSort<T>>(this->file_manager_context_);
+        internal_index_ = std::make_shared<ScalarIndexSort<T>>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
-            tantivy_index_version_, this->file_manager_context_);
+            tantivy_index_version_,
+            this->file_manager_context_,
+            false,
+            true,
+            is_nested_index_);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -205,16 +265,20 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
 
     if (internal_index_type_ == ScalarIndexType::BITMAP) {
         internal_index_ = std::make_shared<BitmapIndex<std::string>>(
-            this->file_manager_context_);
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::MARISA) {
         internal_index_ =
             std::make_shared<StringIndexMarisa>(this->file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ =
-            std::make_shared<StringIndexSort>(this->file_manager_context_);
+        internal_index_ = std::make_shared<StringIndexSort>(
+            this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            tantivy_index_version_, this->file_manager_context_);
+            tantivy_index_version_,
+            this->file_manager_context_,
+            false,
+            true,
+            is_nested_index_);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -244,6 +308,7 @@ HybridScalarIndex<T>::Build(const Config& config) {
     auto scalar_index_version =
         GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
             .value_or(kLastVersionWithoutHybridIndexConfig);
+    scalar_index_version_ = scalar_index_version;
 
     if (scalar_index_version >= kHybridIndexConfigVersion) {
         // Version 3+: Use configurable index types
@@ -422,8 +487,43 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    internal_index_type_ =
-        static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>("index_type"));
+    if (reader.HasMeta(INDEX_TYPE)) {
+        internal_index_type_ =
+            static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>(INDEX_TYPE));
+    } else {
+        // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
+        // indexes were built as a standalone STLSORT (or, hypothetically, other
+        // physical) file whose meta lacks the hybrid index_type key. Prefer the
+        // packed filename ("milvus_packed_<type>_index.v3") to recover the
+        // physical type; fall back to the file meta keys for robustness.
+        internal_index_type_ = ScalarIndexType::NONE;
+        auto index_files =
+            GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
+        if (index_files.has_value() && !index_files.value().empty()) {
+            auto path = index_files.value()[0];
+            auto filename = path.substr(path.find_last_of('/') + 1);
+            if (auto type = ParsePhysicalTypeFromPackedFileName(filename)) {
+                internal_index_type_ = *type;
+            }
+        }
+        if (internal_index_type_ == ScalarIndexType::NONE) {
+            if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
+                internal_index_type_ = ScalarIndexType::STLSORT;
+            } else if (reader.HasMeta("file_names")) {
+                internal_index_type_ = ScalarIndexType::INVERTED;
+            } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
+                internal_index_type_ = ScalarIndexType::BITMAP;
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "hybrid index file has neither index_type meta, a "
+                          "recognizable packed filename, nor a recognizable "
+                          "physical index meta");
+            }
+        }
+        LOG_WARN(
+            "hybrid index missing index_type meta, inferred physical type: {}",
+            ToString(internal_index_type_));
+    }
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));

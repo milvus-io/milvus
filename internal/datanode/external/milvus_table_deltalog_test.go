@@ -46,9 +46,14 @@ type fakeMilvusTableDeltalogReader struct {
 	nextErr  error
 	closeErr error
 	next     int
+	current  storage.Record
 }
 
 func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.nextErr != nil {
 		return nil, r.nextErr
 	}
@@ -57,10 +62,15 @@ func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.next]
 	r.next++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeMilvusTableDeltalogReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return r.closeErr
 }
 
@@ -499,7 +509,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	)
 	s.Require().NoError(err)
 	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			s.Equal(schemapb.DataType_Int64, pkType)
 			s.Equal([]string{sourceDeltalogPath}, paths)
 			return &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}, nil
@@ -1059,7 +1069,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{ref.sourcePath}, paths)
 				return reader, nil
@@ -1085,7 +1095,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		legacyRef := milvusTableDeltalogRef{sourcePath: "files/delta_log/1/2/3/10", logID: 10, numEntries: 2}
 		reader := &fakeMilvusTableDeltalogReader{}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{legacyRef.sourcePath}, paths)
 				return reader, nil
@@ -1303,6 +1313,7 @@ func writeDeltalog(
 func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path string) ([]int64, []int64) {
 	t.Helper()
 	reader, err := storage.NewDeltalogReader(
+		context.Background(),
 		schemapb.DataType_Int64,
 		[]string{path},
 		storage.WithVersion(storage.StorageV3),
@@ -1322,15 +1333,12 @@ func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path 
 		if err != nil {
 			t.Fatalf("read deltalog: %v", err)
 		}
-		func() {
-			defer record.Release()
-			pkColumn := record.Column(0).(*array.Int64)
-			tsColumn := record.Column(common.TimeStampField).(*array.Int64)
-			for i := 0; i < record.Len(); i++ {
-				pks = append(pks, pkColumn.Value(i))
-				tss = append(tss, tsColumn.Value(i))
-			}
-		}()
+		pkColumn := record.Column(0).(*array.Int64)
+		tsColumn := record.Column(common.TimeStampField).(*array.Int64)
+		for i := 0; i < record.Len(); i++ {
+			pks = append(pks, pkColumn.Value(i))
+			tss = append(tss, tsColumn.Value(i))
+		}
 	}
 	return pks, tss
 }

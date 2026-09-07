@@ -44,20 +44,8 @@ namespace milvus::index {
 size_t
 get_file_size(int fd);
 
-std::vector<IndexType>
-NM_List();
-
-std::vector<IndexType>
-BIN_List();
-
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations();
-
-bool
-is_in_bin_list(const IndexType& index_type);
-
-bool
-is_in_nm_list(const IndexType& index_type);
 
 bool
 is_unsupported(const IndexType& index_type, const MetricType& metric_type);
@@ -67,21 +55,6 @@ CheckKeyInConfig(const Config& cfg, const std::string& key);
 
 void
 ParseFromString(google::protobuf::Message& params, const std::string& str);
-
-template <typename T>
-void inline CheckParameter(Config& conf,
-                           const std::string& key,
-                           std::function<T(std::string)> fn,
-                           std::optional<T> default_v) {
-    if (!conf.contains(key)) {
-        if (default_v.has_value()) {
-            conf[key] = default_v.value();
-        }
-    } else {
-        auto value = conf[key];
-        conf[key] = fn(value);
-    }
-}
 
 template <typename T>
 inline std::optional<T>
@@ -136,12 +109,6 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
 
 template <typename T>
 inline void
-SetValueToConfig(Config& cfg, const std::string& key, const T value) {
-    cfg[key] = value;
-}
-
-template <typename T>
-inline void
 CheckMetricTypeSupport(const MetricType& metric_type) {
     if constexpr (std::is_same_v<T, bin1>) {
         AssertInfo(
@@ -176,12 +143,6 @@ GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
 
 ScalarIndexType
 GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
-
-storage::FieldDataMeta
-GetFieldDataMetaFromConfig(const Config& config);
-
-storage::IndexMeta
-GetIndexMetaFromConfig(const Config& config);
 
 Config
 ParseConfigFromIndexParams(

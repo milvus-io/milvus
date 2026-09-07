@@ -257,6 +257,35 @@ func buildSchemaHelperWithArraysT(t *testing.T) *typeutil.SchemaHelper {
 	return helper
 }
 
+func buildSchemaHelperWithStructArrayT(t *testing.T) *typeutil.SchemaHelper {
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID: 301,
+		Name:    "struct_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     302,
+				Name:        "struct_array[sub_str]",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:     303,
+				Name:        "struct_array[sub_int]",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:              "rewrite_struct_array_test",
+		AutoID:            false,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArrayField},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
 func TestRewrite_Range_Array_Int_NotSupported(t *testing.T) {
 	helper := buildSchemaHelperWithArraysT(t)
 	_, err := parser.ParseExpr(helper, `ArrayInt > 10`, nil)
@@ -363,6 +392,36 @@ func TestRewrite_Range_Array_Index_Different_NoMerge(t *testing.T) {
 	}
 	require.True(t, seenInterval)
 	require.True(t, seenLower)
+}
+
+func TestRewrite_Range_ArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	for _, exprStr := range []string{
+		`ArrayInt[0] > 100 and ArrayInt[0] < 50`,
+		`not (ArrayInt[0] > 100 and ArrayInt[0] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed array must not fold to valid false when the index can be out of range: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed array under NOT must not fold to valid true when the index can be out of range: %s", exprStr)
+	}
+}
+
+func TestRewrite_Range_StructArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithStructArrayT(t)
+
+	for _, exprStr := range []string{
+		`struct_array[0][sub_int] > 100 and struct_array[0][sub_int] < 50`,
+		`not (struct_array[0][sub_int] > 100 and struct_array[0][sub_int] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed struct array must not fold to valid false when the element can be missing: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed struct array under NOT must not fold to valid true when the element can be missing: %s", exprStr)
+	}
 }
 
 // Test invalid BinaryRangeExpr: lower > upper → false

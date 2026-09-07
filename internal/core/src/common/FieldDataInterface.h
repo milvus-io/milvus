@@ -64,10 +64,6 @@ class FieldDataBase {
     virtual void
     FillFieldData(const std::shared_ptr<arrow::Array> array) = 0;
 
-    virtual void
-    FillFieldData(const std::optional<DefaultValueType> default_value,
-                  ssize_t element_count) = 0;
-
     // For all FieldDataImpl subclasses, this method returns Type* that points
     // at all rows in this field data.
     virtual void*
@@ -188,15 +184,6 @@ class FieldBitsetImpl : public FieldDataBase {
             NotImplemented,
             "FillFieldData(const std::shared_ptr<arrow::ChunkedArray>& arrays) "
             "not implemented for bitset");
-    }
-
-    void
-    FillFieldData(const std::optional<DefaultValueType> default_value,
-                  ssize_t element_count) override {
-        ThrowInfo(NotImplemented,
-                  "FillFieldData(const const std::optional<DefaultValueType> "
-                  "default_value, "
-                  "ssize_t element_count) not implemented for bitset");
     }
 
     virtual void
@@ -354,6 +341,24 @@ class FieldDataImpl : public FieldDataBase {
         }
     }
 
+    explicit FieldDataImpl(ssize_t dim,
+                           DataType data_type,
+                           bool nullable,
+                           int64_t num_rows,
+                           const std::optional<Type>& default_value)
+        : FieldDataImpl(dim, data_type, nullable, num_rows) {
+        AssertInfo(nullable_, "default value field data must be nullable");
+        AssertInfo(dim_ == 1,
+                   "default value field data only supports scalar types");
+        if (default_value.has_value()) {
+            std::fill(data_.begin(), data_.end(), *default_value);
+        } else {
+            std::fill(valid_data_.begin(), valid_data_.end(), 0x00);
+            null_count_ = num_rows;
+        }
+        length_ = num_rows;
+    }
+
     explicit FieldDataImpl(size_t dim,
                            DataType type,
                            bool nullable,
@@ -395,10 +400,6 @@ class FieldDataImpl : public FieldDataBase {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override;
-
-    void
-    FillFieldData(const std::optional<DefaultValueType> default_value,
-                  ssize_t element_count) override;
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
@@ -573,6 +574,15 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataStringImpl(
+        DataType data_type,
+        bool nullable,
+        int64_t total_num_rows,
+        const std::optional<std::string>& default_value)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, total_num_rows, default_value) {
+    }
+
     explicit FieldDataStringImpl(DataType data_type,
                                  bool nullable,
                                  FixedVector<std::string>&& data)
@@ -684,6 +694,15 @@ class FieldDataGeometryImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataGeometryImpl(
+        DataType data_type,
+        bool nullable,
+        int64_t total_num_rows,
+        const std::optional<std::string>& default_value)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, total_num_rows, default_value) {
+    }
+
     int64_t
     DataSize() const override {
         int64_t data_size = 0;
@@ -756,6 +775,27 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         : FieldDataImpl<Json, true>(1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataJsonImpl(
+        DataType data_type,
+        bool nullable,
+        int64_t total_num_rows,
+        const std::optional<DefaultValueType>& default_value)
+        : FieldDataImpl<Json, true>(1, data_type, nullable, total_num_rows) {
+        AssertInfo(nullable, "default value field data must be nullable");
+        if (default_value.has_value()) {
+            AssertInfo(default_value->has_bytes_data(),
+                       "json type default_value shall be bytes data");
+            default_value_buffer_.emplace(default_value->bytes_data());
+            const Json default_json(default_value_buffer_->data(),
+                                    default_value_buffer_->size());
+            std::fill(data_.begin(), data_.end(), default_json);
+        } else {
+            std::fill(valid_data_.begin(), valid_data_.end(), 0x00);
+            null_count_ = total_num_rows;
+        }
+        length_ = total_num_rows;
+    }
+
     explicit FieldDataJsonImpl(DataType data_type,
                                bool nullable,
                                FixedVector<Json>&& data)
@@ -789,39 +829,6 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                    array->type()->ToString());
         auto json_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
         FillFieldData(json_array);
-    }
-
-    // used for generate added field which has no related binlogs
-    void
-    FillFieldData(const std::optional<DefaultValueType> default_value,
-                  ssize_t element_count) override {
-        if (element_count == 0) {
-            return;
-        }
-
-        std::lock_guard lck(tell_mutex_);
-        if (length_ + element_count > get_num_rows()) {
-            resize_field_data(length_ + element_count);
-        }
-
-        if (default_value.has_value()) {
-            AssertInfo(default_value->has_bytes_data(),
-                       "json type default_value shall be bytes data");
-
-            auto data = default_value->bytes_data();
-            Json default_json = Json(data.data(), data.size());
-            std::fill(data_.data() + length_,
-                      data_.data() + length_ + element_count,
-                      default_json);
-            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
-                valid_data_.data(), length_, element_count, true);
-        } else {
-            null_count_ = element_count;
-            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
-                valid_data_.data(), length_, element_count, false);
-        }
-
-        length_ += element_count;
     }
 
     void
@@ -872,6 +879,12 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         length_ += json.size();
     }
+
+ private:
+    // Constructed before the FieldData is published so default-value fills do
+    // not allocate while holding tell_mutex_. All default rows share this
+    // immutable buffer for the lifetime of the FieldData.
+    std::optional<simdjson::padded_string> default_value_buffer_;
 };
 
 class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
@@ -880,6 +893,14 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
                                 bool nullable,
                                 int64_t total_num_rows = 0)
         : FieldDataImpl<Array, true>(1, data_type, nullable, total_num_rows) {
+    }
+
+    explicit FieldDataArrayImpl(DataType data_type,
+                                bool nullable,
+                                int64_t total_num_rows,
+                                const std::optional<Array>& default_value)
+        : FieldDataImpl<Array, true>(
+              1, data_type, nullable, total_num_rows, default_value) {
     }
 
     int64_t

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type ColumnGeometryWKTSuite struct {
@@ -69,6 +69,40 @@ func (s *ColumnGeometryWKTSuite) TestAttrMethods() {
 		s.NoError(err)
 		s.Equal(item, val)
 	})
+}
+
+func (s *ColumnGeometryWKTSuite) TestNullableLogicalRows() {
+	column, err := NewNullableColumnGeometryWKT(
+		"location",
+		[]string{"POINT (1 2)"},
+		[]bool{false, true},
+	)
+	s.Require().NoError(err)
+	s.Equal(2, column.Len())
+
+	isNull, err := column.IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err := column.GetAsString(1)
+	s.Require().NoError(err)
+	s.Equal("POINT (1 2)", value)
+
+	sliced := column.Slice(0, column.Len())
+	geometry, ok := sliced.(*ColumnGeometryWKT)
+	s.Require().True(ok)
+	s.Equal(2, geometry.Len())
+	isNull, err = geometry.IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err = geometry.ValueByIdx(1)
+	s.Require().NoError(err)
+	s.Equal("POINT (1 2)", value)
+
+	s.Require().NoError(geometry.AppendValue("POINT (3 4)"))
+	s.Equal(3, geometry.Len())
+	value, err = geometry.GetAsString(2)
+	s.Require().NoError(err)
+	s.Equal("POINT (3 4)", value)
 }
 
 func TestColumnGeometryWKT(t *testing.T) {

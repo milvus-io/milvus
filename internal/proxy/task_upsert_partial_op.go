@@ -39,6 +39,8 @@ func hasNonReplacePartialOp(req *milvuspb.UpsertRequest) bool {
 	return false
 }
 
+// TODO: Recursive Array fields do not support ARRAY_APPEND or ARRAY_REMOVE.
+//
 // validateFieldPartialUpdateOps validates FieldPartialUpdateOp entries
 // attached to an UpsertRequest. It enforces:
 //
@@ -123,6 +125,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 
 		switch op {
 		case schemapb.FieldPartialUpdateOp_ARRAY_APPEND, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+			if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+				return false, merr.WrapErrParameterInvalidMsg(
+					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
+			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array {
 				return false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s requires Array field, but field %q is %s",

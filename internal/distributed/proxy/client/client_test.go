@@ -49,6 +49,31 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func Test_SyncFileResource(t *testing.T) {
+	paramtable.Init()
+
+	client, err := NewClient(context.Background(), "test", 1)
+	assert.NoError(t, err)
+	defer client.Close()
+
+	mockProxy := mocks.NewMockProxyClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return f(mockProxy)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	req := &internalpb.SyncFileResourceRequest{Version: 1}
+	mockProxy.EXPECT().SyncFileResource(mock.Anything, req).Return(merr.Success(), nil)
+	status, err := client.SyncFileResource(context.Background(), req)
+	assert.NoError(t, err)
+	assert.NoError(t, merr.Error(status))
+}
+
 func Test_GetComponentStates(t *testing.T) {
 	paramtable.Init()
 

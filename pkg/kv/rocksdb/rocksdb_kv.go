@@ -18,6 +18,7 @@ package rocksdbkv
 
 import (
 	"context"
+	"math"
 
 	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
@@ -37,6 +38,12 @@ type RocksdbKV struct {
 	WriteOptions *gorocksdb.WriteOptions
 	ReadOptions  *gorocksdb.ReadOptions
 	name         string
+}
+
+// MaxTxnOps reports no practical limit: writes are applied via a single
+// rocksdb WriteBatch, so any batch commits atomically in one shot.
+func (kv *RocksdbKV) MaxTxnOps() int {
+	return math.MaxInt32
 }
 
 const (

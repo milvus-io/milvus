@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -61,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -98,6 +100,7 @@ func (t failCommitTxn) Commit() ([]TxnResult, error)                           {
 type failOnceCASPersist struct {
 	inner     OptimisticTxnPersist
 	remaining atomic.Int32
+	onFailure func()
 }
 
 func newFailOnceCASPersist(inner OptimisticTxnPersist) *failOnceCASPersist {
@@ -144,9 +147,95 @@ func (t *failOnceCASTxn) Remove(key string) {
 
 func (t *failOnceCASTxn) Commit() ([]TxnResult, error) {
 	if t.persist.remaining.CompareAndSwap(1, 0) {
+		if t.persist.onFailure != nil {
+			t.persist.onFailure()
+		}
 		return nil, ErrCASFailed
 	}
 	return t.inner.Commit()
+}
+
+type partialOncePersist struct {
+	inner     OptimisticTxnPersist
+	prefix    int
+	remaining atomic.Int32
+}
+
+func newPartialOncePersist(inner OptimisticTxnPersist, prefix int) *partialOncePersist {
+	p := &partialOncePersist{inner: inner, prefix: prefix}
+	p.remaining.Store(1)
+	return p
+}
+
+func (p *partialOncePersist) Txn(ctx context.Context) Txn {
+	return &partialOnceTxn{ctx: ctx, persist: p}
+}
+
+func (p *partialOncePersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return p.inner.Scan(ctx, prefix)
+}
+
+type partialOnceTxn struct {
+	ctx     context.Context
+	persist *partialOncePersist
+	ops     []txnOp
+}
+
+func (t *partialOnceTxn) Insert(key string, value []byte) {
+	t.ops = append(t.ops, txnOp{kind: opInsert, key: key, value: value})
+}
+
+func (t *partialOnceTxn) Update(key string, value []byte, expectedVersion int64) {
+	t.ops = append(t.ops, txnOp{kind: opUpdate, key: key, value: value, expectedVersion: expectedVersion})
+}
+
+func (t *partialOnceTxn) Delete(key string) {
+	t.ops = append(t.ops, txnOp{kind: opDelete, key: key})
+}
+
+func (t *partialOnceTxn) Put(key string, value []byte) {
+	t.ops = append(t.ops, txnOp{kind: opPut, key: key, value: value})
+}
+
+func (t *partialOnceTxn) Remove(key string) {
+	t.ops = append(t.ops, txnOp{kind: opRemove, key: key})
+}
+
+func (t *partialOnceTxn) Commit() ([]TxnResult, error) {
+	if !t.persist.remaining.CompareAndSwap(1, 0) {
+		return replayTxnOps(t.ctx, t.persist.inner, t.ops)
+	}
+
+	prefix := min(t.persist.prefix, len(t.ops))
+	committed, err := replayTxnOps(t.ctx, t.persist.inner, t.ops[:prefix])
+	if err != nil {
+		return nil, err
+	}
+	results := make([]TxnResult, len(t.ops))
+	copy(results, committed)
+	if prefix == len(t.ops) {
+		return results, nil
+	}
+	return results, newPartialCommitError(errors.New("injected partial commit"))
+}
+
+func replayTxnOps(ctx context.Context, persist OptimisticTxnPersist, ops []txnOp) ([]TxnResult, error) {
+	txn := persist.Txn(ctx)
+	for _, op := range ops {
+		switch op.kind {
+		case opInsert:
+			txn.Insert(op.key, op.value)
+		case opUpdate:
+			txn.Update(op.key, op.value, op.expectedVersion)
+		case opDelete:
+			txn.Delete(op.key)
+		case opPut:
+			txn.Put(op.key, op.value)
+		case opRemove:
+			txn.Remove(op.key)
+		}
+	}
+	return txn.Commit()
 }
 
 type failScanPersist struct {
@@ -228,6 +317,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -247,6 +337,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -259,6 +350,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 	suite.Run("ok", func() {
 		defer suite.resetMock()
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
 		brk := broker.NewMockBroker(suite.T())
 		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 			Status: merr.Success(),
@@ -274,6 +368,13 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{
+			{
+				TargetID: 10,
+				Intent:   datapb.TargetIntent_INTENT_REWRITE,
+				State:    datapb.TargetState_TARGET_STATE_ACTIVE,
+			},
+		}, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
@@ -293,8 +394,10 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			PartitionID:  1,
 			State:        commonpb.SegmentState_Flushed,
 		})
-		_, err := newMeta(ctx, suite.catalog, nil, brk, segmentPersist, "")
+		meta, err := newMeta(ctx, suite.catalog, nil, brk, segmentPersist, "")
 		suite.NoError(err)
+		suite.NotNil(meta.compactionTargetMeta)
+		suite.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.compactionTargetMeta.GetCompactionTarget(10).GetState())
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0", "legacy"), 1)
 	})
@@ -307,6 +410,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -326,6 +430,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -345,6 +450,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -364,6 +470,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, errors.New("mock"))
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -383,6 +490,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -402,6 +510,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, errors.New("mock"))
@@ -434,6 +543,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -790,6 +900,51 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(9, infos[0].GetSchemaVersion())
 	})
 
+	suite.Run("clustering compaction output publication is idempotent", func() {
+		segments := NewCachedSegmentsInfo()
+		for _, segmentID := range []int64{1, 2} {
+			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  100,
+				PartitionID:   10,
+				InsertChannel: "ch",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				NumOfRows:     2,
+			}), 0)
+		}
+		m := newTestMetaFromCache(suite.T(), segments, mockChMgr)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch",
+			CreateTs:      1000,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: 3,
+			NumOfRows: 4,
+		}}}
+
+		_, firstMutation, err := m.CompleteCompactionMutation(context.Background(), task, result)
+		suite.NoError(err)
+		suite.EqualValues(4, firstMutation.rowCountChange)
+		suite.EqualValues(4, firstMutation.rowCountAccChange)
+
+		_, replayMutation, err := m.CompleteCompactionMutation(context.Background(), task, result)
+		suite.NoError(err)
+		suite.EqualValues(0, replayMutation.rowCountChange)
+		suite.EqualValues(0, replayMutation.rowCountAccChange)
+		replayedAdds := replayMutation.stateChange[datapb.SegmentLevel_L2.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
+		suite.Zero(replayedAdds, "an idempotent replay must not increment segment metrics twice")
+
+		collision := proto.Clone(result).(*datapb.CompactionPlanResult)
+		collision.Segments[0].NumOfRows = 5
+		_, _, err = m.CompleteCompactionMutation(context.Background(), task, collision)
+		suite.Error(err)
+		suite.Contains(err.Error(), "different identity")
+	})
+
 	suite.Run("test mix complete rejects nil task schema", func() {
 		latestSegments := getLatestSegments()
 		compactToSeg := &datapb.CompactionSegment{
@@ -1120,6 +1275,112 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(5000, infos[0].GetDmlPosition().GetTimestamp())
 		suite.EqualValues(0, infos[0].GetCommitTimestamp())
 	})
+}
+
+func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_PublishesOutputBeforeRetiringInputs() {
+	mockChMgr := mocks.NewChunkManager(suite.T())
+
+	latestSegments := NewCachedSegmentsInfo()
+	latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 100,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+		NumOfRows:    2,
+	}}, 11)
+	latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 100,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+		NumOfRows:    2,
+	}}, 12)
+
+	compactToSeg := &datapb.CompactionSegment{
+		SegmentID:           3,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+		NumOfRows:           4,
+	}
+	result := &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{compactToSeg},
+	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+		Schema:        &schemapb.CollectionSchema{Version: 1},
+	}
+
+	recorded := &recordingPersist{}
+	m := &meta{
+		ctx:            context.Background(),
+		segments:       latestSegments,
+		chunkManager:   mockChMgr,
+		segmentPersist: NewSegmentTxnWrapper(recorded),
+	}
+
+	_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+	suite.NoError(err)
+
+	// The logical mutation may be split into several backend transactions.
+	// Its staged order is therefore the recovery contract: publish the output
+	// segment before retiring either input segment.
+	mainKeys := map[string]struct{}{
+		segmentKey(100, 10, 1): {},
+		segmentKey(100, 10, 2): {},
+		segmentKey(100, 10, 3): {},
+	}
+	mainOps := make([]txnOp, 0, 3)
+	for _, op := range recorded.txn.ops {
+		if _, ok := mainKeys[op.key]; ok {
+			mainOps = append(mainOps, op)
+		}
+	}
+	suite.Require().Len(mainOps, 3)
+	suite.Equal(opInsert, mainOps[0].kind)
+	suite.Equal(segmentKey(100, 10, 3), mainOps[0].key)
+	suite.Equal(opUpdate, mainOps[1].kind)
+	suite.Equal(opUpdate, mainOps[2].kind)
+	suite.ElementsMatch(
+		[]string{segmentKey(100, 10, 1), segmentKey(100, 10, 2)},
+		[]string{mainOps[1].key, mainOps[2].key},
+	)
+}
+
+func (suite *MetaBasicSuite) TestUpdateDropChannelSegmentInfo_PublishesMarkerAfterSegments() {
+	segments := NewCachedSegmentsInfo()
+	for _, segmentID := range []int64{1, 2} {
+		segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+		}}, 0)
+	}
+	m := newTestMetaFromCache(suite.T(), segments, nil)
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, actions ...metastore.UpdateAction) error {
+			suite.Require().Len(actions, 1)
+			channelEntry, ok := actions[0].Entry.(metastore.ChannelEntry)
+			suite.Require().True(ok)
+			suite.Equal(metastore.ActionUpdate, actions[0].Type)
+			suite.Equal("ch-1", channelEntry.Channel)
+			// Cache application follows successful segment persistence. Seeing
+			// both drops here proves the visibility marker is published last.
+			suite.Equal(commonpb.SegmentState_Dropped, m.segments.GetSegment(1).GetState())
+			suite.Equal(commonpb.SegmentState_Dropped, m.segments.GetSegment(2).GetState())
+			return nil
+		}).Once()
+	m.catalog = catalog
+
+	err := m.UpdateDropChannelSegmentInfo(context.TODO(), "ch-1", nil)
+	suite.NoError(err)
 }
 
 func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
@@ -1944,8 +2205,502 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(mutation)
 	})
 
-	suite.Run("segment ID mismatch", func() {
-		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Flushed), nil)
+	suite.Run("in-place result with matching base manifest is adopted", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest, // == current pointer and advances it, adopt
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(1, infos[0].GetID())
+		suite.Equal(resultManifest, infos[0].GetManifestPath())
+	})
+
+	suite.Run("schema-bump-only nil result stats preserves old stats", func() {
+		// runSchemaVersionBumpOnly ships Stats=nil by design (the receiver must
+		// preserve oldSegment.Stats). For V3 the per-field KVs are skipped, so
+		// clobbering with nil yields an all-zero durable summary after restart.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		oldStats := &datapb.Statistics{
+			InsertBinlogSize:  1234,
+			InsertBinlogCount: 7,
+			DeleteNumRows:     3,
+			TimestampFrom:     10,
+			TimestampTo:       50,
+		}
+		old.Stats = oldStats
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					// Stats intentionally nil (bump-only)
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Require().NotNil(infos[0].GetStats())
+		suite.EqualValues(1234, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(7, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(3, infos[0].GetStats().GetDeleteNumRows())
+	})
+
+	suite.Run("in-place result stats is added onto existing stats", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Stats = &datapb.Statistics{
+			InsertBinlogSize:  1000,
+			InsertBinlogCount: 4,
+			StatsBinlogSize:   20,
+			DeleteNumRows:     3,
+			DeltaBinlogSize:   77,
+			TimestampFrom:     10,
+			TimestampTo:       50,
+			NullCounts:        map[int64]int64{100: 0},
+		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  300,
+						InsertBinlogCount: 1,
+						StatsBinlogSize:   5,
+						NullCounts:        map[int64]int64{102: 0},
+					},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+
+		got := infos[0].GetStats()
+		suite.EqualValues(1300, got.GetInsertBinlogSize())
+		suite.EqualValues(5, got.GetInsertBinlogCount())
+		suite.EqualValues(25, got.GetStatsBinlogSize())
+		// Untouched by the increment.
+		suite.EqualValues(3, got.GetDeleteNumRows())
+		suite.EqualValues(77, got.GetDeltaBinlogSize())
+		suite.EqualValues(10, got.GetTimestampFrom())
+		suite.EqualValues(50, got.GetTimestampTo())
+		suite.Equal(map[int64]int64{100: 0, 102: 0}, got.GetNullCounts())
+	})
+
+	suite.Run("CAS retry rejects a concurrently advanced manifest", func() {
+		baseManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		concurrentManifest := packed.MarshalManifestPath("/data/segments/1", 13)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = baseManifest
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1000, InsertBinlogCount: 4}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+
+		failing := newFailOnceCASPersist(m.segmentPersist.inner)
+		failing.onFailure = func() {
+			suite.Require().NoError(m.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+				1: {UpdateManifest(1, concurrentManifest)},
+			}))
+		}
+		m.segmentPersist = NewSegmentTxnWrapper(failing).WithMetaRootPath(m.metaRootPath)
+
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:      1,
+				NumOfRows:      5,
+				Manifest:       resultManifest,
+				BaseManifest:   baseManifest,
+				StorageVersion: storage.StorageV3,
+				Stats:          &datapb.Statistics{InsertBinlogSize: 300, InsertBinlogCount: 1},
+			}},
+		}
+
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+
+		got := m.segments.GetSegment(1)
+		suite.Require().NotNil(got)
+		suite.Equal(concurrentManifest, got.GetManifestPath(), "the stale retry must not roll the pointer back")
+		suite.EqualValues(1000, got.GetStats().GetInsertBinlogSize(), "the failed attempt must not apply its additive stats")
+		suite.EqualValues(4, got.GetStats().GetInsertBinlogCount())
+	})
+
+	suite.Run("replayed in-place result does not accumulate twice", func() {
+		// result == current means a prior adoption already persisted this
+		// manifest, so the increment is already in Stats. Accumulating again
+		// would double-count. This test guards the coupling between the
+		// accumulation and the forward-commit branch of the manifest CAS.
+		manifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = manifest
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1300, InsertBinlogCount: 5}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					Manifest:       manifest, // == current pointer: replay
+					BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10),
+					StorageVersion: storage.StorageV3,
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  300,
+						InsertBinlogCount: 1,
+					},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+
+		got := infos[0].GetStats()
+		suite.EqualValues(1300, got.GetInsertBinlogSize())
+		suite.EqualValues(5, got.GetInsertBinlogCount())
+	})
+
+	suite.Run("in-place result merges ordinary and function-output column groups", func() {
+		// The compactor ships only the groups this run wrote, so the receiver
+		// must upsert them: the live Binlogs keeps the complete column set and
+		// a not-yet-restarted QueryNode estimate stays correct. Replaying the
+		// result must neither duplicate the new groups nor re-apply the
+		// manifest-gated statistics delta.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Stats = &datapb.Statistics{
+			InsertBinlogSize:  1024,
+			InsertBinlogCount: 1,
+			NullCounts:        map[int64]int64{100: 0},
+		}
+		old.Binlogs = []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{0, 1, 100}, Binlogs: []*datapb.Binlog{{LogID: 10000}}},
+		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		ordinaryGroup := &datapb.FieldBinlog{
+			FieldID:     101,
+			ChildFields: []int64{101},
+			Binlogs:     []*datapb.Binlog{{LogID: 10001, EntriesNum: 5, MemorySize: 256}},
+		}
+		functionOutputGroup := &datapb.FieldBinlog{
+			FieldID:     102,
+			ChildFields: []int64{102},
+			Binlogs:     []*datapb.Binlog{{LogID: 10002, EntriesNum: 5, MemorySize: 512}},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{ordinaryGroup, functionOutputGroup},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  768,
+						InsertBinlogCount: 2,
+						NullCounts:        map[int64]int64{101: 5, 102: 0},
+					},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		// The pre-existing group survives and both newly appended groups are
+		// visible through the same adopted manifest.
+		suite.ElementsMatch([]int64{0, 101, 102},
+			lo.Map(infos[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
+		for _, fb := range infos[0].GetBinlogs() {
+			if fb.GetFieldID() == 0 {
+				suite.ElementsMatch([]int64{0, 1, 100}, fb.GetChildFields(),
+					"no child collision, so the pre-existing group keeps its fields")
+			}
+		}
+		firstStats := infos[0].GetStats()
+		suite.EqualValues(1792, firstStats.GetInsertBinlogSize())
+		suite.EqualValues(3, firstStats.GetInsertBinlogCount())
+		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, firstStats.GetNullCounts())
+
+		// Replay: the segment now sits at resultManifest, so this is the
+		// idempotent-adoption branch. The merge must not duplicate either new
+		// group, and the manifest-gated increment must not be accumulated twice.
+		replayed, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(replayed, 1)
+		suite.Require().Len(replayed[0].GetBinlogs(), 3)
+		suite.ElementsMatch([]int64{0, 101, 102},
+			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
+		replayedStats := replayed[0].GetStats()
+		suite.EqualValues(1792, replayedStats.GetInsertBinlogSize())
+		suite.EqualValues(3, replayedStats.GetInsertBinlogCount())
+		suite.Equal(map[int64]int64{100: 0, 101: 5, 102: 0}, replayedStats.GetNullCounts())
+	})
+
+	suite.Run("materialized column group is visible on the live segment", func() {
+		// Regression pin: the merged column group keeps the live Binlogs
+		// complete (pre-restart QueryNode estimation reads it), while index
+		// eligibility is gated by the schema-version advance — the inspector
+		// does not read Binlogs and the build worker reads the manifest.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Binlogs = []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{0, 1, 100}, Binlogs: []*datapb.Binlog{{LogID: 10000}}},
+		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogID: 10002}}}},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          &datapb.Statistics{InsertBinlogSize: 1},
+				},
+			},
+		}
+		_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+
+		updated := m.segments.GetSegment(1)
+		fields := make(map[int64]struct{})
+		for _, binlog := range updated.GetBinlogs() {
+			for _, childFieldID := range binlog.GetChildFields() {
+				fields[childFieldID] = struct{}{}
+			}
+		}
+		suite.Contains(fields, int64(102), "materialized function-output field must be visible on live Binlogs")
+		suite.Contains(fields, int64(100), "pre-existing fields keep their data")
+
+		handler := NewNMockHandler(suite.T())
+		handler.EXPECT().GetCollection(mock.Anything, updated.GetCollectionID()).Return(&collectionInfo{
+			ID: updated.GetCollectionID(),
+			Schema: &schemapb.CollectionSchema{
+				Version: 3,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{OutputFieldIds: []int64{102}},
+				},
+			},
+		}, nil).Once()
+		inspector := &indexInspector{handler: handler}
+		suite.True(inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
+			CollectionID: updated.GetCollectionID(),
+			FieldID:      102,
+			IndexID:      1,
+		}), "materialized function-output field must be index-eligible")
+	})
+
+	suite.Run("in-place result with stale base manifest is rejected", func() {
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		// pointer advanced past the result's base
+		old.ManifestPath = packed.MarshalManifestPath("/data/segments/1", 11)
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					Manifest:       packed.MarshalManifestPath("/data/segments/1", 12),
+					BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10), // stale, != current v11
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	// Defensive: base == current only claims the pointer has not drifted; it does
+	// not independently validate the worker's result. A buggy worker that reports
+	// the matching base but produces a result that does not advance the current
+	// manifest on the same base path (rollback / equal version / different base
+	// path / unparsable) must be rejected, not adopted.
+	suite.Run("in-place result on current base that does not advance is rejected", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		cases := map[string]string{
+			"rollback":       packed.MarshalManifestPath("/data/segments/1", 9),
+			"different base": packed.MarshalManifestPath("/data/segments/2", 12),
+			"unparsable":     "not-a-manifest",
+		}
+		for name, resultManifest := range cases {
+			suite.Run(name, func() {
+				segs := makeSegments(1, commonpb.SegmentState_Flushed)
+				old := segs.GetSegment(1)
+				old.StorageVersion = storage.StorageV3
+				old.ManifestPath = currentManifest
+				m := &meta{
+					catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+					segments: segs,
+				}
+				task := &datapb.CompactionTask{
+					InputSegments: []int64{1},
+					Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+					Schema:        &schemapb.CollectionSchema{Version: 3},
+				}
+				result := &datapb.CompactionPlanResult{
+					Segments: []*datapb.CompactionSegment{
+						{
+							SegmentID:      1,
+							NumOfRows:      5,
+							Manifest:       resultManifest,
+							BaseManifest:   currentManifest, // == current pointer, but result does not advance it
+							StorageVersion: storage.StorageV3,
+						},
+					},
+				}
+				infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				suite.Error(err)
+				suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+				suite.Nil(infos)
+				suite.Nil(mutation)
+			})
+		}
+	})
+
+	suite.Run("in-place result already at current manifest is idempotently adopted", func() {
+		// Crash-replay: an adoption already succeeded (segment is at the
+		// materialized manifest) but the task state was lost before meta_saved.
+		// Replaying the same result — stale base, but manifest already == current
+		// — must be accepted, not rejected, so the already-succeeded task is not
+		// spuriously failed.
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = "base/manifest-12" // already adopted the materialized manifest
+		old.SchemaVersion = 3
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+					Manifest:       "base/manifest-12", // == current pointer
+					BaseManifest:   "base/manifest-10", // stale base, but result already current
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.Equal("base/manifest-12", infos[0].GetManifestPath())
+	})
+
+	suite.Run("replacement result without preallocated ID rejected", func() {
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: makeSegments(1, commonpb.SegmentState_Flushed),
+		}
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
@@ -2138,6 +2893,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2220,6 +2976,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2231,6 +2988,48 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
+	})
+
+	suite.Run("v3 in-place adds shipped stats increment", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		newerManifest := packed.MarshalManifestPath("/data/segments/1", 11)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		segment := segs.GetSegment(1)
+		segment.SchemaVersion = 1
+		segment.StorageVersion = storage.StorageV3
+		segment.ManifestPath = currentManifest
+		// Footprint of the segment before materialization appended columns.
+		segment.Stats = &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		// Materialization adds a function-output column and ships the
+		// footprint of just that column; the receiver adds it onto the
+		// segment's current Stats.
+		shippedStats := &datapb.Statistics{InsertBinlogSize: 250, InsertBinlogCount: 2}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					InsertLogs:     segment.GetBinlogs(),
+					Manifest:       newerManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          shippedStats,
+				},
+			},
+		}
+
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(350, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(3, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(350, m.segments.GetSegment(1).getSegmentSize())
 	})
 
 	suite.Run("v3 same manifest and same task schema accepted", func() {
@@ -2252,6 +3051,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2343,6 +3143,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2543,6 +3344,72 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
+
+	suite.Run("post-restart segment accumulates successive increments", func() {
+		// The recovered StorageV3 shape: per-field binlog KVs were skipped, so
+		// Binlogs/Deltalogs come back empty, and Stats is the only durable
+		// record of the segment's footprint. Two successive materializations
+		// must both land on top of it.
+		segs := NewCachedSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			NumOfRows:      5,
+			SchemaVersion:  1,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/data/segments/1", 10),
+			Binlogs:        nil, // recovered V3: arrays are gone
+			Deltalogs:      nil,
+			Stats: &datapb.Statistics{
+				InsertBinlogSize:  10_000,
+				InsertBinlogCount: 8,
+				StatsBinlogSize:   100,
+				DeleteNumRows:     42,
+				NullCounts:        map[int64]int64{100: 0},
+			},
+		}}, 0)
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+
+		apply := func(baseVer, resultVer int64, fieldID int64, size int64) {
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{
+					{
+						SegmentID:      1,
+						NumOfRows:      5,
+						Manifest:       packed.MarshalManifestPath("/data/segments/1", resultVer),
+						BaseManifest:   packed.MarshalManifestPath("/data/segments/1", baseVer),
+						StorageVersion: storage.StorageV3,
+						Stats: &datapb.Statistics{
+							InsertBinlogSize:  size,
+							InsertBinlogCount: 1,
+							StatsBinlogSize:   10,
+							NullCounts:        map[int64]int64{fieldID: 0},
+						},
+					},
+				},
+			}
+			_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+			suite.NoError(err)
+		}
+
+		apply(10, 11, 102, 2_000)
+		apply(11, 12, 103, 3_000)
+
+		got := m.segments.GetSegment(1).GetStats()
+		suite.EqualValues(15_000, got.GetInsertBinlogSize())
+		suite.EqualValues(10, got.GetInsertBinlogCount())
+		suite.EqualValues(120, got.GetStatsBinlogSize())
+		suite.EqualValues(42, got.GetDeleteNumRows())
+		suite.Equal(map[int64]int64{100: 0, 102: 0, 103: 0}, got.GetNullCounts())
+	})
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchemaVersion() {
@@ -2572,6 +3439,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchema
 				SegmentID:      1,
 				InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 				Manifest:       manifestPath,
+				BaseManifest:   manifestPath,
 				StorageVersion: storage.StorageV3,
 			},
 		},
@@ -2662,7 +3530,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Contains(t, segIDs, segID1_1)
 
 		// check DropSegment
-		err = meta.DropSegment(context.TODO(), segInfo1_0)
+		err = meta.DropSegment(context.TODO(), segInfo1_0.GetID())
 		assert.NoError(t, err)
 		segIDs = meta.GetSegmentsIDOfPartition(context.TODO(), collID, partID1)
 		assert.EqualValues(t, 1, len(segIDs))
@@ -2682,7 +3550,6 @@ func TestMeta_Basic(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-		metakv.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -2699,12 +3566,12 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 		// ErrKeyNotFound, since no segment yet
 		segToDrop := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 1, PartitionID: 1})
-		err = meta.DropSegment(context.TODO(), segToDrop)
+		err = meta.DropSegment(context.TODO(), segToDrop.GetID())
 		assert.NoError(t, err)
 		err = meta.AddSegment(context.TODO(), segToDrop)
 		assert.NoError(t, err)
 		meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("failed")})
-		err = meta.DropSegment(context.TODO(), segToDrop)
+		err = meta.DropSegment(context.TODO(), segToDrop.GetID())
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
@@ -2790,14 +3657,14 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg0 with size0
 		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
-		segInfo0.size.Store(size0)
+		segInfo0.Stats = &datapb.Statistics{InsertBinlogSize: size0}
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg1 with size1
 		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
-		segInfo1.size.Store(size1)
+		segInfo1.Stats = &datapb.Statistics{InsertBinlogSize: size1}
 		err = meta.AddSegment(context.TODO(), segInfo1)
 		assert.NoError(t, err)
 
@@ -2980,6 +3847,47 @@ func TestReloadL0SegmentWithSidePrefixDeltalogs(t *testing.T) {
 	require.EqualValues(t, 100, reloadedSegment.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 }
 
+func TestReloadMixedEmbeddedAndSidePrefixBinlogs(t *testing.T) {
+	ctx := context.Background()
+	inner := NewOptimisticTxnMemoryPersist()
+	segment := &datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   10,
+		InsertChannel: "channel-1",
+		State:         commonpb.SegmentState_Flushed,
+		Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1001)},
+	}
+	segmentValue, err := proto.Marshal(segment)
+	require.NoError(t, err)
+	deltaValue, err := proto.Marshal(getFieldBinlogIDs(0, 2001))
+	require.NoError(t, err)
+
+	txn := inner.Txn(ctx)
+	txn.Put(segmentKey(1, 10, 100), segmentValue)
+	txn.Put(fmt.Sprintf("%s/%d/%d/%d/%d", datacoord.SegmentDeltalogPathPrefix, 1, 10, 100, 0), deltaValue)
+	_, err = txn.Commit()
+	require.NoError(t, err)
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	m := &meta{
+		ctx:            ctx,
+		catalog:        catalog,
+		segmentPersist: NewSegmentTxnWrapper(inner),
+		segments:       NewCachedSegmentsInfo(),
+		channelCPs:     newChannelCps(),
+	}
+	require.NoError(t, m.reloadFromKV(ctx, []int64{1}))
+
+	reloaded := m.GetSegment(ctx, 100)
+	require.NotNil(t, reloaded)
+	require.Len(t, reloaded.GetBinlogs(), 1)
+	require.Len(t, reloaded.GetDeltalogs(), 1)
+	assert.EqualValues(t, 1001, reloaded.GetBinlogs()[0].GetBinlogs()[0].GetLogID())
+	assert.EqualValues(t, 2001, reloaded.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+}
+
 func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
@@ -3033,6 +3941,134 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	require.EqualValues(t, 9001, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 	require.EqualValues(t, 3, updated.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+// Regression for the V3 restart undercount: AlterSegments skips persisting
+// per-FieldBinlog deltalog KVs for V3, so after a DataCoord restart the
+// in-memory Deltalogs array is empty and the cumulative deltas live only in
+// the persisted Stats. An L0 delete compaction must accumulate the new batch
+// onto that persisted baseline, not recompute from the empty array.
+func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	// V3 segment as it looks post-restart: cumulative deltas persisted on
+	// Stats, but the Deltalogs array empty (its per-field KVs were never
+	// written). NewSegmentInfo keeps the non-nil Stats verbatim.
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+		Stats: &datapb.Statistics{
+			DeltaBinlogSize:    4096,
+			DeleteNumRows:      1000,
+			DeltaBinlogCount:   10,
+			DeltaTimestampFrom: 100,
+			DeltaTimestampTo:   900,
+		},
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:         9001,
+			LogPath:       basePath + "/_delta/9001",
+			EntriesNum:    50,
+			MemorySize:    256,
+			TimestampFrom: 950,
+			TimestampTo:   1000,
+		}},
+	}}
+
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	cache := make(map[int64]string)
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		deltalogs,
+		&indexpb.StorageConfig{},
+		cache,
+	))
+	require.NoError(t, err)
+
+	stats := meta.GetSegment(context.TODO(), 200).GetStats()
+	// Baseline + new batch, not the new batch alone.
+	require.EqualValues(t, 1050, stats.GetDeleteNumRows())
+	require.EqualValues(t, 4096+256, stats.GetDeltaBinlogSize())
+	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
+	require.EqualValues(t, 100, stats.GetDeltaTimestampFrom())
+	require.EqualValues(t, 1000, stats.GetDeltaTimestampTo())
+}
+
+// Regression for the L0 retry double-add: l0CompactionTask re-runs
+// saveSegmentMeta when the subsequent meta_saved task-state write fails, so the
+// SAME committed manifest and deltalogs re-enter apply. The committedV3Manifests
+// cache makes the manifest re-commit idempotent, but the delta Stats
+// accumulation must be idempotent too — otherwise for V3 (durable Stats) the
+// retry permanently over-counts deletes.
+func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/202"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           202,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+		Stats: &datapb.Statistics{
+			DeltaBinlogSize:  4096,
+			DeleteNumRows:    1000,
+			DeltaBinlogCount: 10,
+		},
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:      9001,
+			LogPath:    basePath + "/_delta/9001",
+			EntriesNum: 50,
+			MemorySize: 256,
+		}},
+	}}
+
+	var commitCalls int
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			commitCalls++
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	// First run: commits manifest, accumulates deltas.
+	cache := make(map[int64]string)
+	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		202, deltalogs, &indexpb.StorageConfig{}, cache)))
+
+	// Retry with the SAME cache and deltalogs (meta_saved write failed after the
+	// first run persisted segment stats).
+	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		202, deltalogs, &indexpb.StorageConfig{}, cache)))
+
+	stats := meta.GetSegment(context.TODO(), 202).GetStats()
+	require.EqualValues(t, 1050, stats.GetDeleteNumRows(), "deltas must accumulate exactly once across retry")
+	require.EqualValues(t, 4096+256, stats.GetDeltaBinlogSize())
+	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
+	require.Equal(t, 1, commitCalls, "manifest must be committed only once (cache idempotency)")
+	require.Len(t, meta.GetSegment(context.TODO(), 202).GetDeltalogs(), 1, "deltalog array must not duplicate")
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {
@@ -3311,7 +4347,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
-		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
 		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
@@ -3339,7 +4374,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
-		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -3357,7 +4391,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, len(updated.Statslogs[0].Binlogs), len(expected.Statslogs[0].Binlogs))
 		assert.Equal(t, len(updated.Deltalogs[0].Binlogs), len(expected.Deltalogs[0].Binlogs))
 		assert.Equal(t, updated.State, expected.State)
-		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
 	})
 
@@ -3388,7 +4421,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
-		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
 		assert.EqualValues(t, 0, segment1.getDeltaCount())
 
 		err = meta.UpdateSegmentsInfo(
@@ -3419,7 +4451,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
-		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		assert.Equal(t, updated.StartPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}})
@@ -3959,6 +4990,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25Stat
 			segment.Statslogs = append(segment.GetStatslogs(), statslogs...)
 			segment.Deltalogs = append(segment.GetDeltalogs(), deltalogs...)
 			segment.Bm25Statslogs = append(segment.GetBm25Statslogs(), bm25Statslogs...)
+			segment.Stats = nil
 			return BinlogIncrement{
 				Binlogs:       segment.GetBinlogs(),
 				Statslogs:     segment.GetStatslogs(),
@@ -3976,6 +5008,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25S
 			segment.Statslogs = statslogs
 			segment.Deltalogs = deltalogs
 			segment.Bm25Statslogs = bm25Statslogs
+			segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25Statslogs, deltalogs)
 			return BinlogIncrement{
 				Binlogs:       binlogs,
 				Statslogs:     statslogs,
@@ -4524,6 +5557,50 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 	}
 }
 
+func TestCheckAndSetSegmentsCompactingIsAtomic(t *testing.T) {
+	cloneEntered := make(chan struct{}, 2)
+	releaseClone := make(chan struct{})
+	segments := NewCachedSegmentsInfo()
+	segments.segments = NewCache[UniqueID, *SegmentInfo](func(segment *SegmentInfo) *SegmentInfo {
+		cloneEntered <- struct{}{}
+		<-releaseClone
+		return segment.Clone()
+	})
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:    1,
+		State: commonpb.SegmentState_Flushed,
+	}), 0)
+	m := &meta{segments: segments}
+
+	results := make(chan bool, 2)
+	go func() {
+		_, canDo := m.CheckAndSetSegmentsCompacting(context.Background(), []int64{1})
+		results <- canDo
+	}()
+	<-cloneEntered
+
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		_, canDo := m.CheckAndSetSegmentsCompacting(context.Background(), []int64{1})
+		results <- canDo
+	}()
+	<-secondStarted
+	concurrentEntry := false
+	select {
+	case <-cloneEntered:
+		concurrentEntry = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseClone)
+
+	first := <-results
+	second := <-results
+	require.False(t, concurrentEntry, "a concurrent reservation entered the cache update before the first reservation completed")
+	require.NotEqual(t, first, second)
+	require.True(t, first || second)
+}
+
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 	storedSegments := NewCachedSegmentsInfo()
 
@@ -4705,6 +5782,175 @@ func equalCollectionInfo(t *testing.T, a *collectionInfo, b *collectionInfo) {
 	assert.Equal(t, a.Schema, b.Schema)
 	assert.Equal(t, a.Properties, b.Properties)
 	assert.Equal(t, a.StartPositions, b.StartPositions)
+}
+
+func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing.T) {
+	const (
+		channel1 = "channel-1"
+		channel2 = "channel-2"
+	)
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	channel1Entered := make(chan struct{})
+	releaseChannel1 := make(chan struct{})
+	channel2Entered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel1, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel1Entered)
+			<-releaseChannel1
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel2, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel2Entered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewCachedSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	channel1Done := make(chan error, 1)
+	go func() {
+		channel1Done <- meta.UpdateChannelCheckpoint(context.Background(), channel1, &msgpb.MsgPosition{
+			ChannelName: channel1,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		})
+	}()
+
+	select {
+	case <-channel1Entered:
+	case <-time.After(3 * time.Second):
+		close(releaseChannel1)
+		select {
+		case <-channel1Done:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("channel-1 did not enter SaveChannelCheckpoint")
+	}
+
+	channel2Done := make(chan error, 1)
+	go func() {
+		channel2Done <- meta.UpdateChannelCheckpoint(context.Background(), channel2, &msgpb.MsgPosition{
+			ChannelName: channel2,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+
+	channel2PersistedConcurrently := false
+	select {
+	case <-channel2Entered:
+		channel2PersistedConcurrently = true
+	case <-time.After(3 * time.Second):
+	}
+
+	close(releaseChannel1)
+	errs := make(map[string]error, 2)
+	for channel, done := range map[string]<-chan error{
+		channel1: channel1Done,
+		channel2: channel2Done,
+	} {
+		select {
+		case err := <-done:
+			errs[channel] = err
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "channel: %s", channel)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	require.True(t, channel2PersistedConcurrently, "channel-2 did not enter catalog while channel-1 was blocked")
+}
+
+func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *testing.T) {
+	const channel = "channel-1"
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	batchEntered := make(chan struct{})
+	releaseBatch := make(chan struct{})
+	singleEntered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoints(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, []*msgpb.MsgPosition) error {
+			close(batchEntered)
+			<-releaseBatch
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(singleEntered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewCachedSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	batchDone := make(chan error, 1)
+	go func() {
+		batchDone <- meta.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{{
+			ChannelName: channel,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		}})
+	}()
+
+	select {
+	case <-batchEntered:
+	case <-time.After(3 * time.Second):
+		close(releaseBatch)
+		select {
+		case <-batchDone:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("batch update did not enter SaveChannelCheckpoints")
+	}
+
+	singleStarted := make(chan struct{})
+	singleDone := make(chan error, 1)
+	go func() {
+		close(singleStarted)
+		singleDone <- meta.UpdateChannelCheckpoint(context.Background(), channel, &msgpb.MsgPosition{
+			ChannelName: channel,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+	<-singleStarted
+
+	singleEnteredBeforeBatchRelease := false
+	select {
+	case <-singleEntered:
+		singleEnteredBeforeBatchRelease = true
+	case <-time.After(2 * time.Second):
+	}
+
+	close(releaseBatch)
+	errs := make([]error, 0, 2)
+	for operation, done := range map[string]<-chan error{
+		"batch":  batchDone,
+		"single": singleDone,
+	} {
+		select {
+		case err := <-done:
+			errs = append(errs, err)
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "operation: %s", operation)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	assert.False(t, singleEnteredBeforeBatchRelease, "single update entered catalog before the overlapping batch completed")
+	require.Equal(t, uint64(2), meta.GetChannelCheckpoint(channel).GetTimestamp())
 }
 
 func TestChannelCP(t *testing.T) {
@@ -5065,6 +6311,45 @@ func TestTruncateChannelByTime(t *testing.T) {
 	})
 }
 
+func TestTruncateChannelByTimeRechecksTimestampAfterCASRetry(t *testing.T) {
+	ctx := context.Background()
+	const segmentID = int64(102)
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   1,
+		PartitionID:    10,
+		InsertChannel:  "ch3",
+		State:          commonpb.SegmentState_Flushed,
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch3", Timestamp: 100},
+		StorageVersion: storage.StorageV2,
+	})))
+
+	failing := newFailOnceCASPersist(m.segmentPersist.inner)
+	failing.onFailure = func() {
+		require.NoError(t, m.UpdateSegmentsInfo(ctx, map[int64][]SegmentOperator{
+			segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+				segment.DmlPosition = &msgpb.MsgPosition{ChannelName: "ch3", Timestamp: 300}
+				return BinlogIncrement{}, true
+			}},
+		}))
+	}
+	m.segmentPersist = NewSegmentTxnWrapper(failing).WithMetaRootPath(m.metaRootPath)
+
+	require.NoError(t, m.TruncateChannelByTime(ctx, "ch3", 200))
+	segment := m.GetSegment(ctx, segmentID)
+	require.NotNil(t, segment)
+	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
+	require.Equal(t, uint64(300), segment.GetDmlPosition().GetTimestamp())
+
+	persisted, _, err := m.segmentPersist.Scan(ctx, segmentMetaPrefix)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Equal(t, commonpb.SegmentState_Flushed, persisted[0].GetState())
+	require.Equal(t, uint64(300), persisted[0].GetDmlPosition().GetTimestamp())
+}
+
 func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
@@ -5097,6 +6382,163 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
 	segment = meta.GetSegment(context.Background(), 3)
 	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
+}
+
+func TestDropSegmentsOfPartitionRetriesUncommittedRemainder(t *testing.T) {
+	segments := NewCachedSegmentsInfo()
+	for _, segmentID := range []int64{1, 2} {
+		segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           segmentID,
+			PartitionID:  1,
+			CollectionID: 1,
+			State:        commonpb.SegmentState_Flushed,
+		}), 0)
+	}
+	m := newTestMetaFromCache(t, segments, nil)
+	m.segmentPersist = NewSegmentTxnWrapper(newPartialOncePersist(m.segmentPersist.inner, 1))
+
+	require.NoError(t, m.DropSegmentsOfPartition(context.Background(), []int64{1}))
+	for _, segmentID := range []int64{1, 2} {
+		segment, version := m.segments.GetSegmentWithVersion(segmentID)
+		require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+		require.Positive(t, version)
+	}
+
+	persisted, _, err := m.segmentPersist.Scan(context.Background(), segmentMetaPrefix)
+	require.NoError(t, err)
+	require.Len(t, persisted, 2)
+	for _, segment := range persisted {
+		require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	}
+}
+
+func TestPersistCompactionSegmentsRetriesAfterOutputOnlyPartialCommit(t *testing.T) {
+	input := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           1,
+		PartitionID:  1,
+		CollectionID: 1,
+		State:        commonpb.SegmentState_Flushed,
+	})
+	segments := NewCachedSegmentsInfo()
+	segments.SetSegment(input.GetID(), input, 0)
+	m := newTestMetaFromCache(t, segments, nil)
+	m.segmentPersist = NewSegmentTxnWrapper(newPartialOncePersist(m.segmentPersist.inner, 1))
+	output := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2,
+		PartitionID:    1,
+		CollectionID:   1,
+		State:          commonpb.SegmentState_Flushed,
+		CompactionFrom: []int64{input.GetID()},
+	})
+
+	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
+	require.NoError(t, m.persistCompactionSegments(
+		context.Background(),
+		[]*SegmentInfo{output},
+		[]int64{input.GetID()},
+		metricMutation,
+	))
+
+	persistedInput, inputVersion := m.segments.GetSegmentWithVersion(input.GetID())
+	require.Equal(t, commonpb.SegmentState_Dropped, persistedInput.GetState())
+	require.True(t, persistedInput.GetCompacted())
+	require.Positive(t, inputVersion)
+	persistedOutput, outputVersion := m.segments.GetSegmentWithVersion(output.GetID())
+	require.NotNil(t, persistedOutput)
+	require.Equal(t, commonpb.SegmentState_Flushed, persistedOutput.GetState())
+	require.Positive(t, outputVersion)
+
+	persisted, _, err := m.segmentPersist.Scan(context.Background(), segmentMetaPrefix)
+	require.NoError(t, err)
+	require.Len(t, persisted, 2)
+	for _, segment := range persisted {
+		if segment.GetID() == input.GetID() {
+			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+			require.True(t, segment.GetCompacted())
+		}
+	}
+}
+
+func TestSetStateDoesNotResurrectDroppedSegment(t *testing.T) {
+	ctx := context.Background()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 1,
+		PartitionID:  1,
+		State:        commonpb.SegmentState_Flushed,
+	})))
+
+	require.NoError(t, m.SetState(ctx, 1, commonpb.SegmentState_Dropped))
+	dropped, version := m.segments.GetSegmentWithVersion(1)
+	require.Equal(t, commonpb.SegmentState_Dropped, dropped.GetState())
+	require.Positive(t, version)
+
+	require.NoError(t, m.SetState(ctx, 1, commonpb.SegmentState_Flushed))
+	stillDropped, unchangedVersion := m.segments.GetSegmentWithVersion(1)
+	require.Equal(t, commonpb.SegmentState_Dropped, stillDropped.GetState())
+	require.Equal(t, version, unchangedVersion)
+
+	// Dropping an already-absent segment remains idempotent.
+	require.NoError(t, m.SetState(ctx, 2, commonpb.SegmentState_Dropped))
+}
+
+func TestUpdateSegmentsInfoDoesNotReplayCommittedPartialMutation(t *testing.T) {
+	segments := NewCachedSegmentsInfo()
+	for _, segmentID := range []int64{1, 2} {
+		segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           segmentID,
+			PartitionID:  1,
+			CollectionID: 1,
+			State:        commonpb.SegmentState_Flushed,
+		}), 0)
+	}
+	m := newTestMetaFromCache(t, segments, nil)
+	m.segmentPersist = NewSegmentTxnWrapper(newPartialOncePersist(m.segmentPersist.inner, 1))
+	incrementRows := func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		segment.NumOfRows++
+		return BinlogIncrement{}, true
+	}
+
+	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		1: {incrementRows},
+		2: {incrementRows},
+	}))
+	for _, segmentID := range []int64{1, 2} {
+		segment, version := m.segments.GetSegmentWithVersion(segmentID)
+		require.EqualValues(t, 1, segment.GetNumOfRows())
+		require.Positive(t, version)
+	}
+}
+
+func TestUpdateSegmentsInfoAggregatesOperatorChanges(t *testing.T) {
+	segments := NewCachedSegmentsInfo()
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            1,
+		PartitionID:   1,
+		CollectionID:  1,
+		State:         commonpb.SegmentState_Flushed,
+		SchemaVersion: 1,
+	}), 0)
+	m := newTestMetaFromCache(t, segments, nil)
+
+	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		1: {
+			func(segment *SegmentInfo) (BinlogIncrement, bool) {
+				segment.NumOfRows = 10
+				return BinlogIncrement{}, true
+			},
+			func(segment *SegmentInfo) (BinlogIncrement, bool) {
+				return BinlogIncrement{}, false
+			},
+			SetSchemaVersion(2),
+		},
+	}))
+
+	segment := m.GetSegment(context.Background(), 1)
+	require.EqualValues(t, 10, segment.GetNumOfRows())
+	require.EqualValues(t, 2, segment.GetSchemaVersion())
 }
 
 func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
@@ -5370,4 +6812,686 @@ func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
 	cp := meta.GetChannelCheckpoint(mockVChannel)
 	assert.NotNil(t, cp)
 	assert.Equal(t, uint64(300), cp.GetTimestamp())
+}
+
+func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {
+	ctx := context.Background()
+	startTime := time.Date(2026, time.May, 20, 12, 0, 0, 0, time.UTC).Unix()
+	expectedCreateTS := tsoutil.ComposeTSByTimeWithLogical(time.Unix(startTime, 0), 7)
+
+	t.Run("mix", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(t,
+			newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1),
+			newCompactionCreateTsTestSegment(2, datapb.SegmentLevel_L1),
+		)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			StartTime:     startTime,
+			CreateTs:      expectedCreateTS,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           100,
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 3).GetCreateTs())
+	})
+
+	t.Run("sort", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(t, newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L2))
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_SortCompaction,
+			Channel:       "ch-1",
+			StartTime:     startTime,
+			CreateTs:      expectedCreateTS,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           2,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 60000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 60001)},
+				NumOfRows:           100,
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 2).GetCreateTs())
+	})
+
+	t.Run("clustering", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(t,
+			newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1),
+			newCompactionCreateTsTestSegment(2, datapb.SegmentLevel_L1),
+		)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+			StartTime:     startTime,
+			CreateTs:      expectedCreateTS,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 65000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 65001)},
+				NumOfRows:           100,
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 3).GetCreateTs())
+	})
+
+	t.Run("bump schema replacement", func(t *testing.T) {
+		meta := newCompactionCreateTsTestMeta(t, newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1))
+		task := &datapb.CompactionTask{
+			InputSegments:          []int64{1},
+			Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+			Channel:                "ch-1",
+			StartTime:              startTime,
+			CreateTs:               expectedCreateTS,
+			Schema:                 &schemapb.CollectionSchema{Version: 2},
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 2, End: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           2,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 68000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 68001)},
+				NumOfRows:           100,
+				StorageVersion:      storage.StorageV3,
+				Manifest:            "replacement-manifest",
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
+		require.Equal(t, expectedCreateTS, meta.GetSegment(ctx, 2).GetCreateTs())
+	})
+
+	t.Run("backfill preserves existing segment create ts", func(t *testing.T) {
+		segment := newCompactionCreateTsTestSegment(1, datapb.SegmentLevel_L1)
+		segment.CreateTs = 777
+		segment.StorageVersion = storage.StorageV3
+		segment.ManifestPath = "manifest"
+		meta := newCompactionCreateTsTestMeta(t, segment)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Channel:       "ch-1",
+			StartTime:     startTime,
+			CreateTs:      expectedCreateTS,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:      1,
+				InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 70000)},
+				StorageVersion: storage.StorageV3,
+				Manifest:       "manifest",
+				BaseManifest:   "manifest",
+			}},
+		}
+
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Equal(t, uint64(777), infos[0].GetCreateTs())
+		require.Equal(t, uint64(777), meta.GetSegment(ctx, 1).GetCreateTs())
+	})
+}
+
+func newCompactionCreateTsTestMeta(t *testing.T, segments ...*SegmentInfo) *meta {
+	segmentStore := NewCachedSegmentsInfo()
+	for _, segment := range segments {
+		segmentStore.SetSegment(segment.GetID(), segment, 0)
+	}
+	return newTestMetaFromCache(t, segmentStore, nil)
+}
+
+func newCompactionCreateTsTestSegment(id int64, level datapb.SegmentLevel) *SegmentInfo {
+	return NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            id,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Flushed,
+		Level:         level,
+		MaxRowNum:     1024,
+		Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, id*10000)},
+		Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, id*10000+1)},
+		NumOfRows:     100,
+	})
+}
+
+func TestUpdateSegmentStatsOperator(t *testing.T) {
+	logID := int64(0)
+	mkField := func(entries, mem int64) *datapb.FieldBinlog {
+		logID++
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem}}}
+	}
+
+	t.Run("v2 computes from arrays", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    1,
+			State: commonpb.SegmentState_Flushed,
+			// V2: stats are in arrays, manifest_path empty.
+			Binlogs:   []*datapb.FieldBinlog{mkField(100, 1024)},
+			Statslogs: []*datapb.FieldBinlog{mkField(0, 128)},
+			Deltalogs: []*datapb.FieldBinlog{mkField(5, 64)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(1, nil))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 1)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+		assert.EqualValues(t, 128, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 64, stats.GetDeltaBinlogSize())
+		assert.EqualValues(t, 5, stats.GetDeleteNumRows())
+		assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+		assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
+	})
+
+	// Non-nil requestStats is stored wholesale — all fields verbatim as sent
+	// by the datanode's StatisticsCollector. No per-field override or array
+	// derivation happens.
+	t.Run("non-nil request stored wholesale", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           2,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "manifest://foo",
+			Binlogs:      []*datapb.FieldBinlog{mkField(200, 2048)},
+			Statslogs:    nil,
+			Deltalogs:    []*datapb.FieldBinlog{mkField(3, 32)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// Complete Statistics as shipped by the datanode.
+		req := &datapb.Statistics{
+			InsertBinlogSize:  8192,
+			StatsBinlogSize:   4096,
+			DeltaBinlogSize:   256,
+			DeleteNumRows:     7,
+			InsertBinlogCount: 3,
+			DeltaBinlogCount:  2,
+		}
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(2, req))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 2)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		// Wholesale: every field matches what the datanode sent, not the arrays.
+		assert.EqualValues(t, 8192, stats.GetInsertBinlogSize())
+		assert.EqualValues(t, 4096, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 256, stats.GetDeltaBinlogSize())
+		assert.EqualValues(t, 7, stats.GetDeleteNumRows())
+		assert.EqualValues(t, 3, stats.GetInsertBinlogCount())
+		assert.EqualValues(t, 2, stats.GetDeltaBinlogCount())
+	})
+
+	// Non-nil requestStats is stored wholesale regardless of storage version.
+	// Whatever the datanode sends in requestStats is the authoritative value.
+	t.Run("non-nil request StatsBinlogSize taken wholesale", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    10,
+			State: commonpb.SegmentState_Flushed,
+			// V2-style: no manifest_path, statslogs array carries 256 bytes.
+			Binlogs:   []*datapb.FieldBinlog{mkField(100, 1024)},
+			Statslogs: []*datapb.FieldBinlog{mkField(0, 256)},
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// Datanode ships a complete Statistics; StatsBinlogSize=128 is taken
+		// verbatim — wholesale means no array override.
+		err = meta.UpdateSegmentsInfo(context.TODO(),
+			UpdateSegmentStats(10, &datapb.Statistics{
+				InsertBinlogSize: 1024,
+				StatsBinlogSize:  128,
+			}))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 10)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		assert.EqualValues(t, 128, stats.GetStatsBinlogSize(),
+			"wholesale: requestStats.StatsBinlogSize is stored verbatim")
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+	})
+
+	t.Run("missing segment returns false", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(999, nil))
+		// Missing-segment operator returns false; updateSegmentsInfo swallows it.
+		require.NoError(t, err)
+	})
+
+	// nil requestStats → array-derived fallback via storage.BuildStatsFromFieldBinlogs.
+	// V3 segment with no statslogs: StatsBinlogSize falls back to 0 (no
+	// array data), InsertBinlogSize is derived from Binlogs array.
+	t.Run("nil request falls back to array derivation", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           3,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "manifest://foo",
+			Binlogs:      []*datapb.FieldBinlog{mkField(50, 1024)},
+			Statslogs:    nil,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		// nil requestStats → storage.BuildStatsFromFieldBinlogs(Binlogs, nil, nil, nil).
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(3, nil))
+		require.NoError(t, err)
+
+		got := meta.GetSegment(context.TODO(), 3)
+		require.NotNil(t, got)
+		stats := got.GetStats()
+		require.NotNil(t, stats)
+		// Derived from Binlogs array (1 file, 1024 bytes).
+		assert.EqualValues(t, 1024, stats.GetInsertBinlogSize())
+		// No statslogs array → array fallback yields 0.
+		assert.EqualValues(t, 0, stats.GetStatsBinlogSize())
+		assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+	})
+}
+
+// addDeltalogsToSegment is invoked by the L0 delete-compaction commit path:
+// it appends a deltalog to a flushed segment without re-running the full
+// stats recompute (which would zero-out V3 insert/stats fields whose arrays
+// are intentionally empty). The contract is: only delta-* fields move;
+// insert/stats fields stay put.
+func TestAddDeltalogsToSegment_PreservesInsertAndStats(t *testing.T) {
+	mkBinlog := func(logID, entries, mem int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem, TimestampFrom: tsFrom, TimestampTo: tsTo}}}
+	}
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           7,
+			ManifestPath: "manifest://foo",
+			Stats: &datapb.Statistics{
+				InsertBinlogSize:   1 << 20,
+				StatsBinlogSize:    1 << 14,
+				InsertBinlogCount:  3,
+				TimestampFrom:      100,
+				TimestampTo:        200,
+				TimestampQuantiles: []int64{110, 130, 150, 170, 200},
+				DeltaBinlogSize:    64,
+				DeltaBinlogCount:   1,
+				DeleteNumRows:      5,
+				// Stale delta-ts that must be refreshed from the merged array.
+				DeltaTimestampFrom: 999,
+				DeltaTimestampTo:   111,
+			},
+			Deltalogs: []*datapb.FieldBinlog{mkBinlog(1, 5, 64, 200, 300)},
+		},
+	}
+
+	newDelta := []*datapb.FieldBinlog{mkBinlog(2, 9, 128, 150, 400)}
+
+	inc, ok := addL0DeltalogsToSegment(7, segment, newDelta)
+	require.True(t, ok)
+
+	stats := segment.GetStats()
+	// Delta-related fields refreshed from the merged delta array.
+	assert.EqualValues(t, 64+128, stats.GetDeltaBinlogSize())
+	assert.EqualValues(t, 5+9, stats.GetDeleteNumRows())
+	assert.EqualValues(t, 2, stats.GetDeltaBinlogCount())
+	// Delta timestamps recomputed (min from / max to) across both deltalogs.
+	assert.EqualValues(t, 150, stats.GetDeltaTimestampFrom())
+	assert.EqualValues(t, 400, stats.GetDeltaTimestampTo())
+	// Insert / stats fields untouched.
+	assert.EqualValues(t, 1<<20, stats.GetInsertBinlogSize())
+	assert.EqualValues(t, 1<<14, stats.GetStatsBinlogSize())
+	assert.EqualValues(t, 3, stats.GetInsertBinlogCount())
+	assert.EqualValues(t, 100, stats.GetTimestampFrom())
+	assert.EqualValues(t, 200, stats.GetTimestampTo())
+	assert.Equal(t, []int64{110, 130, 150, 170, 200}, stats.GetTimestampQuantiles())
+	// Only the deltalog side-prefix KVs are rewritten.
+	assert.Equal(t, segment.GetDeltalogs(), inc.Deltalogs)
+	assert.Empty(t, inc.Binlogs)
+	assert.Empty(t, inc.Statslogs)
+	assert.Empty(t, inc.Bm25Statslogs)
+}
+
+func TestAddDeltalogsToSegment_NilStatsInitializes(t *testing.T) {
+	mkBinlog := func(logID, entries, mem int64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem}}}
+	}
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{ID: 8},
+	}
+	inc, ok := addL0DeltalogsToSegment(8, segment, []*datapb.FieldBinlog{mkBinlog(1, 7, 256)})
+	require.True(t, ok)
+	require.NotNil(t, segment.GetStats())
+	assert.EqualValues(t, 256, segment.GetStats().GetDeltaBinlogSize())
+	assert.EqualValues(t, 7, segment.GetStats().GetDeleteNumRows())
+	assert.EqualValues(t, 1, segment.GetStats().GetDeltaBinlogCount())
+	assert.Equal(t, segment.GetDeltalogs(), inc.Deltalogs)
+}
+
+func TestAddDeltalogsToSegment_EmptyInputIsNoOp(t *testing.T) {
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{ID: 9, Stats: &datapb.Statistics{DeltaBinlogSize: 42}},
+	}
+	inc, ok := addL0DeltalogsToSegment(9, segment, nil)
+	assert.False(t, ok)
+	// Stats untouched on no-op.
+	assert.EqualValues(t, 42, segment.GetStats().GetDeltaBinlogSize())
+	assert.True(t, inc.IsEmpty())
+}
+
+// UpdateBinlogsOperator fully replaces the FieldBinlog arrays AND recomputes
+// Stats from those arrays. Import / copy-segment / sort paths rely on this:
+// they don't ship a writer-side Statistics, so the Stats they get out of the
+// operator must match what the arrays imply.
+func TestUpdateBinlogsOperator_RefreshesStats(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+
+	mkBinlog := func(logID, entries, mem int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: entries, MemorySize: mem, TimestampFrom: tsFrom, TimestampTo: tsTo}}}
+	}
+
+	// Seed with stale Stats so we can verify recomputation actually happened.
+	require.NoError(t, meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:    11,
+			State: commonpb.SegmentState_Flushed,
+			Stats: &datapb.Statistics{InsertBinlogSize: 999, DeltaBinlogSize: 999, StatsBinlogSize: 999},
+		},
+	}))
+
+	newBinlogs := []*datapb.FieldBinlog{mkBinlog(1, 100, 4096, 100, 200)}
+	newStats := []*datapb.FieldBinlog{mkBinlog(2, 0, 256, 0, 0)}
+	newDelta := []*datapb.FieldBinlog{mkBinlog(3, 5, 64, 150, 180)}
+
+	err = meta.UpdateSegmentsInfo(context.TODO(),
+		UpdateBinlogsOperator(11, newBinlogs, newStats, newDelta, nil))
+	require.NoError(t, err)
+
+	got := meta.GetSegment(context.TODO(), 11)
+	require.NotNil(t, got)
+	stats := got.GetStats()
+	require.NotNil(t, stats)
+	assert.EqualValues(t, 4096, stats.GetInsertBinlogSize())
+	assert.EqualValues(t, 256, stats.GetStatsBinlogSize())
+	assert.EqualValues(t, 64, stats.GetDeltaBinlogSize())
+	assert.EqualValues(t, 5, stats.GetDeleteNumRows())
+	assert.EqualValues(t, 1, stats.GetInsertBinlogCount())
+	assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
+	assert.EqualValues(t, 100, stats.GetTimestampFrom())
+	assert.EqualValues(t, 200, stats.GetTimestampTo())
+}
+
+// TestMeta_CleanPartitionStatsInfo proves CleanPartitionStatsInfo persists
+// the analyze task removal, the current-version rollback (when the dropped
+// version is the current one), and the partition-stats info removal as a
+// single composite catalog.Update - analyze task first, rollback second,
+// partition-stats info last - and only mutates the analyzeMeta/
+// partitionStatsMeta in-memory state after that write succeeds.
+func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
+	ctx := context.Background()
+	info := &datapb.PartitionStatsInfo{
+		CollectionID:  1,
+		PartitionID:   2,
+		VChannel:      "ch-1",
+		Version:       100,
+		AnalyzeTaskID: 55,
+		SegmentIDs:    []int64{1000},
+	}
+
+	newTestChunkManager := func(t *testing.T) *mocks.ChunkManager {
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil).Once()
+		return cm
+	}
+
+	t.Run("no rollback needed", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		var gotActions []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				gotActions = actions
+				return nil
+			}).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: emptyPartitionStatsVersion, // not current -> no rollback
+						infos:          map[int64]*datapb.PartitionStatsInfo{100: info},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+
+		require.Len(t, gotActions, 2)
+		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
+		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		assert.Equal(t, metastore.ActionDelete, gotActions[1].Type)
+		psEntry, ok := gotActions[1].Entry.(metastore.PartitionStatsEntry)
+		require.True(t, ok)
+		assert.Same(t, info, psEntry.Info)
+
+		// Memory updated after success.
+		assert.Nil(t, am.GetTask(55))
+		assert.Nil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+	})
+
+	t.Run("rolls back current version", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		var gotActions []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				gotActions = actions
+				return nil
+			}).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		otherInfo := &datapb.PartitionStatsInfo{CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: 100, // info.Version is current -> rollback needed
+						infos: map[int64]*datapb.PartitionStatsInfo{
+							100: info,
+							90:  otherInfo,
+						},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+
+		require.Len(t, gotActions, 3)
+		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
+		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		assert.Equal(t, metastore.ActionUpdate, gotActions[1].Type)
+		assert.Equal(t, metastore.PartitionStatsVersionEntry{
+			CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90,
+		}, gotActions[1].Entry)
+		assert.Equal(t, metastore.ActionDelete, gotActions[2].Type)
+		psEntry, ok := gotActions[2].Entry.(metastore.PartitionStatsEntry)
+		require.True(t, ok)
+		assert.Same(t, info, psEntry.Info)
+
+		// Memory updated after success: rollback applied, dropped info gone.
+		assert.Equal(t, int64(90), psm.GetCurrentPartitionStatsVersion(1, 2, "ch-1"))
+		assert.Nil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 90))
+	})
+
+	t.Run("holds both meta locks across catalog write", func(t *testing.T) {
+		// The rollback compute, catalog write, and in-memory apply must run in
+		// one critical section, so a concurrent SaveCurrentPartitionStatsVersion
+		// cannot interleave between compute and apply and get clobbered. Assert
+		// both meta locks are held while catalog.Update runs: TryLock returns
+		// false only when the lock is already held.
+		catalog := mocks2.NewDataCoordCatalog(t)
+
+		var am *analyzeMeta
+		var psm *partitionStatsMeta
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ ...metastore.UpdateAction) error {
+				if psm.TryLock() {
+					psm.Unlock()
+					t.Error("partitionStatsMeta lock must be held during catalog.Update")
+				}
+				if am.TryLock() {
+					am.Unlock()
+					t.Error("analyzeMeta lock must be held during catalog.Update")
+				}
+				return nil
+			}).Once()
+
+		am = &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		otherInfo := &datapb.PartitionStatsInfo{CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90}
+		psm = &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: 100,
+						infos: map[int64]*datapb.PartitionStatsInfo{
+							100: info,
+							90:  otherInfo,
+						},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+		// Locks released after the call: both TryLock succeed now.
+		require.True(t, psm.TryLock())
+		psm.Unlock()
+		require.True(t, am.TryLock())
+		am.Unlock()
+	})
+
+	t.Run("catalog update failure leaves memory untouched", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("update failed")).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: emptyPartitionStatsVersion,
+						infos:          map[int64]*datapb.PartitionStatsInfo{100: info},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.Error(t, err)
+
+		// A failed composite write must not desync memory from disk.
+		assert.NotNil(t, am.GetTask(55))
+		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+	})
 }

@@ -47,6 +47,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -62,9 +63,20 @@ const std::string MMAP_PATH_FOR_TEST = "/tmp/milvus/mmap_test";
 
 const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t SCALAR_SORT_ALIGNMENT = 32;  // 32-byte alignment
 
-const uint64_t MMAP_INDEX_PADDING = 1;
+const uint64_t SCALAR_SORT_MMAP_INDEX_PADDING = 1;
+
+namespace {
+
+bool
+IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
+    return file_manager_context.Valid() &&
+           file_manager_context.fieldDataMeta.field_schema.data_type() ==
+               proto::schema::DataType::Array;
+}
+
+}  // namespace
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
@@ -72,6 +84,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
       is_nested_index_(is_nested_index),
+      is_array_field_(IsScalarArrayField(file_manager_context)),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
@@ -308,7 +321,9 @@ ScalarIndexSort<T>::SetupMmapFromData(
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
-    auto aligned_size = ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((size + SCALAR_SORT_ALIGNMENT - 1) / SCALAR_SORT_ALIGNMENT) *
+        SCALAR_SORT_ALIGNMENT;
 
     // Write data to file with alignment padding
     {
@@ -321,19 +336,20 @@ ScalarIndexSort<T>::SetupMmapFromData(
             file_writer.Write(padding.data(), padding.size());
         }
         // Write extra padding for safety
-        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        std::vector<uint8_t> padding(SCALAR_SORT_MMAP_INDEX_PADDING, 0);
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
 
     // mmap the file
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ = static_cast<char*>(mmap(NULL,
-                                         aligned_size + MMAP_INDEX_PADDING,
-                                         PROT_READ,
-                                         MAP_PRIVATE,
-                                         file.Descriptor(),
-                                         0));
+    mmap_data_ =
+        static_cast<char*>(mmap(NULL,
+                                aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING,
+                                PROT_READ,
+                                MAP_PRIVATE,
+                                file.Descriptor(),
+                                0));
 
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
@@ -342,7 +358,7 @@ ScalarIndexSort<T>::SetupMmapFromData(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
-    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
     data_size_ = size;
     file.Close();
 }
@@ -358,9 +374,11 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     auto is_nested_index = index_binary.GetByName("is_nested_index");
     if (is_nested_index) {
-        milvus::fastmem::FastMemcpy(&is_nested_index_,
+        bool loaded_is_nested_index = false;
+        milvus::fastmem::FastMemcpy(&loaded_is_nested_index,
                                     is_nested_index->data.get(),
                                     (size_t)is_nested_index->size);
+        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -467,7 +485,8 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(Count(), true);
+    // NotIn must keep null rows false, so start from the validity bitmap.
+    auto bitset = valid_bitset_.clone();
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -483,8 +502,6 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
             bitset[lb->idx_] = false;
         }
     }
-    // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    bitset &= valid_bitset_;
     return bitset;
 }
 
@@ -492,8 +509,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::IsNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
+    auto bitset = valid_bitset_.clone();
     bitset.flip();
     return bitset;
 }
@@ -502,9 +518,7 @@ template <typename T>
 TargetBitmap
 ScalarIndexSort<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
-    return bitset;
+    return valid_bitset_.clone();
 }
 
 template <typename T>
@@ -701,7 +715,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -731,18 +745,19 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                        total_data_size += len;
                                    });
 
-            auto aligned_size =
-                ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            auto aligned_size = ((total_data_size + SCALAR_SORT_ALIGNMENT - 1) /
+                                 SCALAR_SORT_ALIGNMENT) *
+                                SCALAR_SORT_ALIGNMENT;
             if (aligned_size > total_data_size) {
                 std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
                 file_writer.Write(padding.data(), padding.size());
             }
-            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
+            std::vector<uint8_t> mmap_pad(SCALAR_SORT_MMAP_INDEX_PADDING, 0);
             file_writer.Write(mmap_pad.data(), mmap_pad.size());
             file_writer.Finish();
 
             data_size_ = total_data_size;
-            mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+            mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
         }
 
         auto file = File::Open(mmap_filepath_, O_RDONLY);

@@ -33,6 +33,7 @@ Every WAL entry is a [**Message**](message/message.md) representing a system eve
 - [**Lock**](wal/lock.md): Exclusive/shared append access at VChannel or PChannel scope.
 - [**Shard Management**](wal/shard-management.md): Per-PChannel collection/partition/segment metadata and segment assignment.
 - [**RecoveryStorage**](wal/recovery-storage.md): Checkpoint, metadata and data persistence and WAL-based state recovery.
+- [**WAL Tracing**](wal/tracing.md): Trace span semantics for append, consume, broadcast, transaction, and replication paths.
 
 **[StreamingClient](streaming-client/streaming-client.md)**: In-process Append/Read/Broadcast API with service discovery and auto-reconnect.
 

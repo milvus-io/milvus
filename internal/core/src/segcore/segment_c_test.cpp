@@ -56,7 +56,6 @@
 #include "query/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -130,7 +129,7 @@ TEST(CApiTest, DeleteTest) {
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -169,7 +168,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
@@ -233,7 +232,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
+    ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
@@ -280,7 +279,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
@@ -345,7 +344,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
+    ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
@@ -442,7 +441,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -526,7 +525,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -650,7 +649,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {9, 9, 9}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -727,40 +726,6 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, TestMultiElement) {
-    std::vector<std::string> params;
-    for (int i = 0; i < 100; i++) {
-        params.push_back(std::to_string(i));
-    }
-    auto multi_element =
-        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
-    std::string target = "50";
-    auto res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "30";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "40";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "100";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-    target = "1000";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-
-    std::string_view target_view = "30";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "40";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "50";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-}
-
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
@@ -782,7 +747,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -1024,6 +989,57 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_field = FieldId(100);
+    auto missing_field = FieldId(101);
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk_field,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "pk_col"));
+    schema->AddField(FieldMeta(FieldName("new_field"),
+                               missing_field,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "new_col"));
+    schema->set_primary_field_id(pk_field);
+    schema->set_external_source("s3://bucket/table");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(1);
+    load_info.set_manifest_path("/manifest/v1");
+    sealed->SetLoadInfo(load_info);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {missing_field};
+    plan->access_entries_ = {missing_field};
+
+    int64_t offsets[] = {0};
+    CRetrieveResult* retrieve_result = nullptr;
+    auto status =
+        CRetrieveByOffsets(static_cast<CSegmentInterface>(segment.get()),
+                           plan.get(),
+                           offsets,
+                           1,
+                           &retrieve_result);
+
+    ASSERT_EQ(status.error_code, FieldNotLoaded);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("RefreshExternalCollection"),
+              std::string::npos)
+        << status.error_msg;
+    EXPECT_EQ(retrieve_result, nullptr);
+    free(const_cast<char*>(status.error_msg));
+}
+
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
@@ -1062,7 +1078,7 @@ TEST(CApiTest, GetDeletedCountTest) {
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -1135,7 +1151,7 @@ TEST(CApiTest, GetRealCount) {
 
     auto pks = dataset.get_col<int64_t>(schema->get_primary_field_id().value());
     std::vector<int64_t> delete_row_ids(pks.begin(), pks.begin() + 3);
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -1399,8 +1415,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
-    status = UpdateSealedSegmentIndex(segment.get(), &load_index_info);
-    ASSERT_EQ(status.error_code, Success);
+    segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(segment.get(),

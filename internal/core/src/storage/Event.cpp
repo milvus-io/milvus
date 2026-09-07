@@ -247,11 +247,13 @@ DescriptorEventData::Serialize() {
     return res;
 }
 
-BaseEventData::BaseEventData(BinlogReaderPtr reader,
-                             int event_length,
-                             DataType data_type,
-                             bool nullable,
-                             bool is_field_data) {
+BaseEventData::BaseEventData(
+    BinlogReaderPtr reader,
+    int event_length,
+    DataType data_type,
+    bool nullable,
+    bool is_field_data,
+    std::optional<proto::schema::TypeSchema> array_type) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
@@ -261,8 +263,12 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
     AssertInfo(res.first.ok(), "read payload failed");
-    payload_reader = std::make_shared<PayloadReader>(
-        res.second.get(), payload_length, data_type, nullable, is_field_data);
+    payload_reader = std::make_shared<PayloadReader>(res.second.get(),
+                                                     payload_length,
+                                                     data_type,
+                                                     nullable,
+                                                     is_field_data,
+                                                     std::move(array_type));
 }
 
 std::vector<uint8_t>
@@ -323,12 +329,21 @@ BaseEventData::Serialize() {
                 break;
             }
             case DataType::ARRAY: {
+                auto nested_array_field =
+                    std::dynamic_pointer_cast<FieldData<ArrayValue>>(
+                        field_data);
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
-                    auto array =
-                        static_cast<const Array*>(field_data->RawValue(offset));
-                    auto array_string =
-                        array->output_data().SerializeAsString();
+                    std::string array_string;
+                    if (nested_array_field != nullptr) {
+                        auto array = static_cast<const ArrayValue*>(
+                            field_data->RawValue(offset));
+                        array_string = array->output_data().SerializeAsString();
+                    } else {
+                        auto array = static_cast<const Array*>(
+                            field_data->RawValue(offset));
+                        array_string = array->output_data().SerializeAsString();
+                    }
                     auto size =
                         field_data->is_valid(offset) ? array_string.size() : -1;
 
@@ -357,9 +372,15 @@ BaseEventData::Serialize() {
                      ++offset) {
                     auto geo_ptr = static_cast<const std::string*>(
                         field_data->RawValue(offset));
+                    // A negative length is the only way a null reaches Arrow
+                    // (AddOneBinaryToArrowBuilder appends a null iff
+                    // length < 0), so a null row must not be handed its raw
+                    // size -- same as the STRING/ARRAY/JSON branches above.
+                    auto size =
+                        field_data->is_valid(offset) ? geo_ptr->size() : -1;
                     payload_writer->add_one_binary_payload(
                         reinterpret_cast<const uint8_t*>(geo_ptr->data()),
-                        geo_ptr->size());
+                        size);
                 }
                 break;
             }

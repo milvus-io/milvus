@@ -475,15 +475,9 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
-	DataNodeConsumeTimeTickLag.
-		Delete(
-			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				msgTypeLabelName:      AllLabel,
-				collectionIDLabelName: fmt.Sprint(collectionID),
-			})
-
-	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {
+	// The InputNode owns the collection-level AllLabel metrics. They are
+	// deleted when the last InputNode using the cached handles is closed.
+	for _, label := range []string{DeleteLabel, InsertLabel} {
 		DataNodeConsumeMsgCount.
 			Delete(
 				prometheus.Labels{

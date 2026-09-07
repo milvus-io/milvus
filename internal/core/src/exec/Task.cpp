@@ -147,8 +147,13 @@ Task::CreateDriversLocked(std::shared_ptr<Task>& self,
 
 void
 Task::Terminate(TaskState state) {
-    for (auto& driver : drivers_) {
-        driver->CloseByTask();
+    for (auto& driver_ptr : drivers_) {
+        // RemoveDriver clears the entry while CloseByTask is running. Keep a
+        // local owner so the Driver cannot be destroyed inside its own method.
+        auto driver = driver_ptr;
+        if (driver != nullptr) {
+            driver->CloseByTask();
+        }
     }
 }
 

@@ -39,13 +39,72 @@ type StructFieldReader struct {
 	dim          int
 }
 
+// collectSubFieldLeaves returns the parquet leaf column indices belonging to the
+// fieldIndex-th sub-field of the list<struct> column at columnIndex.
+func collectSubFieldLeaves(manifest *pqarrow.SchemaManifest, columnIndex, fieldIndex int) (map[int]bool, error) {
+	if manifest == nil || columnIndex < 0 || columnIndex >= len(manifest.Fields) {
+		return nil, merr.WrapErrImportSysFailedMsg("struct column index %d out of range", columnIndex)
+	}
+	listField := &manifest.Fields[columnIndex]
+	if len(listField.Children) != 1 {
+		return nil, merr.WrapErrImportSysFailedMsg("struct column %d is not a list of structs", columnIndex)
+	}
+	structField := &listField.Children[0]
+	if fieldIndex < 0 || fieldIndex >= len(structField.Children) {
+		return nil, merr.WrapErrImportSysFailedMsg("struct sub-field index %d out of range", fieldIndex)
+	}
+
+	leaves := make(map[int]bool)
+	collectLeafColumnIndices(&structField.Children[fieldIndex], leaves)
+	// Unreachable with the current recursion, which always records at least one
+	// index for any node it is handed. Kept as a guard so a future change to
+	// collectLeafColumnIndices cannot silently hand arrow an empty leaf set,
+	// which GetFieldReader answers with a nil reader rather than an error.
+	if len(leaves) == 0 {
+		return nil, merr.WrapErrImportSysFailedMsg("no leaf column found for struct sub-field index %d", fieldIndex)
+	}
+	return leaves, nil
+}
+
+// collectLeafColumnIndices walks a schema subtree and records every leaf column index.
+//
+// Recursion terminates on len(Children) == 0 rather than SchemaField.IsLeaf():
+// arrow assigns ColIndex only in populateLeaf and zero-initializes every other
+// SchemaField, so IsLeaf() (ColIndex != -1) reports true for group nodes and
+// yields a bogus index of 0. arrow's own getReader guards the same way.
+func collectLeafColumnIndices(field *pqarrow.SchemaField, leaves map[int]bool) {
+	if len(field.Children) == 0 {
+		leaves[field.ColIndex] = true
+		return
+	}
+	for i := range field.Children {
+		collectLeafColumnIndices(&field.Children[i], leaves)
+	}
+}
+
 // NewStructFieldReader creates a reader for extracting a field from nested struct
 func NewStructFieldReader(ctx context.Context, fileReader *pqarrow.FileReader, columnIndex int,
 	fieldIndex int, field *schemapb.FieldSchema,
 ) (*FieldReader, error) {
-	columnReader, err := fileReader.GetColumn(ctx, columnIndex)
+	// Only pull the leaf columns of this sub-field. Using GetColumn here would
+	// decode every leaf of the list<struct> column for every sub-field reader,
+	// reading the whole column N times for N sub-fields.
+	includedLeaves, err := collectSubFieldLeaves(fileReader.Manifest, columnIndex, fieldIndex)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to resolve leaf columns for struct sub-field '%s'", field.GetName())
+	}
+
+	rowGroups := make([]int, fileReader.ParquetReader().NumRowGroups())
+	for i := range rowGroups {
+		rowGroups[i] = i
+	}
+
+	columnReader, err := fileReader.GetFieldReader(ctx, columnIndex, includedLeaves, rowGroups)
 	if err != nil {
 		return nil, err
+	}
+	if columnReader == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("no column reader for struct sub-field '%s'", field.GetName())
 	}
 
 	dim := 0
@@ -67,8 +126,11 @@ func NewStructFieldReader(ctx context.Context, fileReader *pqarrow.FileReader, c
 	sfr := &StructFieldReader{
 		columnReader: columnReader,
 		field:        field,
-		fieldIndex:   fieldIndex,
-		dim:          dim,
+		// Leaf pruning leaves exactly one surviving child under the struct, so
+		// the sub-field always sits at position 0 in the arrow struct this
+		// reader produces.
+		fieldIndex: 0,
+		dim:        dim,
 	}
 
 	fr := &FieldReader{

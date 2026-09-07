@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -66,9 +67,12 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		ChannelNames:   vchannels,
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
+			// so both clusters derive identical autoID primary keys.
 			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
+				Id:                  file.GetId(),
+				Paths:               file.GetPaths(),
+				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -145,6 +149,27 @@ func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
 	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
+// isReplicatingClusterNow reports whether this cluster is currently part of a CDC
+// replication topology. A non-nil error means the status could not be determined (e.g. a
+// transient balancer error, or OnShutdownError while streamingcoord is stopping before
+// datacoord); the caller must treat that as indeterminate rather than "not replicating",
+// because at GC time a false "not replicating" would irreversibly drop a replicating job
+// without releasing the peer. A nil assignment is an unambiguous "not replicating".
+func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	assignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return false, err
+	}
+	if assignment == nil {
+		return false, nil
+	}
+	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
@@ -170,6 +195,33 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
+	// Per-file PK ranges are the default path for every autoID import. The
+	// coordinator allocates each file a range once and ships it on the ImportMsg, so
+	// the datanode derives primary keys from literal values instead of allocating
+	// them locally. On a replicating cluster that is what makes both clusters produce
+	// identical primary keys; elsewhere it costs a little ID space and keeps one
+	// well-exercised code path instead of a rarely-taken special case.
+	//
+	// The local-allocator path in the datanode remains only for compatibility:
+	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
+	// autoID PKs, non-autoID collections never allocate, and jobs created before
+	// this version carry no range. A schema without a resolvable primary key is
+	// left to normal validation.
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+			s.allocator.AllocN,
+			Params.CommonCfg.ClusterID.GetAsUint64(),
+		); err != nil {
+			return merr.Wrap(err, "failed to assign per-file PK ranges")
+		}
+		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
+		// pairing stays provable rather than assumed.
+		for i := 0; i < len(files) && i < len(msgFiles); i++ {
+			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
+		}
+	}
+
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
@@ -177,6 +229,16 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
+
+	// Re-check the replication state now that the broadcast holds the shared-cluster
+	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
+	// change the replication topology while this lock is held. The pre-lock check in
+	// validateImportRequest can go stale during the sizing I/O above: if CDC was enabled
+	// in that window, an auto_commit / non-enableInReplicatingCluster import would
+	// otherwise be broadcast into a replicating topology and diverge.
+	if err := s.validateImportReplication(ctx, options); err != nil {
+		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
@@ -224,8 +286,8 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		mlog.Warn(ctx, "CommitImport: job not found, skipping", mlog.FieldJobID(jobID))
-		return nil
+		mlog.Info(ctx, "CommitImport: job not found, retry later", mlog.FieldJobID(jobID))
+		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Uncommitted:
@@ -235,8 +297,11 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	case internalpb.ImportJobState_Failed:
-		mlog.Info(ctx, "CommitImport: job already failed, no-op",
-			mlog.FieldJobID(jobID))
+		// Divergence signal: the source committed but this replica already failed, so
+		// this replica will NOT make the data visible. Left as a no-op here; surfaced
+		// at WARN for alerting.
+		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits — potential primary/standby divergence",
+			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
 		return nil
 	default:
 		// CommitImport may be replicated before the local import task reaches

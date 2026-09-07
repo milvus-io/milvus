@@ -115,13 +115,11 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
 
-# Unity (jumbo) build: merge multiple .cpp files per target into fewer
-# translation units, dramatically reducing redundant header parsing.
+# Unity (jumbo) build is applied to Milvus-owned targets in src/CMakeLists.txt.
+# Do not set CMAKE_UNITY_BUILD globally: that also changes vendored dependency
+# targets such as Knowhere/FAISS, some of which are not unity-build compatible.
 if ( MILVUS_UNITY_BUILD )
-    set( CMAKE_UNITY_BUILD ON )
-    # ~8 sources per unity chunk is a good balance between speed and memory.
-    set( CMAKE_UNITY_BUILD_BATCH_SIZE 8 )
-    message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
+    message( STATUS "Unity build enabled for Milvus-owned targets" )
 endif ()
 
 set( CMAKE_CXX_STANDARD 20 )
@@ -203,13 +201,16 @@ find_package(Azure REQUIRED)
 include( CTest )
 include( BuildUtils )
 include( DefineOptions )
-using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 include( ExternalProject )
 include( GNUInstallDirs )
 include( FetchContent )
 
 include_directories( thirdparty )
+# Header-only FM-index (vendored under thirdparty/fmindex, exempt from the src
+# clang-format check). The extra root preserves the "index/fmindex/..." include
+# prefix the headers and the wrapper use, so nothing else needs to change.
+include_directories( thirdparty/fmindex )
 
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set( FETCHCONTENT_QUIET OFF )
@@ -396,7 +397,11 @@ ADD_DEFINITIONS(-DBOOST_GEOMETRY_INDEX_DETAIL_EXPERIMENTAL)
 
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
 # otherwise cpp code coverage tool will miss src folder
+using_ccache_if_defined(MILVUS_USE_CCACHE)
 add_subdirectory( thirdparty )
+# Vendored projects may set global launch rules while they configure. Their
+# targets already retain the compiler launcher configured above.
+clear_global_ccache_launchers()
 add_subdirectory( src )
 
 # Unittest lib
@@ -445,6 +450,13 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )
+
+# Install rescores
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/rescores/
+        DESTINATION include/rescores
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # cgo consumers need milvus-common headers in the core output include path.
 foreach(MILVUS_COMMON_INCLUDE_DIR IN LISTS milvus-common_INCLUDE_DIRS)
     install(DIRECTORY ${MILVUS_COMMON_INCLUDE_DIR}/

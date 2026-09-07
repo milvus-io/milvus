@@ -121,12 +121,39 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 	}
 }
 
+// checkFMIndexEngineVersion rejects FMINDEX creation when the cluster's resolved
+// scalar index engine version is below MinScalarIndexVersionForFMINDEX. FMINDEX
+// (scalar engine v5) is a new capability older nodes cannot handle:
+// `ResolveScalarIndexVersion` aggregates QueryNode sessions, so passing here
+// means no old QueryNode will be asked to LOAD a freshly built FMINDEX segment.
+//
+// This is shared by BOTH Server.CreateIndex and snapshotManager.RestoreIndexes:
+// restore broadcasts the same CreateIndex DDL directly, so without this it could
+// bypass the gate and create an FMINDEX index in a mixed-version cluster.
+// FMINDEX is opt-in (never an AutoIndex-resolved type), so reject, don't downgrade.
+//
+// Caveat (unchanged): this gates the loaders, not the build workers
+// (DataNode/IndexNode), which must be upgraded no later than the QueryNodes; the
+// bundled upgrade script orders IndexNode/DataNode first. Gating build workers on
+// scalar capability is a follow-up.
+func checkFMIndexEngineVersion(indexParams []*commonpb.KeyValuePair, resolvedScalarVersion int32) error {
+	if common.GetIndexType(indexParams) != indexparamcheck.IndexFMINDEX {
+		return nil
+	}
+	if resolvedScalarVersion < common.MinScalarIndexVersionForFMINDEX {
+		return merr.WrapErrServiceNotReadyMsg(
+			"FMINDEX requires scalar index engine version >= %d, current resolved version: %d (a rolling upgrade may still be in progress)",
+			common.MinScalarIndexVersionForFMINDEX, resolvedScalarVersion)
+	}
+	return nil
+}
+
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
 // indexBuilder will find this task and assign it to DataNode for execution.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "receive CreateIndex request",
+	mlog.Info(ctx, "receive CreateIndex request",
 		mlog.String("IndexName", req.GetIndexName()), mlog.Int64("fieldID", req.GetFieldID()),
 		mlog.Any("TypeParams", req.GetTypeParams()),
 		mlog.Any("IndexParams", req.GetIndexParams()),
@@ -161,18 +188,18 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		// check json_path and json_cast_type exist
 		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 		if err != nil {
-			mlog.Warn(context.TODO(), "get json path failed", mlog.Err(err))
+			mlog.Warn(ctx, "get json path failed", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 		_, err = getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
 		if err != nil {
-			mlog.Warn(context.TODO(), "get json cast type failed", mlog.Err(err))
+			mlog.Warn(ctx, "get json cast type failed", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 
 		nestedPath, err := typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
 		if err != nil {
-			mlog.Error(context.TODO(), "parse nested path failed", mlog.Err(err))
+			mlog.Error(ctx, "parse nested path failed", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 		// set nested path as json path
@@ -192,7 +219,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
 			if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
 				if req.GetIsAutoIndex() {
-					mlog.Info(context.TODO(), "downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
+					mlog.Info(ctx, "downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
 						mlog.String("requestedType", indexType),
 						mlog.Int32("resolvedVersion", resolved),
 						mlog.Int32("requiredVersion", common.MinScalarIndexVersionForJsonPathMultiType))
@@ -202,10 +229,21 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 					err := merr.WrapErrParameterInvalidMsg(
 						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
 						indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
-					mlog.Warn(context.TODO(), "scalar index engine version too low for JSON path index", mlog.Err(err))
+					mlog.Warn(ctx, "scalar index engine version too low for JSON path index", mlog.Err(err))
 					return merr.Status(err), nil
 				}
 			}
+		}
+	}
+
+	// FMINDEX version gate — shared with snapshot restore via
+	// checkFMIndexEngineVersion so neither path can create an FMINDEX segment the
+	// cluster's QueryNodes cannot load yet.
+	if common.GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexFMINDEX {
+		resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
+		if err := checkFMIndexEngineVersion(req.GetIndexParams(), resolved); err != nil {
+			mlog.Warn(ctx, "scalar index engine version too low for FMINDEX", mlog.Err(err))
+			return merr.Status(err), nil
 		}
 	}
 
@@ -213,7 +251,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 		fieldName, err := s.defaultIndexNameByID(schema, req.GetFieldID())
 		if err != nil {
-			mlog.Warn(context.TODO(), "get field name from schema failed", mlog.Int64("fieldID", req.GetFieldID()))
+			mlog.Warn(ctx, "get field name from schema failed", mlog.Int64("fieldID", req.GetFieldID()))
 			return merr.Status(err), nil
 		}
 		defaultIndexName := fieldName
@@ -242,19 +280,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		// For snapshot restore: use provided index ID instead of allocating a new one
 		indexID = req.GetIndexId()
 		if indexID <= 0 {
-			mlog.Warn(context.TODO(), "invalid index ID provided for preserve",
+			mlog.Warn(ctx, "invalid index ID provided for preserve",
 				mlog.Int64("indexID", indexID))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(merr.WrapErrParameterInvalidMsg("index_id must be positive when preserve_index_id is true")), nil
 		}
-		mlog.Info(context.TODO(), "using preserved index ID for snapshot restore",
+		mlog.Info(ctx, "using preserved index ID for snapshot restore",
 			mlog.Int64("indexID", indexID))
 	} else {
 		// Normal path: allocate new index ID
 		var err error
 		_, err = s.allocator.AllocID(ctx)
 		if err != nil {
-			mlog.Warn(context.TODO(), "failed to alloc indexID", mlog.Err(err))
+			mlog.Warn(ctx, "failed to alloc indexID", mlog.Err(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
@@ -262,21 +300,21 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		indexID, err = s.meta.indexMeta.CanCreateIndex(req, isJSON)
 		if err != nil {
 			if errors.Is(err, errIndexOperationIgnored) {
-				mlog.Info(context.TODO(), "index already exists",
+				mlog.Info(ctx, "index already exists",
 					mlog.Int64("collectionID", req.GetCollectionID()),
 					mlog.Int64("fieldID", req.GetFieldID()),
 					mlog.String("indexName", req.GetIndexName()))
 				metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 				return merr.Success(), nil
 			}
-			mlog.Error(context.TODO(), "Check CanCreateIndex fail", mlog.Err(err))
+			mlog.Error(ctx, "Check CanCreateIndex fail", mlog.Err(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
 	}
 	if indexID == 0 {
 		if indexID, err = s.allocator.AllocID(ctx); err != nil {
-			mlog.Warn(context.TODO(), "failed to alloc indexID", mlog.Err(err))
+			mlog.Warn(ctx, "failed to alloc indexID", mlog.Err(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
@@ -298,13 +336,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		UserIndexParams: req.GetUserIndexParams(),
 	}
 	// Validate the index params.
-	if err := ValidateIndexParams(index); err != nil {
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
-	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -316,58 +351,18 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast(channels).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
-		mlog.Error(context.TODO(), "CreateIndex fail", mlog.Err(err))
+		mlog.Error(ctx, "CreateIndex fail", mlog.Err(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	mlog.Info(context.TODO(), "CreateIndex successfully",
+	mlog.Info(ctx, "CreateIndex successfully",
 		mlog.String("IndexName", index.IndexName), mlog.Int64("fieldID", index.FieldID),
-		mlog.Int64("IndexID", index.IndexID),
-		mlog.Strings("channels", channels))
+		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
-}
-
-func ValidateIndexParams(index *model.Index) error {
-	if err := CheckDuplidateKey(index.IndexParams, "indexParams"); err != nil {
-		return err
-	}
-	if err := CheckDuplidateKey(index.UserIndexParams, "userIndexParams"); err != nil {
-		return err
-	}
-	if err := CheckDuplidateKey(index.TypeParams, "typeParams"); err != nil {
-		return err
-	}
-	indexType := GetIndexType(index.IndexParams)
-	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
-	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
-	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
-	}
-	return nil
-}
-
-func CheckDuplidateKey(kvs []*commonpb.KeyValuePair, tag string) error {
-	keySet := typeutil.NewSet[string]()
-	for _, kv := range kvs {
-		if keySet.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicate %s key in %s params", kv.GetKey(), tag)
-		}
-		keySet.Insert(kv.GetKey())
-	}
-	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
@@ -498,7 +493,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.IndexParams = newIndexParams
 		}
 
-		if err := ValidateIndexParams(index); err != nil {
+		if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 			return merr.Status(err), nil
 		}
 	}

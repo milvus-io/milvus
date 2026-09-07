@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -95,7 +97,12 @@ type meta struct {
 
 	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
 
-	segments *CachedSegmentsInfo // segment id to segment info
+	segments            *CachedSegmentsInfo // segment id to segment info
+	segmentCompactionMu lock.Mutex          // serializes local check-and-set of segment compaction flags
+	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
+	// segment. Manifest I/O runs while this per-segment lock is held; final
+	// catalog publication still uses the optimistic segment CAS path.
+	segmentManifestLocks *lock.KeyLock[int64]
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -104,13 +111,10 @@ type meta struct {
 	analyzeMeta                   *analyzeMeta
 	partitionStatsMeta            *partitionStatsMeta
 	compactionTaskMeta            *compactionTaskMeta
+	compactionTargetMeta          *compactionTargetMeta
 	statsTaskMeta                 *statsTaskMeta
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
-
-	// File Resource Meta
-	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
-	resourceVersion uint64
-	resourceLock    lock.RWMutex
+	broker                        broker.Broker
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
 }
@@ -131,19 +135,25 @@ func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
 }
 
+func (m *meta) GetCompactionTargetMeta() *compactionTargetMeta {
+	return m.compactionTargetMeta
+}
+
 func (m *meta) GetSnapshotMeta() *snapshotMeta {
 	return m.snapshotMeta
 }
 
 type channelCPs struct {
 	lock.RWMutex
-	checkpoints map[string]*msgpb.MsgPosition
-	cond        *syncutil.ContextCond
+	checkpoints  map[string]*msgpb.MsgPosition
+	channelLocks *lock.KeyLock[string]
+	cond         *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
 	cp := &channelCPs{
-		checkpoints: make(map[string]*msgpb.MsgPosition),
+		checkpoints:  make(map[string]*msgpb.MsgPosition),
+		channelLocks: lock.NewKeyLock[string](),
 	}
 	// use the same lock as channelCPs
 	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
@@ -182,15 +192,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if segment == nil {
 		return segmentMetricFormatUnknown
 	}
-
-	formats := make(map[string]struct{})
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		format := strings.TrimSpace(fieldBinlog.GetFormat())
-		if format == "" {
-			continue
-		}
-		formats[format] = struct{}{}
-	}
+	formats := segment.EnsureStats().GetFormats()
 	if len(formats) == 0 {
 		if segment.GetStorageVersion() < storage.StorageV2 {
 			return segmentMetricFormatLegacy
@@ -200,10 +202,7 @@ func segmentMetricFormatLabel(segment *SegmentInfo) string {
 	if len(formats) > 1 {
 		return segmentMetricFormatMixed
 	}
-	for format := range formats {
-		return format
-	}
-	return segmentMetricFormatUnknown
+	return formats[0]
 }
 
 func segmentMetricLabelValues(segment *SegmentInfo) []string {
@@ -287,6 +286,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		am   *analyzeMeta
 		psm  *partitionStatsMeta
 		ctm  *compactionTaskMeta
+		crm  *compactionTargetMeta
 		stm  *statsTaskMeta
 		ecrm *externalCollectionRefreshMeta
 		spm  *snapshotMeta
@@ -295,17 +295,16 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:             ctx,
-		catalog:         catalog,
-		metaRootPath:    metaRootPath,
-		segmentPersist:  segmentPersist,
-		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:        NewCachedSegmentsInfo(),
-		channelCPs:      newChannelCps(),
-		chunkManager:    chunkManager,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
+		ctx:                  ctx,
+		catalog:              catalog,
+		metaRootPath:         metaRootPath,
+		segmentPersist:       segmentPersist,
+		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:             NewCachedSegmentsInfo(),
+		segmentManifestLocks: lock.NewKeyLock[int64](),
+		channelCPs:           newChannelCps(),
+		chunkManager:         chunkManager,
+		broker:               broker,
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -334,6 +333,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		g.Go(func() error {
+			var err error
+			crm, err = newCompactionTargetMeta(ctx, catalog)
+			return err
+		})
+	}
+
 	g.Go(func() error {
 		var err error
 		stm, err = newStatsTaskMeta(ctx, catalog)
@@ -342,7 +349,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	g.Go(func() error {
 		var err error
-		ecrm, err = newExternalCollectionRefreshMeta(ctx, catalog)
+		ecrm, err = newExternalCollectionRefreshMeta(
+			ctx,
+			catalog,
+			withExternalCollectionRefreshResultStore(
+				newExternalCollectionRefreshResultStore(chunkManager),
+			),
+		)
 		return err
 	})
 
@@ -367,6 +380,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.analyzeMeta = am
 	mt.partitionStatsMeta = psm
 	mt.compactionTaskMeta = ctm
+	mt.compactionTargetMeta = crm
 	mt.statsTaskMeta = stm
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
@@ -400,48 +414,68 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 				return nil, err
 			}
 			// Backward-compat: older clusters persist binlog fields as separate KVs
-			// and strip them from the segment proto. A segment with no embedded
-			// binlog-family fields may still have side-prefix KVs, including L0
-			// delete-only segments whose NumOfRows is zero.
-			needsBinlogFallback := false
+			// and strip them from the segment proto. Resolve each family independently:
+			// rolling upgrades can leave a mixed record with one family embedded and
+			// another available only under its side prefix.
+			var needInsert, needDelta, needStats, needBM25 bool
 			for _, seg := range values {
-				if len(seg.GetBinlogs()) == 0 && len(seg.GetDeltalogs()) == 0 &&
-					len(seg.GetStatslogs()) == 0 && len(seg.GetBm25Statslogs()) == 0 {
-					needsBinlogFallback = true
-					break
+				needInsert = needInsert || len(seg.GetBinlogs()) == 0
+				needDelta = needDelta || len(seg.GetDeltalogs()) == 0
+				needStats = needStats || len(seg.GetStatslogs()) == 0
+				needBM25 = needBM25 || len(seg.GetBm25Statslogs()) == 0
+			}
+			var insertMap, deltaMap, statsMap, bm25Map map[int64][]*datapb.FieldBinlog
+			if needInsert {
+				insertMap, err = m.scanLegacyBinlogs(datacoordkv.SegmentBinlogPathPrefix, collectionID)
+				if err != nil {
+					return nil, err
 				}
 			}
-			if needsBinlogFallback {
-				insertMap, err := m.scanLegacyBinlogs(datacoordkv.SegmentBinlogPathPrefix, collectionID)
+			if needDelta {
+				deltaMap, err = m.scanLegacyBinlogs(datacoordkv.SegmentDeltalogPathPrefix, collectionID)
 				if err != nil {
 					return nil, err
 				}
-				deltaMap, err := m.scanLegacyBinlogs(datacoordkv.SegmentDeltalogPathPrefix, collectionID)
+			}
+			if needStats {
+				statsMap, err = m.scanLegacyBinlogs(datacoordkv.SegmentStatslogPathPrefix, collectionID)
 				if err != nil {
 					return nil, err
 				}
-				statsMap, err := m.scanLegacyBinlogs(datacoordkv.SegmentStatslogPathPrefix, collectionID)
+			}
+			if needBM25 {
+				bm25Map, err = m.scanLegacyBinlogs(datacoordkv.SegmentBM25logPathPrefix, collectionID)
 				if err != nil {
 					return nil, err
 				}
-				bm25Map, err := m.scanLegacyBinlogs(datacoordkv.SegmentBM25logPathPrefix, collectionID)
-				if err != nil {
-					return nil, err
-				}
-				for _, seg := range values {
-					if len(seg.GetBinlogs()) > 0 || len(seg.GetDeltalogs()) > 0 ||
-						len(seg.GetStatslogs()) > 0 || len(seg.GetBm25Statslogs()) > 0 {
-						continue
-					}
-					id := seg.GetID()
+			}
+			for _, seg := range values {
+				id := seg.GetID()
+				if len(seg.GetBinlogs()) == 0 {
 					seg.Binlogs = insertMap[id]
+				}
+				if len(seg.GetDeltalogs()) == 0 {
 					seg.Deltalogs = deltaMap[id]
+				}
+				if len(seg.GetStatslogs()) == 0 {
 					seg.Statslogs = statsMap[id]
+				}
+				if len(seg.GetBm25Statslogs()) == 0 {
 					seg.Bm25Statslogs = bm25Map[id]
 				}
 			}
-			// Restore full paths for text index logs (filenames-only in etcd).
+			// Preserve the path normalization performed by Catalog.ListSegments:
+			// text-index files become absolute, while JSON-key files stay relative.
 			for _, seg := range values {
+				if err := binlog.CompressBinLogs(
+					seg.GetBinlogs(),
+					seg.GetDeltalogs(),
+					seg.GetStatslogs(),
+					seg.GetBm25Statslogs(),
+				); err != nil {
+					return nil, err
+				}
+				metautil.ExtractJSONKeyStatsRelativePaths(seg.GetJsonKeyStats())
 				if len(seg.GetTextStatsLogs()) == 0 {
 					continue
 				}
@@ -476,11 +510,8 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 			if segment.State == commonpb.SegmentState_Flushed {
 				numStoredRows += segment.NumOfRows
 
-				insertFileNum := 0
-				for _, fieldBinlog := range segment.GetBinlogs() {
-					insertFileNum += len(fieldBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+				stats := segment.GetStats()
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 
 				statFileNum := 0
 				for _, fieldBinlog := range segment.GetStatslogs() {
@@ -488,11 +519,7 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 				}
 				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
 
-				deleteFileNum := 0
-				for _, filedBinlog := range segment.GetDeltalogs() {
-					deleteFileNum += len(filedBinlog.GetBinlogs())
-				}
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 			}
 		}
 	}
@@ -556,19 +583,19 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 // AddCollection adds a collection into meta
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
-	mlog.Info(context.TODO(), "meta update: add collection", mlog.Int64("collectionID", collection.ID))
+	mlog.Info(m.ctx, "meta update: add collection", mlog.Int64("collectionID", collection.ID))
 	m.collections.Insert(collection.ID, collection)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
-	mlog.Info(context.TODO(), "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
+	mlog.Info(m.ctx, "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
 }
 
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
-	mlog.Info(context.TODO(), "meta update: drop collection", mlog.Int64("collectionID", collectionID))
+	mlog.Info(m.ctx, "meta update: drop collection", mlog.Int64("collectionID", collectionID))
 	if _, ok := m.collections.GetAndRemove(collectionID); ok {
 		metrics.CleanupDataCoordWithCollectionID(collectionID)
 		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
-		mlog.Info(context.TODO(), "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
+		mlog.Info(m.ctx, "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
 	}
 }
 
@@ -651,18 +678,13 @@ func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
-	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
-		cnt := 0
-		for _, fbs := range fieldBinlogs {
-			cnt += len(fbs.Binlogs)
-		}
-		return cnt
+	stats := s.GetStats()
+	cnt := int(stats.GetInsertBinlogCount() + stats.GetDeltaBinlogCount())
+	// Statistics has no stat-file count; V3's empty statslogs array = 0
+	// matches the manifest-driven layout, so the array path is correct.
+	for _, fbs := range s.GetStatslogs() {
+		cnt += len(fbs.Binlogs)
 	}
-
-	cnt := 0
-	cnt += statsFieldFn(s.GetBinlogs())
-	cnt += statsFieldFn(s.GetStatslogs())
-	cnt += statsFieldFn(s.GetDeltalogs())
 	return cnt
 }
 
@@ -785,7 +807,7 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 			log.Info(ctx, "segment already exists, ignore the operation", mlog.Int64("segmentID", segment.ID))
 			return nil
 		}
-		log.Error(ctx, "meta update: adding segment failed",
+		mlog.Error(ctx, "meta update: adding segment failed",
 			mlog.Int64("segmentID", segment.GetID()),
 			mlog.Err(err))
 		return err
@@ -793,15 +815,19 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	m.segments.SetSegment(segment.GetID(), segment, results[0].Version)
 
 	metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(segment)...).Inc()
-	mlog.Info(context.TODO(), "meta update: adding segment - complete", mlog.Int64("segmentID", segment.GetID()))
+	mlog.Info(ctx, "meta update: adding segment - complete", mlog.Int64("segmentID", segment.GetID()))
 	return nil
 }
 
-// DropSegment remove segment, etcd persistence also removed
-func (m *meta) DropSegment(ctx context.Context, segment *SegmentInfo) error {
+// DropSegment removes a segment and its persisted metadata.
+func (m *meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	log := mlog.With()
-	segmentID := segment.GetID()
 	log.Debug(ctx, "meta update: dropping segment", mlog.Int64("segmentID", segmentID))
+	segment := m.segments.GetSegment(segmentID)
+	if segment == nil {
+		log.Info(ctx, "meta update: dropping segment - already deleted", mlog.Int64("segmentID", segmentID))
+		return nil
+	}
 	key := m.segmentKey(segment.GetCollectionID(), segment.GetPartitionID(), segmentID)
 	txn := m.segmentPersist.Txn(ctx)
 	txn.Delete(key, segment.SegmentInfo)
@@ -812,7 +838,7 @@ func (m *meta) DropSegment(ctx context.Context, segment *SegmentInfo) error {
 			m.segments.DropSegment(segmentID, math.MaxInt64)
 			return nil
 		}
-		log.Warn(ctx, "meta update: dropping segment failed",
+		mlog.Warn(ctx, "meta update: dropping segment failed",
 			mlog.Int64("segmentID", segmentID),
 			mlog.Err(err))
 		return err
@@ -860,6 +886,9 @@ func (m *meta) scanLegacyBinlogs(pathPrefix string, collectionID int64) (map[int
 			if b.GetMemorySize() == 0 {
 				fb.Binlogs[j].MemorySize = b.GetLogSize()
 			}
+		}
+		if err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{fb}); err != nil {
+			return nil, merr.Wrapf(err, "compress legacy FieldBinlog at %q", key)
 		}
 		result[segID] = append(result[segID], fb)
 	}
@@ -924,7 +953,7 @@ func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
 	for _, segmentID := range segmentIDs {
 		segment := m.segments.GetSegment(segmentID)
 		if segment == nil {
-			mlog.Warn(context.TODO(), "cannot find segment", mlog.Int64("segmentID", segmentID))
+			mlog.Warn(m.ctx, "cannot find segment", mlog.Int64("segmentID", segmentID))
 			continue
 		}
 		sum += segment.GetNumOfRows()
@@ -967,6 +996,13 @@ func (m *meta) updateSegmentCAS(ctx context.Context, segmentID UniqueID, mutate 
 		base := cur.Clone()
 		clone := base.Clone()
 		inc, ok := mutate(clone)
+		if clone.pendingMutationErr != nil {
+			return retry.Unrecoverable(clone.pendingMutationErr)
+		}
+		if clone.pendingMutationSkip {
+			out = cur
+			return nil
+		}
 		if !ok {
 			out = cur
 			return nil
@@ -1020,16 +1056,25 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 		mlog.Any("target state", targetState))
 
 	var oldState commonpb.SegmentState
+	var stateChanged bool
 	updated, err := m.updateSegmentCAS(ctx, segmentID, func(s *SegmentInfo) (BinlogIncrement, bool) {
+		stateChanged = false
+		// Preserve the legacy SetState contract: once a segment is unhealthy,
+		// callers cannot resurrect it by applying a later state transition.
+		if !isSegmentHealthy(s) {
+			return BinlogIncrement{}, false
+		}
 		oldState = s.GetState()
 		s.State = targetState
+		stateChanged = true
 		if targetState == commonpb.SegmentState_Dropped {
 			s.DroppedAt = uint64(time.Now().UnixNano())
 		}
 		return BinlogIncrement{}, true
 	})
 	if err != nil {
-		if errors.Is(err, ErrKeyNotFound) && targetState == commonpb.SegmentState_Dropped {
+		if targetState == commonpb.SegmentState_Dropped &&
+			(errors.Is(err, ErrKeyNotFound) || errors.Is(err, merr.ErrSegmentNotFound)) {
 			return nil
 		}
 		if errors.Is(err, merr.ErrSegmentNotFound) {
@@ -1041,12 +1086,12 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 			mlog.Err(err))
 		return err
 	}
-	if updated != nil && oldState != updated.GetState() {
+	if stateChanged && updated != nil && oldState != updated.GetState() {
 		metricMutation := segMetricMutation{stateChange: make(segmentMetricStateChange)}
 		metricMutation.append(oldState, updated.GetState(), updated.GetLevel(), updated.GetIsSorted(), updated.GetStorageVersion(), segmentMetricFormatLabel(updated), updated.GetNumOfRows())
 		metricMutation.commit()
 	}
-	mlog.Info(context.TODO(), "meta update: setting segment state - complete",
+	mlog.Info(ctx, "meta update: setting segment state - complete",
 		mlog.Int64("segmentID", segmentID),
 		mlog.String("target state", targetState.String()))
 	return nil
@@ -1082,10 +1127,12 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 	return nil
 }
 
-// UpdateSegmentsInfo atomically persists mutations to existing segments and
-// inserts newSegments. Existing-segment operators run against a clone of the
-// cached (fully-stitched) SegmentInfo; writes are CAS-gated on the cache
-// version. On CAS conflict the whole operation retries from the cache read.
+// UpdateSegmentsInfo persists a logical batch of existing-segment mutations
+// and new segments. Existing-segment operators run against a clone of the
+// cached (fully-stitched) SegmentInfo and writes are CAS-gated on the cache
+// version. A backend may commit the batch in bounded atomic prefixes; returned
+// partial results are applied to the cache before the uncommitted remainder is
+// restaged and retried.
 type segmentMutationEntry struct {
 	segID   int64
 	key     string
@@ -1101,16 +1148,51 @@ type segmentNewEntry struct {
 }
 
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+	return m.updateSegmentsInfo(ctx, mutations, nil, nil, newSegments...)
+}
+
+func (m *meta) updateSegmentsInfo(
+	ctx context.Context,
+	mutations map[int64][]SegmentOperator,
+	prioritySegmentIDs []int64,
+	missingSegmentErrors map[int64]error,
+	newSegments ...*datapb.SegmentInfo,
+) error {
 	if len(mutations) == 0 && len(newSegments) == 0 {
 		return nil
 	}
+	orderedSegmentIDs := make([]int64, 0, len(mutations))
+	seenSegmentIDs := make(map[int64]struct{}, len(mutations))
+	for _, segmentID := range prioritySegmentIDs {
+		if _, ok := mutations[segmentID]; !ok {
+			continue
+		}
+		if _, seen := seenSegmentIDs[segmentID]; seen {
+			continue
+		}
+		orderedSegmentIDs = append(orderedSegmentIDs, segmentID)
+		seenSegmentIDs[segmentID] = struct{}{}
+	}
+	remainingSegmentIDs := make([]int64, 0, len(mutations)-len(orderedSegmentIDs))
+	for segmentID := range mutations {
+		if _, seen := seenSegmentIDs[segmentID]; !seen {
+			remainingSegmentIDs = append(remainingSegmentIDs, segmentID)
+		}
+	}
+	sort.Slice(remainingSegmentIDs, func(i, j int) bool {
+		return remainingSegmentIDs[i] < remainingSegmentIDs[j]
+	})
+	orderedSegmentIDs = append(orderedSegmentIDs, remainingSegmentIDs...)
 
 	var lastMutated []segmentMutationEntry
 	var lastNew []segmentNewEntry
 	var results []SegmentTxnResult
 	var noop bool
 	committedL0Manifests := make(map[int64]string)
+	committedMutatedSegments := make(map[int64]struct{})
 	committedNewSegments := make(map[int64]struct{})
+	committedMutatedEntries := make([]segmentMutationEntry, 0)
+	committedNewEntries := make([]segmentNewEntry, 0)
 
 	err := retry.Do(ctx, func() error {
 		noop = false
@@ -1120,9 +1202,19 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 
 		mutated := make([]segmentMutationEntry, 0, len(mutations))
 		l0ManifestUpdates := make([]*l0ManifestUpdate, 0)
-		for segID, fns := range mutations {
+		for _, segID := range orderedSegmentIDs {
+			if _, committed := committedMutatedSegments[segID]; committed {
+				continue
+			}
+			fns := mutations[segID]
 			cur, version := m.segments.GetSegmentWithVersion(segID)
 			if cur == nil {
+				if missingErr, required := missingSegmentErrors[segID]; required {
+					mlog.Warn(ctx, "meta update: required segment not found",
+						mlog.Int64("segmentID", segID),
+						mlog.Err(missingErr))
+					return missingErr
+				}
 				mlog.Warn(ctx, "meta update: segment not found, skipping",
 					mlog.Int64("segmentID", segID))
 				continue
@@ -1130,17 +1222,20 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 			base := cur.Clone()
 			clone := base.Clone()
 			var inc BinlogIncrement
-			shouldWrite := true
+			shouldWrite := false
 			for _, fn := range fns {
-				fnInc, ok := fn(clone)
+				fnInc, changed := fn(clone)
 				if clone.pendingMutationErr != nil {
-					return retry.Unrecoverable(clone.pendingMutationErr)
+					return clone.pendingMutationErr
 				}
-				if !ok {
+				if clone.pendingMutationSkip {
 					shouldWrite = false
 					break
 				}
-				inc.Union(fnInc)
+				if changed {
+					shouldWrite = true
+					inc.Union(fnInc)
+				}
 			}
 			if !shouldWrite {
 				continue
@@ -1184,15 +1279,17 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		newEntries := make([]segmentNewEntry, 0, len(newSegments))
 		for _, seg := range newSegments {
 			if _, ok := committedNewSegments[seg.GetID()]; ok {
-				if existing := m.segments.GetSegment(seg.GetID()); existing != nil {
-					continue
-				}
+				// This insert was durably committed by an earlier partial prefix.
+				// Never replay it: a concurrent removal may have installed a newer
+				// cache tombstone, and retrying would either collide or resurrect it.
+				continue
 			}
-			key := m.segmentKey(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
-			if err := txn.Insert(key, seg); err != nil {
+			info := NewSegmentInfo(seg)
+			key := m.segmentKey(info.GetCollectionID(), info.GetPartitionID(), info.GetID())
+			if err := txn.Insert(key, info.SegmentInfo); err != nil {
 				return retry.Unrecoverable(err)
 			}
-			newEntries = append(newEntries, segmentNewEntry{segID: seg.GetID(), info: NewSegmentInfo(seg)})
+			newEntries = append(newEntries, segmentNewEntry{segID: info.GetID(), info: info})
 		}
 
 		if len(mutated) == 0 && len(newEntries) == 0 {
@@ -1203,9 +1300,15 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		committed, err := txn.Commit()
 		if err != nil {
 			if errors.Is(err, ErrPartialCommit) {
-				for _, segID := range m.applyPartialSegmentResults(mutated, newEntries, committed) {
-					committedNewSegments[segID] = struct{}{}
+				committedMutated, committedNew := m.applyPartialSegmentResults(mutated, newEntries, committed)
+				for _, entry := range committedMutated {
+					committedMutatedSegments[entry.segID] = struct{}{}
 				}
+				for _, entry := range committedNew {
+					committedNewSegments[entry.segID] = struct{}{}
+				}
+				committedMutatedEntries = append(committedMutatedEntries, committedMutated...)
+				committedNewEntries = append(committedNewEntries, committedNew...)
 				return ErrCASFailed
 			}
 			return err
@@ -1216,10 +1319,14 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		return nil
 	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
 	if err != nil {
+		if errors.Is(err, errIgnoredSegmentMetaOperation) {
+			mlog.Info(ctx, "meta update: ignored stale segment meta operation", mlog.Err(err))
+			return nil
+		}
 		mlog.Error(ctx, "meta update: failed to persist segments", mlog.Err(err))
 		return err
 	}
-	if noop {
+	if noop && len(committedMutatedEntries) == 0 && len(committedNewEntries) == 0 {
 		return nil
 	}
 
@@ -1227,6 +1334,22 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	metricMutation := &segMetricMutation{
 		stateChange:             make(segmentMetricStateChange),
 		deferSegmentLabelChange: true,
+	}
+	for _, e := range committedMutatedEntries {
+		newSeg := m.segments.GetSegment(e.segID)
+		if newSeg == nil {
+			continue
+		}
+		metricMutation.append(e.base.GetState(), newSeg.GetState(), newSeg.GetLevel(), newSeg.GetIsSorted(), newSeg.GetStorageVersion(), segmentMetricFormatLabel(newSeg), newSeg.GetNumOfRows())
+		if !sameSegmentMetricLabels(e.base, newSeg) {
+			metricMutation.appendSegmentLabelChange(e.base, newSeg)
+		}
+	}
+	for _, e := range committedNewEntries {
+		newSeg := m.segments.GetSegment(e.segID)
+		if newSeg != nil {
+			metricMutation.addNewSeg(newSeg.GetState(), newSeg.GetLevel(), newSeg.GetIsSorted(), newSeg.GetStorageVersion(), segmentMetricFormatLabel(newSeg), newSeg.GetNumOfRows())
+		}
 	}
 	idx := 0
 	for _, e := range lastMutated {
@@ -1249,192 +1372,129 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	return nil
 }
 
-func (m *meta) applyPartialSegmentResults(mutated []segmentMutationEntry, newEntries []segmentNewEntry, results []SegmentTxnResult) []int64 {
-	committedNewSegments := make([]int64, 0, len(newEntries))
+func (m *meta) applyPartialSegmentResults(
+	mutated []segmentMutationEntry,
+	newEntries []segmentNewEntry,
+	results []SegmentTxnResult,
+) ([]segmentMutationEntry, []segmentNewEntry) {
+	committedMutatedSegments := make([]segmentMutationEntry, 0, len(mutated))
+	committedNewSegments := make([]segmentNewEntry, 0, len(newEntries))
 	idx := 0
 	for _, e := range mutated {
 		if idx >= len(results) {
-			return committedNewSegments
+			return committedMutatedSegments, committedNewSegments
 		}
 		if results[idx].Version > 0 {
 			m.segments.SetSegmentPreservingLocalState(e.segID, e.base, e.clone, results[idx].Version)
+			committedMutatedSegments = append(committedMutatedSegments, e)
 		}
 		idx++
 	}
 	for _, e := range newEntries {
 		if idx >= len(results) {
-			return committedNewSegments
+			return committedMutatedSegments, committedNewSegments
 		}
 		if results[idx].Version > 0 {
 			m.segments.SetSegment(e.segID, e.info, results[idx].Version)
-			committedNewSegments = append(committedNewSegments, e.segID)
+			committedNewSegments = append(committedNewSegments, e)
 		}
 		idx++
 	}
-	return committedNewSegments
+	return committedMutatedSegments, committedNewSegments
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
 // reusing segment info to pass segment id, binlogs, statslog, deltalog, start position and checkpoint
 func (m *meta) UpdateDropChannelSegmentInfo(ctx context.Context, channel string, segments []*SegmentInfo) error {
-	log := mlog.With()
-	log.Debug(ctx, "meta update: update drop channel segment info",
-		mlog.String("channel", channel))
+	log := mlog.With(mlog.String("channel", channel))
+	log.Debug(ctx, "meta update: update drop channel segment info")
 
-	// Build map of segment ID -> drop data for merge segments
-	seg2DropMap := make(map[int64]*SegmentInfo)
-	for _, seg2Drop := range segments {
-		segment := m.segments.GetSegment(seg2Drop.ID)
-		if segment == nil || !isSegmentHealthy(segment) {
-			log.Warn(ctx, "UpdateDropChannel skipping nil or unhealthy",
-				mlog.Bool("is nil", segment == nil),
-				mlog.Bool("isHealthy", isSegmentHealthy(segment)))
+	dropData := make(map[int64]*SegmentInfo, len(segments))
+	for _, segment := range segments {
+		if segment != nil {
+			dropData[segment.GetID()] = segment
+		}
+	}
+
+	getFieldBinlogs := func(fieldID UniqueID, fieldBinlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+		for _, fieldBinlog := range fieldBinlogs {
+			if fieldBinlog.GetFieldID() == fieldID {
+				return fieldBinlog
+			}
+		}
+		return nil
+	}
+
+	droppedAt := uint64(time.Now().UnixNano())
+	mutations := make(map[int64][]SegmentOperator)
+	segmentIDs := make([]int64, 0)
+	for _, current := range m.segments.GetSegmentsByChannel(channel) {
+		if current == nil || !isSegmentHealthy(current) {
 			continue
 		}
-		seg2DropMap[seg2Drop.GetID()] = seg2Drop
-	}
-
-	// Collect all healthy segments on this channel
-	type segRef struct {
-		id  int64
-		key string
-	}
-	var segRefs []segRef
-	for _, seg := range m.segments.GetSegmentsByChannel(channel) {
-		segRefs = append(segRefs, segRef{
-			id:  seg.GetID(),
-			key: m.segmentKey(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID()),
-		})
-	}
-
-	if len(segRefs) == 0 {
-		// No segments to drop, just mark channel deleted
-		if err := m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	log.Info(ctx, "meta update: batch save drop segments",
-		mlog.Int64s("drop segments", lo.Map(segRefs, func(r segRef, _ int) int64 { return r.id })))
-
-	getFieldBinlogs := func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
-		for _, binlog := range binlogs {
-			if id == binlog.GetFieldID() {
-				return binlog
+		segmentID := current.GetID()
+		incoming := dropData[segmentID]
+		mutations[segmentID] = []SegmentOperator{func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if !isSegmentHealthy(segment) {
+				return BinlogIncrement{}, false
 			}
-		}
-		return nil
-	}
-	applyDrop := func(clone *SegmentInfo, mergeData *SegmentInfo) {
-		clone.State = commonpb.SegmentState_Dropped
-		clone.DroppedAt = uint64(time.Now().UnixNano())
-		if mergeData == nil {
-			return
-		}
-		currBinlogs := clone.GetBinlogs()
-		for _, tBinlogs := range mergeData.GetBinlogs() {
-			fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
-			if fieldBinlogs == nil {
-				currBinlogs = append(currBinlogs, tBinlogs)
-			} else {
-				fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
+			segment.State = commonpb.SegmentState_Dropped
+			segment.DroppedAt = droppedAt
+			if incoming == nil {
+				return BinlogIncrement{}, true
 			}
-		}
-		clone.Binlogs = currBinlogs
 
-		currStatsLogs := clone.GetStatslogs()
-		for _, tStatsLogs := range mergeData.GetStatslogs() {
-			fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
-			if fieldStatsLog == nil {
-				currStatsLogs = append(currStatsLogs, tStatsLogs)
-			} else {
-				fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
-			}
-		}
-		clone.Statslogs = currStatsLogs
-
-		clone.Deltalogs = append(clone.GetDeltalogs(), mergeData.GetDeltalogs()...)
-		if mergeData.GetStartPosition() != nil {
-			clone.StartPosition = mergeData.GetStartPosition()
-		}
-		if mergeData.GetDmlPosition() != nil {
-			clone.DmlPosition = mergeData.GetDmlPosition()
-		}
-		clone.NumOfRows = mergeData.GetNumOfRows()
-	}
-
-	type pending struct {
-		id    int64
-		clone *SegmentInfo
-	}
-
-	var results []SegmentTxnResult
-	var pendings []pending
-
-	err := retry.Do(ctx, func() error {
-		txn := m.segmentPersist.Txn(ctx)
-		pendings = pendings[:0]
-		for _, ref := range segRefs {
-			cur, version := m.segments.GetSegmentWithVersion(ref.id)
-			if cur == nil {
-				continue
-			}
-			clone := cur.Clone()
-			mergeData := seg2DropMap[ref.id]
-			applyDrop(clone, mergeData)
-			// Only merge cases mutate binlog families; non-merge is state-only.
-			var inc BinlogIncrement
-			if mergeData != nil {
-				inc = BinlogIncrement{
-					Binlogs:   clone.GetBinlogs(),
-					Deltalogs: clone.GetDeltalogs(),
-					Statslogs: clone.GetStatslogs(),
+			for _, incomingBinlogs := range incoming.GetBinlogs() {
+				fieldBinlogs := getFieldBinlogs(incomingBinlogs.GetFieldID(), segment.GetBinlogs())
+				if fieldBinlogs == nil {
+					segment.Binlogs = append(segment.Binlogs, incomingBinlogs)
+				} else {
+					fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, incomingBinlogs.GetBinlogs()...)
 				}
 			}
-			if err := txn.Update(ref.key, clone.SegmentInfo, version, inc); err != nil {
-				return retry.Unrecoverable(err)
+			for _, incomingStatslogs := range incoming.GetStatslogs() {
+				fieldStatslogs := getFieldBinlogs(incomingStatslogs.GetFieldID(), segment.GetStatslogs())
+				if fieldStatslogs == nil {
+					segment.Statslogs = append(segment.Statslogs, incomingStatslogs)
+				} else {
+					fieldStatslogs.Binlogs = append(fieldStatslogs.Binlogs, incomingStatslogs.GetBinlogs()...)
+				}
 			}
-			pendings = append(pendings, pending{id: ref.id, clone: clone})
-		}
-		if len(pendings) == 0 {
-			return nil
-		}
-		committed, err := txn.Commit()
-		if err != nil {
+			segment.Deltalogs = append(segment.Deltalogs, incoming.GetDeltalogs()...)
+			if incoming.GetStartPosition() != nil {
+				segment.StartPosition = incoming.GetStartPosition()
+			}
+			if incoming.GetDmlPosition() != nil {
+				segment.DmlPosition = incoming.GetDmlPosition()
+			}
+			segment.NumOfRows = incoming.GetNumOfRows()
+			return BinlogIncrement{
+				Binlogs:   segment.GetBinlogs(),
+				Deltalogs: segment.GetDeltalogs(),
+				Statslogs: segment.GetStatslogs(),
+			}, true
+		}}
+		segmentIDs = append(segmentIDs, segmentID)
+	}
+
+	if len(mutations) > 0 {
+		log.Info(ctx, "meta update: batch save drop segments",
+			mlog.Int64s("drop segments", segmentIDs))
+		if err := m.UpdateSegmentsInfo(ctx, mutations); err != nil {
+			log.Warn(ctx, "meta update: update drop channel segment info failed", mlog.Err(err))
 			return err
 		}
-		results = committed
-		return nil
-	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
-	if err != nil {
-		log.Warn(ctx, "meta update: update drop channel segment info failed",
-			mlog.String("channel", channel),
-			mlog.Err(err))
-		return err
 	}
-	if err := m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
+
+	// Publish the channel tombstone only after every segment mutation has
+	// completed. UpdateSegmentsInfo compensates and retries any partial backend
+	// batch before this visibility marker is written.
+	if err := m.catalog.Update(ctx, metastore.MarkChannelDropped(channel)); err != nil {
+		log.Warn(ctx, "meta update: mark channel dropped failed", mlog.Err(err))
 		return err
 	}
 
-	metricMutation := &segMetricMutation{
-		stateChange:             make(segmentMetricStateChange),
-		deferSegmentLabelChange: true,
-	}
-	for i, p := range pendings {
-		newInfo := p.clone
-		oldSeg, existed := m.segments.SetSegment(p.id, newInfo, results[i].Version)
-		if existed {
-			metricMutation.append(oldSeg.GetState(), newInfo.GetState(), newInfo.GetLevel(), newInfo.GetIsSorted(), newInfo.GetStorageVersion(), segmentMetricFormatLabel(newInfo), newInfo.GetNumOfRows())
-			if !sameSegmentMetricLabels(oldSeg, newInfo) {
-				metricMutation.appendSegmentLabelChange(oldSeg, newInfo)
-			}
-		}
-	}
-	metricMutation.commit()
-
-	log.Info(ctx, "meta update: update drop channel segment info - complete",
-		mlog.String("channel", channel))
+	log.Info(ctx, "meta update: update drop channel segment info - complete")
 	return nil
 }
 
@@ -1579,11 +1639,15 @@ func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
 
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
+	m.segmentCompactionMu.Lock()
+	defer m.segmentCompactionMu.Unlock()
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
 // IsSegmentCompacting check if segment is compacting
 func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
+	m.segmentCompactionMu.Lock()
+	defer m.segmentCompactionMu.Unlock()
 	seg := m.segments.GetSegment(segmentID)
 	if seg == nil {
 		return false
@@ -1595,6 +1659,8 @@ func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
 // if true, set them compacting and return true
 // if false, skip setting and
 func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID) (exist, canDo bool) {
+	m.segmentCompactionMu.Lock()
+	defer m.segmentCompactionMu.Unlock()
 	var hasCompacting bool
 	exist = true
 	for _, segmentID := range segmentIDs {
@@ -1618,14 +1684,11 @@ func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 }
 
 func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID, compacting bool) {
+	m.segmentCompactionMu.Lock()
+	defer m.segmentCompactionMu.Unlock()
 	for _, segmentID := range segmentIDs {
 		m.segments.SetIsCompacting(segmentID, compacting)
 	}
-}
-
-// SetSegmentLevel sets level for segment
-func (m *meta) SetSegmentLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	m.segments.SetLevel(segmentID, level)
 }
 
 func getMinPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
@@ -1657,8 +1720,9 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 // Falls back to the provided fallback positions if binlog timestamps are unavailable
 // (e.g., legacy segments without TimestampFrom/TimestampTo populated).
 func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
-	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
+	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
+	if minTs > 0 && maxTs > 0 {
 		return &msgpb.MsgPosition{
 				ChannelName: channel,
 				Timestamp:   minTs,
@@ -1692,12 +1756,30 @@ func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.
 	}
 }
 
+func compactionTaskCreateTS(t *datapb.CompactionTask) uint64 {
+	return t.GetCreateTs()
+}
+
 func maxCommitTimestamp(compactFromSegInfos []*SegmentInfo) uint64 {
 	var maxCommitTs uint64
 	for _, info := range compactFromSegInfos {
 		maxCommitTs = max(maxCommitTs, info.GetCommitTimestamp())
 	}
 	return maxCommitTs
+}
+
+func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
+	if fallbackStart == nil {
+		return nil
+	}
+	maxCommitTs := maxCommitTimestamp(compactFromSegInfos)
+	if maxCommitTs == 0 || fallbackStart.GetTimestamp() >= maxCommitTs {
+		return nil
+	}
+	return merr.WrapErrServiceInternalMsg(
+		"compaction fallback start position timestamp %d is earlier than max input commit timestamp %d",
+		fallbackStart.GetTimestamp(),
+		maxCommitTs)
 }
 
 func getCompactionFallbackPositions(compactFromSegInfos []*SegmentInfo) (fallbackStart, fallbackDml *msgpb.MsgPosition) {
@@ -1715,6 +1797,170 @@ func getCompactionFallbackPositions(compactFromSegInfos []*SegmentInfo) (fallbac
 		return info.GetDmlPosition()
 	})), maxCommitTs)
 	return fallbackStart, fallbackDml
+}
+
+// persistCompactionSegments publishes compaction outputs before retiring any
+// inputs. The ordering is deliberate: etcd may split a logical transaction
+// into multiple backend transactions, so a committed prefix must never drop
+// the inputs before the replacement segments are visible.
+//
+// A partial commit returns per-operation versions for the committed prefix.
+// Apply those versions to the cache, then retry only the remaining work with
+// fresh input versions. TiKV and the in-memory backend commit the same logical
+// operation in one transaction, while etcd retains this compensation path.
+func (m *meta) persistCompactionSegments(
+	ctx context.Context,
+	compactToSegments []*SegmentInfo,
+	compactFromSegmentIDs []int64,
+	metricMutation *segMetricMutation,
+) error {
+	type compactFromEntry struct {
+		segID int64
+		base  *SegmentInfo
+		clone *SegmentInfo
+	}
+
+	committedTo := make(map[int64]struct{}, len(compactToSegments))
+	committedFrom := make(map[int64]struct{}, len(compactFromSegmentIDs))
+
+	applyResults := func(toEntries []segmentNewEntry, fromEntries []compactFromEntry, results []SegmentTxnResult) {
+		idx := 0
+		for _, entry := range toEntries {
+			if idx < len(results) && results[idx].Version > 0 {
+				m.segments.SetSegment(entry.segID, entry.info, results[idx].Version)
+				committedTo[entry.segID] = struct{}{}
+			}
+			idx++
+		}
+		for _, entry := range fromEntries {
+			if idx < len(results) && results[idx].Version > 0 {
+				old, existed := m.segments.SetSegmentPreservingLocalState(entry.segID, entry.base, entry.clone, results[idx].Version)
+				updated := m.segments.GetSegment(entry.segID)
+				if existed && updated != nil && old.GetState() != updated.GetState() {
+					metricMutation.append(old.GetState(), updated.GetState(), updated.GetLevel(), updated.GetIsSorted(), updated.GetStorageVersion(), segmentMetricFormatLabel(updated), updated.GetNumOfRows())
+				}
+				committedFrom[entry.segID] = struct{}{}
+			}
+			idx++
+		}
+	}
+
+	return retry.Do(ctx, func() error {
+		txn := m.segmentPersist.Txn(ctx)
+		toEntries := make([]segmentNewEntry, 0, len(compactToSegments))
+		for _, info := range compactToSegments {
+			if _, ok := committedTo[info.GetID()]; ok {
+				continue
+			}
+			if existing := m.segments.GetSegment(info.GetID()); existing != nil {
+				if !sameCompactionOutputIdentity(existing, info) {
+					return retry.Unrecoverable(merr.WrapErrServiceInternalMsg(
+						"compaction output segment %d already exists with a different identity", info.GetID()))
+				}
+				// CompleteCompactionMutation succeeded previously, but persisting the
+				// task's next state may have failed. Preserve the old AlterSegments
+				// upsert/replay behavior without overwriting metadata that may have
+				// advanced since publication, and do not report the existing segment
+				// as newly added a second time.
+				committedTo[info.GetID()] = struct{}{}
+				if metricMutation != nil {
+					metricMutation.discardNewSeg(info.GetState(), info.GetLevel(), info.GetIsSorted(), info.GetStorageVersion(), segmentMetricFormatLabel(info), info.GetNumOfRows())
+				}
+				continue
+			}
+			if err := txn.Insert(m.segmentKey(info.GetCollectionID(), info.GetPartitionID(), info.GetID()), info.SegmentInfo); err != nil {
+				return retry.Unrecoverable(err)
+			}
+			toEntries = append(toEntries, segmentNewEntry{segID: info.GetID(), info: info})
+		}
+
+		fromEntries := make([]compactFromEntry, 0, len(compactFromSegmentIDs))
+		for _, segmentID := range compactFromSegmentIDs {
+			if _, ok := committedFrom[segmentID]; ok {
+				continue
+			}
+			cur, version := m.segments.GetSegmentWithVersion(segmentID)
+			if cur == nil || !isSegmentHealthy(cur) {
+				return retry.Unrecoverable(merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped during compaction mutation"))
+			}
+			base := cur.Clone()
+			clone := base.Clone()
+			clone.State = commonpb.SegmentState_Dropped
+			clone.DroppedAt = uint64(time.Now().UnixNano())
+			clone.Compacted = true
+			if err := txn.Update(m.segmentKey(clone.GetCollectionID(), clone.GetPartitionID(), segmentID), clone.SegmentInfo, version, BinlogIncrement{}); err != nil {
+				return retry.Unrecoverable(err)
+			}
+			fromEntries = append(fromEntries, compactFromEntry{segID: segmentID, base: base, clone: clone})
+		}
+
+		if len(toEntries) == 0 && len(fromEntries) == 0 {
+			return nil
+		}
+		results, err := txn.Commit()
+		if err != nil {
+			if errors.Is(err, ErrPartialCommit) {
+				applyResults(toEntries, fromEntries, results)
+				return ErrCASFailed
+			}
+			return err
+		}
+		if len(results) != len(toEntries)+len(fromEntries) {
+			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg(
+				"compaction expected %d segment txn results, got %d",
+				len(toEntries)+len(fromEntries), len(results)))
+		}
+		applyResults(toEntries, fromEntries, results)
+		return nil
+	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
+}
+
+// sameCompactionOutputIdentity distinguishes an idempotent publication replay
+// from a segment-ID collision. Binlogs and aggregate stats are deliberately not
+// compared: StorageV3 reload omits fake binlogs, and later stats/index commits
+// may advance the manifest while retaining the same immutable compaction
+// output identity.
+func sameCompactionOutputIdentity(existing, expected *SegmentInfo) bool {
+	if existing == nil || expected == nil ||
+		existing.GetID() != expected.GetID() ||
+		existing.GetCollectionID() != expected.GetCollectionID() ||
+		existing.GetPartitionID() != expected.GetPartitionID() ||
+		existing.GetInsertChannel() != expected.GetInsertChannel() ||
+		existing.GetNumOfRows() != expected.GetNumOfRows() ||
+		existing.GetState() != expected.GetState() ||
+		existing.GetLevel() != expected.GetLevel() ||
+		existing.GetCreatedByCompaction() != expected.GetCreatedByCompaction() ||
+		existing.GetCreateTs() != expected.GetCreateTs() ||
+		existing.GetStorageVersion() != expected.GetStorageVersion() ||
+		existing.GetSchemaVersion() < expected.GetSchemaVersion() ||
+		existing.GetIsInvisible() != expected.GetIsInvisible() ||
+		existing.GetIsSorted() != expected.GetIsSorted() ||
+		existing.GetIsSortedByNamespace() != expected.GetIsSortedByNamespace() ||
+		!sameCompactionManifestLineage(existing.GetManifestPath(), expected.GetManifestPath()) ||
+		len(existing.GetCompactionFrom()) != len(expected.GetCompactionFrom()) {
+		return false
+	}
+	for i, segmentID := range existing.GetCompactionFrom() {
+		if segmentID != expected.GetCompactionFrom()[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameCompactionManifestLineage(existing, expected string) bool {
+	if existing == expected {
+		return true
+	}
+	if existing == "" || expected == "" {
+		return false
+	}
+	existingBase, existingVersion, err := packed.UnmarshalManifestPath(existing)
+	if err != nil {
+		return false
+	}
+	expectedBase, expectedVersion, err := packed.UnmarshalManifestPath(expected)
+	return err == nil && existingBase == expectedBase && existingVersion >= expectedVersion
 }
 
 func (m *meta) completeClusterCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
@@ -1738,7 +1984,7 @@ func (m *meta) completeClusterCompactionMutation(ctx context.Context, t *datapb.
 		// Re-validate segment health to prevent race condition with drop collection
 		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 		if !isSegmentHealthy(segment) {
-			mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+			mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("state", segment.GetState().String()))
@@ -1767,7 +2013,8 @@ func (m *meta) completeClusterCompactionMutation(ctx context.Context, t *datapb.
 			Statslogs:           seg.GetField2StatslogPaths(),
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			CreateTs:            compactionTaskCreateTS(t),
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
@@ -1779,27 +2026,21 @@ func (m *meta) completeClusterCompactionMutation(ctx context.Context, t *datapb.
 			SchemaVersion:   t.GetSchema().GetVersion(),
 			CommitTimestamp: 0, // Normalized: row timestamps already rewritten
 		}
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment. V3 outputs whose stats live in the manifest
+		// are populated correctly there (the compactor sees the stats
+		// blob size); the receiver does not recompute.
+		segmentInfo.Stats = seg.GetStats()
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
 	}
 
-	mlog.Debug(context.TODO(), "meta update: prepare for meta mutation - complete")
+	mlog.Debug(m.ctx, "meta update: prepare for meta mutation - complete")
 
-	// Persist new compactTo segments
-	txn := m.segmentPersist.Txn(ctx)
-	for _, info := range compactToSegInfos {
-		if err := txn.Insert(m.segmentKey(info.GetCollectionID(), info.GetPartitionID(), info.GetID()), info.SegmentInfo); err != nil {
-			return nil, nil, err
-		}
-	}
-	results, err := txn.Commit()
-	if err != nil {
+	if err := m.persistCompactionSegments(ctx, compactToSegInfos, nil, metricMutation); err != nil {
 		log.Warn(ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
-	}
-	for i, info := range compactToSegInfos {
-		m.segments.SetSegment(info.GetID(), info, results[i].Version)
 	}
 	log.Info(ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegInfos, metricMutation, nil
@@ -1832,7 +2073,7 @@ func (m *meta) completeMixCompactionMutation(
 		// Re-validate segment health to prevent race condition with drop collection
 		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 		if !isSegmentHealthy(segment) {
-			mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+			mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("state", segment.GetState().String()))
@@ -1861,34 +2102,36 @@ func (m *meta) completeMixCompactionMutation(
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
-		compactToSegmentInfo := NewSegmentInfo(
-			&datapb.SegmentInfo{
-				ID:            compactToSegment.GetSegmentID(),
-				CollectionID:  compactFromCached[0].CollectionID,
-				PartitionID:   compactFromCached[0].PartitionID,
-				InsertChannel: t.GetChannel(),
-				NumOfRows:     compactToSegment.NumOfRows,
-				State:         commonpb.SegmentState_Flushed,
-				MaxRowNum:     compactFromCached[0].MaxRowNum,
-				Binlogs:       compactToSegment.GetInsertLogs(),
-				Statslogs:     compactToSegment.GetField2StatslogPaths(),
-				Deltalogs:     compactToSegment.GetDeltalogs(),
-				Bm25Statslogs: compactToSegment.GetBm25Logs(),
-				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
-
-				CreatedByCompaction: true,
-				CompactionFrom:      compactFromSegIDs,
-				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
-				Level:               datapb.SegmentLevel_L1,
-				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
-				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
-				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-				SchemaVersion:       outputSchemaVersion,
-			})
+		compactToProto := &datapb.SegmentInfo{
+			ID:                  compactToSegment.GetSegmentID(),
+			CollectionID:        compactFromCached[0].CollectionID,
+			PartitionID:         compactFromCached[0].PartitionID,
+			InsertChannel:       t.GetChannel(),
+			NumOfRows:           compactToSegment.NumOfRows,
+			State:               commonpb.SegmentState_Flushed,
+			MaxRowNum:           compactFromCached[0].MaxRowNum,
+			Binlogs:             compactToSegment.GetInsertLogs(),
+			Statslogs:           compactToSegment.GetField2StatslogPaths(),
+			Deltalogs:           compactToSegment.GetDeltalogs(),
+			Bm25Statslogs:       compactToSegment.GetBm25Logs(),
+			TextStatsLogs:       compactToSegment.GetTextStatsLogs(),
+			CreatedByCompaction: true,
+			CompactionFrom:      compactFromSegIDs,
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			CreateTs:            compactionTaskCreateTS(t),
+			Level:               datapb.SegmentLevel_L1,
+			StorageVersion:      compactToSegment.GetStorageVersion(),
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
+			IsSorted:            compactToSegment.GetIsSorted(),
+			ManifestPath:        compactToSegment.GetManifest(),
+			IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
+			ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
+			SchemaVersion:       outputSchemaVersion,
+			CommitTimestamp:     0,
+			Stats:               compactToSegment.GetStats(),
+		}
+		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
@@ -1897,7 +2140,7 @@ func (m *meta) completeMixCompactionMutation(
 		// metrics mutation for compactTo segments
 		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetIsSorted(), compactToSegmentInfo.GetStorageVersion(), segmentMetricFormatLabel(compactToSegmentInfo), compactToSegmentInfo.GetNumOfRows())
 
-		mlog.Info(context.TODO(), "Add a new compactTo segment",
+		mlog.Info(m.ctx, "Add a new compactTo segment",
 			mlog.Int64("compactTo", compactToSegmentInfo.GetID()),
 			mlog.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
 			mlog.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
@@ -1910,61 +2153,12 @@ func (m *meta) completeMixCompactionMutation(
 	}
 
 	log.Debug(ctx, "meta update: prepare for meta mutation - complete")
-
-	// Persist all segments atomically in one transaction, retrying on CAS conflict.
-	type compactFromEntry struct {
-		seg   *SegmentInfo
-		clone *SegmentInfo
-	}
-	var fromPendings []compactFromEntry
-	var results []SegmentTxnResult
-	err := retry.Do(ctx, func() error {
-		txn := m.segmentPersist.Txn(ctx)
-		for _, info := range compactToSegments {
-			if err := txn.Insert(m.segmentKey(info.GetCollectionID(), info.GetPartitionID(), info.GetID()), info.SegmentInfo); err != nil {
-				return retry.Unrecoverable(err)
-			}
-		}
-		fromPendings = fromPendings[:0]
-		for _, seg := range compactFromCached {
-			cur, version := m.segments.GetSegmentWithVersion(seg.GetID())
-			if cur == nil {
-				continue
-			}
-			clone := cur.Clone()
-			clone.State = commonpb.SegmentState_Dropped
-			clone.DroppedAt = uint64(time.Now().UnixNano())
-			clone.Compacted = true
-			key := m.segmentKey(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
-			if err := txn.Update(key, clone.SegmentInfo, version, BinlogIncrement{}); err != nil {
-				return retry.Unrecoverable(err)
-			}
-			fromPendings = append(fromPendings, compactFromEntry{seg: seg, clone: clone})
-		}
-		committed, err := txn.Commit()
-		if err != nil {
-			return err
-		}
-		results = committed
-		return nil
-	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
-	if err != nil {
+	if err := m.persistCompactionSegments(ctx, compactToSegments, compactFromSegIDs, metricMutation); err != nil {
 		log.Warn(ctx, "fail to alter segments for compaction", mlog.Err(err))
 		return nil, nil, err
 	}
-	toCount := len(compactToSegments)
-	for i, info := range compactToSegments {
-		m.segments.SetSegment(info.GetID(), info, results[i].Version)
-	}
-	for i, entry := range fromPendings {
-		newInfo := entry.clone
-		old, existed := m.segments.SetSegment(entry.seg.GetID(), newInfo, results[toCount+i].Version)
-		if existed && old.GetState() != newInfo.GetState() {
-			metricMutation.append(old.GetState(), newInfo.GetState(), newInfo.GetLevel(), newInfo.GetIsSorted(), newInfo.GetStorageVersion(), segmentMetricFormatLabel(newInfo), newInfo.GetNumOfRows())
-		}
-	}
 
-	mlog.Info(context.TODO(), "meta update: alter in memory meta after compaction - complete")
+	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegments, metricMutation, nil
 }
 
@@ -1977,7 +2171,7 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
 		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
 		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
-			mlog.Info(context.TODO(), "compaction rejected: collection has pending snapshot or unloaded RefIndex",
+			mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.String("type", t.GetType().String()),
 				mlog.Int64("collectionID", t.GetCollectionID()),
@@ -1992,7 +2186,7 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 		// Check if any input segment is protected by a snapshot.
 		for _, segmentID := range t.GetInputSegments() {
 			if m.isSegmentCompactionProtected(segmentID) {
-				mlog.Info(context.TODO(), "compaction rejected: input segment is protected by snapshot",
+				mlog.Info(m.ctx, "compaction rejected: input segment is protected by snapshot",
 					mlog.Int64("planID", t.GetPlanID()),
 					mlog.String("type", t.GetType().String()),
 					mlog.Int64("collectionID", t.GetCollectionID()),
@@ -2012,7 +2206,7 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 			// SHOULD NOT HAPPEN: input segment was dropped.
 			// This indicates that compaction tasks, which should be mutually exclusive,
 			// may have executed concurrently.
-			mlog.Warn(context.TODO(), "should not happen! input segment was dropped",
+			mlog.Warn(m.ctx, "should not happen! input segment was dropped",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.String("type", t.GetType().String()),
 				mlog.String("channel", t.GetChannel()),
@@ -2109,17 +2303,24 @@ func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition
 	return minPos
 }
 
-func (m *meta) collectionHasTextFields(collectionID int64) bool {
+// collectionTextFieldIDs returns the field IDs of all TEXT type fields in the collection schema.
+func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	coll := m.GetCollection(collectionID)
 	if coll == nil || coll.Schema == nil {
-		return false
+		return nil
 	}
+	var ids []int64
 	for _, field := range coll.Schema.GetFields() {
 		if field.GetDataType() == schemapb.DataType_Text {
-			return true
+			ids = append(ids, field.GetFieldID())
 		}
 	}
-	return false
+	return ids
+}
+
+// collectionHasTextFields returns true if the collection has any TEXT type fields.
+func (m *meta) collectionHasTextFields(collectionID int64) bool {
+	return len(m.collectionTextFieldIDs(collectionID)) > 0
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
@@ -2137,18 +2338,22 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 		pos = minGrowingCP
 	}
 
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(vChannel)
+	defer m.channelCPs.channelLocks.Unlock(vChannel)
 
+	m.channelCPs.RLock()
 	oldPosition, ok := m.channelCPs.checkpoints[vChannel]
+	m.channelCPs.RUnlock()
 	if !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID)) {
 		err := m.catalog.SaveChannelCheckpoint(ctx, vChannel, pos)
 		if err != nil {
 			return err
 		}
+		m.channelCPs.Lock()
 		m.channelCPs.checkpoints[vChannel] = pos
+		m.channelCPs.Unlock()
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		mlog.Info(context.TODO(), "UpdateChannelCheckpoint done",
+		mlog.Info(ctx, "UpdateChannelCheckpoint done",
 			mlog.String("vChannel", vChannel),
 			mlog.Uint64("ts", pos.GetTimestamp()),
 			mlog.ByteString("msgID", pos.GetMsgID()),
@@ -2165,8 +2370,8 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 // UpdateChannelCheckpoint can overwrite it, and removes the channel-checkpoint
 // lag metric.
 func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(channel)
+	defer m.channelCPs.channelLocks.Unlock(channel)
 
 	cp := &msgpb.MsgPosition{
 		ChannelName: channel,
@@ -2178,7 +2383,9 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 		return err
 	}
 
+	m.channelCPs.Lock()
 	m.channelCPs.checkpoints[channel] = cp
+	m.channelCPs.Unlock()
 
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	return nil
@@ -2201,33 +2408,59 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		}
 	}
 
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
-	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
+	validPositions := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
 		if pos == nil || (pos.GetMsgID() == nil && pos.GetWALName() != commonpb.WALName_WoodPecker) || pos.GetChannelName() == "" {
-			mlog.Warn(context.TODO(), "illegal channel cp", mlog.Any("pos", pos))
+			mlog.Warn(ctx, "illegal channel cp", mlog.Any("pos", pos))
 			return false
 		}
+		return true
+	})
+	channelSet := make(map[string]struct{}, len(validPositions))
+	for _, pos := range validPositions {
+		channelSet[pos.GetChannelName()] = struct{}{}
+	}
+	channels := make([]string, 0, len(channelSet))
+	for channel := range channelSet {
+		channels = append(channels, channel)
+	}
+	sort.Strings(channels)
+	for _, channel := range channels {
+		m.channelCPs.channelLocks.Lock(channel)
+	}
+	defer func() {
+		for i := len(channels) - 1; i >= 0; i-- {
+			m.channelCPs.channelLocks.Unlock(channels[i])
+		}
+	}()
+
+	m.channelCPs.RLock()
+	toUpdates := lo.Filter(validPositions, func(pos *msgpb.MsgPosition, _ int) bool {
 		vChannel := pos.GetChannelName()
 		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
 		return !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID))
 	})
+	m.channelCPs.RUnlock()
 	err := m.catalog.SaveChannelCheckpoints(ctx, toUpdates)
 	if err != nil {
 		return err
 	}
+	m.channelCPs.Lock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
-		mlog.Info(context.TODO(), "UpdateChannelCheckpoint done", mlog.String("channel", channel),
+	}
+	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
+	m.channelCPs.cond.UnsafeBroadcast()
+	m.channelCPs.Unlock()
+	for _, pos := range toUpdates {
+		channel := pos.GetChannelName()
+		mlog.Info(ctx, "UpdateChannelCheckpoint done", mlog.String("channel", channel),
 			mlog.Stringer("walName", pos.WALName),
 			mlog.Uint64("ts", pos.GetTimestamp()),
 			mlog.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), channel).Set(float64(ts.Unix()))
 	}
-	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
-	m.channelCPs.cond.UnsafeBroadcast()
 	return nil
 }
 
@@ -2242,15 +2475,17 @@ func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(vChannel)
+	defer m.channelCPs.channelLocks.Unlock(vChannel)
 	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
 	if err != nil {
 		return err
 	}
+	m.channelCPs.Lock()
 	delete(m.channelCPs.checkpoints, vChannel)
+	m.channelCPs.Unlock()
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vChannel)
-	mlog.Info(context.TODO(), "DropChannelCheckpoint done", mlog.String("vChannel", vChannel))
+	mlog.Info(m.ctx, "DropChannelCheckpoint done", mlog.String("vChannel", vChannel))
 	return nil
 }
 
@@ -2350,6 +2585,24 @@ func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, level datapb.
 
 	s.rowCountChange += rowCount
 	s.rowCountAccChange += rowCount
+}
+
+// discardNewSeg cancels a provisional addNewSeg entry when persistence finds
+// that the exact compaction output was already published by an earlier attempt.
+func (s *segMetricMutation) discardNewSeg(state commonpb.SegmentState, level datapb.SegmentLevel, isSorted bool, storageVersion int64, format string, rowCount int64) {
+	levelEntry := s.stateChange[level.String()]
+	stateEntry := levelEntry[state.String()]
+	sortedEntry := stateEntry[getSortStatus(isSorted)]
+	versionEntry := sortedEntry[fmt.Sprint(storageVersion)]
+	if versionEntry[format] <= 0 {
+		return
+	}
+	versionEntry[format]--
+	if versionEntry[format] == 0 {
+		delete(versionEntry, format)
+	}
+	s.rowCountChange -= rowCount
+	s.rowCountAccChange -= rowCount
 }
 
 // commit persists all updates in current segMetricMutation, should and must be called AFTER segment state change
@@ -2489,22 +2742,54 @@ func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.Partiti
 		return err
 	}
 
-	// first clean analyze task
-	if err = m.analyzeMeta.DropAnalyzeTask(ctx, info.GetAnalyzeTaskID()); err != nil {
-		mlog.Warn(ctx, "remove analyze task failed", mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), mlog.Err(err))
+	// Persist the analyze task removal, the current-partition-stats-version
+	// rollback (if the dropped version is the current one), and the
+	// partition-stats info removal as a single composite catalog write, with
+	// the partition-stats info removal landing last as the commit marker.
+	//
+	// Both meta locks are held across the WHOLE compute -> catalog.Update ->
+	// in-memory apply sequence, mirroring the single critical section the
+	// legacy partitionStatsMeta.DropPartitionStatsInfo held around its own
+	// catalog write. This is what keeps the rollback correct: without it, a
+	// concurrent clustering-compaction completion (SaveCurrentPartitionStats
+	// Version for the same coll/part/vchannel) could bump the current version
+	// between the rollback compute and its application, and the apply would
+	// clobber that newer version back to the stale rollback target. In-memory
+	// bookkeeping is only applied after the write succeeds, so a failed write
+	// never desyncs memory from disk.
+	m.analyzeMeta.Lock()
+	defer m.analyzeMeta.Unlock()
+	m.partitionStatsMeta.Lock()
+	defer m.partitionStatsMeta.Unlock()
+
+	rollbackVersion := m.partitionStatsMeta.getRollbackVersionLocked(info)
+
+	actions := []metastore.UpdateAction{metastore.DropAnalyzeTask(info.GetAnalyzeTaskID())}
+	if rollbackVersion != nil {
+		actions = append(actions, metastore.SavePartitionStatsVersion(
+			info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion))
+	}
+	actions = append(actions, metastore.DropPartitionStats(info))
+
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		mlog.Warn(ctx, "clean partition stats info failed",
+			mlog.Int64("collectionID", info.GetCollectionID()),
+			mlog.Int64("partitionID", info.GetPartitionID()),
+			mlog.String("vChannel", info.GetVChannel()),
+			mlog.Int64("planID", info.GetVersion()),
+			mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()),
+			mlog.Err(err))
 		return err
 	}
 
-	// finally, clean up the partition stats info, and make sure the analysis task is cleaned up
-	err = m.partitionStatsMeta.DropPartitionStatsInfo(ctx, info)
+	m.analyzeMeta.dropTaskFromMemoryLocked(info.GetAnalyzeTaskID())
+	m.partitionStatsMeta.applyDropLocked(info, rollbackVersion)
+
 	mlog.Debug(ctx, "drop partition stats meta",
 		mlog.Int64("collectionID", info.GetCollectionID()),
 		mlog.Int64("partitionID", info.GetPartitionID()),
 		mlog.String("vChannel", info.GetVChannel()),
 		mlog.Int64("planID", info.GetVersion()))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -2529,7 +2814,7 @@ func (m *meta) completeSortCompactionMutation(
 	// Re-validate segment health to prevent race condition with drop collection
 	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 	if !isSegmentHealthy(oldSegment) {
-		mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+		mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 			mlog.Int64("planID", t.GetPlanID()),
 			mlog.Int64("segmentID", compactFromSegID),
 			mlog.String("state", oldSegment.GetState().String()))
@@ -2582,6 +2867,7 @@ func (m *meta) completeSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
+		CreateTs:                  compactionTaskCreateTS(t),
 		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
@@ -2589,6 +2875,10 @@ func (m *meta) completeSortCompactionMutation(
 		SchemaVersion:             outputSchemaVersion,
 		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
 	}
+	// Statistics is computed at the compactor and shipped on the
+	// CompactionSegment. V3 outputs whose stats live in the manifest are
+	// populated correctly there; the receiver does not recompute.
+	segmentInfo.Stats = resultSegment.GetStats()
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {
@@ -2596,7 +2886,7 @@ func (m *meta) completeSortCompactionMutation(
 	} else {
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().UnixNano())
-		mlog.Info(context.TODO(), "drop segment due to 0 rows", mlog.Int64("segmentID", segment.GetID()))
+		mlog.Info(m.ctx, "drop segment due to 0 rows", mlog.Int64("segmentID", segment.GetID()))
 	}
 
 	log = log.With(mlog.Int64s("compactFrom", []int64{oldSegment.GetID()}), mlog.Int64("compactTo", segment.GetID()))
@@ -2605,47 +2895,10 @@ func (m *meta) completeSortCompactionMutation(
 		mlog.Int64("num rows", segment.GetNumOfRows()),
 		mlog.Int64("segment size", segment.getSegmentSize()),
 		mlog.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
-	// Persist old (dropped) and new segments atomically, retrying on CAS conflict.
-	oldKey := m.segmentKey(oldSegment.GetCollectionID(), oldSegment.GetPartitionID(), oldSegment.GetID())
-	newKey := m.segmentKey(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	var results []SegmentTxnResult
-	var oldClone *SegmentInfo
-	err := retry.Do(ctx, func() error {
-		cur, version := m.segments.GetSegmentWithVersion(oldSegment.GetID())
-		if cur == nil {
-			return retry.Unrecoverable(merr.WrapErrSegmentNotFound(oldSegment.GetID()))
-		}
-		oldClone = cur.Clone()
-		oldClone.State = commonpb.SegmentState_Dropped
-		oldClone.DroppedAt = uint64(time.Now().UnixNano())
-		oldClone.Compacted = true
-
-		txn := m.segmentPersist.Txn(ctx)
-		if err := txn.Update(oldKey, oldClone.SegmentInfo, version, BinlogIncrement{}); err != nil {
-			return retry.Unrecoverable(err)
-		}
-		if err := txn.Insert(newKey, segment.SegmentInfo); err != nil {
-			log.Warn(ctx, "fail to build new segment binlog kvs for sort compaction", mlog.Err(err))
-			return retry.Unrecoverable(err)
-		}
-		committed, err := txn.Commit()
-		if err != nil {
-			return err
-		}
-		results = committed
-		return nil
-	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
-	if err != nil {
+	if err := m.persistCompactionSegments(ctx, []*SegmentInfo{segment}, []int64{oldSegment.GetID()}, metricMutation); err != nil {
 		log.Warn(ctx, "fail to persist segments for sort compaction", mlog.Err(err))
 		return nil, nil, err
 	}
-
-	// Update cache and compute metrics from the staged old-segment clone.
-	old, existed := m.segments.SetSegment(oldSegment.GetID(), oldClone, results[0].Version)
-	if existed && old.GetState() != oldClone.GetState() {
-		metricMutation.append(old.GetState(), oldClone.GetState(), oldClone.GetLevel(), oldClone.GetIsSorted(), oldClone.GetStorageVersion(), segmentMetricFormatLabel(oldClone), oldClone.GetNumOfRows())
-	}
-	m.segments.SetSegment(segment.GetID(), segment, results[1].Version)
 	log.Info(ctx, "meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, metricMutation, nil
 }
@@ -2675,7 +2928,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 	if !isSegmentHealthy(oldSegment) {
-		mlog.Warn(context.TODO(), "input segment was dropped during compaction mutation",
+		mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 			mlog.Int64("planID", t.GetPlanID()),
 			mlog.Int64("segmentID", segmentID),
 			mlog.String("state", oldSegment.GetState().String()))
@@ -2710,66 +2963,148 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if currentManifest == "" {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction input segment should contain a StorageV3 manifest")
 	}
-	if currentManifest != resultManifest {
-		manifestCompare, err := packed.CompareManifestPath(resultManifest, currentManifest)
-		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump compaction result manifest is not comparable with current manifest: %v", err)
+	// Optimistic-concurrency CAS on the manifest pointer. Adopt the in-place
+	// result only when it is a valid successor of the current pointer:
+	//   - result == current: idempotent replay of an adoption whose task state
+	//     was lost to a crash after AlterSegments but before meta_saved.
+	//   - base == current AND result strictly newer on the same base path: a
+	//     fresh forward commit built on the current pointer.
+	// Reject anything else — a stale base (a concurrent stats/index/bump commit
+	// advanced the pointer), a rollback, a different base path, or an unparsable
+	// result — so the task re-triggers and rebuilds on the current manifest
+	// instead of overwriting the concurrent commit (mirrors the stats path's
+	// errStatsResultStale). The check also self-heals a lost result: the pointer
+	// stays put, so the retry re-pins the same base.
+	baseManifest := resultSegment.GetBaseManifest()
+	if baseManifest == "" {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
+	}
+	if resultManifest != currentManifest {
+		if baseManifest != currentManifest {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
 		}
-		if manifestCompare <= 0 {
-			return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction result manifest is not newer than current manifest")
+		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
+		if err != nil {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s not comparable with current %s: %v", resultManifest, currentManifest, err)
+		}
+		if cmp <= 0 {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s does not advance current %s", resultManifest, currentManifest)
 		}
 	}
 
 	var oldSchemaVersion int32
-	var droppedErr error
 	updated, err := m.updateSegmentCAS(m.ctx, segmentID, func(cloned *SegmentInfo) (BinlogIncrement, bool) {
 		// Re-validate segment health to prevent race condition with drop collection
 		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here.
 		if !isSegmentHealthy(cloned) {
 			log.Warn(m.ctx, "input segment was dropped during compaction mutation",
 				mlog.String("state", cloned.GetState().String()))
-			droppedErr = merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+			cloned.pendingMutationErr = merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
 			return BinlogIncrement{}, false
 		}
-		oldSchemaVersion = cloned.GetSchemaVersion()
 
-		dataChanged := !fieldBinlogsEqual(cloned.GetBinlogs(), resultSegment.GetInsertLogs()) ||
-			cloned.GetManifestPath() != resultManifest
+		// The callback is re-run after every CAS conflict, so validate the
+		// manifest relation against this attempt's clone rather than the snapshot
+		// captured before entering updateSegmentCAS. Otherwise a concurrent
+		// manifest advance can be overwritten on retry and the additive Stats
+		// delta can be applied twice.
+		attemptManifest := cloned.GetManifestPath()
+		freshCommit := attemptManifest != resultManifest
+		if freshCommit {
+			if baseManifest != attemptManifest {
+				cloned.pendingMutationErr = merr.WrapErrIllegalCompactionPlanMsg(
+					"schema bump result base manifest %s no longer matches current %s", baseManifest, attemptManifest)
+				return BinlogIncrement{}, false
+			}
+			cmp, err := packed.CompareManifestPath(resultManifest, attemptManifest)
+			if err != nil {
+				cloned.pendingMutationErr = merr.WrapErrIllegalCompactionPlanMsg(
+					"schema bump result manifest %s not comparable with current %s: %v", resultManifest, attemptManifest, err)
+				return BinlogIncrement{}, false
+			}
+			if cmp <= 0 {
+				cloned.pendingMutationErr = merr.WrapErrIllegalCompactionPlanMsg(
+					"schema bump result manifest %s does not advance current %s", resultManifest, attemptManifest)
+				return BinlogIncrement{}, false
+			}
+		}
 
-		// Replace binlogs with the merged result (original fields + new function output field).
-		// For V3 segments, buildMergedLogsV3 assigns LogID!=0 so buildBinlogKvs validation passes
-		// and getSegmentBinlogFields can detect the new field via ChildFields.
-		cloned.Binlogs = resultSegment.GetInsertLogs()
+		before := proto.Clone(cloned.SegmentInfo).(*datapb.SegmentInfo)
+		oldSchemaVersion = before.GetSchemaVersion()
 
-		// Update SchemaVersion from task schema.
-		// t.Schema is set from collection.Schema at task creation time and should never be nil.
-		// A nil schema here indicates data corruption (e.g. etcd serialization loss); we warn
-		// and skip the update so the segment's schemaVersion remains stale, causing the next
-		// backfill trigger to re-evaluate and re-submit the task.
-		if t.GetSchema() == nil {
-			log.Warn(m.ctx, "backfill compaction task has nil schema, skipping schemaVersion update — segment will be re-evaluated on next trigger")
-		} else if newVer := t.GetSchema().GetVersion(); newVer > cloned.GetSchemaVersion() {
-			cloned.SchemaVersion = newVer
+		// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
+		// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
+		// function-output field with no data here has nothing to index.
+		// Materialization exists precisely to make such a field indexable, and
+		// compaction_task_bump_schema_version enqueues the segment for index
+		// building right after this mutation — so the column groups this run wrote
+		// must land here, or the index on the materialized field is never built.
+		//
+		// This is an upsert, not an assignment: the compactor ships only the groups
+		// it just wrote, so overwriting would drop the segment's other groups. Same
+		// semantics as the backfill path's UpdateSegmentColumnGroupsOperator, shared
+		// through mergeSegmentColumnGroups. The merge is idempotent (groups are
+		// upserted by FieldID and the result is FieldID-sorted), so unlike the
+		// additive Stats increment below it needs no manifest gate: re-applying a
+		// replayed result cannot double-count. Index eligibility is gated by the
+		// schema-version update below, while Binlogs retains the materialized column
+		// group metadata on the live SegmentInfo.
+		var droppedBinlogFieldIDs []int64
+		if newGroups := resultSegment.GetInsertLogs(); len(newGroups) > 0 {
+			cloned.Binlogs, droppedBinlogFieldIDs = mergeSegmentColumnGroups(cloned.GetBinlogs(),
+				lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
+		}
+
+		if newSchemaVersion > cloned.GetSchemaVersion() {
+			cloned.SchemaVersion = newSchemaVersion
+			mlog.Info(m.ctx, "meta update: update schema version for schema bump compaction",
+				mlog.Int64("segmentID", segmentID),
+				mlog.Int32("oldSchemaVersion", before.GetSchemaVersion()),
+				mlog.Int32("newSchemaVersion", newSchemaVersion))
 		}
 
 		cloned.StorageVersion = resultSegment.GetStorageVersion()
 		cloned.ManifestPath = resultManifest
-
-		if dataChanged {
-			cloned.DataVersion++
+		// Statistics semantics depend on the adoption path: this branch updates an
+		// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
+		// onto the segment's current value. See CompactionSegment.stats.
+		//
+		// The gate is the exactly-once token. freshCommit is the forward-commit
+		// branch validated against this CAS attempt; result == current is a replay
+		// of an adoption that already persisted, and its increment is already in
+		// Stats. Loosening the CAS silently double-counts.
+		//
+		// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
+		if freshCommit {
+			if delta := resultSegment.GetStats(); delta != nil {
+				cloned.Stats = addStatsDelta(m.ctx, segmentID, cloned.GetStats(), delta)
+				mlog.Info(m.ctx, "meta update: applied schema bump stats increment",
+					mlog.Int64("segmentID", segmentID),
+					mlog.String("baseManifest", baseManifest),
+					mlog.String("resultManifest", resultManifest),
+					mlog.Int64("deltaInsertBinlogSize", delta.GetInsertBinlogSize()),
+					mlog.Int64("deltaInsertBinlogCount", delta.GetInsertBinlogCount()),
+					mlog.Int64("deltaStatsBinlogSize", delta.GetStatsBinlogSize()),
+					mlog.Int64("insertBinlogSize", cloned.GetStats().GetInsertBinlogSize()),
+					mlog.Int64("insertBinlogCount", cloned.GetStats().GetInsertBinlogCount()),
+					mlog.Int64("statsBinlogSize", cloned.GetStats().GetStatsBinlogSize()))
+			}
+		}
+		if !proto.Equal(before, cloned.SegmentInfo) {
+			cloned.DataVersion = before.GetDataVersion() + 1
 		}
 
+		// Prepare binlogs increment for catalog update. droppedBinlogFieldIDs is
+		// empty unless the merge above emptied a pre-existing group; when it is not,
+		// the catalog must delete that group's KV or listBinlogs resurrects it.
 		return BinlogIncrement{
-			Binlogs:       cloned.Binlogs,
-			Bm25Statslogs: cloned.Bm25Statslogs,
+			Binlogs:               cloned.Binlogs,
+			DroppedBinlogFieldIDs: droppedBinlogFieldIDs,
 		}, true
 	})
 	if err != nil {
 		log.Warn(m.ctx, "fail to alter segment for backfill compaction", mlog.Err(err))
 		return nil, nil, err
-	}
-	if droppedErr != nil {
-		return nil, nil, droppedErr
 	}
 
 	log.Info(m.ctx, "meta update: alter in memory meta after backfill compaction - complete",
@@ -2806,10 +3141,6 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID range", resultSegment.GetSegmentID())
 	}
 
-	dropped := oldSegment.Clone()
-	dropped.Compacted = true
-	updateSegStateAndPrepareMetrics(dropped, commonpb.SegmentState_Dropped, metricMutation)
-
 	startPos, dmlPos := recalculateSegmentPosition(resultSegment.GetInsertLogs(), oldSegment.GetInsertChannel(), oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
 	newSegment := NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                        resultSegment.GetSegmentID(),
@@ -2836,11 +3167,15 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{oldSegment.GetID()},
+		CreateTs:                  compactionTaskCreateTS(t),
 		IsSorted:                  oldSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       oldSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             schemaVersion,
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment; the receiver copies it verbatim.
+		Stats: resultSegment.GetStats(),
 	})
 	if newSegment.GetNumOfRows() > 0 {
 		metricMutation.addNewSeg(newSegment.GetState(), newSegment.GetLevel(), newSegment.GetIsSorted(), newSegment.GetStorageVersion(), segmentMetricFormatLabel(newSegment), newSegment.GetNumOfRows())
@@ -2850,44 +3185,15 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 	}
 
 	mlog.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", mlog.Int64("num rows", newSegment.GetNumOfRows()))
-
-	currentOld, version := m.segments.GetSegmentWithVersion(oldSegment.GetID())
-	if currentOld == nil {
-		return nil, nil, merr.WrapErrSegmentNotFound(oldSegment.GetID())
-	}
-	oldKey := m.segmentKey(dropped.GetCollectionID(), dropped.GetPartitionID(), dropped.GetID())
-	newKey := m.segmentKey(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-	txn := m.segmentPersist.Txn(m.ctx)
-	if err := txn.Update(oldKey, dropped.SegmentInfo, version, BinlogIncrement{
-		Binlogs:       dropped.GetBinlogs(),
-		Deltalogs:     dropped.GetDeltalogs(),
-		Statslogs:     dropped.GetStatslogs(),
-		Bm25Statslogs: dropped.GetBm25Statslogs(),
-	}); err != nil {
-		return nil, nil, err
-	}
-	if err := txn.Insert(newKey, newSegment.SegmentInfo); err != nil {
-		return nil, nil, err
-	}
-	results, err := txn.Commit()
-	if err != nil {
-		if errors.Is(err, ErrPartialCommit) {
-			if len(results) > 0 && results[0].Version > 0 {
-				m.segments.SetSegmentPreservingLocalState(dropped.GetID(), currentOld, dropped, results[0].Version)
-			}
-			if len(results) > 1 && results[1].Version > 0 {
-				m.segments.SetSegment(newSegment.GetID(), newSegment, results[1].Version)
-			}
-		}
+	if err := m.persistCompactionSegments(
+		m.ctx,
+		[]*SegmentInfo{newSegment},
+		[]int64{oldSegment.GetID()},
+		metricMutation,
+	); err != nil {
 		mlog.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
-	if len(results) != 2 {
-		return nil, nil, merr.WrapErrServiceInternalMsg("schema bump replacement expected 2 segment txn results, got %d", len(results))
-	}
-
-	m.segments.SetSegmentPreservingLocalState(dropped.GetID(), currentOld, dropped, results[0].Version)
-	m.segments.SetSegment(newSegment.GetID(), newSegment, results[1].Version)
 	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, metricMutation, nil
 }
@@ -2904,7 +3210,7 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 				Channel:      s.InsertChannel,
 				NumOfRows:    s.NumOfRows,
 				State:        s.State.String(),
-				MemSize:      s.size.Load(),
+				MemSize:      s.getSegmentSize(),
 				Level:        s.Level.String(),
 				IsImporting:  s.IsImporting,
 				Compacted:    s.Compacted,
@@ -2929,7 +3235,9 @@ func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64
 		}
 	}
 
-	results, pendings, err := m.batchSetDroppedWithCAS(m.ctx, segRefs)
+	results, pendings, err := m.batchSetDroppedWithCAS(m.opContext(ctx), segRefs, func(segment *SegmentInfo) bool {
+		return contains(partitionIDs, segment.GetPartitionID())
+	})
 	if err != nil {
 		return err
 	}
@@ -2939,7 +3247,7 @@ func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64
 	}
 	for i, p := range pendings {
 		newSeg := p.clone
-		oldSeg, existed := m.segments.SetSegment(p.id, newSeg, results[i].Version)
+		oldSeg, existed := m.segments.SetSegmentPreservingLocalState(p.id, p.base, newSeg, results[i].Version)
 		if existed && oldSeg.GetState() != newSeg.GetState() {
 			metricMutation.append(oldSeg.GetState(), newSeg.GetState(), newSeg.GetLevel(), newSeg.GetIsSorted(), newSeg.GetStorageVersion(), segmentMetricFormatLabel(newSeg), newSeg.GetNumOfRows())
 		}
@@ -2957,21 +3265,41 @@ type segKeyed struct {
 // segPending carries a staged segment mutation and its cache-ready clone.
 type segPending struct {
 	segKeyed
+	base  *SegmentInfo
 	clone *SegmentInfo
 }
 
-// batchSetDroppedWithCAS marks every referenced segment as Dropped atomically,
-// retrying on CAS conflicts. Returns the commit results and the pending
-// entries actually staged (in order), so callers can update in-memory state.
-func (m *meta) batchSetDroppedWithCAS(ctx context.Context, segRefs []segKeyed) ([]SegmentTxnResult, []segPending, error) {
+// batchSetDroppedWithCAS stages every referenced segment as Dropped in one
+// logical write and retries ordinary CAS conflicts. A backend partial commit
+// is applied to the cache before the uncommitted remainder is restaged, so a
+// committed prefix cannot leave subsequent retries pinned to stale versions.
+// The returned results and pendings cover the final commit attempt; committed
+// prefixes have already been installed in the cache.
+func (m *meta) batchSetDroppedWithCAS(
+	ctx context.Context,
+	segRefs []segKeyed,
+	shouldDrop func(*SegmentInfo) bool,
+) ([]SegmentTxnResult, []segPending, error) {
+	ctx = m.opContext(ctx)
 	var results []SegmentTxnResult
 	var pendings []segPending
+	committedSegments := make(map[int64]struct{}, len(segRefs))
 	err := retry.Do(ctx, func() error {
+		results = nil
 		txn := m.segmentPersist.Txn(ctx)
 		pendings = make([]segPending, 0, len(segRefs))
 		for _, ref := range segRefs {
+			if _, committed := committedSegments[ref.id]; committed {
+				continue
+			}
 			cur, version := m.segments.GetSegmentWithVersion(ref.id)
 			if cur == nil {
+				continue
+			}
+			if cur.GetState() == commonpb.SegmentState_Dropped {
+				continue
+			}
+			if shouldDrop != nil && !shouldDrop(cur) {
 				continue
 			}
 			clone := cur.Clone()
@@ -2980,13 +3308,34 @@ func (m *meta) batchSetDroppedWithCAS(ctx context.Context, segRefs []segKeyed) (
 			if err := txn.Update(ref.key, clone.SegmentInfo, version, BinlogIncrement{}); err != nil {
 				return retry.Unrecoverable(err)
 			}
-			pendings = append(pendings, segPending{segKeyed: ref, clone: clone})
+			pendings = append(pendings, segPending{segKeyed: ref, base: cur, clone: clone})
 		}
 		if len(pendings) == 0 {
 			return nil
 		}
 		committed, err := txn.Commit()
 		if err != nil {
+			if errors.Is(err, ErrPartialCommit) {
+				metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
+				for i, pending := range pendings {
+					if i >= len(committed) || committed[i].Version == 0 {
+						continue
+					}
+					old, existed := m.segments.SetSegmentPreservingLocalState(
+						pending.id,
+						pending.base,
+						pending.clone,
+						committed[i].Version,
+					)
+					updated := m.segments.GetSegment(pending.id)
+					if existed && updated != nil && old.GetState() != updated.GetState() {
+						metricMutation.append(old.GetState(), updated.GetState(), updated.GetLevel(), updated.GetIsSorted(), updated.GetStorageVersion(), segmentMetricFormatLabel(updated), updated.GetNumOfRows())
+					}
+					committedSegments[pending.id] = struct{}{}
+				}
+				metricMutation.commit()
+				return ErrCASFailed
+			}
 			return err
 		}
 		results = committed
@@ -3007,41 +3356,16 @@ func contains(arr []int64, target int64) bool {
 	return false
 }
 
-func (m *meta) UpdateFileResources(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-	m.resourceIDMap = make(map[int64]*internalpb.FileResourceInfo)
-	for _, resource := range resources {
-		m.resourceIDMap[resource.Id] = resource
-	}
-	m.resourceVersion = version
-
-	return nil
-}
-
-func (m *meta) ListFileResources(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-	return lo.Values(m.resourceIDMap), m.resourceVersion
-}
-
 func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-
-	resources := make([]*internalpb.FileResourceInfo, 0)
-	for _, id := range resourceIDs {
-		if resource, ok := m.resourceIDMap[id]; ok {
-			resources = append(resources, resource)
-		} else {
-			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", id)
-		}
+	if m.broker == nil {
+		return nil, merr.WrapErrServiceInternalMsg("file resource broker is not initialized")
 	}
-	return resources, nil
+	return m.broker.GetFileResources(ctx, resourceIDs...)
 }
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp
 func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flushTs uint64) error {
+	ctx = m.opContext(ctx)
 	segments := m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel))
 
 	// Collect segments to drop (read-only from cache for key construction and filtering).
@@ -3059,7 +3383,11 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 		return nil
 	}
 
-	results, pendings, err := m.batchSetDroppedWithCAS(ctx, segRefs)
+	results, pendings, err := m.batchSetDroppedWithCAS(ctx, segRefs, func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
+			segment.GetInsertChannel() == vChannel &&
+			segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs
+	})
 	if err != nil {
 		mlog.Warn(ctx, "Failed to batch set segments state to dropped", mlog.Err(err))
 		return err
@@ -3070,7 +3398,7 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	}
 	for i, p := range pendings {
 		newSeg := p.clone
-		oldSeg, existed := m.segments.SetSegment(p.id, newSeg, results[i].Version)
+		oldSeg, existed := m.segments.SetSegmentPreservingLocalState(p.id, p.base, newSeg, results[i].Version)
 		if existed && oldSeg.GetState() != newSeg.GetState() {
 			metricMutation.append(oldSeg.GetState(), newSeg.GetState(), newSeg.GetLevel(), newSeg.GetIsSorted(), newSeg.GetStorageVersion(), segmentMetricFormatLabel(newSeg), newSeg.GetNumOfRows())
 		}

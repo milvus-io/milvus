@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -96,6 +97,10 @@ func createTextIndex(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	pluginContext, err := hookutil.GetCPluginContext(plan.GetPluginContext(), collectionID)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		mu            sync.Mutex
@@ -105,7 +110,7 @@ func createTextIndex(ctx context.Context,
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(plan.GetFileResources()) > 0 {
+	if len(plan.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, cm, plan.GetFileResources()...)
 		if err != nil {
 			return nil, err
@@ -154,6 +159,7 @@ func createTextIndex(ctx context.Context,
 				StorageVersion:            storageVersion,
 				Manifest:                  segment.GetManifest(),
 				StatsBasePath:             statsBasePath,
+				StoragePluginContext:      pluginContext,
 				IndexParams: []*commonpb.KeyValuePair{
 					{Key: "index_type", Value: "INVERTED"},
 					{Key: "is_text_match", Value: "true"},
@@ -258,19 +264,6 @@ func collectionSchemaFields(schema *schemapb.CollectionSchema) map[int64]struct{
 	return fields
 }
 
-func missingSchemaFunctions(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) []*schemapb.FunctionSchema {
-	var missing []*schemapb.FunctionSchema
-	for _, functionSchema := range schema.GetFunctions() {
-		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			if _, ok := existingFields[outputFieldID]; !ok {
-				missing = append(missing, functionSchema)
-				break
-			}
-		}
-	}
-	return missing
-}
-
 func droppedSchemaFieldIDs(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) []int64 {
 	targetFields := collectionSchemaFields(schema)
 	dropped := make([]int64, 0)
@@ -298,7 +291,11 @@ func newCompactionSegmentRecordReaderWithFields(ctx context.Context, segment *da
 	readSchema := compactionReadSchema(schema, existingFields)
 
 	if segment.GetManifest() != "" {
-		reader, err := storage.NewManifestRecordReader(ctx, segment.GetManifest(), readSchema, opts...)
+		// existingFields is already the manifest's physically-present field set
+		// (compactionSegmentStorageFields called GetManifestFieldIDs on the same
+		// manifest); hand it over so the reader does not re-open the manifest.
+		reader, err := storage.NewManifestRecordReader(ctx, segment.GetManifest(), readSchema,
+			append(opts, storage.WithPresentFields(existingFields))...)
 		return reader, existingFields, err
 	}
 
@@ -348,9 +345,16 @@ func compactionReadSchema(schema *schemapb.CollectionSchema, existingFields map[
 	return readSchema
 }
 
+// compactionFieldReadable keeps a field in the read schema when it is
+// physically present, or when the reader layer can synthesize it (absent
+// ordinary fields are reader-filled with default/null). Only function outputs
+// missing from storage are excluded: storage cannot synthesize them and the
+// RecordMaterializer computes them instead.
 func compactionFieldReadable(field *schemapb.FieldSchema, existingFields map[int64]struct{}) bool {
-	_, ok := existingFields[field.GetFieldID()]
-	return ok
+	if _, ok := existingFields[field.GetFieldID()]; ok {
+		return true
+	}
+	return !field.GetIsFunctionOutput()
 }
 
 func filterCompactionFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, readFields map[int64]struct{}) []*datapb.FieldBinlog {

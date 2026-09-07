@@ -341,6 +341,7 @@ enum StreamingCode {
     STREAMING_CODE_WALNAME_MISMATCH       = 14; // walName mismatch
     STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 15; // wrong schema version
     STREAMING_CODE_RATE_LIMIT_REJECTED    = 16; // rate limit rejected
+    STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE = 17; // Proxy must re-query, merge, and retry.
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 

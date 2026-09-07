@@ -75,6 +75,10 @@ func (plan *SearchPlan) GetMetricType() string {
 	return metricType
 }
 
+func (plan *SearchPlan) HasTargetEntries() bool {
+	return bool(C.HasTargetEntries(plan.cSearchPlan))
+}
+
 func (plan *SearchPlan) delete() {
 	C.DeleteSearchPlan(plan.cSearchPlan)
 }

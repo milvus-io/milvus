@@ -14,6 +14,8 @@ type WriteBufferOption func(opt *writeBufferOption)
 
 type TaskObserverCallback func(t syncmgr.Task, err error)
 
+type FlushSourceModeNotifier func(segmentID int64, mode metacache.FlushSourceMode)
+
 // GrowingSourceResolver resolves an optional in-memory growing segment source
 // for growing-source flush. GrowingSourcePending means the growing source exists but has not
 // caught up to targetOffset yet; WriteBuffer should only be used when the state
@@ -32,6 +34,7 @@ type writeBufferOption struct {
 
 	growingSourceResolver      GrowingSourceResolver
 	growingSourceRetryInterval time.Duration
+	flushSourceModeNotifier    FlushSourceModeNotifier
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
@@ -90,5 +93,11 @@ func WithTaskObserverCallback(callback TaskObserverCallback) WriteBufferOption {
 func WithGrowingSourceResolver(resolver GrowingSourceResolver) WriteBufferOption {
 	return func(opt *writeBufferOption) {
 		opt.growingSourceResolver = resolver
+	}
+}
+
+func WithFlushSourceModeNotifier(notifier FlushSourceModeNotifier) WriteBufferOption {
+	return func(opt *writeBufferOption) {
+		opt.flushSourceModeNotifier = notifier
 	}
 }

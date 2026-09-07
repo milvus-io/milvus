@@ -79,6 +79,9 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 	placeholder := phg.Placeholders[0]
 	phType := placeholder.Type
 	fieldType := fieldSchema.GetDataType()
+	if fieldType == schemapb.DataType_ArrayOfVector {
+		fieldType = fieldSchema.GetElementType()
+	}
 
 	// Check if types already match
 	if isVectorTypeMatch(placeholder.Type, fieldType) {
@@ -146,7 +149,7 @@ func convertPlaceholder(
 
 func normalizeFP32ToFP16BF16VectorFieldData(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
-		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.GetFieldName())
+		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.GetFieldName())
 		if err != nil {
 			return err
 		}

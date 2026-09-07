@@ -117,6 +117,10 @@ func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel 
 	return 0, errors.New("not implemented")
 }
 
+func (n *noopLocal) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	return false, getExpectErr()
+}
+
 func (n *noopLocal) GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	return &types.StreamingNodeMetrics{}, nil
 }
@@ -188,10 +192,6 @@ func (n *noopWALAccesser) Local() Local {
 	return &noopLocal{}
 }
 
-func (n *noopWALAccesser) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
-	return false, getExpectErr()
-}
-
 func (n *noopWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	if err := getExpectErr(); err != nil {
 		return nil, err
@@ -212,6 +212,14 @@ func (n *noopWALAccesser) Broadcast() Broadcast {
 
 func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
 	return &noopScanner{}
+}
+
+func (n *noopWALAccesser) ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	return types.PChannelInfo{
+		Name:       funcutil.ToPhysicalChannel(vchannel),
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}, nil
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {

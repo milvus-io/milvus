@@ -625,6 +625,40 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	s.Len(bfs, 1)
 }
 
+func (s *LevelZeroCompactionTaskSuite) TestLoadBFManifestMissingBloomFilterFails() {
+	manifest := packed.MarshalManifestPath(path.Join(s.T().TempDir(), "insert_log/1/10/201"), 1)
+	plan := &datapb.CompactionPlan{
+		PlanID: 19530,
+		Type:   datapb.CompactionType_Level0DeleteCompaction,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				CollectionID: 1,
+				PartitionID:  10,
+				SegmentID:    201,
+				Level:        datapb.SegmentLevel_L1,
+				Manifest:     manifest,
+			},
+		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
+	}
+
+	s.task.plan = plan
+	patchStats := mockey.Mock((*packed.StatsResolver).BloomFilterPaths).Return(nil, nil).Build()
+	defer patchStats.UnPatch()
+
+	_, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+	s.Error(err)
+	s.Contains(err.Error(), "missing bloom filter stats")
+}
+
 func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 	s.Run("no primary key", func() {
 		plan := &datapb.CompactionPlan{

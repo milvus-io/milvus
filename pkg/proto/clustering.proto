@@ -47,6 +47,9 @@ message AnalyzeInfo {
   map<int64, int64> num_rows = 14;
   schema.FieldSchema field_schema = 15;
   StorageConfig storage_config = 16;
+  // segmentID -> manifest path. A non-empty entry marks a StorageV3 segment
+  // read through the manifest; V1 segments use insert_files instead.
+  map<int64, string> manifest_paths = 17;
 }
 
 message ClusteringCentroidsStats {

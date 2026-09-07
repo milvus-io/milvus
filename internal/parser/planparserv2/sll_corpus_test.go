@@ -103,6 +103,9 @@ var corpusExprs = []struct {
 	{"template_in", "Int64Field in {id_list}"},
 	{"call_fn", "my_func(Int64Field, 1, 2)"},
 	{"call_noargs", "now()"},
+	{"soft_type_field", `type == "document"`},
+	{"membership_match", "membership_match(Int64Field, {bf})"},
+	{"membership_match_type", "membership_match(Int64Field, {bf}, type=bloom)"},
 
 	// ---- batch 3: deeply nested / mixed-precedence complex ----
 	{"deep_logical", "(Int64Field > 10 && Int64Field < 100) || (FloatField > 1.0 && FloatField < 10.0)"},

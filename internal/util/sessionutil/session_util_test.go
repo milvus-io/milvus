@@ -122,7 +122,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
@@ -161,7 +161,7 @@ func TestUpdateSessions(t *testing.T) {
 	notExistSessions, _, _ := s.GetSessions(ctx, "testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix(ctx, metaRoot)
+	etcdKV.RemoveWithPrefix(ctx, "")
 	assert.Eventually(t, func() bool {
 		sessions, _, _ := s.GetSessions(ctx, "test")
 		return len(sessions) == 0

@@ -41,6 +41,10 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			mutations[segID] = append(mutations[segID], UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
+			// Keep V3 version adoption in the same logical batch as V2 column-group
+			// updates. The optimistic persistence layer may split a large logical
+			// batch into backend transactions and will report/compensate partial
+			// progress so the caller can retry safely.
 			mutations[segID] = append(mutations[segID], UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:

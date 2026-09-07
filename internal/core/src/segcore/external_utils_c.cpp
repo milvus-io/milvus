@@ -37,6 +37,7 @@
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -53,10 +54,18 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
         return;
     }
 
+    auto extend_status_code =
+        milvus_storage::ExtendStatusCodeFromInt(result.err_code);
+    auto error_code =
+        extend_status_code.has_value()
+            ? milvus_storage::ToSegcoreErrorCode(extend_status_code.value())
+            : (loon_ffi_is_retryable_errcode(result.err_code) != 0
+                   ? milvus::StorageTransientError
+                   : milvus::StorageError);
     const char* msg = loon_ffi_get_errmsg(&result);
     std::string detail = msg != nullptr ? msg : "unknown error";
     loon_ffi_free_result(&result);
-    throw std::runtime_error(context + ": " + detail);
+    ThrowInfo(error_code, "{}: {}", context, detail);
 }
 
 struct TransactionGuard {
@@ -117,8 +126,10 @@ ReadManifestColumnGroupsWithFFI(const char* manifest_path,
     auto status = milvus_storage::column_groups_import(
         &manifest.manifest->column_groups, cgs.get());
     if (!status.ok()) {
-        throw std::runtime_error("import external segment column groups: " +
-                                 status.ToString());
+        auto error = milvus_storage::ToSegcoreError(status);
+        ThrowInfo(error.get_error_code(),
+                  "import external segment column groups: {}",
+                  error.what());
     }
     return cgs;
 }
@@ -186,7 +197,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         auto result = reader->take(indices, 1);
         if (!result.ok()) {
-            return MakeCStatusError(result.status().ToString().c_str());
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto table = result.ValueOrDie();
         auto num_rows = table->num_rows();
@@ -330,7 +342,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         ok.error_msg = nullptr;
         return ok;
     } catch (const std::exception& e) {
-        return MakeCStatusError(e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 

@@ -38,114 +38,103 @@ func TestPartitionStatsMetaSuite(t *testing.T) {
 	suite.Run(t, new(PartitionStatsMetaSuite))
 }
 
+// seedPartitionStatsInfo inserts info into psm's in-memory state (lazily
+// creating the channel/partition buckets), mirroring what a persisted load
+// leaves behind - a memory-only test fixture with no catalog write.
+func seedPartitionStatsInfo(psm *partitionStatsMeta, info *datapb.PartitionStatsInfo) {
+	vch, part := info.GetVChannel(), info.GetPartitionID()
+	if _, ok := psm.partitionStatsInfos[vch]; !ok {
+		psm.partitionStatsInfos[vch] = make(map[int64]*partitionStatsInfo)
+	}
+	if _, ok := psm.partitionStatsInfos[vch][part]; !ok {
+		psm.partitionStatsInfos[vch][part] = &partitionStatsInfo{
+			infos: make(map[int64]*datapb.PartitionStatsInfo),
+		}
+	}
+	psm.partitionStatsInfos[vch][part].infos[info.GetVersion()] = info
+}
+
 func (s *PartitionStatsMetaSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveCurrentPartitionStatsVersion(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog = catalog
 }
 
 func (s *PartitionStatsMetaSuite) TestGetPartitionStats() {
 	ctx := context.Background()
-	partitionStatsMeta, err := newPartitionStatsMeta(ctx, s.catalog)
-	s.NoError(err)
-	partitionStats := []*datapb.PartitionStatsInfo{
-		{
-			CollectionID: 1,
-			PartitionID:  2,
-			VChannel:     "ch-1",
-			SegmentIDs:   []int64{100000},
-			Version:      100,
-		},
-	}
-	for _, partitionStats := range partitionStats {
-		partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
-	}
-
-	ps1 := partitionStatsMeta.GetPartitionStats(1, 2, "ch-2", 100)
-	s.Nil(ps1)
-
-	ps2 := partitionStatsMeta.GetPartitionStats(1, 3, "ch-1", 100)
-	s.Nil(ps2)
-
-	ps3 := partitionStatsMeta.GetPartitionStats(1, 2, "ch-1", 101)
-	s.Nil(ps3)
-
-	ps := partitionStatsMeta.GetPartitionStats(1, 2, "ch-1", 100)
-	s.NotNil(ps)
-
-	err = partitionStatsMeta.SaveCurrentPartitionStatsVersion(1, 2, "ch-1", 100)
+	psm, err := newPartitionStatsMeta(ctx, s.catalog)
 	s.NoError(err)
 
-	currentVersion := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-1")
-	s.Equal(int64(100), currentVersion)
+	info := &datapb.PartitionStatsInfo{
+		CollectionID: 1,
+		PartitionID:  2,
+		VChannel:     "ch-1",
+		SegmentIDs:   []int64{100000},
+		Version:      100,
+	}
+	seedPartitionStatsInfo(psm, info)
 
-	currentVersion2 := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-2")
-	s.Equal(emptyPartitionStatsVersion, currentVersion2)
+	s.Nil(psm.GetPartitionStats(1, 2, "ch-2", 100))
+	s.Nil(psm.GetPartitionStats(1, 3, "ch-1", 100))
+	s.Nil(psm.GetPartitionStats(1, 2, "ch-1", 101))
+	s.NotNil(psm.GetPartitionStats(1, 2, "ch-1", 100))
 
-	currentVersion3 := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 3, "ch-1")
-	s.Equal(emptyPartitionStatsVersion, currentVersion3)
+	s.Equal(emptyPartitionStatsVersion, psm.GetCurrentPartitionStatsVersion(1, 2, "ch-1"))
+	s.Equal(emptyPartitionStatsVersion, psm.GetCurrentPartitionStatsVersion(1, 2, "ch-2"))
+	s.Equal(emptyPartitionStatsVersion, psm.GetCurrentPartitionStatsVersion(1, 3, "ch-1"))
 
-	partitionStatsMeta.partitionStatsInfos["ch-1"][2].currentVersion = 100
-	currentVersion4 := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-1")
-	s.Equal(int64(100), currentVersion4)
+	psm.partitionStatsInfos["ch-1"][2].currentVersion = 100
+	s.Equal(int64(100), psm.GetCurrentPartitionStatsVersion(1, 2, "ch-1"))
 }
 
+// TestDropPartitionStats exercises the live drop bookkeeping - the rollback
+// target computed by getRollbackVersionLocked and applied by applyDropLocked -
+// which the meta-level composite drop path uses (see meta.go).
 func (s *PartitionStatsMetaSuite) TestDropPartitionStats() {
 	ctx := context.Background()
-	partitionStatsMeta, err := newPartitionStatsMeta(ctx, s.catalog)
+	psm, err := newPartitionStatsMeta(ctx, s.catalog)
 	s.NoError(err)
+
 	collectionID := int64(1)
 	partitionID := int64(2)
 	channel := "ch-1"
-	s.catalog.EXPECT().DropPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().SaveCurrentPartitionStatsVersion(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	partitionStats := []*datapb.PartitionStatsInfo{
-		{
+	mk := func(v int64) *datapb.PartitionStatsInfo {
+		return &datapb.PartitionStatsInfo{
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 			VChannel:     channel,
 			SegmentIDs:   []int64{100000},
-			Version:      100,
-		},
-		{
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-			VChannel:     channel,
-			SegmentIDs:   []int64{100000},
-			Version:      101,
-		},
-		{
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-			VChannel:     channel,
-			SegmentIDs:   []int64{100000},
-			Version:      102,
-		},
+			Version:      v,
+		}
 	}
-	for _, partitionStats := range partitionStats {
-		partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
-	}
-	partitionStatsMeta.SaveCurrentPartitionStatsVersion(collectionID, partitionID, channel, 102)
-	version := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
-	s.Equal(int64(102), version)
+	seedPartitionStatsInfo(psm, mk(100))
+	seedPartitionStatsInfo(psm, mk(101))
+	seedPartitionStatsInfo(psm, mk(102))
+	psm.partitionStatsInfos[channel][partitionID].currentVersion = 102
+	s.Equal(int64(102), psm.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel))
 
-	err = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[2])
-	s.NoError(err)
-	s.Equal(2, len(partitionStatsMeta.partitionStatsInfos[channel][partitionID].infos))
-	version2 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
-	s.Equal(int64(101), version2)
+	// Drop the current version (102): rollback to the max remaining below it (101).
+	rb := psm.getRollbackVersionLocked(mk(102))
+	s.NotNil(rb)
+	s.Equal(int64(101), *rb)
+	psm.applyDropLocked(mk(102), rb)
+	s.Equal(2, len(psm.partitionStatsInfos[channel][partitionID].infos))
+	s.Equal(int64(101), psm.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel))
 
-	_ = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[1])
-	s.Equal(1, len(partitionStatsMeta.partitionStatsInfos[channel][partitionID].infos))
-	version3 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
-	s.Equal(int64(100), version3)
+	// Drop the new current version (101): rollback to 100.
+	rb = psm.getRollbackVersionLocked(mk(101))
+	s.NotNil(rb)
+	s.Equal(int64(100), *rb)
+	psm.applyDropLocked(mk(101), rb)
+	s.Equal(1, len(psm.partitionStatsInfos[channel][partitionID].infos))
+	s.Equal(int64(100), psm.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel))
 
-	err = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[0])
-	s.NoError(err)
-	s.Nil(partitionStatsMeta.partitionStatsInfos[channel][partitionID])
-	version4 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
-	s.Equal(emptyPartitionStatsVersion, version4)
+	// Drop the last version (100): no smaller version remains, so the rollback
+	// target is the empty version and the whole entry is removed.
+	rb = psm.getRollbackVersionLocked(mk(100))
+	s.NotNil(rb)
+	s.Equal(emptyPartitionStatsVersion, *rb)
+	psm.applyDropLocked(mk(100), rb)
+	s.Nil(psm.partitionStatsInfos[channel][partitionID])
+	s.Equal(emptyPartitionStatsVersion, psm.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel))
 }

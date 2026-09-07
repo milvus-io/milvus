@@ -21,7 +21,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -39,6 +41,17 @@ func AssertSplitEqual(t *testing.T, expect, actual *currentSplit) {
 		assert.Equal(t, expect.outputGroups[i].GroupID, actual.outputGroups[i].GroupID)
 		assert.Equal(t, expect.outputGroups[i].Columns, actual.outputGroups[i].Columns)
 		assert.Equal(t, expect.outputGroups[i].Fields, actual.outputGroups[i].Fields)
+		assert.Equal(t, expect.outputGroups[i].Format, actual.outputGroups[i].Format)
+	}
+}
+
+func AssertPendingGroupsEqual(t *testing.T, expect []localFormatGroup, actual *currentSplit) {
+	groups := actual.RangeGroups(nil)
+	assert.Equal(t, len(expect), len(groups))
+	for i := range expect {
+		assert.Equal(t, expect[i].indices, groups[i].indices)
+		assert.Equal(t, expect[i].fields, groups[i].fields)
+		assert.Equal(t, expect[i].localFormat, groups[i].localFormat)
 	}
 }
 
@@ -47,6 +60,15 @@ func TestWideDataTypePolicy(t *testing.T) {
 		tag    string
 		input  *currentSplit
 		expect *currentSplit
+	}
+
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
 	}
 
 	cases := []testCase{
@@ -73,6 +95,30 @@ func TestWideDataTypePolicy(t *testing.T) {
 						GroupID: 100,
 						Columns: []int{2},
 						Fields:  []int64{100},
+					},
+				},
+			},
+		},
+		{
+			tag: "text_with_vortex_local_format",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:    101,
+					DataType:   schemapb.DataType_Text,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+			}, nil),
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](101),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 101,
+						Columns: []int{1},
+						Fields:  []int64{101},
 					},
 				},
 			},
@@ -137,6 +183,261 @@ func TestWideDataTypePolicy(t *testing.T) {
 	}
 }
 
+func TestLocalFormatPolicy(t *testing.T) {
+	type testCase struct {
+		tag    string
+		input  *currentSplit
+		expect *currentSplit
+	}
+
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
+	}
+
+	cases := []testCase{
+		{
+			tag: "mixed_local_formats",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:    101,
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+				{
+					FieldID:    102,
+					DataType:   schemapb.DataType_Double,
+					TypeParams: localFormatParam(common.LocalFormatRaw),
+				},
+				{
+					FieldID:  103,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:    104,
+					DataType:   schemapb.DataType_Int64,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+				{
+					FieldID:    105,
+					DataType:   schemapb.DataType_Double,
+					TypeParams: localFormatParam(common.LocalFormatRaw),
+				},
+			}, nil),
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](),
+			},
+		},
+		{
+			tag: "single_vortex_local_format_partitions_without_output",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:    100,
+					DataType:   schemapb.DataType_Int64,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+				{
+					FieldID:    101,
+					DataType:   schemapb.DataType_Double,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+			}, nil),
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](),
+			},
+		},
+	}
+
+	policy := NewLocalFormatPolicy()
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result := policy.Split(tc.input)
+
+			AssertSplitEqual(t, tc.expect, result)
+			switch tc.tag {
+			case "mixed_local_formats":
+				AssertPendingGroupsEqual(t, []localFormatGroup{
+					{
+						indices:     []int{0, 3},
+						fields:      []int64{100, 103},
+						localFormat: localFormatDefault,
+					},
+					{
+						indices:     []int{1, 4},
+						fields:      []int64{101, 104},
+						localFormat: common.LocalFormatVortex,
+					},
+					{
+						indices:     []int{2, 5},
+						fields:      []int64{102, 105},
+						localFormat: common.LocalFormatRaw,
+					},
+				}, result)
+			case "single_vortex_local_format_partitions_without_output":
+				AssertPendingGroupsEqual(t, []localFormatGroup{
+					{
+						indices:     []int{0, 1},
+						fields:      []int64{100, 101},
+						localFormat: common.LocalFormatVortex,
+					},
+				}, result)
+			}
+		})
+	}
+}
+
+func TestSplitColumnsSeparatesLocalFormatsWithoutSelectingWriterFormat(t *testing.T) {
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
+	}
+
+	fields := []*schemapb.FieldSchema{
+		{
+			FieldID:  100,
+			DataType: schemapb.DataType_Int64,
+		},
+		{
+			FieldID:    101,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+		{
+			FieldID:  102,
+			DataType: schemapb.DataType_FloatVector,
+		},
+		{
+			FieldID:  103,
+			DataType: schemapb.DataType_Double,
+		},
+		{
+			FieldID:    104,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+		{
+			FieldID:    105,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatRaw),
+		},
+		{
+			FieldID:    106,
+			DataType:   schemapb.DataType_Double,
+			TypeParams: localFormatParam(common.LocalFormatRaw),
+		},
+	}
+
+	result := SplitColumns(fields,
+		map[int64]ColumnStats{},
+		NewLocalFormatPolicy(),
+		NewSelectedDataTypePolicy(),
+		NewRemanentShortPolicy(-1))
+
+	assert.Equal(t, []ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0, 3},
+			Fields:  []int64{100, 103},
+		},
+		{
+			GroupID: 1,
+			Columns: []int{1, 4},
+			Fields:  []int64{101, 104},
+		},
+		{
+			GroupID: 2,
+			Columns: []int{5, 6},
+			Fields:  []int64{105, 106},
+		},
+		{
+			GroupID: 102,
+			Columns: []int{2},
+			Fields:  []int64{102},
+		},
+	}, result)
+
+	for _, group := range result {
+		assert.Empty(t, group.Format)
+	}
+	for _, writerFormat := range []string{"parquet", "vortex"} {
+		for _, group := range FillColumnGroupFormats(result, writerFormat) {
+			assert.Equal(t, writerFormat, group.Format)
+		}
+	}
+}
+
+func TestLocalFormatPolicyKeepsLaterSplitsWithinPartitions(t *testing.T) {
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
+	}
+
+	fields := []*schemapb.FieldSchema{
+		{
+			FieldID:  100,
+			DataType: schemapb.DataType_Int64,
+		},
+		{
+			FieldID:    101,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+		{
+			FieldID:  102,
+			DataType: schemapb.DataType_Double,
+		},
+		{
+			FieldID:    103,
+			DataType:   schemapb.DataType_Double,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+	}
+
+	result := SplitColumns(fields,
+		map[int64]ColumnStats{},
+		NewLocalFormatPolicy(),
+		NewRemanentShortPolicy(1))
+
+	assert.Equal(t, []ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0},
+			Fields:  []int64{100},
+		},
+		{
+			GroupID: 1,
+			Columns: []int{2},
+			Fields:  []int64{102},
+		},
+		{
+			GroupID: 2,
+			Columns: []int{1},
+			Fields:  []int64{101},
+		},
+		{
+			GroupID: 3,
+			Columns: []int{3},
+			Fields:  []int64{103},
+		},
+	}, result)
+}
+
 func TestSystemColumnPolicy(t *testing.T) {
 	type testCase struct {
 		tag                  string
@@ -145,6 +446,15 @@ func TestSystemColumnPolicy(t *testing.T) {
 		includeClusteringKey bool
 		input                *currentSplit
 		expect               *currentSplit
+	}
+
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
 	}
 
 	cases := []testCase{
@@ -177,6 +487,49 @@ func TestSystemColumnPolicy(t *testing.T) {
 						GroupID: 0,
 						Columns: []int{0, 1, 2},
 						Fields:  []int64{0, 1, 100},
+					},
+				},
+			},
+		},
+		{
+			tag: "include_pk_respects_local_format_partitions",
+			input: func() *currentSplit {
+				split := newCurrentSplit([]*schemapb.FieldSchema{
+					{
+						FieldID:  0,
+						DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID:  1,
+						DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID:      100,
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+						TypeParams:   localFormatParam(common.LocalFormatVortex),
+					},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_FloatVector,
+					},
+				}, nil)
+				split.PartitionRemainingByLocalFormat()
+				return split
+			}(),
+			includePK: true,
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](0, 1, 100),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 0,
+						Columns: []int{0, 1},
+						Fields:  []int64{0, 1},
+					},
+					{
+						GroupID: 1,
+						Columns: []int{2},
+						Fields:  []int64{100},
 					},
 				},
 			},
@@ -532,6 +885,41 @@ func TestAvgSizePolicy(t *testing.T) {
 					{
 						GroupID: 101,
 						Columns: []int{3},
+						Fields:  []int64{101},
+					},
+				},
+			},
+		},
+		{
+			tag: "over_threshold_does_not_select_writer_format",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.LocalFormatKey,
+							Value: common.LocalFormatVortex,
+						},
+					},
+				},
+			}, map[int64]ColumnStats{
+				101: {
+					AvgSize: 512,
+					MaxSize: 1024,
+				},
+			}),
+			sizeThreshold: 500,
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](101),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 101,
+						Columns: []int{1},
 						Fields:  []int64{101},
 					},
 				},

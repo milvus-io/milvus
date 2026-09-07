@@ -2155,6 +2155,17 @@ func (c *Client) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	})
 }
 
+func (c *Client) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetExportSnapshotStateResponse, error) {
+		return client.GetExportSnapshotState(ctx, req)
+	})
+}
+
 func (c *Client) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -2246,5 +2257,12 @@ func (c *Client) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DeleteClientCommandResponse, error) {
 		return client.DeleteClientCommand(ctx, req, opts...)
+	})
+}
+
+// ListClientCommands lists the commands currently held for clients
+func (c *Client) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.ListClientCommandsResponse, error) {
+		return client.ListClientCommands(ctx, req, opts...)
 	})
 }

@@ -47,6 +47,44 @@ func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, isAdvan
 	return nil
 }
 
+func hasFunctionChainStage(chains []*schemapb.FunctionChain, target schemapb.FunctionChainStage) bool {
+	for _, chainPB := range chains {
+		if chainPB != nil && chainPB.GetStage() == target {
+			return true
+		}
+	}
+	return false
+}
+
+func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.FunctionChain, []*schemapb.FunctionChain, error) {
+	l2Chains := make([]*schemapb.FunctionChain, 0)
+	querynodeChains := make([]*schemapb.FunctionChain, 0)
+	seenStages := make(map[schemapb.FunctionChainStage]struct{}, len(chains))
+
+	for i, chainPB := range chains {
+		if chainPB == nil {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] is nil", i)
+		}
+		stage := chainPB.GetStage()
+		if _, ok := seenStages[stage]; ok {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain stage %s appears more than once", stage.String())
+		}
+		seenStages[stage] = struct{}{}
+
+		switch stage {
+		case schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
+			l2Chains = append(l2Chains, chainPB)
+		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+			schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
+			querynodeChains = append(querynodeChains, chainPB)
+		default:
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
+		}
+	}
+
+	return l2Chains, querynodeChains, nil
+}
+
 func newFunctionChainRerankMeta(chains []*schemapb.FunctionChain, schema *schemaInfo) (*functionChainRerankMeta, error) {
 	if len(chains) == 0 {
 		return nil, nil
@@ -57,6 +95,9 @@ func newFunctionChainRerankMeta(chains []*schemapb.FunctionChain, schema *schema
 	var repr *chain.ChainRepr
 
 	for i, pb := range chains {
+		if pb == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d] is nil", i)
+		}
 		stage := pb.GetStage()
 		if _, ok := seenStages[stage]; ok {
 			return nil, merr.WrapErrParameterInvalidMsg("function chain stage %s appears more than once", stage.String())
@@ -140,7 +181,7 @@ func validateL2RerankSystemNames(repr *chain.ChainRepr) error {
 				return merr.WrapErrParameterInvalidMsg("op[%d] input %q: %v", opIdx, input, err)
 			}
 		}
-		for _, output := range op.WriteNames {
+		for _, output := range repr.Operators[opIdx].Outputs {
 			if !chain.IsFunctionChainSystemName(output) {
 				continue
 			}
@@ -171,11 +212,11 @@ func validateL2RerankSystemOutput(name string) error {
 }
 
 func getFunctionChainInputField(schema *schemaInfo, name string) (*schemapb.FieldSchema, int64, error) {
-	if schema == nil || schema.schemaHelper == nil {
+	if schema == nil || schema.SchemaHelper == nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromName(name)
+	field, err := schema.SchemaHelper.GetFieldFromName(name)
 	if err != nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
 	}

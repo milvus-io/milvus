@@ -17,6 +17,8 @@
 package pipeline
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -68,6 +70,16 @@ type FlowGraphMsg struct {
 
 func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {
 	return fgMsg.TimeRange.TimestampMax
+}
+
+func (fgMsg *FlowGraphMsg) TraceCtx() context.Context {
+	if len(fgMsg.InsertMessages) > 0 {
+		return fgMsg.InsertMessages[0].TraceCtx()
+	}
+	if len(fgMsg.DeleteMessages) > 0 {
+		return fgMsg.DeleteMessages[0].TraceCtx()
+	}
+	return context.Background()
 }
 
 func (fgMsg *FlowGraphMsg) IsClose() bool {

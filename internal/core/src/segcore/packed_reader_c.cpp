@@ -28,6 +28,7 @@
 #include "arrow/result.h"
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/packed/reader.h"
@@ -149,8 +150,8 @@ NewPackedReaderWithProperties(char** paths,
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
             properties, filesystem_path != nullptr ? filesystem_path : "");
         if (!fs_result.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          fs_result.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(fs_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto trueFs = fs_result.ValueOrDie();
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
@@ -218,8 +219,8 @@ ReadNext(CPackedReader c_packed_reader,
         std::shared_ptr<arrow::RecordBatch> record_batch;
         auto status = packed_reader->ReadNext(&record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          status.ToString());
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
         }
         if (record_batch == nullptr) {
             // end of file

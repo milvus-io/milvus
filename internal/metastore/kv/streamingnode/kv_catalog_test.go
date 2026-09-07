@@ -2,22 +2,36 @@ package streamingnode
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// newTestEtcdCatalog builds a streamingnode catalog backed by a real etcd KV
+// under a uuid-scoped root, for round-trip tests that persist and read back.
+func newTestEtcdCatalog(t *testing.T, name string) metastore.StreamingNodeCataLog {
+	t.Helper()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	return NewCataLog(etcdkv.NewEtcdKV(etcdCli, name+"-"+uuid.New().String()+"/meta"))
+}
 
 func TestCatalogConsumeCheckpoint(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
@@ -50,45 +64,182 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
-	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	err = catalog.SaveConsumeCheckpoint(canceledCtx, "p1", &streamingpb.WALCheckpoint{})
 	assert.Error(t, err)
 }
 
-func TestCatalogSegmentAssignments(t *testing.T) {
-	kv := mocks.NewMetaKv(t)
-	k := "p1"
-	v := streamingpb.SegmentAssignmentMeta{}
-	vs, err := proto.Marshal(&v)
-	assert.NoError(t, err)
-
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
-	catalog := NewCataLog(kv)
+func TestCatalogQueryViews(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogQueryViews")
 	ctx := context.Background()
-	metas, err := catalog.ListSegmentAssignment(ctx, "p1")
-	assert.Len(t, metas, 1)
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{
+			NodeId: 100,
+			Partitions: []*viewpb.QueryViewOfPartition{{
+				PartitionId:     200,
+				SegmentIds:      []int64{300},
+				ReadySegmentIds: []int64{300},
+			}},
+		}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err := catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Empty(t, views[0].GetQueryNode()[0].GetPartitions()[0].GetReadySegmentIds())
+
+	next := proto.Clone(view).(*viewpb.QueryViewOfShard)
+	next.Meta.Version.QueryVersion++
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{next}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, int64(31), views[0].GetMeta().GetVersion().GetQueryVersion())
+}
+
+func TestCatalogQueryViewWritesUseReliableMetaKV(t *testing.T) {
+	metaKV := &etcdkv.EmbedEtcdKV{}
+	var attempts atomic.Int32
+	mockWrite := mockey.Mock((*etcdkv.EmbedEtcdKV).MultiSaveAndRemove).
+		To(func(_ *etcdkv.EmbedEtcdKV, _ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
+			if attempts.Add(1) == 1 {
+				return merr.WrapErrServiceUnavailableMsg("injected metastore failure")
+			}
+			return nil
+		}).Build()
+	t.Cleanup(func() { mockWrite.UnPatch() })
+
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, NewCataLog(metaKV).SaveQueryViews(context.Background(), "p1", []*viewpb.QueryViewOfShard{view}))
+	assert.Equal(t, int32(2), attempts.Load())
+}
+
+func TestBuildQueryViewKeyRejectsMismatchedIdentity(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{
+		CollectionId: 1,
+		ReplicaId:    10,
+		Vchannel:     "p1_1v0",
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+			QueryVersion: 30,
+		},
+	}
+
+	key, err := buildQueryViewKey("p1", meta)
+	require.NoError(t, err)
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/1/10/0/20/0/30", key)
+
+	_, err = buildQueryViewKey("p2", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "pchannel")
+
+	meta.CollectionId = 2
+	_, err = buildQueryViewKey("p1", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "collection")
+}
+
+func TestCatalogListQueryViewsRejectsCompactKeyValueMismatch(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+	}
+	value, err := marshalQueryViewForPersistence(view)
+	require.NoError(t, err)
+
+	kv := mocks.NewMetaKv(t)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildQueryViewPrefix("p1")).Return(
+		[]string{"streamingnode-meta/wal/p1/qv/1/10/1/20/0/30"},
+		[]string{string(value)},
+		nil,
+	)
+
+	views, err := NewCataLog(kv).ListQueryViews(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, views)
+	assert.ErrorContains(t, err, "mismatched query view")
+}
+
+// TestCatalogSegmentAssignments round-trips segment assignments through the
+// compound SaveRecoverySnapshot: GROWING segments are persisted and listed
+// back, and a FLUSHED segment is removed from meta while untouched segments
+// (absent from the delta) are left in place.
+func TestCatalogSegmentAssignments(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogSegmentAssignments")
+	ctx := context.Background()
+
+	segments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 0)
 	assert.NoError(t, err)
 
-	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
-
-	err = catalog.SaveSegmentAssignments(ctx, "p1", map[int64]*streamingpb.SegmentAssignmentMeta{
-		1: {
-			SegmentId: 1,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-		},
-		2: {
-			SegmentId: 2,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+	err = catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
+			2: {SegmentId: 2, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
 		},
 	})
 	assert.NoError(t, err)
+
+	segments, err = catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 2)
+	assert.NoError(t, err)
+
+	// A FLUSHED segment is removed; segment 2 is not in the delta, so it stays.
+	err = catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED},
+		},
+	})
+	assert.NoError(t, err)
+
+	segments, err = catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), segments[0].GetSegmentId())
 }
 
 func TestCatalogVChannel(t *testing.T) {
-	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	rootPath := "testCatalogVChannel-" + uuid.New().String() + "/meta"
-	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	catalog := NewCataLog(kv)
+	catalog := newTestEtcdCatalog(t, "testCatalogVChannel")
 	ctx := context.Background()
 
 	channel1 := "p1"
@@ -155,7 +306,7 @@ func TestCatalogVChannel(t *testing.T) {
 		},
 	}
 
-	err = catalog.SaveVChannels(ctx, channel1, vchannelMetas)
+	err = catalog.SaveRecoverySnapshot(ctx, channel1, &metastore.WALRecoverySnapshot{VChannels: vchannelMetas})
 	assert.NoError(t, err)
 
 	vchannels, err = catalog.ListVChannel(ctx, channel1)
@@ -181,7 +332,7 @@ func TestCatalogVChannel(t *testing.T) {
 
 	vchannelMetas["vchannel-1"].CollectionInfo.Schemas[1].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
 	vchannelMetas["vchannel-2"].State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
-	err = catalog.SaveVChannels(ctx, channel1, vchannelMetas)
+	err = catalog.SaveRecoverySnapshot(ctx, channel1, &metastore.WALRecoverySnapshot{VChannels: vchannelMetas})
 	assert.NoError(t, err)
 
 	vchannels, err = catalog.ListVChannel(ctx, channel1)
@@ -201,7 +352,7 @@ func TestCatalogVChannel(t *testing.T) {
 func TestCatalogSalvageCheckpoint(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("save_and_get_success", func(t *testing.T) {
+	t.Run("get_success", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
@@ -210,10 +361,6 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 			Pchannel:  "source-cluster-rootcoord-dml_0",
 		}
 		cpBytes, err := proto.Marshal(cp)
-		assert.NoError(t, err)
-
-		kv.EXPECT().Save(mock.Anything, mock.Anything, string(cpBytes)).Return(nil)
-		err = catalog.SaveSalvageCheckpoint(ctx, "p1", cp)
 		assert.NoError(t, err)
 
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
@@ -226,15 +373,6 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 		assert.Len(t, checkpoints, 1)
 		assert.Equal(t, "source-cluster", checkpoints[0].ClusterId)
 		assert.Equal(t, "source-cluster-rootcoord-dml_0", checkpoints[0].Pchannel)
-	})
-
-	t.Run("save_error", func(t *testing.T) {
-		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
-
-		kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("etcd error"))
-		err := catalog.SaveSalvageCheckpoint(ctx, "p1", &commonpb.ReplicateCheckpoint{ClusterId: "c1"})
-		assert.Error(t, err)
 	})
 
 	t.Run("get_load_error", func(t *testing.T) {
@@ -291,6 +429,64 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 	})
 }
 
+// TestCatalogSaveRecoverySnapshotRoundTrip persists a full recovery snapshot -
+// segment assignments, vchannels, salvage checkpoint and the consume
+// checkpoint (the commit marker) - in one compound write, then reads every
+// part back through its own accessor. This is the end-to-end replacement for
+// the removed per-category SaveSegmentAssignments / SaveVChannels /
+// SaveSalvageCheckpoint writers.
+func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogSnapshot")
+	ctx := context.Background()
+	pchannel := "p1"
+
+	err := catalog.SaveRecoverySnapshot(ctx, pchannel, &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
+		},
+		VChannels: map[string]*streamingpb.VChannelMeta{
+			"vchannel-1": {
+				Vchannel: "vchannel-1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 100,
+					Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+						{
+							Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+							CheckpointTimeTick: 1,
+							State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						},
+					},
+				},
+			},
+		},
+		SalvageCheckpoint: &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a", Pchannel: "p1-rootcoord-dml_0"},
+		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 42},
+	})
+	assert.NoError(t, err)
+
+	segments, err := catalog.ListSegmentAssignment(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+	assert.Equal(t, int64(1), segments[0].GetSegmentId())
+
+	vchannels, err := catalog.ListVChannel(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, vchannels, 1)
+	assert.Equal(t, "vchannel-1", vchannels[0].GetVchannel())
+	assert.Len(t, vchannels[0].GetCollectionInfo().GetSchemas(), 1)
+
+	salvage, err := catalog.GetSalvageCheckpoint(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, salvage, 1)
+	assert.Equal(t, "cluster-a", salvage[0].GetClusterId())
+
+	checkpoint, err := catalog.GetConsumeCheckpoint(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.NotNil(t, checkpoint)
+	assert.Equal(t, uint64(42), checkpoint.GetTimeTick())
+}
+
 func TestBuildPrefixAndKey(t *testing.T) {
 	// Prefix functions
 	assert.Equal(t, "streamingnode-meta/wal/p1/", buildWALPrefix("p1"))
@@ -319,4 +515,5 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/", buildQueryViewPrefix("p1"))
 }

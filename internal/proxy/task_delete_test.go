@@ -14,10 +14,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -121,30 +125,24 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	globalMetaCache = cache
-	chMgr := NewMockChannelsMgr(t)
-	chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+	chMgr := channelmgr.NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 	dt := deleteTask{
-		ctx: context.Background(),
+		baseTask: baseTask{MetaCache: cache},
+		ctx:      context.Background(),
 		req: &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
 		},
 		chMgr: chMgr,
 	}
-	err := dt.setChannels()
+	err := dt.SetChannels()
 	assert.NoError(t, err)
-	resChannels := dt.getChannels()
+	resChannels := dt.GetChannels()
 	assert.ElementsMatch(t, channels, resChannels)
 	assert.ElementsMatch(t, channels, dt.pChannels)
 }
 
 func TestDeleteTask_PreExecuteSkipsNamespaceValidationWhenUnset(t *testing.T) {
-	cache := globalMetaCache
-	globalMetaCache = nil
-	defer func() {
-		globalMetaCache = cache
-	}()
-
 	dt := deleteTask{
 		req: &milvuspb.DeleteRequest{},
 	}
@@ -171,7 +169,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		rc := mocks.NewMockRootCoordClient(t)
 		allocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
 		assert.NoError(t, err)
@@ -198,7 +196,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(
 			&rootcoordpb.AllocIDResponse{
@@ -272,13 +270,13 @@ func (s *DeleteRunnerSuite) SetupSuite() {
 			},
 		},
 	}
-	s.schema = newSchemaInfo(schema)
+	s.schema = mustNewSchemaInfo(schema)
 	s.mockCache = NewMockCache(s.T())
 }
 
 func (s *DeleteRunnerSuite) TestInitSuccess() {
 	s.Run("non_pk == 1", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -286,15 +284,15 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"part1", "part2"}, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Require().Equal(1, len(dr.partitionIDs))
@@ -302,7 +300,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 	})
 
 	s.Run("non_pk > 1, partition key", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -310,22 +308,22 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"part1", "part2"}, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Require().Equal(0, len(dr.partitionIDs))
 	})
 
 	s.Run("pk == 1, partition key", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -333,22 +331,22 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"part1", "part2"}, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Require().Equal(0, len(dr.partitionIDs))
 	})
 
 	s.Run("namespace assigns partition", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		namespace := "ns-1"
 		partitionNames := []string{"_default_0", "_default_1"}
 		partitionIDs := map[string]int64{"_default_0": 100, "_default_1": 101}
@@ -356,7 +354,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 1, Name: "non_pk", DataType: schemapb.DataType_Int64},
 		)
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -365,22 +363,22 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return(partitionNames, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(partitionIDs, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Equal([]int64{expectedNamespacePartitionID(namespace, partitionNames, partitionIDs)}, dr.partitionIDs)
 	})
 
 	s.Run("pk == 1, no partition name", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -388,7 +386,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		// Schema without PartitionKey
@@ -409,18 +407,18 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Once()
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Equal(0, len(dr.partitionIDs))
 	})
 
 	s.Run("pk == 1, with partition name", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -429,7 +427,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		// Schema without PartitionKey
@@ -450,12 +448,12 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Once()
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1000), nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Equal(1, len(dr.partitionIDs))
@@ -463,7 +461,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 	})
 
 	s.Run("namespace partition mode routes to namespace partition", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		namespace := "tenant_partition"
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
@@ -473,7 +471,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		schema := &schemapb.CollectionSchema{
@@ -496,12 +494,12 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		schemaInfo := newSchemaInfo(schema)
+		schemaInfo := mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Once()
 		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, namespace).Return(int64(1000), nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
 		s.Equal(namespace, dr.req.GetPartitionName())
@@ -517,7 +515,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("namespace disabled", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		namespace := "ns-1"
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
@@ -538,12 +536,12 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.schema = mustNewSchemaInfo(schema)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
@@ -554,7 +552,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 			},
 		}
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 
 		s.Error(dr.Init(context.Background()))
 	})
@@ -564,11 +562,11 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				CollectionName: s.collectionName,
 			},
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(int64(0), errors.New("mock get collectionID error"))
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
@@ -576,13 +574,13 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		dr := deleteRunner{req: &milvuspb.DeleteRequest{
 			CollectionName: s.collectionName,
 		}}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock GetCollectionSchema err"))
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
@@ -593,14 +591,14 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				Expr:           "????",
 			},
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.schema, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 	s.Run("delete with always true expression failed", func() {
@@ -611,14 +609,47 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				Expr:           alwaysTrueExpr,
 			},
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.schema, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
+	})
+
+	s.Run("delete with bloom_match expression rejected", func() {
+		// bloom_match takes a client pre-built blob as a {template} bytes param;
+		// build a valid SBBF blob so the plan PARSES successfully and the delete
+		// guard (not the arg validator) is what rejects it.
+		builder, err := sbbf.NewBuilder(3, 0.001)
+		s.Require().NoError(err)
+		builder.AddInt64(1)
+		builder.AddInt64(2)
+		builder.AddInt64(3)
+		blob := builder.Marshal()
+
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Expr:           "membership_match(pk, {bf}, type=bloom)",
+				ExprTemplateValues: map[string]*schemapb.TemplateValue{
+					"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+				},
+			},
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
+			Return(s.schema, nil)
+
+		dr.metaCache = s.mockCache
+		err = dr.Init(context.Background())
+		s.Error(err)
+		s.ErrorContains(err, "approximate bloom filter blob")
+		s.ErrorContains(err, "cannot be used in delete expressions")
 	})
 
 	s.Run("partition key mode but delete with partition name", func() {
@@ -626,7 +657,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 			CollectionName: s.collectionName,
 			PartitionName:  s.partitionName,
 		}}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
@@ -634,7 +665,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 			Return(s.schema, nil)
 			// The schema enabled partitionKey
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
@@ -646,7 +677,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				Expr:           "non_pk in [1, 2, 3]",
 			},
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 
@@ -668,11 +699,11 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.schema, nil)
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
@@ -702,19 +733,19 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.schema = mustNewSchemaInfo(schema)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil)
 		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(int64(0), errors.New("mock GetPartitionID err"))
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 
 	s.Run("get vchannel failed", func() {
-		mockChMgr := NewMockChannelsMgr(s.T())
+		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -722,15 +753,15 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 			},
 			chMgr: mockChMgr,
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"part1", "part2"}, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return(nil, errors.New("mock error"))
+		mockChMgr.EXPECT().GetVChannels(mock.Anything).Return(nil, errors.New("mock error"))
 
-		globalMetaCache = s.mockCache
+		dr.metaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 }
@@ -748,7 +779,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 	tsoAllocator := &mockTsoAllocator{}
 	idAllocator := &mockIDAllocatorInterface{}
 
-	queue, err := newTaskScheduler(ctx, tsoAllocator)
+	queue, err := scheduler.NewTaskScheduler(ctx, tsoAllocator)
 	assert.NoError(t, err)
 	queue.Start()
 	defer queue.Close()
@@ -772,24 +803,21 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
-	globalMetaCache = metaCache
-	defer func() {
-		globalMetaCache = nil
-	}()
 
 	t.Run("simple delete task failed", func(t *testing.T) {
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		lb := shardclient.NewMockLBPolicy(t)
 
 		expr := "pk in [1,2,3]"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
+			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -797,7 +825,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			vChannels:       channels,
 			tsoAllocatorIns: tsoAllocator,
 			idAllocator:     idAllocator,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			lb:              lb,
 			result: &milvuspb.MutationResult{
 				Status: merr.Success(),
@@ -813,24 +841,25 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
+		mockMgr.EXPECT().GetChannels(collectionID).Return(channels, nil)
 		streaming.ExpectErrorOnce(errors.New("mock error"))
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
 	t.Run("complex delete query rpc failed", func(t *testing.T) {
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
 			idAllocator:     idAllocator,
 			tsoAllocatorIns: tsoAllocator,
-			queue:           queue.dmQueue,
+			metaCache:       metaCache,
+			queue:           queue.DmQueue,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -858,19 +887,49 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
+	t.Run("complex delete budgets and marshals before shard fanout", func(t *testing.T) {
+		blob, err := roaringfilter.Build([]int64{1, 2, 3})
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(
+			schema.SchemaHelper,
+			"membership_match(pk, {rb}, type=roaring)",
+			map[string]*schemapb.TemplateValue{
+				"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+			})
+		require.NoError(t, err)
+
+		pt := paramtable.Get()
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, "1")
+		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
+		dr := deleteRunner{
+			schema:       schema,
+			collectionID: collectionID,
+			lb:           shardclient.NewMockLBPolicy(t),
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				DbName:         dbName,
+			},
+		}
+		err = dr.complexDelete(ctx, plan)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.NotEmpty(t, plan.GetOutputFieldIds(),
+			"output fields must be finalized before the one-time marshal")
+	})
+
 	t.Run("complex delete query failed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
+			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -893,7 +952,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
+		mockMgr.EXPECT().GetChannels(collectionID).Return(channels, nil)
 
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
 			return workload.Exec(ctx, 1, qn, "")
@@ -928,16 +987,17 @@ func TestDeleteRunner_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
 			chMgr:           mockMgr,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
+			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
 			partitionIDs:    []int64{partitionID},
@@ -991,16 +1051,17 @@ func TestDeleteRunner_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
 			chMgr:           mockMgr,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
+			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
 			partitionIDs:    []int64{partitionID},
@@ -1022,7 +1083,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
+		mockMgr.EXPECT().GetChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
 			return workload.Exec(ctx, 1, qn, "")
 		})
@@ -1055,15 +1116,16 @@ func TestDeleteRunner_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 		expr := "pk < 3"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
+			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -1086,7 +1148,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
+		mockMgr.EXPECT().GetChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
 			return workload.Exec(ctx, 1, qn, "")
 		})
@@ -1123,20 +1185,19 @@ func TestDeleteRunner_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockMgr := NewMockChannelsMgr(t)
+		mockMgr := channelmgr.NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
 		lb := shardclient.NewMockLBPolicy(t)
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
-		globalMetaCache = mockCache
-		defer func() { globalMetaCache = metaCache }()
 		expr := "non_pk in [2, 3]"
-		plan, err := planparserv2.CreateRetrievePlan(schema.schemaHelper, expr, nil)
+		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:           queue.dmQueue,
+			metaCache:       mockCache,
+			queue:           queue.DmQueue,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -1158,7 +1219,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
+		mockMgr.EXPECT().GetChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
 			return workload.Exec(ctx, 1, qn, "")
 		})

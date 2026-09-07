@@ -215,6 +215,14 @@ func MergeBm25Stats(newStats map[int64]*storage.BM25Stats) SegmentAction {
 	}
 }
 
+func SetStatistics(stats *SegmentStats) SegmentAction {
+	return func(info *SegmentInfo) {
+		if stats != nil {
+			info.stats = stats
+		}
+	}
+}
+
 func StartSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.syncingRows += batchSize

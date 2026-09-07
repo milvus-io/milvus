@@ -64,14 +64,6 @@ class BaseConfig {
         }
     }
 
-    virtual bool
-    IsValueExists(const std::string& key) const = 0;
-
-    virtual const std::unordered_map<std::string, std::string>&
-    values() const {
-        ThrowInfo(NotImplemented, "method values() is not supported");
-    }
-
     virtual ~BaseConfig() = default;
 };
 
@@ -99,26 +91,12 @@ class MemConfig : public BaseConfig {
         return val;
     }
 
-    bool
-    IsValueExists(const std::string& key) const override {
-        return values_.find(key) != values_.end();
-    }
-
-    const std::unordered_map<std::string, std::string>&
-    values() const override {
-        return values_;
-    }
-
  private:
     std::unordered_map<std::string, std::string> values_;
 };
 
 class QueryConfig : public MemConfig {
  public:
-    // Whether to use the simplified expression evaluation path. False by default.
-    static constexpr const char* kExprEvalSimplified =
-        "expression.eval_simplified";
-
     static constexpr const char* kExprEvalBatchSize =
         "expression.eval_batch_size";
 
@@ -128,11 +106,6 @@ class QueryConfig : public MemConfig {
     }
 
     QueryConfig() = default;
-
-    bool
-    get_expr_eval_simplified() const {
-        return BaseConfig::Get<bool>(kExprEvalSimplified, false);
-    }
 
     int64_t
     get_expr_batch_size() const {
@@ -212,11 +185,6 @@ class QueryContext : public Context {
         return executor_;
     }
 
-    const std::unordered_map<std::string, std::shared_ptr<Config>>&
-    connector_configs() const {
-        return connector_configs_;
-    }
-
     std::shared_ptr<QueryConfig>
     query_config() const {
         return query_config_;
@@ -288,16 +256,6 @@ class QueryContext : public Context {
     }
 
     void
-    set_retrieve_result(milvus::RetrieveResult&& result) {
-        retrieve_result_ = std::move(result);
-    }
-
-    milvus::RetrieveResult&&
-    get_retrieve_result() {
-        return std::move(retrieve_result_);
-    }
-
-    void
     set_op_context(milvus::OpContext* op_context) {
         op_context_ = op_context;
     }
@@ -348,24 +306,6 @@ class QueryContext : public Context {
     }
 
     void
-    set_element_level_bitset(TargetBitmap&& bitset) {
-        element_level_bitset_ = std::move(bitset);
-    }
-
-    std::optional<TargetBitmap>
-    get_element_level_bitset() {
-        if (element_level_bitset_.has_value()) {
-            return std::move(element_level_bitset_.value());
-        }
-        return std::nullopt;
-    }
-
-    bool
-    has_element_level_bitset() const {
-        return element_level_bitset_.has_value();
-    }
-
-    void
     set_bitset_is_element_level(bool is_element_level) {
         bitset_is_element_level_ = is_element_level;
     }
@@ -411,7 +351,6 @@ class QueryContext : public Context {
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
-    std::unordered_map<std::string, std::shared_ptr<Config>> connector_configs_;
     std::shared_ptr<QueryConfig> query_config_;
     std::string query_id_;
 
@@ -429,9 +368,8 @@ class QueryContext : public Context {
     milvus::SearchInfo search_info_;
     const query::PlaceholderGroup* placeholder_group_;
 
-    // used for store segment search/retrieve result
+    // used for store segment search result
     milvus::SearchResult search_result_;
-    milvus::RetrieveResult retrieve_result_;
 
     // used for save op context
     milvus::OpContext* op_context_{nullptr};
@@ -443,7 +381,6 @@ class QueryContext : public Context {
     std::string struct_name_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
-    std::optional<TargetBitmap> element_level_bitset_;
     // Whether the current bitset has been converted to element-level.
     // Set by element-level filter/search operators after row-to-element
     // conversion.

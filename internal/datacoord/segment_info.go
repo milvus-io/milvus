@@ -19,16 +19,15 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"math"
 	"runtime/debug"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -51,37 +50,40 @@ type segmentInfoIndexes struct {
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	allocations   []*Allocation
-	lastFlushTime time.Time
-	isCompacting  bool
-	// a cache to avoid calculate twice
-	size          atomic.Int64
-	deltaRowcount atomic.Int64
-	// earliestTs caches the minimum TimestampFrom across all binlogs. It is
-	// intentionally NOT copied by Clone()/ShadowClone(): the only path that
-	// transitions commit_timestamp from non-zero to zero is compaction
-	// completion, which also replaces the binlogs on the cloned segment; a
-	// carried-over cache would be stale against the new binlogs. The cache is
-	// recomputed lazily on the first GetEarliestTs() call after clone.
-	earliestTs      atomic.Uint64
+	allocations     []*Allocation
+	lastFlushTime   time.Time
+	isCompacting    bool
 	lastWrittenTime time.Time
 
 	pendingL0ManifestUpdates []*l0ManifestUpdate
 	pendingMutationErr       error
+	pendingMutationSkip      bool
+}
+
+// EnsureStats returns a non-nil Statistics view for read-only aggregate
+// queries. It does NOT mutate s because cached SegmentInfo snapshots can be
+// read concurrently. The persisted s.Stats is populated eagerly by
+// NewSegmentInfo on construction and refreshed by binlog mutation operators
+// before their cloned result is CAS-published. When a caller hands us a
+// SegmentInfo built via the struct literal
+// `&SegmentInfo{SegmentInfo: ...}` with a nil Stats (the only remaining
+// path is now legacy tests), we fall back to a transient recompute so
+// readers see the right number; we just don't write it back.
+func (s *SegmentInfo) EnsureStats() *datapb.Statistics {
+	if s.SegmentInfo == nil {
+		return nil
+	}
+	if stats := s.GetStats(); stats != nil {
+		return stats
+	}
+	return storage.BuildStatsFromFieldBinlogs(s.GetBinlogs(), s.GetStatslogs(), s.GetBm25Statslogs(), s.GetDeltalogs())
 }
 
 func (s *SegmentInfo) GetResidualSegmentSize() int64 {
 	if s.GetNumOfRows() == 0 {
 		return 0
 	}
-	totalDeletedRows := 0
-	for _, deltaLogs := range s.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			totalDeletedRows += int(l.GetEntriesNum())
-		}
-	}
-
-	deltaRatio := float64(totalDeletedRows) / float64(s.GetNumOfRows())
+	deltaRatio := float64(s.EnsureStats().GetDeleteNumRows()) / float64(s.GetNumOfRows())
 	if deltaRatio >= 1.0 {
 		// segments with too many deleted rows should be considered as prioritized segments and be compacted definitely
 		return s.getSegmentSize()
@@ -97,23 +99,25 @@ func (s *SegmentInfo) GetEarliestTs() uint64 {
 	if commitTs := s.GetCommitTimestamp(); commitTs != 0 {
 		return commitTs
 	}
-	if s.earliestTs.Load() == 0 {
-		var earliestFromTs uint64 = math.MaxUint64
-		for _, binlogs := range s.GetBinlogs() {
-			for _, l := range binlogs.GetBinlogs() {
-				earliestFromTs = min(earliestFromTs, l.TimestampFrom)
-			}
-		}
-		s.earliestTs.Store(earliestFromTs)
-	}
-	return s.earliestTs.Load()
+	// Stats.TimestampFrom is the exact min(TimestampFrom) across all insert
+	// binlogs (populated by StatisticsCollector on the writer side, or by
+	// BuildStatsFromFieldBinlogs on V2 fallback / migration).
+	return s.EnsureStats().GetTimestampFrom()
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
 // assign current rows to last checkpoint and pre-allocate `allocations` slice
 // Note that the allocation information is not preserved,
 // the worst case scenario is to have a segment with twice size we expects
+//
+// Stats is populated from the FieldBinlog arrays when nil so legacy
+// segments (persisted before Statistics existed) and live aggregate
+// reads agree without callers needing a fallback. EnsureStats covers the
+// struct-literal construction path that bypasses this constructor.
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
+	if info.Stats == nil {
+		info.Stats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Statslogs(), info.GetDeltalogs())
+	}
 	s := &SegmentInfo{
 		SegmentInfo: info,
 	}
@@ -124,8 +128,6 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 		// A growing segment from recovery can be also considered idle.
 		s.lastWrittenTime = getZeroTime()
 	}
-	// mark as uninitialized
-	s.deltaRowcount.Store(-1)
 	return s
 }
 
@@ -321,7 +323,7 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 
 // SetIsCompacting sets compaction status for segment.
 // NOTE: This method manually updates secondary indexes after ShadowClone.
-// Other Set methods (SetRowCount, SetLevel, SetFlushTime, etc.) have the same
+// Other Set methods (SetRowCount, SetFlushTime, etc.) have the same
 // stale-index problem but are not yet fixed. See #48593 for the tracking issue
 // to extract a common updateSegment helper for all Set methods.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
@@ -361,27 +363,21 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 	return false
 }
 
-// SetLevel sets level for segment
-func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
-	}
-}
-
-// Clone deep clone the segment info and return a new instance.
-// The size and earliestTs caches are intentionally NOT copied because opts
-// may replace the binlogs (e.g. compaction completion), which would make the
-// cached values stale. See the earliestTs field comment for details.
+// Clone deep clone the segment info and return a new instance. Stats lives
+// on the proto and is copied by proto.Clone, so the cloned segment's
+// aggregate reads stay consistent with its (cloned) binlog arrays. Opts
+// that replace binlogs should also refresh Stats eagerly (recompute via
+// storage.BuildStatsFromFieldBinlogs); EnsureStats no longer writes back lazily —
+// concurrent RLock readers would race.
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo:     info,
-		allocations:     s.allocations,
+		allocations:     append([]*Allocation(nil), s.allocations...),
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
-	cloned.deltaRowcount.Store(-1)
 	for _, opt := range opts {
 		opt(cloned)
 	}
@@ -392,14 +388,11 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		allocations:     s.allocations,
+		allocations:     append([]*Allocation(nil), s.allocations...),
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
-	cloned.size.Store(s.size.Load())
-	cloned.deltaRowcount.Store(s.deltaRowcount.Load())
-
 	for _, opt := range opts {
 		opt(cloned)
 	}
@@ -493,7 +486,7 @@ func SetStartPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 // SetAllocations is the option to set allocations for segment info
 func SetAllocations(allocations []*Allocation) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
-		segment.allocations = allocations
+		segment.allocations = append([]*Allocation(nil), allocations...)
 	}
 }
 
@@ -526,39 +519,9 @@ func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	}
 }
 
-// SetLevel is the option to set level for segment info
-func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.Level = level
-	}
-}
-
-// getSegmentSize use cached value when segment is immutable
 func (s *SegmentInfo) getSegmentSize() int64 {
-	if s.size.Load() <= 0 || s.GetState() != commonpb.SegmentState_Flushed {
-		var size int64
-		for _, binlogs := range s.GetBinlogs() {
-			for _, l := range binlogs.GetBinlogs() {
-				size += l.GetMemorySize()
-			}
-		}
-
-		for _, deltaLogs := range s.GetDeltalogs() {
-			for _, l := range deltaLogs.GetBinlogs() {
-				size += l.GetMemorySize()
-			}
-		}
-
-		for _, statsLogs := range s.GetStatslogs() {
-			for _, l := range statsLogs.GetBinlogs() {
-				size += l.GetMemorySize()
-			}
-		}
-		if size > 0 {
-			s.size.Store(size)
-		}
-	}
-	return s.size.Load()
+	stats := s.EnsureStats()
+	return stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
 }
 
 func (s *SegmentInfo) getFieldBinlogSize(fieldID int64) int64 {
@@ -584,19 +547,8 @@ func (s *SegmentInfo) getFieldBinlogSize(fieldID int64) int64 {
 	return size
 }
 
-// Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
-	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {
-		var rc int64
-		for _, deltaLogs := range s.GetDeltalogs() {
-			for _, l := range deltaLogs.GetBinlogs() {
-				rc += l.GetEntriesNum()
-			}
-		}
-		s.deltaRowcount.Store(rc)
-	}
-	r := s.deltaRowcount.Load()
-	return r
+	return s.EnsureStats().GetDeleteNumRows()
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta

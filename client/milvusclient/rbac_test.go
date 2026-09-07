@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/crypto"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type UserSuite struct {

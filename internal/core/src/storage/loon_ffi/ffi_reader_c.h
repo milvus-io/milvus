@@ -34,50 +34,11 @@ extern "C" {
 typedef void* CFFIPackedReader;
 
 /**
- * @brief Creates a new packed FFI reader from a manifest file path.
- *
- * This function initializes a packed reader that can read columnar data
- * from storage based on the manifest file. The manifest contains metadata
- * about the data layout and file locations.
- *
- * @param manifest_path         Path to the manifest file in object storage.
- *                              Must be a valid UTF-8 encoded null-terminated string.
- * @param schema                Arrow schema defining the structure of the data.
- *                              Must be a valid ArrowSchema pointer conforming to
- *                              the Arrow C data interface specification.
- * @param needed_columns        Array of column names to read. If NULL, all columns
- *                              from the schema will be read.
- * @param needed_columns_size   Number of column names in the needed_columns array.
- *                              Must be 0 if needed_columns is NULL.
- * @param c_packed_reader       Output parameter for the created reader handle.
- *                              On success, will contain a valid reader handle that
- *                              must be released by the caller when no longer needed.
- * @param c_storage_config      Storage configuration containing credentials and
- *                              endpoint information for accessing object storage.
- * @param c_plugin_context      Plugin context for extensibility, may be NULL if
- *                              no plugins are used.
- *
- * @return CStatus indicating success or failure. On failure, the error_msg
- *         field contains details about what went wrong.
- *
- * @note The caller is responsible for releasing the reader handle after use.
- * @note The schema pointer must remain valid for the lifetime of the reader.
- */
-CStatus
-NewPackedFFIReader(const char* manifest_path,
-                   struct ArrowSchema* schema,
-                   char** needed_columns,
-                   int64_t needed_columns_size,
-                   CFFIPackedReader* c_packed_reader,
-                   CStorageConfig c_storage_config,
-                   CPluginContext* c_plugin_context);
-
-/**
  * @brief Creates a new packed FFI reader from manifest content directly.
  *
- * Similar to NewPackedFFIReader, but accepts the manifest content directly
- * as a string instead of reading from a file path. This is useful when the
- * manifest has already been loaded or is generated dynamically.
+ * Accepts the manifest content directly as a string instead of reading from
+ * a file path. This is useful when the manifest has already been loaded or
+ * is generated dynamically.
  *
  * @param loon_manifest         Loon Manifest to open FFI reader with
  * @param schema                Arrow schema defining the structure of the data.

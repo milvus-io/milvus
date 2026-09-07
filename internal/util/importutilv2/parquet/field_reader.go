@@ -820,22 +820,23 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 	if data == nil {
 		return nil, nil, nil
 	}
-	wkbValues := make([][]byte, 0)
-	defaultValueStr := pcr.field.GetDefaultValue().GetStringData()
-	defaultValue := []byte(nil)
-	if defaultValueStr != "" {
-		defaultValue, _ = pkgcommon.ConvertWKTToWKB(defaultValueStr)
-	}
+	wkbValues := make([][]byte, len(data))
 	for i, wktValue := range data {
 		if !validData[i] {
-			wkbValues = append(wkbValues, defaultValue)
 			continue
 		}
 		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, nil, err
 		}
-		wkbValues = append(wkbValues, wkbValue)
+		wkbValues[i] = wkbValue
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue, err := pkgcommon.ConvertWKTToWKB(pcr.field.GetDefaultValue().GetStringData())
+		if err != nil {
+			return nil, nil, merr.WrapErrImportSysFailedMsg("invalid default value for geometry field %s", pcr.field.GetName())
+		}
+		return fillWithDefaultValueImpl(wkbValues, defaultValue, validData, pcr.field)
 	}
 	return wkbValues, validData, nil
 }

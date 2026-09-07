@@ -46,12 +46,6 @@ struct TextColumnCacheConfig {
     size_t max_file_readers = 64;  // Maximum number of cached file readers
 };
 
-struct TextColumnCacheStats {
-    size_t file_cache_hits = 0;
-    size_t file_cache_misses = 0;
-    size_t current_file_cache_size = 0;
-};
-
 using TextLobReaderFactory = std::function<
     arrow::Result<std::unique_ptr<milvus_storage::lob_column::LobColumnReader>>(
         std::shared_ptr<arrow::fs::FileSystem>,
@@ -105,13 +99,6 @@ class TextColumnCache {
                       std::shared_ptr<arrow::fs::FileSystem> fs,
                       const milvus_storage::api::Properties& properties);
 
-    std::string
-    ReadText(const std::string& lob_base_path,
-             std::shared_ptr<arrow::fs::FileSystem> fs,
-             const milvus_storage::api::Properties& properties,
-             const uint8_t* encoded_ref,
-             size_t ref_size);
-
     std::vector<std::string>
     ReadBatch(const std::string& lob_base_path,
               std::shared_ptr<arrow::fs::FileSystem> fs,
@@ -135,18 +122,7 @@ class TextColumnCache {
         google::protobuf::RepeatedPtrField<std::string>* dst);
 
     void
-    Invalidate(const std::string& lob_base_path);
-
-    void
     Clear();
-
-    TextColumnCacheStats
-    GetStats() const;
-
-    const TextColumnCacheConfig&
-    GetConfig() const {
-        return config_;
-    }
 
  private:
     TextColumnCacheConfig config_;

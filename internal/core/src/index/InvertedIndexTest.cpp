@@ -169,6 +169,8 @@ test_run() {
             default_value->set_float_data(20);
         } else if constexpr (std::is_same_v<double, T>) {
             default_value->set_double_data(20);
+        } else if constexpr (std::is_same_v<bool, T>) {
+            default_value->set_bool_data(true);
         }
     }
 
@@ -1008,6 +1010,18 @@ BuildTantivyStringIndex(const std::vector<std::string>& data) {
     auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
     index->BuildWithRawDataForUT(data.size(), data.data(), Config());
     return index;
+}
+
+TEST(InvertedIndexTest, SealedAllValidDoesNotRetainValidityBitmap) {
+    std::vector<std::string> data = {"alpha", "beta", "gamma"};
+    auto index = BuildTantivyStringIndex(data);
+
+    EXPECT_EQ(index->ValidityBitmapByteSize(), 0);
+    auto valid = index->IsNotNull();
+    ASSERT_EQ(valid.size(), data.size());
+    EXPECT_EQ(valid.count(), data.size());
+    auto nulls = index->IsNull();
+    EXPECT_EQ(nulls.count(), 0);
 }
 
 // Verify all three matchers agree for a pattern against test data

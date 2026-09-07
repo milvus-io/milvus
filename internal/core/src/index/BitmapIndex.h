@@ -30,11 +30,6 @@
 namespace milvus {
 namespace index {
 
-struct BitmapInfo {
-    size_t offset_;
-    size_t size_;
-};
-
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,
@@ -77,6 +72,13 @@ class BitmapIndex : public ScalarIndex<T> {
         return ScalarIndexType::BITMAP;
     }
 
+    // Reverse_Lookup is O(1) only when the offset cache is built; otherwise it
+    // linearly scans all distinct postings (O(cardinality)) per row.
+    bool
+    SupportFastReverseLookup() const override {
+        return use_offset_cache_;
+    }
+
     bool
     IsNestedIndex() const override {
         return is_nested_index_;
@@ -99,6 +101,11 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const TargetBitmap
     IsNull() override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override;
@@ -188,8 +195,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        if (schema_.data_type() == proto::schema::DataType::Array &&
-            !is_nested_index_) {
+        if (schema_.data_type() == proto::schema::DataType::Array) {
             return false;
         }
         return true;

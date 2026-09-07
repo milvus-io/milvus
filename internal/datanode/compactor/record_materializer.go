@@ -17,6 +17,8 @@
 package compactor
 
 import (
+	"sync"
+
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -24,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -53,15 +54,22 @@ func (s *recordSelection) Len() int {
 
 type RecordMaterializer struct {
 	materializers []FunctionMaterializer
-	missingFields []*schemapb.FieldSchema
 	schema        *schemapb.CollectionSchema
+	// pendingOutputs are the function-output fields this materializer computes:
+	// the only schema fields absent from the records it wraps. Absent ordinary
+	// fields are already reader-filled (default/null) per the reader contract.
+	pendingOutputs map[int64]struct{}
 }
 
 func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, error) {
 	materializer := &RecordMaterializer{schema: schema}
 	materializedFields := make(map[int64]struct{})
 	for _, functionSchema := range functions {
-		outputIndexes := functionOutputIndexesToMaterialize(functionSchema, existingFields)
+		outputIndexes, err := functionOutputIndexesToMaterialize(functionSchema, existingFields)
+		if err != nil {
+			materializer.Close()
+			return nil, err
+		}
 		if len(outputIndexes) == 0 {
 			continue
 		}
@@ -86,7 +94,7 @@ func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schem
 		}
 		materializer.materializers = append(materializer.materializers, functionMaterializer)
 	}
-	materializer.missingFields = missingNonMaterializedSchemaFields(schema, existingFields, materializedFields)
+	materializer.pendingOutputs = materializedFields
 	return materializer, nil
 }
 
@@ -94,58 +102,44 @@ func (m *RecordMaterializer) Wrap(rec storage.Record) (storage.Record, error) {
 	return m.WrapWithSelection(rec, nil)
 }
 
+// WrapWithSelection wraps rec — optionally filtered to selection — filling
+// absent function outputs. Ordinary fields, including reader-filled defaults
+// and nulls for fields absent from storage, arrive complete on rec per the
+// reader contract, so functions read their inputs from it directly. rec stays
+// borrowed from its reader and is valid until the reader's next Next/Close;
+// the caller must clean up only the derived arrays owned by the returned
+// record (cleanupMaterializedRecord), never the input record itself. Callers
+// that keep the returned record across a reader advance must Retain/Release
+// it explicitly (see storage.Sort).
 func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *recordSelection) (storage.Record, error) {
 	base := rec
-	var selected *selectedRecord
 	if selection != nil {
-		selected = newSelectedRecord(rec, m.schema, selection)
+		selected, err := newSelectedRecord(rec, m.schema, m.pendingOutputs, selection)
+		if err != nil {
+			return nil, err
+		}
 		base = selected
 	}
 	if !m.hasMaterialization() {
 		return base, nil
 	}
 
-	computed := make(map[int64]arrow.Array)
+	functionOutputs := make(map[int64]arrow.Array)
 	for _, materializer := range m.materializers {
 		arrays, err := materializer.Materialize(base)
 		if err != nil {
-			releaseArrowArrays(computed)
-			if base != rec {
-				base.Release()
-			}
-			if selected != nil && selected.err != nil {
-				return nil, selected.err
-			}
+			releaseArrowArrays(functionOutputs)
+			cleanupMaterializedRecord(base)
 			return nil, err
-		}
-		if selected != nil && selected.err != nil {
-			releaseArrowArrays(computed)
-			base.Release()
-			return nil, selected.err
 		}
 		for fieldID, arr := range arrays {
-			computed[fieldID] = arr
+			functionOutputs[fieldID] = arr
 		}
 	}
-	for _, field := range m.missingFields {
-		fieldID := field.GetFieldID()
-		if _, ok := computed[fieldID]; ok {
-			continue
-		}
-		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
-		if err != nil {
-			releaseArrowArrays(computed)
-			if base != rec {
-				base.Release()
-			}
-			return nil, err
-		}
-		computed[fieldID] = arr
-	}
-	if len(computed) == 0 {
+	if len(functionOutputs) == 0 {
 		return base, nil
 	}
-	return &materializedRecord{base: base, computed: computed}, nil
+	return &materializedRecord{base: base, computed: functionOutputs}, nil
 }
 
 func (m *RecordMaterializer) Close() {
@@ -158,12 +152,13 @@ func (m *RecordMaterializer) Close() {
 }
 
 func (m *RecordMaterializer) hasMaterialization() bool {
-	return m != nil && (len(m.materializers) > 0 || len(m.missingFields) > 0)
+	return m != nil && len(m.materializers) > 0
 }
 
 type materializedRecord struct {
-	base     storage.Record
-	computed map[int64]arrow.Array
+	base        storage.Record
+	computed    map[int64]arrow.Array
+	cleanupOnce sync.Once
 }
 
 var _ storage.Record = (*materializedRecord)(nil)
@@ -186,10 +181,6 @@ func (r *materializedRecord) Retain() {
 	}
 }
 
-func (r *materializedRecord) retainBase() {
-	r.base.Retain()
-}
-
 func (r *materializedRecord) Release() {
 	r.base.Release()
 	for _, col := range r.computed {
@@ -197,55 +188,69 @@ func (r *materializedRecord) Release() {
 	}
 }
 
+func (r *materializedRecord) cleanupDerived() {
+	r.cleanupOnce.Do(func() {
+		releaseArrowArrays(r.computed)
+		cleanupMaterializedRecord(r.base)
+	})
+}
+
 type selectedRecord struct {
-	base      storage.Record
-	fields    map[int64]*schemapb.FieldSchema
-	selection *recordSelection
-	columns   map[int64]arrow.Array
-	err       error
+	base        storage.Record
+	selection   *recordSelection
+	columns     map[int64]arrow.Array
+	cleanupOnce sync.Once
 }
 
 var _ storage.Record = (*selectedRecord)(nil)
 
-func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, selection *recordSelection) *selectedRecord {
-	fields := make(map[int64]*schemapb.FieldSchema)
+// newSelectedRecord eagerly slices every readSchema field of base down to the
+// selection ranges. The column set must be fixed for the record's lifetime: a
+// column created lazily after a wrapper Retain-snapshot (e.g.
+// timestampOverwriteRecord) would escape the snapshot and be released once
+// more than it was retained. Per the reader contract base is readSchema-wide
+// (absent ordinary fields arrive reader-filled), so the only schema fields to
+// skip are the function outputs this materializer has yet to compute —
+// declared by pendingOutputs, never decided by probing base.Column.
+func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, pendingOutputs map[int64]struct{}, selection *recordSelection) (*selectedRecord, error) {
+	columns := make(map[int64]arrow.Array)
 	for _, field := range typeutil.GetAllFieldSchemas(schema) {
-		fields[field.GetFieldID()] = field
+		fieldID := field.GetFieldID()
+		if _, pending := pendingOutputs[fieldID]; pending {
+			continue
+		}
+		col, err := buildSelectedColumn(base, field, selection)
+		if err != nil {
+			releaseArrowArrays(columns)
+			return nil, err
+		}
+		columns[fieldID] = col
 	}
 	return &selectedRecord{
 		base:      base,
-		fields:    fields,
 		selection: selection,
-		columns:   make(map[int64]arrow.Array),
+		columns:   columns,
+	}, nil
+}
+
+func buildSelectedColumn(base storage.Record, field *schemapb.FieldSchema, selection *recordSelection) (arrow.Array, error) {
+	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer builder.Release()
+	for _, rowRange := range selection.ranges {
+		if err := builder.Append(base, rowRange.start, rowRange.end); err != nil {
+			return nil, err
+		}
 	}
+	built := builder.Build()
+	defer built.Release()
+	// built holds exactly this field (single-field builder), so Column never returns nil.
+	col := built.Column(field.GetFieldID())
+	col.Retain()
+	return col, nil
 }
 
 func (r *selectedRecord) Column(fieldID storage.FieldID) arrow.Array {
-	if col, ok := r.columns[fieldID]; ok {
-		return col
-	}
-	field := r.fields[fieldID]
-	if field == nil {
-		return nil
-	}
-	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
-	defer builder.Release()
-	for _, rowRange := range r.selection.ranges {
-		if err := builder.Append(r.base, rowRange.start, rowRange.end); err != nil {
-			r.err = err
-			return nil
-		}
-	}
-	selected := builder.Build()
-	defer selected.Release()
-	col := selected.Column(fieldID)
-	if col == nil {
-		r.err = merr.WrapErrServiceInternalMsg("selected record field %d not found", fieldID)
-		return nil
-	}
-	col.Retain()
-	r.columns[fieldID] = col
-	return col
+	return r.columns[fieldID]
 }
 
 func (r *selectedRecord) Len() int {
@@ -266,6 +271,12 @@ func (r *selectedRecord) Release() {
 	}
 }
 
+func (r *selectedRecord) cleanupDerived() {
+	r.cleanupOnce.Do(func() {
+		releaseArrowArrays(r.columns)
+	})
+}
+
 type materializedRecordReader struct {
 	base         storage.RecordReader
 	materializer *RecordMaterializer
@@ -283,7 +294,7 @@ func newMaterializedRecordReader(base storage.RecordReader, materializer *Record
 
 func (r *materializedRecordReader) Next() (storage.Record, error) {
 	if r.current != nil {
-		r.current.Release()
+		cleanupMaterializedRecord(r.current)
 		r.current = nil
 	}
 	rec, err := r.base.Next()
@@ -292,13 +303,9 @@ func (r *materializedRecordReader) Next() (storage.Record, error) {
 	}
 	wrapped, err := r.materializer.Wrap(rec)
 	if err != nil {
-		rec.Release()
+		// rec stays owned by the base reader; it is released on its next
+		// Next/Close, never here.
 		return nil, err
-	}
-	if materialized, ok := wrapped.(*materializedRecord); ok {
-		materialized.retainBase()
-	} else {
-		wrapped.Retain()
 	}
 	r.current = wrapped
 	return wrapped, nil
@@ -306,7 +313,7 @@ func (r *materializedRecordReader) Next() (storage.Record, error) {
 
 func (r *materializedRecordReader) Close() error {
 	if r.current != nil {
-		r.current.Release()
+		cleanupMaterializedRecord(r.current)
 		r.current = nil
 	}
 	r.materializer.Close()
@@ -537,38 +544,32 @@ func (m *minHashFunctionMaterializer) Close() {
 	}
 }
 
-func functionOutputIndexesToMaterialize(functionSchema *schemapb.FunctionSchema, existingFields map[int64]struct{}) []int {
+func functionOutputIndexesToMaterialize(functionSchema *schemapb.FunctionSchema, existingFields map[int64]struct{}) ([]int, error) {
 	outputFieldIDs := functionSchema.GetOutputFieldIds()
+	// A persisted function with no output fields is schema corruption; reject
+	// before the all-present early-return treats the empty set as "nothing to
+	// materialize" and silently drops it.
+	if len(outputFieldIDs) == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("persisted function %s has no output fields", functionSchema.GetName())
+	}
 	indexes := make([]int, 0, len(outputFieldIDs))
-	hasMissingOutput := false
+	presentCount := 0
 	for idx, outputFieldID := range outputFieldIDs {
 		indexes = append(indexes, idx)
-		if _, ok := existingFields[outputFieldID]; !ok {
-			hasMissingOutput = true
+		if _, ok := existingFields[outputFieldID]; ok {
+			presentCount++
 		}
 	}
-	if !hasMissingOutput {
-		return nil
+	if presentCount == len(outputFieldIDs) {
+		return nil, nil
 	}
-	return indexes
-}
-
-func missingNonMaterializedSchemaFields(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}, materializedFields map[int64]struct{}) []*schemapb.FieldSchema {
-	missing := make([]*schemapb.FieldSchema, 0)
-	for _, field := range typeutil.GetAllFieldSchemas(schema) {
-		fieldID := field.GetFieldID()
-		if common.IsSystemField(fieldID) {
-			continue
-		}
-		if _, ok := existingFields[fieldID]; ok {
-			continue
-		}
-		if _, ok := materializedFields[fieldID]; ok {
-			continue
-		}
-		missing = append(missing, field)
+	if presentCount != 0 {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"function %s has partially materialized output fields: %d of %d are physically present",
+			functionSchema.GetName(), presentCount, len(outputFieldIDs),
+		)
 	}
-	return missing
+	return indexes, nil
 }
 
 func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error) {
@@ -640,10 +641,14 @@ func releaseArrowArrays(arrays map[int64]arrow.Array) {
 	}
 }
 
-func releaseWrappedRecord(wrapped storage.Record, base storage.Record) {
-	if wrapped != base {
-		wrapped.Release()
-		return
+type derivedRecord interface {
+	cleanupDerived()
+}
+
+// cleanupMaterializedRecord releases only the arrays created by materialization
+// or selection. The base record stays borrowed from and owned by its reader.
+func cleanupMaterializedRecord(record storage.Record) {
+	if derived, ok := record.(derivedRecord); ok {
+		derived.cleanupDerived()
 	}
-	base.Release()
 }

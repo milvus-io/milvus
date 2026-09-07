@@ -81,6 +81,13 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
 
 class Schema {
  public:
+    Schema() = default;
+
+    Schema(const Schema& other);
+
+    Schema&
+    operator=(const Schema& other);
+
     FieldId
     AddDebugField(const std::string& name,
                   DataType data_type,
@@ -236,8 +243,15 @@ class Schema {
              DataType data_type,
              DataType element_type,
              bool nullable) {
-        auto field_meta = FieldMeta(
-            name, id, data_type, element_type, nullable, std::nullopt);
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    element_type,
+                                    nullable,
+                                    std::nullopt,
+                                    std::string{},
+                                    LOCAL_FORMAT_RAW,
+                                    std::nullopt);
         this->AddField(std::move(field_meta));
     }
 
@@ -543,6 +557,7 @@ class Schema {
 
     void
     AddField(FieldMeta&& field_meta) {
+        std::atomic_store(&loon_arrow_lob_schema_cache_, ArrowSchemaPtr{});
         auto field_name = field_meta.get_name();
         auto field_id = field_meta.get_id();
         AssertInfo(!name_ids_.count(field_name), "duplicated field name");
@@ -629,15 +644,13 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const;
+
     // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
         return function_output_field_ids_.count(field_id) > 0;
-    }
-
-    const std::unordered_set<FieldId>&
-    function_output_field_ids() const {
-        return function_output_field_ids_;
     }
 
     void
@@ -652,6 +665,9 @@ class Schema {
     }
 
  private:
+    // Keep Schema's copy constructor and assignment operator in sync with
+    // these members. Runtime-only caches, such as loon_arrow_lob_schema_cache_,
+    // are intentionally reset instead of copied.
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
 
@@ -703,8 +719,9 @@ class Schema {
     std::unordered_set<FieldId> function_output_field_ids_;
 
     bool is_milvus_table_external_ = false;
+
+    mutable ArrowSchemaPtr loon_arrow_lob_schema_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
-using SafeSchemaPtr = std::atomic<SchemaPtr*>;
 }  // namespace milvus

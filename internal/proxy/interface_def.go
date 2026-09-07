@@ -24,12 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
 
-// use interface tsoAllocator to keep other components testable
-// include: channelsTimeTickerImpl, baseTaskQueue, taskScheduler
-type tsoAllocator interface {
-	AllocOne(ctx context.Context) (Timestamp, error)
-}
-
 // use timestampAllocatorInterface to keep other components testable
 //
 //go:generate mockery --name=timestampAllocatorInterface --filename=mock_tso_test.go --outpkg=proxy --output=. --inpackage --structname=mockTimestampAllocator --with-expecter

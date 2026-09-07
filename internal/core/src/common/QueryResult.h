@@ -28,14 +28,18 @@
 #include <NamedType/named_type.hpp>
 
 #include "common/BitsetView.h"
+#include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
-#include "common/OffsetMapping.h"
 #include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
 namespace milvus {
+
+namespace segcore {
+class SegmentReadLease;
+}
 
 // scan cost in each search/query
 struct StorageCost {
@@ -43,57 +47,7 @@ struct StorageCost {
     int64_t scanned_total_bytes = 0;
 
     StorageCost() = default;
-
-    StorageCost(int64_t scanned_remote_bytes, int64_t scanned_total_bytes)
-        : scanned_remote_bytes(scanned_remote_bytes),
-          scanned_total_bytes(scanned_total_bytes) {
-    }
-
-    StorageCost
-    operator+(const StorageCost& rhs) const {
-        return {scanned_remote_bytes + rhs.scanned_remote_bytes,
-                scanned_total_bytes + rhs.scanned_total_bytes};
-    }
-
-    void
-    operator+=(const StorageCost& rhs) {
-        scanned_remote_bytes += rhs.scanned_remote_bytes;
-        scanned_total_bytes += rhs.scanned_total_bytes;
-    }
-
-    StorageCost
-    operator*(const double factor) const {
-        return {static_cast<int64_t>(scanned_remote_bytes * factor),
-                static_cast<int64_t>(scanned_total_bytes * factor)};
-    }
-
-    void
-    operator*=(const double factor) {
-        scanned_remote_bytes =
-            static_cast<int64_t>(scanned_remote_bytes * factor);
-        scanned_total_bytes =
-            static_cast<int64_t>(scanned_total_bytes * factor);
-    }
-
-    void
-    operator=(const StorageCost& rhs) {
-        scanned_remote_bytes = rhs.scanned_remote_bytes;
-        scanned_total_bytes = rhs.scanned_total_bytes;
-    }
-
-    std::string
-    ToString() const {
-        return fmt::format("scanned_remote_bytes: {}, scanned_total_bytes: {}",
-                           scanned_remote_bytes,
-                           scanned_total_bytes);
-    }
 };
-
-inline std::ostream&
-operator<<(std::ostream& os, const StorageCost& cost) {
-    os << cost.ToString();
-    return os;
-}
 
 struct OffsetDisPair {
  private:
@@ -158,13 +112,8 @@ class VectorIterator {
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
  public:
-    // Pass nullptr for VECTOR_ARRAY element-level search: the iterator
-    // returns element IDs, which will be processed by IArrayOffsets.
-    ChunkMergeIterator(int chunk_count,
-                       const milvus::OffsetMapping* offset_mapping,
-                       bool larger_is_closer = false)
-        : offset_mapping_(offset_mapping),
-          heap_(OffsetDisPairComparator(larger_is_closer)) {
+    ChunkMergeIterator(int chunk_count, bool larger_is_closer = false)
+        : heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
@@ -178,17 +127,21 @@ class ChunkMergeIterator : public VectorIterator {
         if (!heap_.empty()) {
             auto top = heap_.top();
             heap_.pop();
-            if (iterators_[top->GetIteratorIdx()]->HasNext()) {
-                auto origin_pair = iterators_[top->GetIteratorIdx()]->Next();
+            auto& iter = iterators_[top->GetIteratorIdx()];
+            auto has_next = iter->HasNext();
+            AssertInfo(has_next.has_value(),
+                       "knowhere iterator HasNext failed: {}",
+                       has_next.what());
+            if (has_next.value()) {
+                auto origin_pair = iter->Next();
+                AssertInfo(origin_pair.has_value(),
+                           "knowhere iterator Next failed: {}",
+                           origin_pair.what());
                 auto off_dis_pair = std::make_shared<OffsetDisPair>(
-                    origin_pair, top->GetIteratorIdx());
+                    origin_pair.value(), top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
             }
-            auto result = top->GetOffDis();
-            if (offset_mapping_ != nullptr) {
-                result.first = offset_mapping_->GetLogicalOffset(result.first);
-            }
-            return result;
+            return top->GetOffDis();
         }
         return std::nullopt;
     }
@@ -205,12 +158,25 @@ class ChunkMergeIterator : public VectorIterator {
     void
     seal() {
         sealed = true;
-        int idx = 0;
-        for (auto& iter : iterators_) {
-            if (iter->HasNext()) {
+        // idx must track each chunk's position in iterators_, because Next()
+        // refills from iterators_[OffsetDisPair::GetIteratorIdx()]. Incrementing
+        // only for non-empty iterators would misalign the index once a leading
+        // iterator is empty (e.g. emptied by a bitset filter), stamping later
+        // chunks with the wrong iterator and silently dropping their remaining
+        // results from the merged top-k.
+        for (int idx = 0; idx < static_cast<int>(iterators_.size()); ++idx) {
+            auto& iter = iterators_[idx];
+            auto has_next = iter->HasNext();
+            AssertInfo(has_next.has_value(),
+                       "knowhere iterator HasNext failed: {}",
+                       has_next.what());
+            if (has_next.value()) {
                 auto origin_pair = iter->Next();
+                AssertInfo(origin_pair.has_value(),
+                           "knowhere iterator Next failed: {}",
+                           origin_pair.what());
                 auto off_dis_pair =
-                    std::make_shared<OffsetDisPair>(origin_pair, idx++);
+                    std::make_shared<OffsetDisPair>(origin_pair.value(), idx);
                 heap_.push(off_dis_pair);
             }
         }
@@ -223,7 +189,6 @@ class ChunkMergeIterator : public VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
-    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -248,7 +213,6 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
-        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -261,7 +225,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
-                    chunk_count, offset_mapping, larger_is_closer);
+                    chunk_count, larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];
@@ -288,10 +252,18 @@ struct SearchResult {
     }
 
  public:
-    int64_t total_nq_;
-    int64_t unity_topK_;
-    int64_t total_data_cnt_;
-    void* segment_;
+    int64_t total_nq_{0};
+    int64_t unity_topK_{0};
+    int64_t total_data_cnt_{0};
+    void* segment_{nullptr};
+
+    // Sealed search requests keep publication blocked until the result is
+    // deleted. Growing search results leave this empty.
+    std::shared_ptr<segcore::SegmentReadLease> read_lease_;
+
+    // Pins resources whose iterators or offset mappings may outlive the
+    // original search call independently from segment snapshot publication.
+    std::vector<std::shared_ptr<void>> resource_pins_;
 
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;
@@ -333,12 +305,6 @@ struct SearchResult {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
-
-    bool
-    HasIterators() const {
-        return (element_level_ && element_iterators_.has_value()) ||
-               (!element_level_ && vector_iterators_.has_value());
-    }
 
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)

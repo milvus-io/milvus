@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
 #include "common/VectorArray.h"
@@ -41,14 +42,16 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryArithOpEvalRangeExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
-    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("op_type", static_cast<int>(expr_->op_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    const bool is_nested_array =
+        data_type == DataType::ARRAY &&
+        expr_->column_.element_type_ == DataType::ARRAY;
+    if (expr_->column_.element_level_ && !is_nested_array) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {
@@ -97,7 +100,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -105,19 +108,60 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::ARRAY: {
+            const auto is_array_length =
+                expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength;
+            if (is_nested_array && !is_array_length) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for recursive ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    if (is_array_length) {
+                        if (is_nested_array) {
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         false>(input);
+                            }
+                        } else {
+                            result = ExecArrayLength<ArrayView, int64_t, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    }
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForArray<double>(input);
+                    if (is_array_length) {
+                        if (is_nested_array) {
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         false>(input);
+                            }
+                        } else {
+                            result = ExecArrayLength<ArrayView, double, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<double>(input);
+                    }
                     break;
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -125,19 +169,27 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VECTOR_ARRAY: {
+            if (expr_->arith_op_type_ !=
+                proto::plan::ArithOpType::ArrayLength) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for VECTOR_ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForVectorArray<int64_t>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, int64_t, false>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForVectorArray<double>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, double, false>(input);
                     break;
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -145,7 +197,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -197,14 +249,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
 // For int64_t GetType, uses at_numeric() to extract any JSON number in one
 // parse.  int64 values preserve precision; uint64/double fall back to double.
 // 'cmp' must reference 'json_v' (auto-typed as int64_t or double).
-#define BinaryArithRangeJSONCompareCore(cmp, error_result)                  \
+#define BinaryArithRangeJSONCompare(cmp)                                    \
     do {                                                                    \
         for (size_t i = 0; i < size; ++i) {                                 \
             auto offset = i;                                                \
             if constexpr (filter_type == FilterType::random) {              \
                 offset = (offsets) ? offsets[i] : i;                        \
             }                                                               \
-            if (valid_data != nullptr && !valid_data[offset]) {             \
+            if (valid_data && !valid_data[offset]) {                        \
                 res[i] = false;                                             \
                 valid_res[i] = false;                                       \
                 continue;                                                   \
@@ -212,7 +264,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             if constexpr (std::is_same_v<GetType, int64_t>) {               \
                 auto x_num = data[offset].at_numeric(pointer);              \
                 if (x_num.error()) {                                        \
-                    res[i] = (error_result);                                \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
                     continue;                                               \
                 }                                                           \
                 auto n = x_num.value();                                     \
@@ -228,7 +281,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             } else {                                                        \
                 auto x = data[offset].template at<GetType>(pointer);        \
                 if (x.error()) {                                            \
-                    res[i] = (error_result);                                \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
                     continue;                                               \
                 }                                                           \
                 auto json_v = x.value();                                    \
@@ -237,39 +291,36 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
         }                                                                   \
     } while (false)
 
-#define BinaryArithRangeJSONCompare(cmp) \
-    BinaryArithRangeJSONCompareCore(cmp, false)
-
-#define BinaryArithRangeJSONCompareNotEqual(cmp) \
-    BinaryArithRangeJSONCompareCore(cmp, true)
-
-#define BinaryArithRangeJONCompareArrayLength(cmp)              \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            int array_length = 0;                               \
-            auto doc = data[offset].doc();                      \
-            auto array = doc.at_pointer(pointer).get_array();   \
-            if (!array.error()) {                               \
-                array_length = array.count_elements();          \
-            }                                                   \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeJONCompareArrayLength(cmp)             \
+    do {                                                       \
+        for (size_t i = 0; i < size; ++i) {                    \
+            auto offset = i;                                   \
+            if constexpr (filter_type == FilterType::random) { \
+                offset = (offsets) ? offsets[i] : i;           \
+            }                                                  \
+            if (valid_data && !valid_data[offset]) {           \
+                res[i] = false;                                \
+                valid_res[i] = false;                          \
+                continue;                                      \
+            }                                                  \
+            int array_length = 0;                              \
+            auto doc = data[offset].doc();                     \
+            auto array = doc.at_pointer(pointer).get_array();  \
+            if (array.error()) {                               \
+                res[i] = false;                                \
+                valid_res[i] = false;                          \
+                continue;                                      \
+            }                                                  \
+            array_length = array.count_elements();             \
+            res[i] = (cmp);                                    \
+        }                                                      \
     } while (false)
 
     auto execute_sub_batch =
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -330,9 +381,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) == val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) == val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) == val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -342,27 +403,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::NotEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v + right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v + right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v - right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v - right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v * right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v * right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v / right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v / right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             safe_mod(json_v, right_operand) != val);
                         break;
                     }
@@ -372,23 +433,33 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) & int64_t(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) | int64_t(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) ^ int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) != val);
                         break;
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -442,9 +513,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) > val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) > val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) > val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -498,9 +579,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) >= val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) >= val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -554,9 +645,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) < val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) < val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) < val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -610,9 +711,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) <= val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) <= val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -620,7 +731,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -657,6 +768,8 @@ template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     OffsetVector* input) {
+    AssertInfo(expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength,
+               "ARRAY length must use ExecArrayLength");
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
@@ -665,11 +778,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->value_);
-        if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
-            right_operand_arg_.SetValue(ValueType());
-        } else {
-            right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
-        }
+        right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
         arg_inited_ = true;
     }
 
@@ -707,31 +816,17 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             if constexpr (filter_type == FilterType::random) {  \
                 offset = (offsets) ? offsets[i] : i;            \
             }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
+            if (valid_data && !valid_data[offset]) {            \
                 res[i] = false;                                 \
                 valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
             if (index >= data[offset].length()) {               \
                 res[i] = false;                                 \
+                valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
             auto value = data[offset].get_data<GetType>(index); \
-            res[i] = (cmp);                                     \
-        }                                                       \
-    } while (false)
-
-#define BinaryArithRangeArrayLengthCompate(cmp)                 \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = valid_res[i] = false;                  \
-                continue;                                       \
-            }                                                   \
             res[i] = (cmp);                                     \
         }                                                       \
     } while (false)
@@ -740,7 +835,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -748,6 +843,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
+        AssertInfo(index >= 0,
+                   "array arithmetic predicate requires nested path");
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
@@ -782,11 +879,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) == val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() == val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) == val);
@@ -802,9 +894,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) == val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) == val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) == val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -838,11 +940,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) != val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() != val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) != val);
@@ -858,9 +955,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) != val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) != val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -894,11 +1001,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) > val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() > val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) > val);
@@ -914,9 +1016,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) > val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) > val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) > val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -950,11 +1062,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) >= val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() >= val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) >= val);
@@ -970,9 +1077,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) >= val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) >= val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1006,11 +1123,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) < val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() < val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) < val);
@@ -1026,9 +1138,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) < val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) < val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) < val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1062,11 +1184,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) <= val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() <= val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) <= val);
@@ -1082,9 +1199,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) <= val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) <= val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1092,7 +1219,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -1127,20 +1254,31 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ArrayType, typename ValueType, bool ElementLevel>
 VectorPtr
-PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
-    OffsetVector* input) {
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
     if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
-        ThrowInfo(OpTypeInvalid,
-                  "unsupported arith type for vector array field: {}",
+        ThrowInfo(UnexpectedError,
+                  "unsupported arith type for ARRAY length expression: {}",
                   expr_->arith_op_type_);
     }
+    AssertInfo(expr_->column_.element_level_ == ElementLevel,
+               "ARRAY length element-level mismatch: plan={}, executor={}",
+               expr_->column_.element_level_,
+               ElementLevel);
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        AssertInfo(expr_->column_.nested_path_.empty(),
+                   "recursive ARRAY length does not support nested path now");
+    }
 
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
     }
 
     if (!arg_inited_) {
@@ -1157,7 +1295,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
     auto op_type = expr_->op_type_;
     auto value = value_arg_.GetValue<ValueType>();
 
-    auto compare_length = [op_type, value](int length) {
+    auto compare_length = [op_type, value](int64_t length) {
         switch (op_type) {
             case proto::plan::OpType::Equal:
                 return length == value;
@@ -1172,9 +1310,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
             case proto::plan::OpType::LessEqual:
                 return length <= value;
             default:
-                ThrowInfo(OpTypeInvalid,
-                          "unsupported operator type for vector array "
-                          "length eval expr: {}",
+                ThrowInfo(UnexpectedError,
+                          "unsupported operator type for ARRAY length "
+                          "expression: {}",
                           op_type);
         }
         return false;
@@ -1182,8 +1320,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
 
     auto execute_sub_batch = [compare_length]<FilterType filter_type =
                                                   FilterType::sequential>(
-        const VectorArrayView* data,
-        const bool* valid_data,
+        const ArrayType* data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -1196,21 +1334,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            res[i] = compare_length(data[offset].length());
+            res[i] = compare_length(
+                static_cast<int64_t>(GetArrayRowSize(data[offset])));
         }
     };
 
     int64_t processed_size = 0;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessElementLevelByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        } else {
+            processed_size = ProcessDataByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        }
     } else {
-        processed_size = ProcessDataChunks<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        } else {
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        }
     }
 
     AssertInfo(processed_size == real_batch_size,
@@ -1241,10 +1390,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                int64_t,
                                T>
         HighPrecisionType;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
@@ -1373,9 +1527,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::Equal,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::Equal,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1488,9 +1668,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::NotEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::NotEqual,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1603,9 +1809,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterThan,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterThan,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1718,9 +1950,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterEqual,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1833,9 +2091,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessThan,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessThan,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1948,9 +2232,35 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessEqual,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1958,7 +2268,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -1997,10 +2307,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                T>
         HighPrecisionType;
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     auto res_vec =
@@ -2024,7 +2339,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         [ op_type,
           arith_type ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -2111,9 +2426,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::Equal,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::Equal,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2194,9 +2527,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::NotEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::NotEqual,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2277,9 +2628,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterThan,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterThan,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2360,9 +2729,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterEqual,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2443,9 +2830,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessThan,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessThan,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2526,9 +2931,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessEqual,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2536,7 +2959,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -2547,7 +2970,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         if constexpr (filter_type == FilterType::sequential) {
             // contiguous rows: reuse the vectorized shared helper
             ApplyValidMask(valid_data, res, valid_res, size);
-        } else if (valid_data != nullptr) {
+        } else if (valid_data) {
             // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
                 auto offset = (offsets) ? offsets[i] : i;
@@ -2667,18 +3090,19 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
         std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
                            int64_t,
                            T>;
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     auto value = GetValueWithCastNumber<H>(expr_->value_);
     auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
 
     std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index.CanSkipBinaryArithRange<T>(field_id_,
-                                                          i,
-                                                          expr_->op_type_,
-                                                          expr_->arith_op_type_,
-                                                          value,
-                                                          right_value);
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
+        auto skip =
+            skip_index->CanSkipBinaryArithRange<T>(field_id_,
+                                                   i,
+                                                   expr_->op_type_,
+                                                   expr_->arith_op_type_,
+                                                   value,
+                                                   right_value);
         if (!skip) {
             chunks_may_hit.push_back(i);
         }
@@ -2692,3 +3116,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
 
 }  //namespace exec
 }  // namespace milvus
+
+#undef BinaryArithRangeJSONCompare
+#undef BinaryArithRangeJONCompareArrayLength
+#undef BinaryArithRangeArrayCompare

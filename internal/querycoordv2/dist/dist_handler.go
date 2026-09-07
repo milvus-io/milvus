@@ -178,9 +178,15 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 	} else {
 		dh.lastUpdateTs = resp.GetLastModifyTs()
 
+		segmentCnt := len(resp.GetSegments())
+		channelCnt := len(resp.GetChannels())
+		if resp.GetIsDelta() {
+			segmentCnt = int(resp.GetTotalSegmentCount())
+			channelCnt = int(resp.GetTotalChannelCount())
+		}
 		node.UpdateStats(
-			session.WithSegmentCnt(len(resp.GetSegments())),
-			session.WithChannelCnt(len(resp.GetChannels())),
+			session.WithSegmentCnt(segmentCnt),
+			session.WithChannelCnt(channelCnt),
 			session.WithMemCapacity(resp.GetMemCapacityInMB()),
 			session.WithCPUNum(resp.GetCpuNum()),
 		)
@@ -224,6 +230,10 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 		})
 	}
 
+	if resp.GetIsDelta() {
+		dh.dist.SegmentDistManager.Patch(resp.GetNodeID(), updates, resp.GetRemovedSegmentIds())
+		return
+	}
 	dh.dist.SegmentDistManager.Update(resp.GetNodeID(), updates...)
 }
 
@@ -292,13 +302,19 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		updates = append(updates, dmChannel)
 
 		serviceable := checkDelegatorServiceable(ctx, dh, dmChannel.View)
-		// trigger pull next target until shard leader is ready
-		if !serviceable {
+		// Delta responses rely on QueryNodes to report serviceability changes through leader-view deltas.
+		// Keep the full-pull fallback for legacy and full responses.
+		if !serviceable && !resp.GetIsDelta() {
 			dh.lastUpdateTs = 0
 		}
 	}
 
-	newLeaderOnNode := dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
+	var newLeaderOnNode []*meta.DmChannel
+	if resp.GetIsDelta() {
+		newLeaderOnNode = dh.dist.ChannelDistManager.Patch(resp.GetNodeID(), updates, resp.GetRemovedChannelNames())
+	} else {
+		newLeaderOnNode = dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
+	}
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
@@ -356,11 +372,13 @@ func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDis
 
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.DistributionRequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+	supportDelta := paramtable.Get().QueryCoordCfg.EnableDataDistributionDelta.GetAsBool()
 	resp, err := dh.client.GetDataDistribution(ctx, dh.nodeID, &querypb.GetDataDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
 		),
 		LastUpdateTs: dh.lastUpdateTs,
+		SupportDelta: supportDelta,
 	})
 	if err != nil {
 		return nil, err

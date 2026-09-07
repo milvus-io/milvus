@@ -76,6 +76,7 @@ const (
 	DataCoord_DescribeSnapshot_FullMethodName                     = "/milvus.proto.data.DataCoord/DescribeSnapshot"
 	DataCoord_RestoreSnapshot_FullMethodName                      = "/milvus.proto.data.DataCoord/RestoreSnapshot"
 	DataCoord_ExportSnapshot_FullMethodName                       = "/milvus.proto.data.DataCoord/ExportSnapshot"
+	DataCoord_GetExportSnapshotState_FullMethodName               = "/milvus.proto.data.DataCoord/GetExportSnapshotState"
 	DataCoord_GetRestoreSnapshotState_FullMethodName              = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
 	DataCoord_ListRestoreSnapshotJobs_FullMethodName              = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
 	DataCoord_PinSnapshotData_FullMethodName                      = "/milvus.proto.data.DataCoord/PinSnapshotData"
@@ -157,6 +158,7 @@ type DataCoordClient interface {
 	DescribeSnapshot(ctx context.Context, in *DescribeSnapshotRequest, opts ...grpc.CallOption) (*DescribeSnapshotResponse, error)
 	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error)
 	ExportSnapshot(ctx context.Context, in *ExportSnapshotRequest, opts ...grpc.CallOption) (*ExportSnapshotResponse, error)
+	GetExportSnapshotState(ctx context.Context, in *GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*GetExportSnapshotStateResponse, error)
 	GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error)
 	PinSnapshotData(ctx context.Context, in *PinSnapshotDataRequest, opts ...grpc.CallOption) (*PinSnapshotDataResponse, error)
@@ -663,6 +665,15 @@ func (c *dataCoordClient) ExportSnapshot(ctx context.Context, in *ExportSnapshot
 	return out, nil
 }
 
+func (c *dataCoordClient) GetExportSnapshotState(ctx context.Context, in *GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*GetExportSnapshotStateResponse, error) {
+	out := new(GetExportSnapshotStateResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetExportSnapshotState_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dataCoordClient) GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error) {
 	out := new(GetRestoreSnapshotStateResponse)
 	err := c.cc.Invoke(ctx, DataCoord_GetRestoreSnapshotState_FullMethodName, in, out, opts...)
@@ -838,6 +849,7 @@ type DataCoordServer interface {
 	DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error)
 	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error)
 	ExportSnapshot(context.Context, *ExportSnapshotRequest) (*ExportSnapshotResponse, error)
+	GetExportSnapshotState(context.Context, *GetExportSnapshotStateRequest) (*GetExportSnapshotStateResponse, error)
 	GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error)
 	PinSnapshotData(context.Context, *PinSnapshotDataRequest) (*PinSnapshotDataResponse, error)
@@ -1019,6 +1031,9 @@ func (UnimplementedDataCoordServer) RestoreSnapshot(context.Context, *RestoreSna
 }
 func (UnimplementedDataCoordServer) ExportSnapshot(context.Context, *ExportSnapshotRequest) (*ExportSnapshotResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ExportSnapshot not implemented")
+}
+func (UnimplementedDataCoordServer) GetExportSnapshotState(context.Context, *GetExportSnapshotStateRequest) (*GetExportSnapshotStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetExportSnapshotState not implemented")
 }
 func (UnimplementedDataCoordServer) GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRestoreSnapshotState not implemented")
@@ -2022,6 +2037,24 @@ func _DataCoord_ExportSnapshot_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_GetExportSnapshotState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExportSnapshotStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetExportSnapshotState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetExportSnapshotState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetExportSnapshotState(ctx, req.(*GetExportSnapshotStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DataCoord_GetRestoreSnapshotState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRestoreSnapshotStateRequest)
 	if err := dec(in); err != nil {
@@ -2456,6 +2489,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExportSnapshot",
 			Handler:    _DataCoord_ExportSnapshot_Handler,
+		},
+		{
+			MethodName: "GetExportSnapshotState",
+			Handler:    _DataCoord_GetExportSnapshotState_Handler,
 		},
 		{
 			MethodName: "GetRestoreSnapshotState",

@@ -32,7 +32,9 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -150,6 +152,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	return InitRemoteArrowFileSystem(params)
 }
 
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
@@ -215,6 +227,14 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
+}
+
+// SetArrowFSChunkManagerEnabled selects the segcore remote chunk manager
+// backend for this process: milvus-storage Arrow FileSystem vs the legacy
+// AWS-SDK based implementations. Must run during component init, before any
+// remote chunk manager is created (segment load, index build/load).
+func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
+	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
@@ -297,6 +317,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
@@ -501,6 +522,72 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+// maxStorageReaderThreadPoolSize bounds common.storage.readerThreadPoolSize.
+// The value is operational sanity far above any useful pool (reads are
+// network-bound); its real job is to reject values that would wrap when
+// narrowed to int32 (e.g. 4294967296 -> 0, silently disabling the pool).
+const maxStorageReaderThreadPoolSize = 1024
+
+// maxIndexBuildReadWindowBytes mirrors the limit enforced by
+// InitIndexBuildReadWindow in storage_c.cpp (milvus-storage validates
+// reader.record_batch_max_size in [1, 4GB]). It is duplicated here so both
+// values can be checked before either one is applied; the C side stays
+// authoritative for callers that bypass this function.
+const maxIndexBuildReadWindowBytes = 4 << 30
+
+// loonReaderConfigMu serializes InitLoonReaderConfig. Config-event handlers
+// run inline on the updating goroutine and the dispatcher gives no ordering
+// guarantee across concurrent updates, so two writers (say 16 then 8) could
+// otherwise read the paramtable in one order and reach
+// C.InitLoonReaderThreadPool in the reverse one, leaving the pool at 16 while
+// the paramtable reports 8 — and the resize is not idempotent, so nothing
+// later repairs it. The lock covers read-then-apply rather than just the
+// apply, so whichever caller acquires it last also reads the newest values
+// and installs them last.
+var loonReaderConfigMu sync.Mutex
+
+// InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
+// settings: the global reader thread pool size (chunk/file-level read
+// fan-out) and the index-build read window (how many bytes one prefetch
+// round may span, which bounds how many row groups download in parallel per
+// round). Both default to 0 = pre-existing sequential behavior.
+//
+// Both values are validated before either is applied. Resizing the global
+// reader pool is not revertible through config (it cannot be destroyed at
+// runtime), so applying it and only then rejecting the window would leave a
+// hot-reload half-applied with nothing but a generic failure log to show it.
+func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
+	loonReaderConfigMu.Lock()
+	defer loonReaderConfigMu.Unlock()
+
+	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
+			maxStorageReaderThreadPoolSize, poolSize)
+	}
+	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
+	if window < 0 || window > maxIndexBuildReadWindowBytes {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
+			maxIndexBuildReadWindowBytes, window)
+	}
+	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
+	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
+		return err
+	}
+	status = C.InitIndexBuildReadWindow(C.int64_t(window))
+	return HandleCStatus(&status, "InitIndexBuildReadWindow failed")
+}
+
+// EffectiveLoonReaderThreadPoolSize returns the pool size actually in effect,
+// which differs from the configured value when the pool already exists: it
+// cannot be destroyed at runtime, so lowering the setting to 0 does not take
+// effect until restart.
+func EffectiveLoonReaderThreadPoolSize() int32 {
+	return int32(C.GetLoonReaderThreadPoolSize())
+}
+
 func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	arrowReaderConfig := C.CArrowReaderConfig{
 		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
@@ -508,6 +595,29 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
 
 var coreParamCallbackInitOnce sync.Once
@@ -605,6 +715,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.EnableDriverPrefetch.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultDriverPrefetchEnable(enable)
+			return nil
+		})
+
 		paramtable.Get().CommonCfg.EnabledJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -663,6 +782,26 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			SyncTakeForOutputResultCountLimit(paramtable.Get())
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -704,6 +843,12 @@ func SetupCoreConfigChangelCallback() {
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
+	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
+	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
@@ -725,9 +870,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
 
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
+
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
-	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	status = C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
 	statErr := HandleCStatus(&status, "InitInterminIndexConfig failed")
 	if statErr != nil {
 		return statErr
@@ -745,6 +893,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 func InitGeometryCache(params *paramtable.ComponentParam) error {
 	enableGeometryCache := C.bool(params.QueryNodeCfg.EnableGeometryCache.GetAsBool())
 	C.SegcoreSetEnableGeometryCache(enableGeometryCache)
+	return nil
+}
+
+func InitGISSplitFusion(params *paramtable.ComponentParam) error {
+	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
+	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
 	return nil
 }
 

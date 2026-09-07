@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -53,7 +54,7 @@ type GrpcAccessInfo struct {
 	end      time.Time
 
 	// runtime set info
-	actualConsistencyLevel *commonpb.ConsistencyLevel
+	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
 }
 
 func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
@@ -323,8 +324,8 @@ func (i *GrpcAccessInfo) OutputFields() string {
 
 func (i *GrpcAccessInfo) ConsistencyLevel() string {
 	// return actual consistency level if set
-	if i.actualConsistencyLevel != nil {
-		return i.actualConsistencyLevel.String()
+	if acl := i.actualConsistencyLevel.Load(); acl != nil {
+		return acl.String()
 	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
@@ -386,7 +387,7 @@ func (i *GrpcAccessInfo) ClientRequestTime() string {
 }
 
 func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
-	i.actualConsistencyLevel = &acl
+	i.actualConsistencyLevel.Store(&acl)
 }
 
 func (i *GrpcAccessInfo) TemplateValueLength() string {

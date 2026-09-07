@@ -66,7 +66,7 @@ registerSum(const std::string& name) {
                     return std::make_unique<T<float, double, double>>(
                         DataType::DOUBLE);
                 default:
-                    ThrowInfo(DataTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "Unknown input type for {} aggregation {}",
                               name,
                               GetDataTypeName(inputType));

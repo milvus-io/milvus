@@ -84,6 +84,13 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    void
+    ApplyStructRowValidity(ColumnVector* col_vec,
+                           FieldId field_id,
+                           const OffsetVector* input,
+                           int64_t batch_rows);
+
+ private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;

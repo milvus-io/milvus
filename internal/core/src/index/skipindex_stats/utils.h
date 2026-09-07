@@ -22,47 +22,9 @@
 #include "unicode/unistr.h"
 #include "unicode/utypes.h"
 #include "ankerl/unordered_dense.h"
-#include "common/Types.h"
-#include "arrow/api.h"
 #include "log/Log.h"
 #include <cstring>
 namespace milvus::index {
-
-inline bool
-SupportsSkipIndex(arrow::Type::type type) {
-    switch (type) {
-        case arrow::Type::BOOL:
-        case arrow::Type::INT8:
-        case arrow::Type::INT16:
-        case arrow::Type::INT32:
-        case arrow::Type::INT64:
-        case arrow::Type::FLOAT:
-        case arrow::Type::DOUBLE:
-        case arrow::Type::STRING:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool
-SupportsSkipIndex(DataType type) {
-    switch (type) {
-        case DataType::BOOL:
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-        case DataType::INT64:
-        case DataType::FLOAT:
-        case DataType::DOUBLE:
-        case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::TIMESTAMPTZ:
-            return true;
-        default:
-            return false;
-    }
-}
 
 inline void
 ExtractNgrams(ankerl::unordered_dense::set<std::string>& ngrams_set,

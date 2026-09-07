@@ -33,8 +33,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 )
+
+// proxyComponentWithMetaCache wraps a proxy component so the http handlers can
+// resolve a meta cache through GetMetaCache, mirroring the real Proxy which
+// owns its cache instance.
+type proxyComponentWithMetaCache struct {
+	types.ProxyComponent
+	metaCache proxy.Cache
+}
+
+func (p proxyComponentWithMetaCache) GetMetaCache() proxy.Cache {
+	return p.metaCache
+}
 
 func Test_WrappedInsertRequest_JSONMarshal_AsInsertRequest(t *testing.T) {
 	// https://github.com/milvus-io/milvus/issues/20415

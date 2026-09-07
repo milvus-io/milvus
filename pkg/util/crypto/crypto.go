@@ -20,7 +20,7 @@ func SHA256(src string, salt string) string {
 
 // PasswordEncrypt encrypt password
 func PasswordEncrypt(pwd string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.MinCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}

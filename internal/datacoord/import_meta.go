@@ -47,19 +47,22 @@ type ImportMeta interface {
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
 	GetTask(ctx context.Context, taskID int64) ImportTask
 	GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask
+	GetTaskByJob(ctx context.Context, jobID int64, filters ...ImportTaskFilter) []ImportTask
 	RemoveTask(ctx context.Context, taskID int64) error
 	TaskStatsJSON(ctx context.Context) string
 }
 
 type importTasks struct {
-	tasks     map[int64]ImportTask
-	taskStats *expirable.LRU[int64, ImportTask]
+	tasks          map[int64]ImportTask
+	taskIDsByJobID map[int64]map[int64]struct{}
+	taskStats      *expirable.LRU[int64, ImportTask]
 }
 
 func newImportTasks() *importTasks {
 	return &importTasks{
-		tasks:     make(map[int64]ImportTask),
-		taskStats: expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
+		tasks:          make(map[int64]ImportTask),
+		taskIDsByJobID: make(map[int64]map[int64]struct{}),
+		taskStats:      expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
 	}
 }
 
@@ -72,20 +75,49 @@ func (t *importTasks) get(taskID int64) ImportTask {
 }
 
 func (t *importTasks) add(task ImportTask) {
-	t.tasks[task.GetTaskID()] = task
-	t.taskStats.Add(task.GetTaskID(), task)
+	taskID := task.GetTaskID()
+	jobID := task.GetJobID()
+	if oldTask, ok := t.tasks[taskID]; ok && oldTask.GetJobID() != jobID {
+		t.removeFromJob(oldTask.GetJobID(), taskID)
+	}
+	t.tasks[taskID] = task
+	if _, ok := t.taskIDsByJobID[jobID]; !ok {
+		t.taskIDsByJobID[jobID] = make(map[int64]struct{})
+	}
+	t.taskIDsByJobID[jobID][taskID] = struct{}{}
+	t.taskStats.Add(taskID, task)
 }
 
 func (t *importTasks) remove(taskID int64) {
 	task, ok := t.tasks[taskID]
 	if ok {
 		delete(t.tasks, taskID)
+		t.removeFromJob(task.GetJobID(), taskID)
 		t.taskStats.Add(task.GetTaskID(), task)
+	}
+}
+
+func (t *importTasks) removeFromJob(jobID, taskID int64) {
+	taskIDs := t.taskIDsByJobID[jobID]
+	delete(taskIDs, taskID)
+	if len(taskIDs) == 0 {
+		delete(t.taskIDsByJobID, jobID)
 	}
 }
 
 func (t *importTasks) listTasks() []ImportTask {
 	return maps.Values(t.tasks)
+}
+
+func (t *importTasks) listTasksByJob(jobID int64) []ImportTask {
+	taskIDs := t.taskIDsByJobID[jobID]
+	tasks := make([]ImportTask, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		if task, ok := t.tasks[taskID]; ok {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
 }
 
 func (t *importTasks) listTaskStats() []ImportTask {
@@ -294,9 +326,19 @@ func (m *importMeta) GetTask(ctx context.Context, taskID int64) ImportTask {
 func (m *importMeta) GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return filterImportTasks(m.tasks.listTasks(), filters...)
+}
+
+func (m *importMeta) GetTaskByJob(ctx context.Context, jobID int64, filters ...ImportTaskFilter) []ImportTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return filterImportTasks(m.tasks.listTasksByJob(jobID), filters...)
+}
+
+func filterImportTasks(tasks []ImportTask, filters ...ImportTaskFilter) []ImportTask {
 	ret := make([]ImportTask, 0)
 OUTER:
-	for _, task := range m.tasks.listTasks() {
+	for _, task := range tasks {
 		for _, f := range filters {
 			if !f(task) {
 				continue OUTER

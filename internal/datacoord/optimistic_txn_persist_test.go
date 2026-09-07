@@ -51,13 +51,13 @@ func TestSegmentTxnWrapperStagesMainRecordAfterAuxiliaryKVs(t *testing.T) {
 	require.Equal(t, segmentKey(100, 20, 10), inner.txn.ops[len(inner.txn.ops)-1].key)
 }
 
-func TestSegmentTxnWrapperReturnsCommittedMainResultsOnPartialCommit(t *testing.T) {
+func TestSegmentTxnWrapperPreservesTypedResultOrderOnPartialCommit(t *testing.T) {
 	ctx := context.Background()
 	partialErr := errors.New("later batch failed")
 	inner := &partialResultPersist{
 		results: []TxnResult{
 			{Version: 21},
-			{Version: 22},
+			{},
 		},
 		err: newPartialCommitError(partialErr),
 	}
@@ -70,11 +70,18 @@ func TestSegmentTxnWrapperReturnsCommittedMainResultsOnPartialCommit(t *testing.
 		PartitionID:  20,
 	}
 	require.NoError(t, txn.Insert(segmentKey(100, 20, 10), segment))
+	second := &datapb.SegmentInfo{
+		ID:           11,
+		CollectionID: 100,
+		PartitionID:  20,
+	}
+	require.NoError(t, txn.Insert(segmentKey(100, 20, 11), second))
 
 	results, err := txn.Commit()
 	require.ErrorIs(t, err, ErrPartialCommit)
-	require.Len(t, results, 1)
+	require.Len(t, results, 2)
 	require.EqualValues(t, 21, results[0].Version)
+	require.Zero(t, results[1].Version)
 }
 
 func TestTiKVTxnUpdateRejectsStaleVersion(t *testing.T) {

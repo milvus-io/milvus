@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -63,12 +64,14 @@ func RecoverBalancer(
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		freezeNodes:            typeutil.NewConcurrentSet[int64](),
+		primaryRGChangedCh:     make(chan struct{}, 1),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	b.watchPrimaryResourceGroupChanges()
 	go b.execute(ready260Future)
 	return b, nil
 }
@@ -86,9 +89,23 @@ type balancerImpl struct {
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
 	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+	primaryRGChangedCh     chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
+	primaryRGChangeHandler config.EventHandler
 
 	fileResourceChecker FileResourceChecker
 	checkerMu           sync.RWMutex
+}
+
+func (b *balancerImpl) watchPrimaryResourceGroupChanges() {
+	key := paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key
+	handler := config.NewHandler("streamingcoord.balancer.primary-rg", func(_ *config.Event) {
+		select {
+		case b.primaryRGChangedCh <- struct{}{}:
+		default:
+		}
+	})
+	b.primaryRGChangeHandler = handler
+	paramtable.Get().Watch(key, handler)
 }
 
 func (b *balancerImpl) SetFileResourceChecker(checker FileResourceChecker) {
@@ -305,6 +322,9 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 
 // Close close the balancer.
 func (b *balancerImpl) Close() {
+	if b.primaryRGChangeHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key, b.primaryRGChangeHandler)
+	}
 	b.lifetime.SetState(typeutil.LifetimeStateStopped)
 	b.provider.Close()
 	// cancel all watch opeartion by context.
@@ -377,6 +397,12 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()
+		case <-b.primaryRGChangedCh:
+			b.Logger().Info(
+				b.backgroundTaskNotifier.Context(),
+				"balance triggered by primary resource group config change",
+				mlog.String("primaryResourceGroup", paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()),
+			)
 		case newChannels, ok := <-b.provider.NewIncomingChannels():
 			if !ok {
 				return

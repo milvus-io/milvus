@@ -167,6 +167,30 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
 }
 
+type commitBackfillSegmentStatusJSON struct {
+	SegmentID int64  `json:"segment_id,omitempty"`
+	OK        bool   `json:"ok"`
+	Reason    string `json:"reason,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+}
+
+func toCommitBackfillSegmentStatusesJSON(statuses []*datapb.CommitBackfillResultSegmentStatus) []*commitBackfillSegmentStatusJSON {
+	result := make([]*commitBackfillSegmentStatusJSON, 0, len(statuses))
+	for _, status := range statuses {
+		if status == nil {
+			result = append(result, nil)
+			continue
+		}
+		result = append(result, &commitBackfillSegmentStatusJSON{
+			SegmentID: status.GetSegmentId(),
+			OK:        status.GetOk(),
+			Reason:    status.GetReason(),
+			Kind:      status.GetKind(),
+		})
+	}
+	return result
+}
+
 // CommitBackfillResult is the proxy-side handler for the
 // /management/datacoord/backfill/commit endpoint. It forwards the S3 result
 // path to DataCoord.CommitBackfillResult and returns the aggregated
@@ -206,7 +230,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 			"total_segments":     resp.GetTotalSegments(),
 			"committed_segments": resp.GetCommittedSegments(),
 			"failed_segments":    resp.GetFailedSegments(),
-			"segment_statuses":   resp.GetSegmentStatuses(),
+			"segment_statuses":   toCommitBackfillSegmentStatusesJSON(resp.GetSegmentStatuses()),
 		})
 		return
 	}
@@ -215,7 +239,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 		"total_segments":     resp.GetTotalSegments(),
 		"committed_segments": resp.GetCommittedSegments(),
 		"failed_segments":    resp.GetFailedSegments(),
-		"segment_statuses":   resp.GetSegmentStatuses(),
+		"segment_statuses":   toCommitBackfillSegmentStatusesJSON(resp.GetSegmentStatuses()),
 	})
 }
 

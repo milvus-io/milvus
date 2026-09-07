@@ -2424,6 +2424,68 @@ func (_c *RootCoordCatalog_SavePrivilegeGroup_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// Update provides a mock function with given fields: ctx, ts, actions
+func (_m *RootCoordCatalog) Update(ctx context.Context, ts uint64, actions ...metastore.UpdateAction) error {
+	_va := make([]interface{}, len(actions))
+	for _i := range actions {
+		_va[_i] = actions[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, ts)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, ...metastore.UpdateAction) error); ok {
+		r0 = rf(ctx, ts, actions...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type RootCoordCatalog_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - ctx context.Context
+//   - ts uint64
+//   - actions ...metastore.UpdateAction
+func (_e *RootCoordCatalog_Expecter) Update(ctx interface{}, ts interface{}, actions ...interface{}) *RootCoordCatalog_Update_Call {
+	return &RootCoordCatalog_Update_Call{Call: _e.mock.On("Update",
+		append([]interface{}{ctx, ts}, actions...)...)}
+}
+
+func (_c *RootCoordCatalog_Update_Call) Run(run func(ctx context.Context, ts uint64, actions ...metastore.UpdateAction)) *RootCoordCatalog_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]metastore.UpdateAction, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(metastore.UpdateAction)
+			}
+		}
+		run(args[0].(context.Context), args[1].(uint64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_Update_Call) Return(_a0 error) *RootCoordCatalog_Update_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, uint64, ...metastore.UpdateAction) error) *RootCoordCatalog_Update_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewRootCoordCatalog creates a new instance of RootCoordCatalog. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewRootCoordCatalog(t interface {

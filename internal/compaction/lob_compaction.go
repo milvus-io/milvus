@@ -44,6 +44,9 @@ const (
 // forced strategies:
 //   - clustering compaction: always REWRITE_ALL (data is repartitioned)
 //   - sort compaction: always REUSE_ALL (row order changes but same data)
+//   - schema-bump compaction: always REUSE_ALL (1->1, only materializes a new
+//     non-LOB output column + bumps schema version; existing TEXT LOB data is
+//     unchanged, so its refs are carried as-is — never REWRITE_ALL)
 //   - mix compaction with multiple outputs (N->M, M>1): always REWRITE_ALL
 //     (LOB refs cannot be duplicated across output manifests without inflating ValidRows)
 //   - L0 delete compaction: always SKIP (only applies delete logs, segment LOB refs unchanged)
@@ -55,6 +58,9 @@ func GetForcedStrategy(compactionType datapb.CompactionType, sourceSegmentCount,
 
 	case datapb.CompactionType_SortCompaction,
 		datapb.CompactionType_PartitionKeySortCompaction:
+		return LOBStrategyReuseAll, true
+
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		return LOBStrategyReuseAll, true
 
 	case datapb.CompactionType_MixCompaction:

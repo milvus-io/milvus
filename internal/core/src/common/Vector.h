@@ -67,9 +67,6 @@ class BaseVector {
         length_ = newSize;
     }
 
-    static void
-    prepareForReuse(VectorPtr& vector, vector_size_t size);
-
     /// Resets non-reusable buffers and updates child vectors by calling
     /// BaseVector::prepareForReuse.
     /// Base implementation checks and resets nulls buffer if needed. Keeps the

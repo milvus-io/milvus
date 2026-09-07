@@ -36,10 +36,15 @@ StripTextLogPrefix(const std::string& path, const std::string& base_prefix) {
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* analyzer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_params,
+                               bool enable_background_merge)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
+    auto memory_budget_in_bytes =
+        commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+            ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+            : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id,
         true,
@@ -47,7 +52,11 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
         ,
         analyzer_name,
-        analyzer_params);
+        analyzer_params,
+        /*analyzer_extra_info=*/"",
+        milvus::tantivy::DEFAULT_NUM_THREADS,
+        memory_budget_in_bytes,
+        enable_background_merge);
     set_is_growing(true);
 }
 
@@ -210,27 +219,12 @@ TextMatchIndex::Load(const Config& config) {
         f = base_path + "/" + f;
     }
 
-    auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            return file.substr(file.find_last_of('/') + 1) ==
-                   "index_null_offset";
-        });
-    if (it != files_value.end()) {
-        std::vector<std::string> file;
-        file.push_back(*it);
-        files_value.erase(it);
-        auto index_datas =
-            this->file_manager_->LoadIndexToMemory(file, load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
-        index_datas.clear();
-        auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    index_valid_data->data.get(),
-                                    (size_t)index_valid_data->size);
-    }
+    // Reuse the base metadata loader so both the legacy single null-offset
+    // sidecar and Disassemble()-generated slices are reconstructed. Remove all
+    // metadata sidecars before passing the remaining Tantivy files to the disk
+    // file manager.
+    LoadIndexMetas(files_value, config);
+    RetainTantivyIndexFiles(files_value);
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
@@ -245,6 +239,10 @@ TextMatchIndex::Load(const Config& config) {
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveTextLogFiles();
     }
+
+    // V2 has its own multi-file loader and therefore does not pass through
+    // InvertedIndexTantivy::Load()/LoadEntries().
+    FinalizeSealed(/*release_null_offsets=*/true);
 }
 
 // Add text for sealed segment
@@ -275,12 +273,17 @@ TextMatchIndex::AddTextsGrowing(size_t n,
                                 const bool* valids,
                                 int64_t offset_begin) {
     if (valids != nullptr) {
+        std::vector<size_t> null_offsets;
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;
             if (!valids[i]) {
-                std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.push_back(offset);
+                null_offsets.push_back(offset);
             }
+        }
+        if (!null_offsets.empty()) {
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
+            null_offset_.insert(
+                null_offset_.end(), null_offsets.begin(), null_offsets.end());
         }
     }
     wrapper_->add_data(texts, n, offset_begin);
@@ -292,8 +295,10 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
-    int64_t offset = 0;
+    const std::vector<FieldDataPtr>& field_datas,
+    bool nullable,
+    int64_t offset_begin) {
+    int64_t offset = offset_begin;
     if (nullable) {
         int64_t total = 0;
         for (const auto& data : field_datas) {
@@ -301,14 +306,27 @@ TextMatchIndex::BuildIndexFromFieldData(
         }
         {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(total);
+            null_offset_.reserve(null_offset_.size() +
+                                 static_cast<size_t>(total));
         }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
+            auto null_count = data->get_null_count();
+            std::vector<size_t> null_offsets;
+            null_offsets.reserve(null_count);
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
-                    std::unique_lock<folly::SharedMutex> lock(mutex_);
-                    null_offset_.push_back(offset);
+                    null_offsets.push_back(offset + i);
+                }
+            }
+            if (!null_offsets.empty()) {
+                std::unique_lock<folly::SharedMutex> lock(mutex_);
+                null_offset_.insert(null_offset_.end(),
+                                    null_offsets.begin(),
+                                    null_offsets.end());
+            }
+            for (int i = 0; i < n; i++) {
+                if (!data->is_valid(i)) {
                     // add empty array doc to register offset in tantivy,
                     // same as AddNullSealed
                     static const std::string empty;
@@ -373,19 +391,22 @@ TextMatchIndex::RegisterAnalyzer(const char* analyzer_name,
     wrapper_->register_tokenizer(analyzer_name, analyzer_params);
 }
 
+// Refresh a growing index if due, then allocate the result bitset. Shared by
+// the text-index query methods so the commit/reload logic lives in one place.
 TargetBitmap
-TextMatchIndex::MatchQuery(const std::string& query,
-                           uint32_t min_should_match) {
-    tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
+TextMatchIndex::PrepareBitset() {
     if (shouldTriggerCommit()) {
         Commit();
         Reload();
     }
+    return TargetBitmap{static_cast<size_t>(Count())};
+}
 
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+TargetBitmap
+TextMatchIndex::MatchQuery(const std::string& query,
+                           uint32_t min_should_match) {
+    tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
+    TargetBitmap bitset = PrepareBitset();
     wrapper_->match_query(query, min_should_match, &bitset);
     return bitset;
 }
@@ -394,16 +415,18 @@ TargetBitmap
 TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     tracer::AutoSpan span("TextMatchIndex::PhraseMatchQuery",
                           tracer::GetRootSpan());
-    if (shouldTriggerCommit()) {
-        Commit();
-        Reload();
-    }
-
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+    TargetBitmap bitset = PrepareBitset();
     wrapper_->phrase_match_query(query, slop, &bitset);
+    return bitset;
+}
+
+TargetBitmap
+TextMatchIndex::FuzzyMatchQuery(const std::string& query,
+                                uint32_t max_edit_distance) {
+    tracer::AutoSpan span("TextMatchIndex::FuzzyMatchQuery",
+                          tracer::GetRootSpan());
+    TargetBitmap bitset = PrepareBitset();
+    wrapper_->fuzzy_match_query(query, max_edit_distance, &bitset);
     return bitset;
 }
 

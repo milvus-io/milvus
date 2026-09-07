@@ -44,6 +44,10 @@ type IndexTaskInfo struct {
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
 	IndexStorePathVersion     indexpb.IndexStorePathVersion
+	ExecStartMs               int64
+	ExecEndMs                 int64
+	CostTimeMs                int64
+	CostCPUNum                int64
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -60,6 +64,10 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		ExecStartMs:               i.ExecStartMs,
+		ExecEndMs:                 i.ExecEndMs,
+		CostTimeMs:                i.CostTimeMs,
+		CostCPUNum:                i.CostCPUNum,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
 }
@@ -130,12 +138,53 @@ func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.Uni
 	}
 }
 
+func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typeutil.UniqueID, startMs int64, costCPUNum int64) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		task.ExecStartMs = startMs
+		task.CostCPUNum = costCPUNum
+		task.ExecEndMs = 0
+		task.CostTimeMs = 0
+	}
+}
+
+// StoreIndexTaskExecutionEndWithState records the execution-end cost bookkeeping
+// together with the final task state/failReason in a single critical section, so
+// a concurrent reader can never observe a final cost paired with a stale state
+// (or vice versa).
+func (m *TaskManager) StoreIndexTaskExecutionEndWithState(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64, state commonpb.IndexState, failReason string) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		mlog.Debug(m.ctx, "store task execution end with state", mlog.String("clusterID", clusterID), mlog.FieldBuildID(buildID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason),
+			mlog.Int64("costTimeMs", costTimeMs))
+		task.ExecEndMs = endMs
+		task.CostTimeMs = costTimeMs
+		task.State = state
+		task.FailReason = failReason
+	}
+}
+
 func (m *TaskManager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo)) {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	for key, info := range m.indexTasks {
 		fn(key.ClusterID, key.TaskID, info)
 	}
+}
+
+func (m *TaskManager) GetIndexTaskInfo(clusterID string, buildID typeutil.UniqueID) *IndexTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	if info, ok := m.indexTasks[Key{ClusterID: clusterID, TaskID: buildID}]; ok {
+		return info.Clone()
+	}
+	return nil
 }
 
 func (m *TaskManager) StoreIndexFilesAndStatistic(
@@ -357,6 +406,7 @@ type StatsTaskInfo struct {
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
+	BaseManifest     string
 	Manifest         string
 }
 
@@ -376,6 +426,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -395,6 +446,7 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		Bm25Logs:         s.Bm25Logs,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -520,6 +572,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	segID typeutil.UniqueID,
 	channel string,
 	texIndexLogs map[int64]*datapb.TextIndexStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
@@ -531,6 +584,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }
@@ -543,6 +597,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	segID typeutil.UniqueID,
 	channel string,
 	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
@@ -554,6 +609,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }

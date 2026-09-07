@@ -207,7 +207,7 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionTask() {
 	})).Return(lo.Values(kvs), nil).Once()
 
 	// Create delta log for deletion
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday(), 5)
+	deleteTs := tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), 5)
 	blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID}, []uint64{deleteTs})
 	s.Require().NoError(err)
 	deltaPath := "deltalog/1001"
@@ -251,7 +251,7 @@ func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {
 
 func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 	s.setupBM25Test()
-	s.prepareSortCompactionWithBM25Task(false)
+	s.prepareSortCompactionWithBM25Task()
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -271,7 +271,7 @@ func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 
 func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesMissingBM25OutputFromOldSegment() {
 	s.setupBM25Test()
-	s.prepareSortCompactionWithBM25Task(true)
+	s.prepareSortCompactionWithBM25Task(102)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -281,6 +281,18 @@ func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesMissingBM25Outpu
 	s.EqualValues(1, segment.GetNumOfRows())
 	s.True(segment.GetIsSorted())
 	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionPrefillsMissingBM25InputBeforeOutput() {
+	s.setupBM25Test()
+	typeutil.GetField(s.task.plan.GetSchema(), 101).Nullable = true
+	s.prepareSortCompactionWithBM25Task(101, 102)
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.EqualValues(1, fieldBinlogEntriesForTest(result.GetSegments()[0].GetInsertLogs(), 101))
+	s.EqualValues(1, fieldBinlogEntriesForTest(result.GetSegments()[0].GetBm25Logs(), 102))
 }
 
 func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesNullableAddedFieldFromOldSegment() {
@@ -353,7 +365,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.task.binlogIO = s.mockBinlogIO
 }
 
-func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task(removeBM25Output bool) {
+func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task(removeFieldIDs ...int64) {
 	segmentID := int64(1001)
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
@@ -361,8 +373,8 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task(removeBM25Ou
 	s.initSegBufferWithBM25(segmentID)
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
-	if removeBM25Output {
-		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+	for _, fieldID := range removeFieldIDs {
+		removeFieldBinlogForTest(kvs, fBinlogs, fieldID)
 	}
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
@@ -448,8 +460,8 @@ func (s *SortCompactionTaskSuite) initSegBuffer(size int, seed int64) {
 	for i := 0; i < size; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(seed),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), int64(i))),
-			Value:     getRow(seed, int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), int64(i)))),
+			Timestamp: int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i))),
+			Value:     getRow(seed, int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i)))),
 		}
 		err := s.segWriter.Write(&v)
 		s.Require().NoError(err)
@@ -462,7 +474,7 @@ func (s *SortCompactionTaskSuite) initSegBufferWithBM25(seed int64) {
 
 	v := storage.Value{
 		PK:        storage.NewInt64PrimaryKey(seed),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(seed),
 	}
 	err := s.segWriter.Write(&v)

@@ -107,48 +107,6 @@ func TestEnforceErrorMapsToInternalServerError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, HTTPStatusFromPrivilegeError(err))
 }
 
-func TestCheckExprAuth(t *testing.T) {
-	paramtable.Init()
-	originalPasswordVerify := passwordVerifyFunc
-	originalGetUserRole := getUserRoleFunc
-	defer func() {
-		passwordVerifyFunc = originalPasswordVerify
-		getUserRoleFunc = originalGetUserRole
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.RootShouldBindRole.Key)
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.ExprAuthMode.Key)
-	}()
-
-	t.Run("root_only_rejects_non_root_with_valid_credentials", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().CommonCfg.ExprAuthMode.Key, ExprAuthModeRootOnly)
-		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
-			return username == "admin" && password == "admin123"
-		})
-		req := httptest.NewRequest(http.MethodGet, "/expr", nil)
-		req.SetBasicAuth("admin", "admin123")
-
-		err := CheckExprAuth(context.Background(), req)
-
-		assert.Error(t, err)
-		assert.True(t, IsPermissionDeniedError(err))
-		assert.Equal(t, http.StatusForbidden, HTTPStatusFromPrivilegeError(err))
-	})
-
-	t.Run("rbac_fails_closed_when_authorization_disabled", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().CommonCfg.ExprAuthMode.Key, ExprAuthModeRBAC)
-		paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "false")
-		req := httptest.NewRequest(http.MethodGet, "/expr", nil)
-		req.SetBasicAuth(util.UserRoot, "Milvus")
-
-		err := CheckExprAuth(context.Background(), req)
-
-		assert.Error(t, err)
-		assert.True(t, IsPermissionDeniedError(err))
-		assert.Contains(t, err.Error(), "authorization must be enabled")
-	})
-}
-
-// CheckPrivilegeTestSuite tests the CheckPrivilege function
 type CheckPrivilegeTestSuite struct {
 	suite.Suite
 	ctx                    context.Context
@@ -174,7 +132,6 @@ func (s *CheckPrivilegeTestSuite) TearDownTest() {
 	// Reset paramtable settings
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.RootShouldBindRole.Key)
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.ExprAuthMode.Key)
 }
 
 func (s *CheckPrivilegeTestSuite) TestAuthorizationDisabledFailsClosed() {
@@ -419,7 +376,6 @@ func (s *CheckPrivilegeWithEnforcerTestSuite) TearDownTest() {
 	getUserRoleFunc = s.originalGetUserRole
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.RootShouldBindRole.Key)
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.ExprAuthMode.Key)
 	privilege.CleanPrivilegeCache()
 }
 

@@ -110,6 +110,14 @@ template <>
 struct ArithOpHelper<proto::plan::ArithOpType::BitXor> {
     static constexpr auto op = milvus::bitset::ArithOpType::BitXor;
 };
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Shl> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Shl;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Shr> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Shr;
+};
 
 }  // namespace
 
@@ -173,8 +181,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) == val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) == val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) == val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -207,8 +223,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) != val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) != val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) != val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -242,8 +266,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) > val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) > val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) > val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -277,8 +309,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) >= val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) >= val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) >= val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -311,8 +351,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) < val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) < val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) < val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -345,8 +393,16 @@ struct ArithOpElementFunc {
                                          proto::plan::ArithOpType::BitXor) {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) <= val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shl) {
+                        res[i] =
+                            (long(src[offset]) << long(right_operand)) <= val;
+                    } else if constexpr (arith_op ==
+                                         proto::plan::ArithOpType::Shr) {
+                        res[i] =
+                            (long(src[offset]) >> long(right_operand)) <= val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -368,14 +424,14 @@ struct ArithOpElementFunc {
                     src, right_operand, val, size);
             } else {
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format(
                         "unsupported arith type:{} for ArithOpElementFunc",
                         arith_op));
             }
         } else {
             ThrowInfo(
-                OpTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported cmp type:{} for ArithOpElementFunc",
                             cmp_op));
         }
@@ -444,9 +500,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) == val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) == val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) == val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -475,9 +537,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) != val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) != val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) != val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -506,9 +574,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) > val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) > val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) > val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -537,9 +611,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) >= val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) >= val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) >= val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -568,9 +648,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) < val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) < val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) < val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -599,9 +685,15 @@ struct ArithOpIndexFunc {
                 } else if constexpr (arith_op ==
                                      proto::plan::ArithOpType::BitXor) {
                     res[i] = (long(raw.value()) ^ long(right_operand)) <= val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shl) {
+                    res[i] = (long(raw.value()) << long(right_operand)) <= val;
+                } else if constexpr (arith_op ==
+                                     proto::plan::ArithOpType::Shr) {
+                    res[i] = (long(raw.value()) >> long(right_operand)) <= val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -710,6 +802,11 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
     void
     PrefetchRawData() override;
 
@@ -738,9 +835,9 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
-    template <typename ValueType>
+    template <typename ArrayType, typename ValueType, bool ElementLevel>
     VectorPtr
-    ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+    ExecArrayLength(OffsetVector* input = nullptr);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

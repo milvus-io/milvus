@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -126,10 +127,15 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.AppendQueueSize.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
+		assert.Equal(t, wpCfg.AppendMaxBatchEntries.GetAsInt(), 1000)
+		assert.Equal(t, wpCfg.AppendMaxBatchBytes.GetAsSize(), int64(2000000))
 		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
+		assert.True(t, wpCfg.DirectReadEnabled.GetAsBool())
+		assert.Equal(t, int64(16*1024*1024), wpCfg.DirectReadMaxBatchSize.GetAsSize())
+		assert.Equal(t, 4, wpCfg.DirectReadMaxFetchThreads.GetAsInt())
 
 		// Test default quorum configuration values
 		// Buffer pools (should be empty by default)
@@ -145,6 +151,7 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds(), int64(200))
 		assert.Equal(t, wpCfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds(), int64(10))
+		assert.Equal(t, wpCfg.SyncMaxIntervalForService.GetAsDurationByParse().Milliseconds(), int64(10))
 		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.FlushMaxRetries.GetAsInt(), 5)
@@ -349,6 +356,8 @@ func TestServiceParam(t *testing.T) {
 			assert.Empty(t, kc.KafkaTLSCert.GetValue())
 			assert.Empty(t, kc.KafkaTLSKey.GetValue())
 			assert.Empty(t, kc.KafkaTLSKeyPassword.GetValue())
+			assert.Equal(t, 10*1024*1024, kc.ProducerMessageMaxBytes.GetAsInt())
+			assert.True(t, base.mgr.IsImmutable(kc.ProducerMessageMaxBytes.Key))
 		}
 	})
 
@@ -365,6 +374,8 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, Params.SecretAccessKey.GetValue(), "minioadmin")
 
 		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
+
+		assert.False(t, Params.DisableAWSChunkedEncoding.GetAsBool())
 
 		assert.Empty(t, Params.SslCACert.GetValue())
 
@@ -387,6 +398,15 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
+		assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+
+		for _, value := range []string{"0", "-1", "invalid"} {
+			assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, value))
+			assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+		}
+		assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, "2"))
+		assert.Equal(t, 2, Params.MaxEtcdTxnNum.GetAsInt())
+		assert.NoError(t, bt.Reset(Params.MaxEtcdTxnNum.Key))
 	})
 
 	t.Run("test profile config", func(t *testing.T) {
@@ -406,4 +426,122 @@ func TestRuntimConfig(t *testing.T) {
 
 	SetLocalComponentEnabled(typeutil.QueryCoordRole)
 	assert.True(t, IsLocalComponentEnabled(typeutil.QueryCoordRole))
+}
+
+func TestNormalizePulsarMessageReserve(t *testing.T) {
+	const maxMessageSize = 2 * 1024 * 1024
+
+	t.Run("configured reserve is honored", func(t *testing.T) {
+		assert.Equal(t, 128*1024, normalizePulsarMessageReserve(maxMessageSize, 128*1024))
+		assert.Equal(t, minPulsarMessageReserveSize, normalizePulsarMessageReserve(maxMessageSize, minPulsarMessageReserveSize))
+	})
+
+	t.Run("reserve below the envelope minimum falls back", func(t *testing.T) {
+		// A reserve this small cannot absorb one record's envelope, so a
+		// full-budget chunk would still be rejected by the backend and retried
+		// forever. The ParamItem formatter prevents these values in production;
+		// keep the helper defensive for direct callers.
+		for _, reserve := range []int{0, 1, minPulsarMessageReserveSize - 1, -1} {
+			assert.Equal(t, defaultPulsarMessageReserveSize, normalizePulsarMessageReserve(maxMessageSize, reserve),
+				"reserve=%d", reserve)
+		}
+	})
+
+	t.Run("reserve not fitting under the active limit falls back", func(t *testing.T) {
+		// The default no longer fits, but the minimum still does.
+		assert.Equal(t, minPulsarMessageReserveSize, normalizePulsarMessageReserve(32*1024, 32*1024))
+		// These values are below the supported WAL message-size minimum and are
+		// unreachable through normalized configuration. Keep zero as a safe
+		// defensive result for direct callers.
+		assert.Equal(t, 0, normalizePulsarMessageReserve(512, 0))
+		assert.Equal(t, 0, normalizePulsarMessageReserve(0, 1024))
+	})
+
+	t.Run("every effective reserve leaves a usable budget", func(t *testing.T) {
+		for _, maxSize := range []int{512, 1024, 1025, 32 * 1024, 64 * 1024, 10 * 1024 * 1024} {
+			for _, reserve := range []int{0, 1, 1024, 64 * 1024, 1 << 30} {
+				effective := normalizePulsarMessageReserve(maxSize, reserve)
+				if effective == 0 {
+					// Defensive direct-helper outcome. Normalized bounded WAL
+					// configuration cannot supply a limit this small.
+					continue
+				}
+				assert.GreaterOrEqual(t, effective, minPulsarMessageReserveSize,
+					"maxSize=%d reserve=%d", maxSize, reserve)
+				assert.Less(t, effective, maxSize, "maxSize=%d reserve=%d", maxSize, reserve)
+			}
+		}
+	})
+}
+
+func TestWALMessageSizeMinimum(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	params := &ServiceParam{}
+	params.init(bt)
+
+	tests := []struct {
+		name        string
+		walName     string
+		item        *ParamItem
+		defaultSize int
+	}{
+		{
+			name:        "pulsar",
+			walName:     "pulsar",
+			item:        &params.PulsarCfg.MaxMessageSize,
+			defaultSize: 2 * 1024 * 1024,
+		},
+		{
+			name:        "kafka",
+			walName:     "kafka",
+			item:        &params.KafkaCfg.ProducerMessageMaxBytes,
+			defaultSize: 10 * 1024 * 1024,
+		},
+		{
+			name:        "woodpecker",
+			walName:     "woodpecker",
+			item:        &params.WoodpeckerCfg.MaxMessageSize,
+			defaultSize: 10 * 1024 * 1024,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				configured string
+				expected   int
+			}{
+				{configured: "-1", expected: minWALMessageSize},
+				{configured: "0", expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize - 1), expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize), expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize + 1), expected: minWALMessageSize + 1},
+				{configured: "invalid", expected: test.defaultSize},
+				{configured: "2147483648", expected: test.defaultSize},
+			} {
+				assert.NoError(t, bt.Save(test.item.Key, tc.configured))
+				assert.Equal(t, tc.expected, test.item.GetAsInt(), "configured=%s", tc.configured)
+				assert.Equal(t, tc.expected, params.WALMaxMessageSize(test.walName), "configured=%s", tc.configured)
+			}
+			assert.NoError(t, bt.Reset(test.item.Key))
+		})
+	}
+
+	assert.Zero(t, params.WALMaxMessageSize("rocksmq"))
+	assert.Zero(t, params.WALMaxMessageSize("unknown"))
+
+	t.Run("clamped limit and invalid reserve leave a usable budget", func(t *testing.T) {
+		assert.NoError(t, bt.Save(params.PulsarCfg.MessageReserveSize.Key, "0"))
+		t.Cleanup(func() { assert.NoError(t, bt.Reset(params.PulsarCfg.MessageReserveSize.Key)) })
+
+		for _, test := range tests {
+			assert.NoError(t, bt.Save(test.item.Key, "1"))
+			maxMessageSize := params.WALMaxMessageSize(test.walName)
+			_, reserve := params.PulsarCfg.GetMessageSizeLimitsFor(maxMessageSize)
+			assert.Equal(t, minWALMessageSize, maxMessageSize, test.name)
+			assert.Equal(t, defaultPulsarMessageReserveSize, reserve, test.name)
+			assert.Positive(t, maxMessageSize-reserve, test.name)
+			assert.NoError(t, bt.Reset(test.item.Key))
+		}
+	})
 }

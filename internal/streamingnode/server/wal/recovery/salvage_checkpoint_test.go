@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -50,12 +51,12 @@ func TestUpdateCheckpointForcePromote(t *testing.T) {
 		}
 
 		// Start as secondary of test2
-		rs.updateCheckpoint(newAlterReplicateConfigMessage("test2", []string{"test1"}, 2, walimplstest.NewTestMessageID(2)))
+		rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test2", []string{"test1"}, 2, walimplstest.NewTestMessageID(2)))
 		assert.NotNil(t, rs.checkpoint.ReplicateCheckpoint)
 		assert.Nil(t, rs.pendingSalvageCheckpoint)
 
 		// Force promote to primary — should capture the salvage checkpoint
-		rs.updateCheckpoint(newAlterReplicateConfigMessageWithForcePromote("test1", []string{"test2"}, 3, walimplstest.NewTestMessageID(3)))
+		rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", []string{"test2"}, 3, walimplstest.NewTestMessageID(3)))
 		assert.Nil(t, rs.checkpoint.ReplicateCheckpoint)
 		assert.NotNil(t, rs.pendingSalvageCheckpoint)
 		assert.Equal(t, "test2", rs.pendingSalvageCheckpoint.ClusterID)
@@ -78,9 +79,9 @@ func TestUpdateCheckpointForcePromote(t *testing.T) {
 			metrics: newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		rs.updateCheckpoint(newAlterReplicateConfigMessage("test2", []string{"test1"}, 2, walimplstest.NewTestMessageID(2)))
+		rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test2", []string{"test1"}, 2, walimplstest.NewTestMessageID(2)))
 		// Normal promote (no ForcePromote flag)
-		rs.updateCheckpoint(newAlterReplicateConfigMessage("test1", []string{"test2"}, 3, walimplstest.NewTestMessageID(3)))
+		rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessage("test1", []string{"test2"}, 3, walimplstest.NewTestMessageID(3)))
 		assert.Nil(t, rs.checkpoint.ReplicateCheckpoint)
 		assert.Nil(t, rs.pendingSalvageCheckpoint)
 	})
@@ -98,7 +99,7 @@ func TestUpdateCheckpointForcePromote(t *testing.T) {
 			metrics: newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		rs.updateCheckpoint(newAlterReplicateConfigMessageWithForcePromote("test1", []string{"test2"}, 2, walimplstest.NewTestMessageID(2)))
+		rs.updateCheckpoint(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", []string{"test2"}, 2, walimplstest.NewTestMessageID(2)))
 		assert.Nil(t, rs.checkpoint.ReplicateCheckpoint)
 		assert.Nil(t, rs.pendingSalvageCheckpoint)
 	})
@@ -214,8 +215,12 @@ func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
 
 func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	snCatalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
-	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
+	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, "test-pchannel", mock.Anything).RunAndReturn(func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
+		assert.NotNil(t, snapshot.SalvageCheckpoint)
+		assert.Equal(t, "cluster-x", snapshot.SalvageCheckpoint.GetClusterId())
+		assert.NotNil(t, snapshot.ConsumeCheckpoint)
+		return nil
+	})
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
 
 	cp := &utility.ReplicateCheckpoint{

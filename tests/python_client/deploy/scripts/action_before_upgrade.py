@@ -1,9 +1,18 @@
-from pymilvus import connections
 import sys
+
+from pymilvus import connections
+
 sys.path.append("..")
 sys.path.append("../..")
 from common.milvus_sys import MilvusSys
-from utils import *
+from utils import (
+    NUM_REPLICAS,
+    create_collections_and_insert_data,
+    create_index,
+    get_collections,
+    load_and_search,
+    logger,
+)
 
 
 def task_1(data_size, host):
@@ -34,6 +43,7 @@ def task_2(data_size, host):
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, flush=False, count=data_size)
 
+
 def task_3(data_size, host):
     """
     task_3:
@@ -47,6 +57,7 @@ def task_3(data_size, host):
     create_index(prefix)
     load_and_search(prefix)
 
+
 def task_4(data_size, host):
     """
     task_4_:
@@ -58,6 +69,7 @@ def task_4(data_size, host):
     get_collections(prefix)
     create_collections_and_insert_data(prefix, flush=True, count=data_size)
     create_index(prefix)
+
 
 def task_5(data_size, host):
     """
@@ -71,12 +83,12 @@ def task_5(data_size, host):
     create_collections_and_insert_data(prefix, flush=False, count=data_size)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
-    import threading
-    parser = argparse.ArgumentParser(description='config for deploy test')
-    parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
-    parser.add_argument('--data_size', type=int, default=3000, help='data size')
+
+    parser = argparse.ArgumentParser(description="config for deploy test")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")
+    parser.add_argument("--data_size", type=int, default=3000, help="data size")
     args = parser.parse_args()
     data_size = args.data_size
     host = args.host

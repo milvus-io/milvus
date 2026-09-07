@@ -53,14 +53,9 @@ func TestImportTaskSuite(t *testing.T) {
 func (s *ImportTaskSuite) TestExecute_GetDatabaseInfoFailsReturnsError() {
 	ctx := context.Background()
 
-	// Mock globalMetaCache.GetDatabaseInfo to fail
+	// Mock database info lookup to fail
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("database not found"))
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	task := &importTask{
 		ctx: ctx,
 		req: &internalpb.ImportRequest{
@@ -69,6 +64,7 @@ func (s *ImportTaskSuite) TestExecute_GetDatabaseInfoFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -79,16 +75,11 @@ func (s *ImportTaskSuite) TestExecute_GetDatabaseInfoFailsReturnsError() {
 func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 	ctx := context.Background()
 
-	// Mock globalMetaCache.GetDatabaseInfo to succeed
+	// Mock database info lookup to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	// Mock MixCoordClient to return RPC error
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
 	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
@@ -113,6 +104,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -123,16 +115,11 @@ func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 	ctx := context.Background()
 
-	// Mock globalMetaCache.GetDatabaseInfo to succeed
+	// Mock database info lookup to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	// Mock MixCoordClient to return error status
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
 	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
@@ -159,6 +146,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -169,16 +157,11 @@ func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 	ctx := context.Background()
 
-	// Mock globalMetaCache.GetDatabaseInfo to succeed
+	// Mock database info lookup to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	// Mock MixCoordClient to return success
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
 	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
@@ -207,6 +190,7 @@ func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 		},
 		resp: resp,
 	}
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -217,16 +201,11 @@ func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	ctx := context.Background()
 
-	// Mock globalMetaCache.GetDatabaseInfo to succeed
+	// Mock database info lookup to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 42,
+		DBID: 42,
 	}, nil)
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	// Capture the request to verify parameters
 	var capturedReq *internalpb.ImportRequestInternal
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
@@ -262,6 +241,7 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -340,12 +320,12 @@ func (s *ImportTaskSuite) TestTaskBasicMethods() {
 
 func (s *ImportTaskSuite) TestSetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.NoError(task.setChannels())
+	s.NoError(task.SetChannels())
 }
 
 func (s *ImportTaskSuite) TestGetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.Nil(task.getChannels())
+	s.Nil(task.GetChannels())
 }
 
 // --------------------------------
@@ -360,13 +340,8 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	var capturedReq *internalpb.ImportRequestInternal
 	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
 	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
@@ -398,6 +373,7 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
+	task.MetaCache = mockCache
 
 	task.Execute(ctx)
 
@@ -418,11 +394,6 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 	// Use NewMockCache which is generated by mockery
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(0), errors.New("collection not found"))
-
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
 	task := &importTask{
 		ctx: ctx,
 		req: &internalpb.ImportRequest{
@@ -430,6 +401,7 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 			CollectionName: "test_collection",
 		},
 	}
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 

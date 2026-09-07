@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -56,6 +55,30 @@ type bumpSchemaVersionCompactionTask struct {
 	logIDAlloc       allocator.Interface
 	chunkManager     storage.ChunkManager
 	currentTime      time.Time
+	// lobContext holds LOB (TEXT) compaction strategy decisions for the full-rewrite
+	// path. A schema bump is 1->1 and never changes existing TEXT LOB data, so it
+	// always uses REUSE_ALL: the existing LOB files are unchanged and only their
+	// references are merged into the output manifest (mirrors sort compaction).
+	lobContext *compaction.LOBCompactionContext
+}
+
+// schemaBumpPhysicalDiff describes the difference between the target schema and
+// the columns physically present in the source manifest. existingFields always
+// comes from the manifest; target-schema membership must never be used as a
+// substitute for physical presence.
+type schemaBumpPhysicalDiff struct {
+	existingFields       map[int64]struct{}
+	droppedFieldIDs      []int64
+	absentOrdinaryFields []*schemapb.FieldSchema
+	missingOutputFields  []*schemapb.FieldSchema
+	missingFunctions     []*schemapb.FunctionSchema
+}
+
+func (d *schemaBumpPhysicalDiff) appendedFields() []*schemapb.FieldSchema {
+	fields := make([]*schemapb.FieldSchema, 0, len(d.absentOrdinaryFields)+len(d.missingOutputFields))
+	fields = append(fields, d.absentOrdinaryFields...)
+	fields = append(fields, d.missingOutputFields...)
+	return fields
 }
 
 func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
@@ -75,7 +98,7 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 		mlog.FieldCollectionID(t.GetCollection()),
 	)
 
-	missingFunctions, droppedFieldIDs, existingFields, err := t.schemaBumpDecision()
+	diff, err := t.schemaBumpDecision()
 	if err != nil {
 		log.Warn(ctx, "failed to decide schema bump action", mlog.Err(err))
 		return nil, err
@@ -84,17 +107,22 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	log.Info(ctx, "schema bump compact start",
 		mlog.FieldSegmentID(t.plan.GetSegmentBinlogs()[0].GetSegmentID()),
 		mlog.Int32("collectionSchemaVersion", t.plan.GetSchema().GetVersion()),
-		mlog.Int("missingFunctionCount", len(missingFunctions)),
-		mlog.Int64s("droppedFieldIDs", droppedFieldIDs),
+		mlog.Int("missingFunctionCount", len(diff.missingFunctions)),
+		mlog.Int("absentOrdinaryFieldCount", len(diff.absentOrdinaryFields)),
+		mlog.Int("missingOutputFieldCount", len(diff.missingOutputFields)),
+		mlog.Int64s("droppedFieldIDs", diff.droppedFieldIDs),
 	)
 
 	var result *datapb.CompactionPlanResult
-	if len(missingFunctions) == 0 && len(droppedFieldIDs) == 0 {
+	// Dropped physical fields always require a replacement rewrite. Zero-row
+	// segments still route to additive reconciliation, which rejects them as a
+	// data-integrity error rather than writing an empty materialized record.
+	if len(diff.droppedFieldIDs) > 0 {
+		result, err = t.runFullSchemaRewrite(diff.existingFields)
+	} else if len(diff.absentOrdinaryFields) == 0 && len(diff.missingOutputFields) == 0 {
 		result = t.runSchemaVersionBumpOnly()
-	} else if len(droppedFieldIDs) > 0 {
-		result, err = t.runFullSchemaRewrite(existingFields)
 	} else {
-		result, err = t.runMissingFunctionMaterialization(ctx, missingFunctions, existingFields)
+		result, err = t.runAdditivePhysicalReconciliation(ctx, diff)
 	}
 	if err != nil {
 		log.Warn(ctx, "schema bump compact failed", mlog.Err(err), mlog.Duration("compact cost", time.Since(compactStart)))
@@ -140,29 +168,20 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 		fields = append(fields, field)
 		fieldIDs = append(fieldIDs, fieldID)
 	}
+	// Inputs were validated by schemaBumpDecision (missingFunctionMaterializations);
+	// this only assembles the read schema.
 	for _, functionSchema := range missingFunctions {
-		if err := validateSupportedMissingFunctionMaterialization(functionSchema); err != nil {
-			return nil, nil, err
-		}
 		for _, inputFieldID := range functionSchema.GetInputFieldIds() {
 			inputField := typeutil.GetField(schema, inputFieldID)
 			if inputField == nil {
-				return nil, nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
-			}
-			if err := validateMaterializationInputField(functionSchema, inputField); err != nil {
-				return nil, nil, err
+				return nil, nil, merr.WrapErrDataIntegrityMsg(
+					"function %s input field %d not found in persisted schema",
+					functionSchema.GetName(), inputFieldID)
 			}
 			addInputField(inputField)
 
-			additionalFields, err := additionalFunctionInputFields(schema, functionSchema, inputField)
-			if err != nil {
+			if err := addBM25MultiAnalyzerInputFields(schema, functionSchema, inputField, addInputField); err != nil {
 				return nil, nil, err
-			}
-			for _, additionalField := range additionalFields {
-				if err := validateMaterializationInputField(functionSchema, additionalField); err != nil {
-					return nil, nil, err
-				}
-				addInputField(additionalField)
 			}
 		}
 	}
@@ -175,16 +194,26 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 	}, fieldIDs, nil
 }
 
-func additionalFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
-	switch functionSchema.GetType() {
-	case schemapb.FunctionType_BM25:
-		return bm25AdditionalInputFields(schema, inputField)
-	default:
-		return nil, nil
+// addBM25MultiAnalyzerInputFields adds the by_field analyzer-selector column of
+// a BM25 multi-analyzer input to the physical read schema; the selector is the
+// runner's per-row analyzer name, not a function text input, so it is resolved
+// and VarChar-validated in bm25AdditionalInputFields instead of the generic
+// input validator. No-op for other function types.
+func addBM25MultiAnalyzerInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema, addInputField func(*schemapb.FieldSchema)) error {
+	if functionSchema.GetType() != schemapb.FunctionType_BM25 {
+		return nil
 	}
+	byFields, err := bm25AdditionalInputFields(schema, functionSchema, inputField)
+	if err != nil {
+		return err
+	}
+	for _, byField := range byFields {
+		addInputField(byField)
+	}
+	return nil
 }
 
-func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
+func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	params, ok := typeutil.CreateFieldSchemaHelper(inputField).GetMultiAnalyzerParams()
 	if !ok {
 		return nil, nil
@@ -192,78 +221,72 @@ func bm25AdditionalInputFields(schema *schemapb.CollectionSchema, inputField *sc
 	var multiAnalyzerParams struct {
 		ByField string `json:"by_field"`
 	}
+	// The params were validated at DDL time; failing to parse or resolve them
+	// here means the persisted schema itself is inconsistent, not that the
+	// compaction request is malformed.
 	if err := json.Unmarshal([]byte(params), &multiAnalyzerParams); err != nil {
-		return nil, err
+		return nil, merr.WrapErrDataIntegrity(err, "failed to parse multi_analyzer_params for function %s", functionSchema.GetName())
 	}
 	if multiAnalyzerParams.ByField == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("multi_analyzer_params missing required 'by_field' key")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s is missing required 'by_field' key", functionSchema.GetName())
 	}
 	byField := typeutil.GetFieldByName(schema, multiAnalyzerParams.ByField)
 	if byField == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references missing input field %s", functionSchema.GetName(), multiAnalyzerParams.ByField)
+	}
+	// DDL only admits a VarChar by_field selector (validateMultiAnalyzerParams).
+	// A resolved selector of any other type is the same class of persisted-schema
+	// corruption as the branches above, so classify it identically instead of
+	// letting it degrade into an ErrParameterInvalid downstream.
+	if byField.GetDataType() != schemapb.DataType_VarChar {
+		return nil, merr.WrapErrDataIntegrityMsg("multi_analyzer_params for function %s references by_field %s of type %s, but only VarChar is allowed", functionSchema.GetName(), multiAnalyzerParams.ByField, byField.GetDataType())
 	}
 	return []*schemapb.FieldSchema{byField}, nil
-}
-
-func (t *bumpSchemaVersionCompactionTask) missingFunctionOutputFields(missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) ([]*schemapb.FieldSchema, []int64, error) {
-	schema := t.plan.GetSchema()
-	var fields []*schemapb.FieldSchema
-	var fieldIDs []int64
-	for _, functionSchema := range missingFunctions {
-		if err := validateSupportedMissingFunctionMaterialization(functionSchema); err != nil {
-			return nil, nil, err
-		}
-		for _, outputIndex := range functionOutputIndexesToMaterialize(functionSchema, existingFields) {
-			outputFieldID := functionSchema.GetOutputFieldIds()[outputIndex]
-			outputField := typeutil.GetField(schema, outputFieldID)
-			if outputField == nil {
-				return nil, nil, merr.WrapErrParameterInvalidMsg("output field not found in schema")
-			}
-			if err := validateMaterializationOutputField(functionSchema, outputField); err != nil {
-				return nil, nil, err
-			}
-			fields = append(fields, outputField)
-			fieldIDs = append(fieldIDs, outputFieldID)
-		}
-	}
-	if len(fields) == 0 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("no missing function output fields")
-	}
-	return fields, fieldIDs, nil
 }
 
 func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.FunctionSchema) error {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(functionSchema.GetInputFieldIds()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("bm25 function should have input fields")
+			return merr.WrapErrDataIntegrityMsg("persisted bm25 function %s has no input fields", functionSchema.GetName())
 		}
 		if len(functionSchema.GetOutputFieldIds()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("bm25 function should have output fields")
+			return merr.WrapErrDataIntegrityMsg("persisted bm25 function %s has no output fields", functionSchema.GetName())
 		}
 		return nil
 	case schemapb.FunctionType_MinHash:
 		if len(functionSchema.GetInputFieldIds()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("minhash function should have input fields")
+			return merr.WrapErrDataIntegrityMsg("persisted minhash function %s has no input fields", functionSchema.GetName())
 		}
 		if len(functionSchema.GetOutputFieldIds()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("minhash function should have output fields")
+			return merr.WrapErrDataIntegrityMsg("persisted minhash function %s has no output fields", functionSchema.GetName())
 		}
 		return nil
 	default:
-		return merr.WrapErrParameterInvalidMsg("unsupported function type")
+		return merr.WrapErrDataIntegrityMsg(
+			"persisted function %s has unsupported materialization type %s",
+			functionSchema.GetName(), functionSchema.GetType())
 	}
 }
 
+// validateMaterializationInputField enforces the schema-bump runtime contract on
+// persisted function inputs. It is narrower than the collection-creation
+// validator: a sealed StorageV3 Text column is read back as encoded LOB
+// references, which stringInputsFromRecord cannot consume without LOB decoding,
+// so only VarChar is an acceptable persisted input here.
 func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, field *schemapb.FieldSchema) error {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
-		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
-			return merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 materialization")
+		if field.GetDataType() != schemapb.DataType_VarChar {
+			return merr.WrapErrDataIntegrityMsg(
+				"persisted bm25 input field %d must be VarChar for schema-bump materialization (Text would require LOB decoding), got %s",
+				field.GetFieldID(), field.GetDataType())
 		}
 	case schemapb.FunctionType_MinHash:
-		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_Text {
-			return merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for minhash materialization")
+		if field.GetDataType() != schemapb.DataType_VarChar {
+			return merr.WrapErrDataIntegrityMsg(
+				"persisted minhash input field %d must be VarChar for schema-bump materialization (Text would require LOB decoding), got %s",
+				field.GetFieldID(), field.GetDataType())
 		}
 	}
 	return nil
@@ -273,24 +296,18 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if field.GetDataType() != schemapb.DataType_SparseFloatVector {
-			return merr.WrapErrParameterInvalidMsg("output field data type must be sparse float vector for bm25 materialization")
+			return merr.WrapErrDataIntegrityMsg(
+				"persisted bm25 output field %d must be SparseFloatVector, got %s",
+				field.GetFieldID(), field.GetDataType())
 		}
 	case schemapb.FunctionType_MinHash:
 		if field.GetDataType() != schemapb.DataType_BinaryVector {
-			return merr.WrapErrParameterInvalidMsg("output field data type must be binary vector for minhash materialization")
+			return merr.WrapErrDataIntegrityMsg(
+				"persisted minhash output field %d must be BinaryVector, got %s",
+				field.GetFieldID(), field.GetDataType())
 		}
 	}
 	return nil
-}
-
-func partialMaterializerExistingFields(schema *schemapb.CollectionSchema, missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) map[int64]struct{} {
-	fields := collectionSchemaFields(schema)
-	for _, functionSchema := range missingFunctions {
-		for _, outputIndex := range functionOutputIndexesToMaterialize(functionSchema, existingFields) {
-			delete(fields, functionSchema.GetOutputFieldIds()[outputIndex])
-		}
-	}
-	return fields
 }
 
 func (t *bumpSchemaVersionCompactionTask) openRecordReader(segment *datapb.CompactionSegmentBinlogs, schema *schemapb.CollectionSchema) (storage.RecordReader, map[int64]struct{}, error) {
@@ -306,13 +323,210 @@ func (t *bumpSchemaVersionCompactionTask) openRecordReader(segment *datapb.Compa
 	return reader, existingFields, err
 }
 
-func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() ([]*schemapb.FunctionSchema, []int64, map[int64]struct{}, error) {
+// schemaBumpDecision diffs the target schema against the manifest-backed
+// physical field set and classifies every gap the bump has to close.
+func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysicalDiff, error) {
 	segment := t.plan.GetSegmentBinlogs()[0]
 	existingFields, err := compactionSegmentStorageFields(segment, t.compactionParams.StorageConfig)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	return missingSchemaFunctions(t.plan.GetSchema(), existingFields), droppedSchemaFieldIDs(t.plan.GetSchema(), existingFields), existingFields, nil
+	schema := t.plan.GetSchema()
+
+	functionOutputFields, err := declaredFunctionOutputFields(schema)
+	if err != nil {
+		return nil, err
+	}
+	missingFunctions, missingOutputFields, err := missingFunctionMaterializations(schema, existingFields)
+	if err != nil {
+		return nil, err
+	}
+
+	return &schemaBumpPhysicalDiff{
+		existingFields:       existingFields,
+		droppedFieldIDs:      droppedSchemaFieldIDs(schema, existingFields),
+		absentOrdinaryFields: absentOrdinarySchemaFields(schema, existingFields, functionOutputFields),
+		missingOutputFields:  missingOutputFields,
+		missingFunctions:     missingFunctions,
+	}, nil
+}
+
+// declaredFunctionOutputFields returns the field IDs declared as outputs by the
+// schema's functions. A field marked IsFunctionOutput that no function declares
+// is persisted-schema corruption: fail instead of silently backfilling a
+// non-nullable vector as an ordinary field.
+func declaredFunctionOutputFields(schema *schemapb.CollectionSchema) (map[int64]struct{}, error) {
+	declared := make(map[int64]struct{})
+	for _, functionSchema := range schema.GetFunctions() {
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			declared[outputFieldID] = struct{}{}
+		}
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetIsFunctionOutput() {
+			if _, hasProducer := declared[field.GetFieldID()]; !hasProducer {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"function output field %d has no producing function", field.GetFieldID())
+			}
+		}
+	}
+	return declared, nil
+}
+
+// missingFunctionMaterializations derives, from the manifest-backed
+// existingFields, the functions whose outputs must be materialized by this bump
+// together with those output fields. Missing functions are defined by their
+// physically absent outputs, so both results are non-empty or both empty by
+// construction. The materialization contract is enforced here, upfront for
+// every route: supported function type, all-or-none output presence, output
+// field types, and input fields that exist and satisfy the schema-bump input
+// contract.
+func missingFunctionMaterializations(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) ([]*schemapb.FunctionSchema, []*schemapb.FieldSchema, error) {
+	var missingFunctions []*schemapb.FunctionSchema
+	var missingOutputFields []*schemapb.FieldSchema
+	for _, functionSchema := range schema.GetFunctions() {
+		outputFieldIDs := functionSchema.GetOutputFieldIds()
+		// A persisted function with no output fields is schema corruption (DDL
+		// rejects it); reject before the all-present early-continue treats the
+		// empty set as "nothing missing" and silently drops it.
+		if len(outputFieldIDs) == 0 {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("persisted function %s has no output fields", functionSchema.GetName())
+		}
+		presentCount := 0
+		for _, outputFieldID := range outputFieldIDs {
+			if _, present := existingFields[outputFieldID]; present {
+				presentCount++
+			}
+		}
+		if presentCount == len(outputFieldIDs) {
+			continue
+		}
+		if err := validateSupportedMissingFunctionMaterialization(functionSchema); err != nil {
+			return nil, nil, err
+		}
+		if presentCount != 0 {
+			return nil, nil, merr.WrapErrDataIntegrityMsg(
+				"function %s has partially materialized output fields: %d of %d are physically present",
+				functionSchema.GetName(), presentCount, len(outputFieldIDs))
+		}
+		for _, outputFieldID := range outputFieldIDs {
+			outputField := typeutil.GetField(schema, outputFieldID)
+			if outputField == nil {
+				return nil, nil, merr.WrapErrDataIntegrityMsg(
+					"function %s output field %d not found in persisted schema",
+					functionSchema.GetName(), outputFieldID)
+			}
+			if err := validateMaterializationOutputField(functionSchema, outputField); err != nil {
+				return nil, nil, err
+			}
+			missingOutputFields = append(missingOutputFields, outputField)
+		}
+		if err := validateFunctionInputFields(schema, functionSchema); err != nil {
+			return nil, nil, err
+		}
+		missingFunctions = append(missingFunctions, functionSchema)
+	}
+	return missingFunctions, missingOutputFields, nil
+}
+
+// validateFunctionInputFields checks that every declared input of a
+// to-be-materialized function exists in the persisted schema and satisfies the
+// schema-bump materialization input contract.
+func validateFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) error {
+	for _, inputFieldID := range functionSchema.GetInputFieldIds() {
+		inputField := typeutil.GetField(schema, inputFieldID)
+		if inputField == nil {
+			return merr.WrapErrDataIntegrityMsg(
+				"function %s input field %d not found in persisted schema",
+				functionSchema.GetName(), inputFieldID)
+		}
+		if err := validateMaterializationInputField(functionSchema, inputField); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// absentOrdinarySchemaFields returns the non-system, non-function-output schema
+// fields that are physically absent from the manifest.
+func absentOrdinarySchemaFields(schema *schemapb.CollectionSchema, existingFields, functionOutputFields map[int64]struct{}) []*schemapb.FieldSchema {
+	absent := make([]*schemapb.FieldSchema, 0)
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		fieldID := field.GetFieldID()
+		if common.IsSystemField(fieldID) {
+			continue
+		}
+		if _, isFunctionOutput := functionOutputFields[fieldID]; isFunctionOutput {
+			continue
+		}
+		if _, present := existingFields[fieldID]; !present {
+			absent = append(absent, field)
+		}
+	}
+	return absent
+}
+
+func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhysicalDiff) (*schemapb.CollectionSchema, []int64, error) {
+	inputSchema, logicalInputFieldIDs, err := t.missingFunctionInputSchema(diff.missingFunctions)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	readFields := make([]*schemapb.FieldSchema, 0, len(inputSchema.GetFields())+1)
+	seen := make(map[int64]struct{}, len(inputSchema.GetFields())+1)
+	// Appends a field once (dedup by ID); absent fields stay in the read schema
+	// for the reader to fill per its contract.
+	addReadField := func(field *schemapb.FieldSchema) {
+		if field == nil {
+			return
+		}
+		fieldID := field.GetFieldID()
+		if _, ok := seen[fieldID]; ok {
+			return
+		}
+		seen[fieldID] = struct{}{}
+		readFields = append(readFields, field)
+	}
+	// Every additive pass reads one stable system column so batches retain row
+	// cardinality even when all logical function inputs are newly added fields.
+	anchor := typeutil.GetField(t.plan.GetSchema(), common.RowIDField)
+	if _, ok := diff.existingFields[common.RowIDField]; !ok || anchor == nil {
+		anchor = nil
+		if _, ok := diff.existingFields[common.TimeStampField]; ok {
+			anchor = typeutil.GetField(t.plan.GetSchema(), common.TimeStampField)
+		}
+	}
+	if anchor == nil {
+		return nil, nil, merr.WrapErrDataIntegrityMsg(
+			"schema bump additive reconciliation requires a physical RowID or Timestamp anchor")
+	}
+	// Anchor was selected from existingFields above, so it is physically present.
+	addReadField(anchor)
+	for _, field := range inputSchema.GetFields() {
+		addReadField(field)
+	}
+	for _, structField := range inputSchema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			addReadField(field)
+		}
+	}
+
+	// Absent ordinary fields (including absent function inputs) enter the read
+	// schema so the reader fills them per its contract; the writer then takes
+	// the appended columns straight from the read record, and functions see
+	// target-schema values for their inputs.
+	for _, field := range diff.absentOrdinaryFields {
+		addReadField(field)
+	}
+
+	schema := t.plan.GetSchema()
+	return &schemapb.CollectionSchema{
+		Name:               schema.GetName(),
+		Description:        schema.GetDescription(),
+		Fields:             readFields,
+		EnableDynamicField: schema.GetEnableDynamicField(),
+		Properties:         schema.GetProperties(),
+	}, logicalInputFieldIDs, nil
 }
 
 func (t *bumpSchemaVersionCompactionTask) fullRewriteSegmentID() (int64, error) {
@@ -323,35 +537,35 @@ func (t *bumpSchemaVersionCompactionTask) fullRewriteSegmentID() (int64, error) 
 	return idRange.GetBegin(), nil
 }
 
-func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchema, entityFilter compaction.EntityFilter, ttlFieldID int64, useTTLField bool, ttlValues []int64) (*recordSelection, []int64, error) {
+func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchema, entityFilter compaction.EntityFilter, ttlFieldID int64, useTTLField bool) (*recordSelection, error) {
 	pkArray := record.Column(pkField.GetFieldID())
 	var pkAt func(int) any
 	switch pkField.GetDataType() {
 	case schemapb.DataType_Int64:
 		int64Array, ok := pkArray.(*array.Int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("int64 primary key field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("int64 primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return int64Array.Value(i) }
 	case schemapb.DataType_VarChar:
 		stringArray, ok := pkArray.(*array.String)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return stringArray.Value(i) }
 	default:
-		return nil, nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
+		return nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}
 
 	timestampArray, ok := record.Column(common.TimeStampField).(*array.Int64)
 	if !ok {
-		return nil, nil, merr.WrapErrServiceInternal("timestamp field not found in full schema rewrite record")
+		return nil, merr.WrapErrServiceInternal("timestamp field not found in full schema rewrite record")
 	}
 	var ttlArray *array.Int64
 	if useTTLField {
 		ttlArray, ok = record.Column(ttlFieldID).(*array.Int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("TTL field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("TTL field not found in full schema rewrite record")
 		}
 	}
 
@@ -373,9 +587,6 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 			continue
 		}
 
-		if useTTLField && expireTs > 0 {
-			ttlValues = append(ttlValues, expireTs)
-		}
 		if sliceStart == -1 {
 			sliceStart = i
 		}
@@ -385,9 +596,9 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 		selection.length += record.Len() - sliceStart
 	}
 	if filteredRows == 0 {
-		return nil, ttlValues, nil
+		return nil, nil
 	}
-	return selection, ttlValues, nil
+	return selection, nil
 }
 
 func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.CompactionPlanResult {
@@ -405,7 +616,14 @@ func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.Com
 				Channel:             segment.GetInsertChannel(),
 				StorageVersion:      segment.GetStorageVersion(),
 				Manifest:            segment.GetManifest(),
+				BaseManifest:        segment.GetManifest(),
 				ExpirQuantiles:      segment.GetExpirQuantiles(),
+				// Schema-version-bump-only path doesn't rewrite data —
+				// the receiver Clones oldSegment and only updates
+				// SchemaVersion/Binlogs/StorageVersion/ManifestPath, so
+				// the existing oldSegment.Stats is preserved. Leaving
+				// Stats nil here documents that the receiver does not
+				// read it for this path.
 			},
 		},
 		Type: t.plan.GetType(),
@@ -432,6 +650,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	ttlFieldID := getTTLFieldID(t.plan.GetSchema())
+	_, ttlFieldPhysicallyPresent := existingFields[ttlFieldID]
+	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && ttlFieldPhysicallyPresent
+	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 	reader, _, err := newCompactionSegmentRecordReaderWithFields(t.ctx, segment, t.plan.GetSchema(), t.compactionParams.StorageConfig, existingFields,
 		storage.WithCollectionID(collectionID),
 		storage.WithVersion(segment.GetStorageVersion()),
@@ -449,8 +670,29 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer materializer.Close()
 
+	// Prepare LOB (TEXT) handling: a schema bump keeps existing TEXT LOB data
+	// unchanged, so REUSE_ALL — the writer preserves the encoded LOB reference
+	// bytes (WithTextRefsAsBinary) and the source LOB files are merged into the
+	// output manifest afterwards (applyLOBCompaction). Mirrors sort compaction.
+	if err := t.initLOBCompactionContext(t.ctx); err != nil {
+		return nil, err
+	}
+
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
-	// TODO(#50021): Support full TEXT LOB rewrite for schema-bump compaction.
+	writerOpts := []storage.RwOption{
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			return t.chunkManager.MultiWrite(ctx, kvs)
+		}),
+		storage.WithVersion(segment.GetStorageVersion()),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(collectionID),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		// Existing TEXT columns arrive from the reader as encoded binary LOB refs;
+		// tell the writer to write them via the physical binary schema unchanged.
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
 	writer, err := storage.NewBinlogRecordWriter(t.ctx,
 		collectionID,
 		segment.GetPartitionID(),
@@ -459,13 +701,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		alloc,
 		t.compactionParams.BinLogMaxSize,
 		t.plan.GetTotalRows(),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			return t.chunkManager.MultiWrite(ctx, kvs)
-		}),
-		storage.WithVersion(segment.GetStorageVersion()),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithCollectionID(collectionID),
-		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		writerOpts...,
 	)
 	if err != nil {
 		return nil, err
@@ -487,26 +723,21 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 
-		sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && record.Column(ttlFieldID) != nil
-		preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 		var selection *recordSelection
 		if preMaterializeFilter {
-			selection, _, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField, nil)
+			selection, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField)
 			if err != nil {
-				record.Release()
 				return nil, err
 			}
 			if selection != nil && selection.Len() == 0 {
-				record.Release()
 				continue
 			}
 		}
 
+		// record stays owned by the reader (released on its next Next/Close);
+		// only the derived arrays of the wrapped record are cleaned up here.
 		wrapped, err := materializer.WrapWithSelection(record, selection)
 		if err != nil {
-			if selection == nil {
-				record.Release()
-			}
 			return nil, err
 		}
 		out := overwriteRecordTimestamps(wrapped, segment.GetCommitTimestamp())
@@ -514,7 +745,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			if out != wrapped {
 				out.Release()
 			}
-			releaseWrappedRecord(wrapped, record)
+			cleanupMaterializedRecord(wrapped)
 			return nil, err
 		}
 		if out != wrapped {
@@ -522,13 +753,25 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 
 		totalRows += int64(wrapped.Len())
-		releaseWrappedRecord(wrapped, record)
+		cleanupMaterializedRecord(wrapped)
 	}
 
 	if err := writer.Close(); err != nil {
 		return nil, err
 	}
 	writerClosed = true
+
+	// Update per-LOB-file valid_rows for REUSE_ALL fields: rows dropped by
+	// delete/TTL during the rewrite reduce the number of live LOB references.
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		inputRows := t.plan.GetTotalRows()
+		deletedRows := inputRows - totalRows
+		if deletedRows < 0 {
+			deletedRows = 0
+		}
+		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), inputRows, deletedRows)
+	}
+
 	insertLogs, statsLog, bm25StatsLogs, manifestPath, expirQuantiles := writer.GetLogs()
 	if totalRows > 0 && manifestPath == "" {
 		return nil, merr.WrapErrServiceInternal("schema bump full rewrite produced empty manifest")
@@ -564,7 +807,24 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		ExpirQuantiles:      expirQuantiles,
 		IsSorted:            segment.GetIsSorted(),
 		IsSortedByNamespace: segment.GetIsSortedByNamespace(),
+		// Stats: insert aggregates from the freshly emitted insert logs,
+		// stats footprint from the writer's tracked counter. V3 writers
+		// leave statsLog/bm25StatsLogs nil because stats live in the
+		// manifest — the counter is the only correct source.
+		Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
 	}
+
+	// Merge the source segment's TEXT LOB file references into the output manifest
+	// (REUSE_ALL) BEFORE building the text-match index. createTextIndex reads the TEXT
+	// column through this manifest, so the carried LOB files must already be referenced
+	// -- otherwise the match index for an out-of-line (>=64KB) TEXT field is built against
+	// a manifest that does not yet list those LOB files, silently missing that data.
+	// Mirrors sort/mix (applyLOBCompaction before createTextIndex); AddStatsToManifest
+	// below then chains its text stats onto the LOB-merged manifest.
+	if err := t.applyLOBCompaction(t.ctx, resultSegment); err != nil {
+		return nil, err
+	}
+
 	if totalRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
 		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment)
@@ -572,16 +832,6 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
-			basePath, _, err := packed.UnmarshalManifestPath(resultSegment.GetManifest())
-			if err != nil {
-				return nil, err
-			}
-			for _, stats := range textStatsLogs {
-				prefix := fmt.Sprintf("%s/_stats/text_index.%d", basePath, stats.GetFieldID())
-				for i, f := range stats.GetFiles() {
-					stats.Files[i] = prefix + "/" + f
-				}
-			}
 			newManifest, err := packed.AddStatsToManifest(resultSegment.GetManifest(), t.compactionParams.StorageConfig, packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion()))
 			if err != nil {
 				return nil, err
@@ -599,10 +849,71 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}, nil
 }
 
+// initLOBCompactionContext prepares REUSE_ALL LOB handling for the (single) input
+// segment's TEXT columns. A schema bump is 1->1 and never changes existing TEXT LOB
+// data, so all TEXT fields are forced REUSE_ALL (GetForcedStrategy): the source LOB
+// files stay in place and only their references are merged into the output manifest.
+// No-op when the schema has no TEXT fields. Mirrors sort compaction.
+func (t *bumpSchemaVersionCompactionTask) initLOBCompactionContext(ctx context.Context) error {
+	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
+	if len(textFieldIDs) == 0 {
+		return nil
+	}
+
+	// preCompact already guarantees a StorageV3 segment with a non-empty manifest,
+	// and this only runs from runFullSchemaRewrite (after preCompact), so no manifest guard.
+	segment := t.plan.GetSegmentBinlogs()[0]
+	sourceManifests := map[int64]string{segment.GetSegmentID(): segment.GetManifest()}
+	lobFilesBySegment, err := compaction.CollectLobFilesFromManifests(sourceManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+
+	t.lobContext = compaction.NewLOBCompactionContext()
+	for segID, files := range lobFilesBySegment {
+		t.lobContext.AddSegmentLobFiles(segID, files)
+	}
+	// schema-bump is always 1 source -> 1 output; forced REUSE_ALL.
+	t.lobContext.SetCompactionType(datapb.CompactionType_BumpSchemaVersionCompaction, 1, 1)
+	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	mlog.Info(ctx, "schema bump: initialized LOB compaction context (REUSE_ALL)",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldSegmentID(segment.GetSegmentID()),
+		mlog.Int64s("textFieldIDs", textFieldIDs),
+	)
+	return nil
+}
+
+// applyLOBCompaction merges the source segment's TEXT LOB file references into the
+// output segment's manifest (REUSE_ALL): LOB files are unchanged, only their
+// references (and valid_rows) are copied over. Mirrors sort compaction.
+func (t *bumpSchemaVersionCompactionTask) applyLOBCompaction(ctx context.Context, outputSegment *datapb.CompactionSegment) error {
+	if t.lobContext == nil || !t.lobContext.HasReuseAllFields() {
+		return nil
+	}
+	if outputSegment.GetManifest() == "" {
+		return nil
+	}
+
+	outputManifests := map[int64]string{outputSegment.GetSegmentID(): outputSegment.GetManifest()}
+	updatedManifests, err := compaction.ApplyLobCompactionToManifests(t.lobContext, outputManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+	if newManifest, ok := updatedManifests[outputSegment.GetSegmentID()]; ok {
+		outputSegment.Manifest = newManifest
+	}
+	mlog.Info(ctx, "schema bump: merged TEXT LOB references into output manifest",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldSegmentID(outputSegment.GetSegmentID()),
+	)
+	return nil
+}
+
 func appendBM25StatsFromArrowArray(stats *storage.BM25Stats, arr arrow.Array) (int, error) {
 	binaryArray, ok := arr.(*array.Binary)
 	if !ok {
-		return 0, merr.WrapErrParameterInvalidMsg("bm25 output field must be arrow binary array, got %T", arr)
+		return 0, merr.WrapErrFunctionFailedMsg("bm25 output field must be arrow binary array, got %T", arr)
 	}
 	memorySize := 0
 	for i := 0; i < binaryArray.Len(); i++ {
@@ -642,6 +953,34 @@ type bumpSchemaVersionBatchWriter interface {
 	GetWrittenUncompressed() uint64
 	AsNewColumnGroups()
 	Close() (packed.WriterOutput, error)
+	Abort()
+}
+
+type bumpSchemaVersionWriterLease struct {
+	writer    bumpSchemaVersionBatchWriter
+	exhausted bool
+}
+
+func (l *bumpSchemaVersionWriterLease) Close() (packed.WriterOutput, error) {
+	if l.exhausted {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump writer lease already consumed")
+	}
+	out, err := l.writer.Close()
+	if err != nil {
+		// Keep the lease unconsumed so the deferred Cleanup aborts the writer;
+		// do not rely on the underlying Close to release native resources.
+		return nil, err
+	}
+	l.exhausted = true
+	return out, nil
+}
+
+func (l *bumpSchemaVersionWriterLease) Cleanup() {
+	if l == nil || l.exhausted {
+		return
+	}
+	l.exhausted = true
+	l.writer.Abort()
 }
 
 type bumpSchemaVersionWriterResult struct {
@@ -649,8 +988,11 @@ type bumpSchemaVersionWriterResult struct {
 	columnGroups   []storagecommon.ColumnGroup
 	storageVersion int64
 	basePath       string
-	baseVersion    int64
 	v3Stats        []packed.StatEntry
+	// statsBlobSize tracks the cumulative bloom-filter + BM25 blob memory
+	// committed via addV3Stats. Reported to DataCoord on
+	// CompactionSegment.Stats.StatsBinlogSize.
+	statsBlobSize int64
 }
 
 func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.FieldSchema, segment *datapb.CompactionSegmentBinlogs, collectionID int64) (*bumpSchemaVersionWriterResult, error) {
@@ -667,14 +1009,14 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 
 	basePath, existingVersion, err := packed.UnmarshalManifestPath(segment.GetManifest())
 	if err != nil {
-		return nil, merr.WrapErrDataIntegrityMsg("failed to parse existing manifest for schema bump: %s", err.Error())
+		return nil, merr.WrapErrDataIntegrity(err, "failed to parse existing manifest for schema bump")
 	}
 	writerResult, err := t.newV3WriterResult(outputSchema, newColumnGroups, segment, collectionID, basePath, existingVersion)
 	if err != nil {
 		return nil, err
 	}
 	writerResult.writer.AsNewColumnGroups()
-	mlog.Info(t.ctx, "[schema-bump-partial-writer] writer setup",
+	mlog.Info(t.ctx, "schema bump partial writer setup",
 		mlog.Int64("baseVersion", existingVersion),
 		mlog.String("basePath", basePath),
 		mlog.Int("outputFieldCount", len(outputFields)),
@@ -685,7 +1027,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 
 func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.CollectionSchema, columnGroups []storagecommon.ColumnGroup, segment *datapb.CompactionSegmentBinlogs, collectionID int64, basePath string, baseVersion int64) (*bumpSchemaVersionWriterResult, error) {
 	if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifest() == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("schema bump compaction requires a StorageV3 segment with manifest")
+		return nil, merr.WrapErrServiceInternalMsg("schema bump compaction requires a StorageV3 segment with manifest")
 	}
 
 	pluginContext, err := hookutil.GetCPluginContext(t.plan.GetPluginContext(), collectionID)
@@ -696,11 +1038,16 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
 	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
-	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+	var writer bumpSchemaVersionBatchWriter
+	if schemaContainsTextField(schema) {
+		writer, err = storage.NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+	} else {
+		writer, err = storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+	}
 	if err != nil {
 		return nil, err
 	}
-	mlog.Info(t.ctx, "[schema-bump-partial-writer] partial manifest writer created",
+	mlog.Info(t.ctx, "schema bump partial manifest writer created",
 		mlog.Int64("baseVersion", baseVersion),
 		mlog.Int("schemaFieldCount", len(schema.GetFields())),
 		mlog.Int("columnGroupCount", len(columnGroups)),
@@ -711,8 +1058,16 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 		columnGroups:   columnGroups,
 		storageVersion: segment.GetStorageVersion(),
 		basePath:       basePath,
-		baseVersion:    baseVersion,
 	}, nil
+}
+
+func schemaContainsTextField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *bumpSchemaVersionCompactionTask) updateStats(stats *storage.BM25Stats, outputFieldID int64, writerResult *bumpSchemaVersionWriterResult) error {
@@ -741,112 +1096,73 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 			MemorySize: memorySize,
 		}},
 	}))
+	writerResult.statsBlobSize += memorySize
 	return nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) buildMergedLogsV3(segment *datapb.CompactionSegmentBinlogs, writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {
+// buildNewInsertLogsV3 returns FieldBinlogs for the column groups this run
+// wrote, and nothing else. It deliberately does not merge the input segment's
+// FieldBinlogs: those come from the compaction plan, which copies them off
+// SegmentInfo, and for a StorageV3 segment recovered after a DataCoord restart
+// they are empty (#50410 stopped persisting per-field binlog KVs for V3).
+// The receiver (completeBumpSchemaVersionCompactionMutation in
+// internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs,
+// which is where the materialized field's data becomes visible to the rest of
+// DataCoord — including index building — without replacing untouched groups.
+// Index eligibility is gated separately by the segment schema version.
+// This result is therefore load-bearing: dropping it silently makes the
+// materialized field permanently un-indexable.
+func (t *bumpSchemaVersionCompactionTask) buildNewInsertLogsV3(writerResult *bumpSchemaVersionWriterResult, fieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {
 	logIDStart, _, err := t.logIDAlloc.Alloc(uint32(len(writerResult.columnGroups)))
 	if err != nil {
 		return nil, err
 	}
-	newInsertLogs := make(map[int64]*datapb.FieldBinlog)
+	newInsertLogs := make(map[int64]*datapb.FieldBinlog, len(writerResult.columnGroups))
 	for i, columnGroup := range writerResult.columnGroups {
 		fieldID := columnGroup.GroupID
-		fieldBinlog := &datapb.FieldBinlog{
+		newInsertLogs[fieldID] = &datapb.FieldBinlog{
 			FieldID:     fieldID,
 			ChildFields: columnGroup.Fields,
 			Format:      columnGroup.Format,
 			Binlogs: []*datapb.Binlog{
 				{
-					MemorySize: int64(sparseFieldMemorySizes[fieldID]),
+					MemorySize: int64(fieldMemorySizes[fieldID]),
 					EntriesNum: totalRows,
 					LogID:      logIDStart + int64(i),
 				},
 			},
 		}
-		newInsertLogs[fieldID] = fieldBinlog
 	}
 
-	return t.finalizeMergedLogs(segment, newInsertLogs)
+	return storage.SortFieldBinlogs(newInsertLogs), nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) preserveDeltaLogsV3(segment *datapb.CompactionSegmentBinlogs, manifestPath string) (string, error) {
-	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(segment.GetManifest(), t.compactionParams.StorageConfig)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to read V3 delta logs from existing manifest")
-	}
-	if len(deltaPaths) == 0 {
-		return manifestPath, nil
-	}
-
-	deltaSummaries := make([]*datapb.Binlog, 0, len(deltaPaths))
-	for _, fieldBinlog := range segment.GetDeltalogs() {
-		deltaSummaries = append(deltaSummaries, fieldBinlog.GetBinlogs()...)
-	}
-	if len(deltaSummaries) != len(deltaPaths) {
-		return "", merr.WrapErrServiceInternalMsg("V3 delta manifest path count %d does not match segment delta summary count %d", len(deltaPaths), len(deltaSummaries))
+func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx context.Context, diff *schemaBumpPhysicalDiff) (*datapb.CompactionPlanResult, error) {
+	// Additive reconciliation reports a Statistics INCREMENT, which is only
+	// valid because this path appends columns and never removes them. Dropped
+	// fields must go to runFullSchemaRewrite, which ships absolute statistics.
+	if len(diff.droppedFieldIDs) > 0 {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"schema bump additive reconciliation cannot run with dropped fields, planID = %d, droppedFieldIDs = %v",
+			t.GetPlanID(), diff.droppedFieldIDs)
 	}
 
-	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
-	if err != nil {
-		return "", merr.WrapErrDataIntegrityMsg("failed to parse new V3 manifest for delta preservation: %s", err.Error())
-	}
-
-	deltaEntries := make([]packed.DeltaLogEntry, 0, len(deltaPaths))
-	for i, deltaPath := range deltaPaths {
-		newDeltaPath := metautil.BuildDeltaLogPathV3(basePath, deltaSummaries[i].GetLogID())
-		if newDeltaPath != deltaPath {
-			if err := t.chunkManager.Copy(t.ctx, deltaPath, newDeltaPath); err != nil {
-				return "", merr.Wrap(err, "failed to copy V3 delta log for schema bump full rewrite")
-			}
-		}
-		deltaEntries = append(deltaEntries, packed.DeltaLogEntry{
-			Path:       newDeltaPath,
-			NumEntries: deltaSummaries[i].GetEntriesNum(),
-		})
-	}
-	newManifest, err := packed.AddDeltaLogsToManifest(manifestPath, t.compactionParams.StorageConfig, deltaEntries)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to preserve V3 delta logs in full rewrite manifest")
-	}
-	return newManifest, nil
-}
-
-func (t *bumpSchemaVersionCompactionTask) finalizeMergedLogs(segment *datapb.CompactionSegmentBinlogs, newInsertLogs map[int64]*datapb.FieldBinlog) ([]*datapb.FieldBinlog, error) {
-	newFieldIDs := make(map[int64]struct{}, len(newInsertLogs)*2)
-	for _, fb := range newInsertLogs {
-		newFieldIDs[fb.GetFieldID()] = struct{}{}
-		for _, childID := range fb.GetChildFields() {
-			newFieldIDs[childID] = struct{}{}
-		}
-	}
-	mergedInsertLogs := make(map[int64]*datapb.FieldBinlog, len(segment.GetFieldBinlogs())+len(newInsertLogs))
-	for _, fb := range segment.GetFieldBinlogs() {
-		if compactionFieldBinlogReadable(fb, newFieldIDs) {
-			continue
-		}
-		mergedInsertLogs[fb.GetFieldID()] = fb
-	}
-	for fieldID, fb := range newInsertLogs {
-		mergedInsertLogs[fieldID] = fb
-	}
-
-	return storage.SortFieldBinlogs(mergedInsertLogs), nil
-}
-
-func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx context.Context, missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
 	segment := t.plan.GetSegmentBinlogs()[0]
 	collectionID := segment.GetCollectionID()
 	partitionID := segment.GetPartitionID()
 	segmentID := segment.GetSegmentID()
 
-	inputSchema, inputFieldIDs, err := t.missingFunctionInputSchema(missingFunctions)
+	inputSchema, inputFieldIDs, err := t.additiveReadSchema(diff)
 	if err != nil {
 		return nil, err
 	}
-	outputFields, outputFieldIDs, err := t.missingFunctionOutputFields(missingFunctions, existingFields)
-	if err != nil {
-		return nil, err
+	outputFields := diff.appendedFields()
+	if len(outputFields) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump additive reconciliation has no fields to append")
+	}
+	outputFieldIDs := make([]int64, 0, len(outputFields))
+	for _, field := range outputFields {
+		outputFieldIDs = append(outputFieldIDs, field.GetFieldID())
 	}
 
 	log := mlog.With(
@@ -870,24 +1186,24 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	if err != nil {
 		return nil, err
 	}
+	writerLease := &bumpSchemaVersionWriterLease{writer: writerResult.writer}
+	defer writerLease.Cleanup()
 
 	log.Info(ctx, "schema bump writer setup",
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		mlog.Int64("clusterStorageVersion", t.compactionParams.StorageVersion),
 		mlog.Bool("segmentHasManifest", segment.GetManifest() != ""),
-		mlog.Int64s("inputFieldIDs", inputFieldIDs),
-		mlog.Int64s("outputFieldIDs", outputFieldIDs),
 	)
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.batchProcess")
 	statsByField := make(map[int64]*storage.BM25Stats)
 	fieldMemorySizeByField := make(map[int64]int, len(outputFieldIDs))
+	fieldNullCountByField := make(map[int64]int64, len(outputFieldIDs))
 	for _, outputFieldID := range outputFieldIDs {
 		if isBM25MaterializedOutputField(t.plan.GetSchema(), outputFieldID) {
 			statsByField[outputFieldID] = storage.NewBM25Stats()
 		}
 	}
-	existingFields = partialMaterializerExistingFields(t.plan.GetSchema(), missingFunctions, existingFields)
-	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), missingFunctions, existingFields)
+	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), diff.missingFunctions, diff.existingFields)
 	if err != nil {
 		span.End()
 		return nil, err
@@ -909,10 +1225,11 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		readDuration += time.Since(readStart)
 
 		computeStart := time.Now()
+		// record stays owned by the reader (released on its next Next/Close);
+		// only the derived arrays of the wrapped record are cleaned up here.
 		wrapped, err := materializer.Wrap(record)
 		computeDuration += time.Since(computeStart)
 		if err != nil {
-			record.Release()
 			span.End()
 			return nil, err
 		}
@@ -921,40 +1238,50 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			outputFieldID := outputField.GetFieldID()
 			outputCol := wrapped.Column(outputFieldID)
 			if outputCol == nil {
-				releaseWrappedRecord(wrapped, record)
+				cleanupMaterializedRecord(wrapped)
 				span.End()
-				return nil, merr.WrapErrServiceInternalMsg("output field %d not found in materialized record", outputFieldID)
+				if outputField.GetIsFunctionOutput() {
+					return nil, merr.WrapErrFunctionFailedMsg("function output field %d not found in materialized record", outputFieldID)
+				}
+				return nil, merr.WrapErrServiceInternalMsg("ordinary output field %d not found in materialized record", outputFieldID)
 			}
 			batchMemSize := arrowArrayMemorySize(outputCol)
 			if stats, ok := statsByField[outputFieldID]; ok {
 				bm25MemSize, err := appendBM25StatsFromArrowArray(stats, outputCol)
 				if err != nil {
-					releaseWrappedRecord(wrapped, record)
+					cleanupMaterializedRecord(wrapped)
 					span.End()
 					return nil, err
 				}
 				batchMemSize = bm25MemSize
 			}
 			fieldMemorySizeByField[outputFieldID] += batchMemSize
+			fieldNullCountByField[outputFieldID] += int64(outputCol.NullN())
 		}
 
 		writeStart := time.Now()
 		if err := writerResult.writer.Write(wrapped); err != nil {
-			releaseWrappedRecord(wrapped, record)
+			cleanupMaterializedRecord(wrapped)
 			span.End()
 			return nil, err
 		}
 		writeDuration += time.Since(writeStart)
-		log.Info(ctx, "[schema-bump-partial-writer] record batch written",
-			mlog.Int("rows", wrapped.Len()),
-			mlog.Int64("totalRowsBeforeBatch", totalRows),
-			mlog.Int("outputFieldCount", len(outputFields)),
-		)
 
 		totalRows += int64(wrapped.Len())
-		releaseWrappedRecord(wrapped, record)
+		cleanupMaterializedRecord(wrapped)
 	}
 	span.End()
+	if totalRows != t.plan.GetTotalRows() {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"schema bump additive reconciliation read %d rows, expected %d",
+			totalRows, t.plan.GetTotalRows())
+	}
+	// A zero-row materialized write would manufacture physical completeness for
+	// an empty segment; fail and let the deferred lease Abort the writer.
+	if totalRows == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"schema bump additive reconciliation observed zero rows for segment %d, refusing to write an empty materialized record", segmentID)
+	}
 
 	_, span2 := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.updateStats")
 	for outputFieldID, stats := range statsByField {
@@ -969,40 +1296,53 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	span2.End()
 
 	log.Info(ctx, "schema bump bm25 stats written",
-		mlog.Int("bm25StatsFieldCount", len(outputFieldIDs)),
+		mlog.Int("bm25StatsFieldCount", len(statsByField)),
 		mlog.Int64("storageVersion", writerResult.storageVersion),
 		mlog.Int("v3StatsCount", len(writerResult.v3Stats)),
 	)
 
-	mergedInsertLogs, err := t.buildMergedLogsV3(segment, writerResult, fieldMemorySizeByField, totalRows)
+	newInsertLogs, err := t.buildNewInsertLogsV3(writerResult, fieldMemorySizeByField, totalRows)
 	if err != nil {
 		return nil, err
 	}
 
-	writerOutput, err := writerResult.writer.Close()
-	if err != nil {
-		return nil, err
-	}
+	writerOutput, err := writerLease.Close()
 	if writerOutput != nil {
 		defer writerOutput.Destroy()
 	}
-
-	manifestPath, err := packed.CommitManifestUpdates(
-		writerResult.basePath,
-		writerResult.baseVersion,
-		t.compactionParams.StorageConfig,
-		&packed.ManifestUpdates{
-			NewFiles: writerOutput,
-			Stats:    writerResult.v3Stats,
-		},
-	)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to commit schema bump V3 manifest")
+		return nil, err
 	}
-	log.Info(ctx, "[schema-bump-partial-writer] writer output and bm25 stats committed",
-		mlog.String("manifestPath", manifestPath),
+
+	// The heavy data files are already written to object storage by the writer
+	// above. Instead of committing the manifest transaction here — on the base
+	// version pinned when the plan was built — ship the transaction INPUT (the
+	// serializable descriptors of those files plus the bm25 stat entries) to
+	// DataCoord and let CommitSegmentManifest run the transaction on the
+	// segment's CURRENT manifest. That rebases the column-group / stat adds
+	// against any concurrent commit (e.g. an L0 deltalog add) instead of losing
+	// to it on a stale-base CAS and forcing a full re-materialization.
+	describer, ok := writerOutput.(interface {
+		ColumnGroupEntries() ([]packed.ColumnGroupEntry, error)
+	})
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization writer output does not expose column group entries")
+	}
+	columnGroupEntries, err := describer.ColumnGroupEntries()
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to read schema bump column group descriptors")
+	}
+	if len(columnGroupEntries) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization produced no column groups, planID = %d, segmentID = %d", t.GetPlanID(), segmentID)
+	}
+	manifestDelta := &datapb.SegmentManifestDelta{
+		ColumnGroups: packed.ColumnGroupEntriesToProto(columnGroupEntries),
+		Stats:        packed.StatEntriesToProto(writerResult.v3Stats),
+	}
+	log.Info(ctx, "[schema-bump-partial-writer] writer output prepared as manifest delta",
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
+		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
+		mlog.Int("columnGroupCount", len(manifestDelta.GetColumnGroups())),
 		mlog.Int("v3StatsCount", len(writerResult.v3Stats)),
 	)
 
@@ -1011,22 +1351,36 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		State:  datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
 			{
-				SegmentID:           segmentID,
-				NumOfRows:           totalRows,
-				InsertLogs:          mergedInsertLogs,
-				Field2StatslogPaths: segment.GetField2StatslogPaths(),
-				Deltalogs:           segment.GetDeltalogs(),
-				Channel:             segment.GetInsertChannel(),
-				StorageVersion:      writerResult.storageVersion,
-				Manifest:            manifestPath,
+				SegmentID:      segmentID,
+				NumOfRows:      totalRows,
+				InsertLogs:     newInsertLogs,
+				Channel:        segment.GetInsertChannel(),
+				StorageVersion: writerResult.storageVersion,
+				// Manifest is intentionally empty: with ManifestDelta set,
+				// DataCoord generates the new manifest revision itself from the
+				// shipped descriptors, on the segment's current base.
+				ManifestDelta: manifestDelta,
+				BaseManifest:  segment.GetManifest(),
+				// In-place materialization ships an INCREMENT, not an absolute
+				// footprint: DataCoord adds it onto the segment's existing
+				// Stats. Field2StatslogPaths and Deltalogs are deliberately
+				// absent — they were echoes of the plan that the in-place
+				// receiver never reads, and the plan's arrays are empty for a
+				// recovered StorageV3 segment anyway.
+				Stats: buildMaterializationStatsDelta(
+					writerResult.columnGroups,
+					fieldMemorySizeByField,
+					fieldNullCountByField,
+					writerResult.statsBlobSize,
+				),
 			},
 		},
 		Type: t.plan.GetType(),
 	}
-	log.Info(ctx, "[schema-bump-partial-writer] compaction completed",
+	log.Info(ctx, "schema bump additive reconciliation completed",
 		mlog.Int64("numOfRows", totalRows),
-		mlog.Int("mergedInsertLogsCount", len(mergedInsertLogs)),
-		mlog.String("manifestPath", manifestPath),
+		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
+		mlog.Int("columnGroupCount", len(manifestDelta.GetColumnGroups())),
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		mlog.Int32("collectionSchemaVersion", t.plan.GetSchema().GetVersion()),
 		mlog.Duration("readDuration", readDuration),

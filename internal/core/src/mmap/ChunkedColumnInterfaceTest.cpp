@@ -21,6 +21,7 @@
 #include <iterator>
 #include <memory>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -357,8 +358,8 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
                      {false, false, false},
                      {true, true, true, true}},
                     true};
-    auto fx = TypeParam::Create(spec);
 
+    auto fx = TypeParam::Create(spec);
     EXPECT_TRUE(fx.fetched->empty());
 
     fx.column->BuildValidRowIds(nullptr);

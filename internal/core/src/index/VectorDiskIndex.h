@@ -52,8 +52,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+        if (HasValidData() && GetValidCount() == 0) {
             return 0;
         }
         if (IsEmptyEmbListIndex()) {
@@ -116,7 +115,23 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
-                    const BitsetView& bitset) const override;
+                    const BitsetView& bitset,
+                    milvus::OpContext* op_context = nullptr) const override;
+
+    knowhere::IdMap&
+    GetIdMap() override {
+        return index_.GetIdMap();
+    }
+
+    const knowhere::IdMap&
+    GetIdMap() const override {
+        return index_.GetIdMap();
+    }
+
+    void
+    SetIdMapType(knowhere::IdMap::Type type) override {
+        index_.SetIdMapType(type);
+    }
 
  private:
     bool

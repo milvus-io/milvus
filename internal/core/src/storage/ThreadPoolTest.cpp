@@ -14,13 +14,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <concepts>
+#include <future>
+#include <limits>
 #include <string>
+#include <system_error>
 
+#include <folly/ScopeGuard.h>
 #include "gtest/gtest.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus {
+
+static_assert(
+    std::same_as<storage::LoadMemoryOverheadController,
+                 storage::LoadOverheadController<
+                     cachinglayer::LoadingOverheadDimension::kMemory>>);
+static_assert(std::same_as<storage::LoadFileOverheadController,
+                           storage::LoadOverheadController<
+                               cachinglayer::LoadingOverheadDimension::kFile>>);
+
+template <typename T>
+concept SupportsBudgetUpdate =
+    requires(T& owner) { owner.UpdateBudgetBytes(size_t{0}); };
+
+static_assert(SupportsBudgetUpdate<storage::LoadMemoryOverheadController>);
+static_assert(!SupportsBudgetUpdate<storage::LoadFileOverheadController>);
+
+TEST(LoadOverheadControllerTest, RejectsBudgetBeyondPolicyRange) {
+    auto& controller = storage::LoadMemoryOverheadController::GetInstance();
+    EXPECT_ANY_THROW(
+        controller.UpdateBudgetBytes(std::numeric_limits<size_t>::max()));
+}
 
 class ThreadPoolTest : public testing::Test {
  protected:
@@ -136,6 +165,61 @@ TEST_F(ThreadPoolTest, DynamicMaxThreadsSizeUpdate) {
     SetThreadPoolMaxThreadsSize(8);
     pool.Resize(20);
     EXPECT_EQ(pool.GetMaxThreadNum(), 8);
+}
+
+TEST_F(ThreadPoolTest, LoadFileOverheadControllerIsLazyAndStable) {
+    auto& file_owner = storage::LoadFileOverheadController::GetInstance();
+    auto& memory_owner = storage::LoadMemoryOverheadController::GetInstance();
+    auto executor_workers = ThreadPools::GetLoadExecutorWorkers();
+    auto cleanup = folly::makeGuard([&file_owner, executor_workers]() {
+        EXPECT_TRUE(file_owner.UpdateExecutorWorkers(executor_workers));
+    });
+
+    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/4));
+    auto file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
+    auto same_file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
+    auto memory_group = memory_owner.GetOrCreate(executor_workers);
+
+    ASSERT_NE(file_group, nullptr);
+    EXPECT_EQ(file_group, same_file_group);
+    ASSERT_NE(memory_group, nullptr);
+    EXPECT_NE(file_group, memory_group);
+
+    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/8));
+    EXPECT_EQ(file_group, file_owner.GetOrCreate(/*executor_workers=*/8));
+}
+
+TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
+    ThreadPool pool(1.0, "test_pool");
+
+    std::promise<void> blocker_started;
+    std::promise<void> unblock_worker;
+    auto unblock_future = unblock_worker.get_future().share();
+    auto blocker = pool.Submit([&blocker_started, unblock_future]() {
+        blocker_started.set_value();
+        unblock_future.wait();
+    });
+    ASSERT_EQ(blocker_started.get_future().wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    pool.worker_spawn_hook_for_test_ = []() {
+        throw std::system_error(
+            std::make_error_code(std::errc::resource_unavailable_try_again));
+    };
+
+    std::atomic<int> task_runs{0};
+    std::future<void> task_future;
+    EXPECT_NO_THROW(
+        task_future = pool.Submit([&task_runs]() { task_runs.fetch_add(1); }));
+
+    unblock_worker.set_value();
+    blocker.get();
+
+    ASSERT_TRUE(task_future.valid());
+    ASSERT_EQ(task_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    task_future.get();
+    EXPECT_EQ(task_runs.load(), 1);
 }
 
 }  // namespace milvus

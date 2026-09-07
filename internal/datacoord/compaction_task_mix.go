@@ -370,8 +370,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// set analyzer resource for text match index if use ref mode.
-	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources.
+	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources in ref mode.
 	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
 		(taskProto.GetType() == datapb.CompactionType_SortCompaction || taskProto.GetType() == datapb.CompactionType_MixCompaction) &&
 		len(taskSchema.GetFileResourceIds()) > 0 {

@@ -36,6 +36,7 @@ add_subdirectory(rocksdb)
 add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
 add_subdirectory(tantivy)
+add_subdirectory(libsais)
 
 if (LINUX)
     add_subdirectory(jemalloc)

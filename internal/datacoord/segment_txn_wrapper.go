@@ -8,9 +8,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // BinlogIncrement names the FieldBinlogs that an Update writes as side-prefix
@@ -51,7 +54,9 @@ func (i *BinlogIncrement) Union(o BinlogIncrement) {
 //
 // Writers pass the fully-stitched in-memory SegmentInfo (the way it looks with
 // binlogs populated from a cache lookup). The wrapper strips the proto and
-// emits binlog KVs in the same atomic backend transaction.
+// stages binlog KVs before the main segment record in the same ordered logical
+// write. The underlying persist may split that write into bounded atomic
+// batches, so callers must handle ErrPartialCommit.
 type SegmentTxnWrapper struct {
 	inner        OptimisticTxnPersist
 	metaRootPath string
@@ -98,8 +103,9 @@ func (w *SegmentTxnWrapper) ScanRaw(ctx context.Context, prefix string) (keys []
 	return w.inner.Scan(ctx, prefix)
 }
 
-// SegmentTxn accepts typed SegmentInfo ops. On Commit, the stripped segment
-// record and all its binlog KVs persist atomically in a single backend txn.
+// SegmentTxn accepts typed SegmentInfo operations. For each operation it
+// stages side-prefix binlog KVs before the main segment record, so a committed
+// prefix never publishes a new segment record before its auxiliary writes.
 type SegmentTxn struct {
 	inner        Txn
 	metaRootPath string
@@ -117,8 +123,8 @@ type SegmentTxnResult struct {
 	Version int64
 }
 
-// Insert stages an atomic write of a new segment record plus every side-prefix
-// binlog KV derived from seg's binlog fields. Fails the commit
+// Insert stages a new segment record plus every side-prefix binlog KV derived
+// from seg's binlog fields. Fails the commit
 // (ErrKeyAlreadyExists) if the segment key is already present.
 func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 	value, binlogKvs, removals, err := t.buildSegmentWrite(seg, BinlogIncrement{
@@ -143,8 +149,8 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 	return nil
 }
 
-// Update stages an atomic overwrite of a segment record plus an explicit list
-// of binlog KVs to rewrite, CAS-gated by expectedVersion (the etcd
+// Update stages an overwrite of a segment record plus an explicit list of
+// binlog KVs to rewrite, CAS-gated by expectedVersion (the etcd
 // ModRevision the caller read when staging). On version mismatch, Commit
 // returns ErrCASFailed; callers retry by re-reading the cache entry and
 // re-staging.
@@ -157,6 +163,16 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 // seg MUST be the fully-stitched post-mutation SegmentInfo (for the segment
 // record write); binlog fields in seg are stripped from the persisted proto.
 func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion int64, inc BinlogIncrement) error {
+	// A legacy segment can still have its binlogs embedded in the segment record
+	// and no side-prefix KVs after a rolling upgrade. Preserve Catalog's
+	// write-on-drop compatibility behavior so rewriting the stripped Dropped
+	// record never makes those logs unreachable to GC.
+	if seg.GetState() == commonpb.SegmentState_Dropped && seg.GetManifestPath() == "" {
+		inc.Binlogs = seg.GetBinlogs()
+		inc.Deltalogs = seg.GetDeltalogs()
+		inc.Statslogs = seg.GetStatslogs()
+		inc.Bm25Statslogs = seg.GetBm25Statslogs()
+	}
 	value, binlogKvs, removals, err := t.buildSegmentWrite(seg, inc)
 	if err != nil {
 		return err
@@ -174,8 +190,8 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 	return nil
 }
 
-// Delete removes the segment record and its binlog KVs atomically.
-// Fails (ErrKeyNotFound) if the segment key is missing.
+// Delete stages removal of the segment record and its binlog KVs. Fails
+// (ErrKeyNotFound) if the segment key is missing.
 func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
 	for _, k := range t.segmentBinlogKeys(seg) {
 		t.inner.Remove(k)
@@ -187,13 +203,15 @@ func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
 
 // RawTxn returns the underlying bytes-only transaction for call sites that
 // need to stage non-segment operations (e.g. channel CP writes) alongside
-// segment ops in the same atomic commit.
+// segment ops in the same ordered logical commit.
 func (t *SegmentTxn) RawTxn() Txn { return t.inner }
 
-// Commit executes the underlying atomic transaction. Returned results are in
-// add order of the typed ops; binlog Put/Remove ops are not reported. Segment
-// results keep the fully stitched SegmentInfo supplied to Insert/Update rather
-// than the stripped proto persisted in the main segment key.
+// Commit executes the underlying logical write. Returned results are in add
+// order of the typed ops; binlog Put/Remove ops are not reported. On
+// ErrPartialCommit, results still preserve typed-op order; a main segment
+// record outside the committed prefix has Version == 0. Segment results keep
+// the fully stitched SegmentInfo supplied to Insert/Update rather than the
+// stripped proto persisted in the main key.
 func (t *SegmentTxn) Commit() ([]SegmentTxnResult, error) {
 	raws, err := t.inner.Commit()
 	if err != nil && !errors.Is(err, ErrPartialCommit) {
@@ -232,11 +250,22 @@ func (t *SegmentTxn) recordAux() { t.count++ }
 func (t *SegmentTxn) buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrement) ([]byte, map[string][]byte, []string, error) {
 	stripped := proto.Clone(seg).(*datapb.SegmentInfo)
 	datacoordkv.ResetBinlogFields(stripped)
+	if seg.GetManifestPath() == "" {
+		segmentutil.ReCalcRowCount(seg, stripped)
+	}
+	// Match Catalog's compact segment-record wire format. Runtime paths are
+	// reconstructed after reload; persisting absolute paths here would restore
+	// the metadata amplification this wrapper is meant to avoid.
+	metautil.ExtractTextLogFilenames(stripped.GetTextStatsLogs())
+	metautil.ExtractJSONKeyStatsRelativePaths(stripped.GetJsonKeyStats())
 	value, err := proto.Marshal(stripped)
 	if err != nil {
 		return nil, nil, nil, merr.WrapErrSerializationFailed(err, "marshal SegmentInfo")
 	}
-	if inc.IsEmpty() {
+	// Manifest-backed V3 segments persist their log paths in LOON. Keep the
+	// existing catalog contract: their SegmentInfo record is still stripped,
+	// but no legacy per-FieldBinlog side-prefix KVs are written or removed.
+	if seg.GetManifestPath() != "" || inc.IsEmpty() {
 		return value, nil, nil, nil
 	}
 	removals := t.segmentDroppedBinlogKeys(seg, inc.DroppedBinlogFieldIDs)

@@ -26,7 +26,7 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeLimit, NewLimitOpFromRepr)
+	MustRegisterOperator(types.OpTypeLimit, statelessOperatorFactory(NewLimitOpFromRepr))
 }
 
 // LimitOp limits the number of rows in each chunk.

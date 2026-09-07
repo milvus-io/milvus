@@ -12,7 +12,14 @@ import (
 var (
 	ErrNotPrimary   = errors.New("cluster is not primary, cannot do any DDL/DCL")
 	ErrNotSecondary = errors.New("cluster is not secondary, cannot perform force promote")
+
+	// ErrBroadcastTaskNotCreated marks a Broadcast error returned before the task is registered in the manager.
+	ErrBroadcastTaskNotCreated = errors.New("broadcast task not created")
 )
+
+func IsBroadcastTaskNotCreated(err error) bool {
+	return errors.Is(err, ErrBroadcastTaskNotCreated)
+}
 
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.
@@ -32,10 +39,10 @@ type Broadcaster interface {
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
-	// GetPendingCreateCollectionResources returns collection ID → file resource IDs
-	// for all pending CreateCollection broadcast tasks that haven't completed
-	// their ack callback yet. Used during recovery to rebuild file resource refCnt.
-	GetPendingCreateCollectionResources() map[int64][]int64
+	// GetPendingSchemaFileResources returns collection ID -> file resource IDs
+	// for all pending schema broadcast tasks that haven't completed their ack
+	// callback yet. Used during recovery to rebuild file resource refCnt.
+	GetPendingSchemaFileResources() map[int64][]int64
 
 	// Close closes the broadcaster.
 	Close()

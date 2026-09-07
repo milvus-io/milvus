@@ -22,6 +22,7 @@ expr:
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| TEXTMATCHFUZZY'('Identifier',' expr ',' Identifier ASSIGN IntegerConstant ')'                         # TextMatchFuzzy
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
@@ -40,7 +41,8 @@ expr:
 	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' expr ')'  # SpatialBinary
 	| STDWithin'('Identifier',' expr',' expr')'                                                             # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
-	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
+	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier | StructSubFieldIdentifier)')'      # ArrayLength
+	| function=Identifier '(' field=(Identifier|Meta|JSONIdentifier|StructFieldIdentifier|StructIndexFieldIdentifier|StructSubFieldIdentifier) ',' expr ',' option=Identifier ASSIGN kind=Identifier ')' # MembershipMatchWithOption
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
@@ -70,6 +72,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+TEXTMATCHFUZZY: 'text_match_fuzzy'|'TEXT_MATCH_FUZZY';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 MATCH_ALL: 'match_all' | 'MATCH_ALL';
