@@ -473,13 +473,24 @@ func (ob *CollectionObserver) observeResourceGroupProgress(ctx context.Context) 
 		// hold a freshly flushed segment the group does not carry yet, and
 		// the figure against it is measured afresh; the target version is a
 		// map lookup, so this costs nothing per tick. A re-arm resets the
-		// figure to -1 and measures afresh too. What remains unseen between
-		// two measurements is a figure that drops with the distribution
-		// alone - a node releasing a segment - until the next target moves
-		// or the promotion tick, where the gate is off; such a group's task
+		// figure to -1 and measures afresh too.
+		//
+		// The gate is keyed on there being no current target at all, not on
+		// the current target not yet being the measured version. Scoped
+		// tasks are registered for loaded collections alone (the expansion
+		// path and the rebuild after a restart), so the window it opens in
+		// is one shape: a loaded collection after a non-graceful coordinator
+		// restart, its next target pulled and no current target promoted
+		// yet. Inside that window the gate is what rules a timeout out -
+		// nothing about the window itself does. A figure that drops with
+		// the distribution alone - a delegator losing a segment - is not
+		// measured between the restart and the promotion, so no stall clock
+		// ever starts on it and releaseResourceGroupOnTimeout cannot fire
+		// there. That is by design, and it matches master, whose own task
+		// for a loaded collection never times out. Such a group's task
 		// still drives the checkers meanwhile, which load the segment back,
-		// and what it cannot do in that window is time out, which master's
-		// own task for a loaded collection never does either.
+		// and the promotion tick, where the gate is off, measures afresh
+		// and sees whatever is still missing.
 		nextTargetVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID, meta.NextTarget)
 		if task.LastProgress >= 100 && nextTargetVersion == task.LastProgressTargetVersion &&
 			!ob.targetMgr.IsCurrentTargetExist(ctx, task.CollectionID, common.AllPartitionsID) {

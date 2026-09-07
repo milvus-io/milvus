@@ -1716,3 +1716,63 @@ func (s *CollectionObserverRGSuite) TestASurvivorsFinishDoesNotDropAnOwedReplica
 	s.EqualValues(len(s.meta.GetByCollection(s.ctx, 1800)), s.meta.GetCollection(s.ctx, 1800).GetReplicaNumber())
 	s.False(s.ob.loadTasks.Contain(key), "and the task finishes on that tick")
 }
+
+// TestARecoveredTaskAtHundredIsNotTimedOutByADistributionDropBeforeThePromotion
+// pins what the reuse gate is for, in the one window it opens in: a loaded
+// collection back from a non-graceful coordinator restart, its next target
+// pulled and no current target promoted yet. The recovered task measures
+// 100 once, and then a delegator loses a segment. It is the gate, not the
+// window, that rules a timeout out there: the drop is not measured, so no
+// stall clock starts on it, nothing is released, and the task keeps waiting
+// for the promotion - which is what master does for a loaded collection,
+// which it never times out. The promotion tick measures afresh and sees it.
+func (s *CollectionObserverRGSuite) TestARecoveredTaskAtHundredIsNotTimedOutByADistributionDropBeforeThePromotion() {
+	s.registerLoadingCollection(1900, 1901, "1900-dmc0", 2, 19001, 19002)
+	s.putReplica(1900, 190001, 95, rgA)
+	s.putDelegator(1900, 95, "1900-dmc0", 19001, 19002)
+	s.markCollectionLoaded(1900, 1901)
+	s.putReplica(1900, 190002, 96, rgB)
+	s.putDelegator(1900, 96, "1900-dmc0", 19001, 19002)
+	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 1900, 1901),
+		"the restart left the next target pulled and nothing promoted")
+
+	// The restart: a fresh observer rebuilds the scoped tasks.
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
+	key, ok := findTask(ob, 1900, rgB)
+	s.Require().True(ok)
+	reads, unpatch := s.countResourceGroupPercentageReads()
+	defer unpatch()
+
+	ob.Observe(s.ctx)
+	task, ok := ob.loadTasks.Get(key)
+	s.Require().True(ok, "the promotion is pending, so the task waits")
+	s.Require().EqualValues(100, task.LastProgress)
+	measured := *reads
+	s.Require().Positive(measured)
+
+	// The group's delegator loses a segment, and a whole load timeout
+	// passes without the figure moving as far as the task knows.
+	s.putDelegator(1900, 96, "1900-dmc0", 19001)
+	s.backdateTaskWatermarkIn(ob, key, 100, time.Hour)
+	ob.Observe(s.ctx)
+
+	s.EqualValues(measured, *reads, "the drop is not measured: the gate reuses the stored 100")
+	s.Len(s.replicaIDsInRG(1900, rgB), 1, "and so nothing can time out before the promotion")
+	task, ok = ob.loadTasks.Get(key)
+	s.Require().True(ok, "the task still waits for the promotion")
+	s.EqualValues(100, task.LastProgress)
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute, "its watermark refreshed by the reused figure")
+
+	// The promotion: the gate is off, the figure is measured afresh, and
+	// the drop is seen.
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1900))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1900))
+	ob.Observe(s.ctx)
+
+	s.Greater(*reads, measured, "the promotion tick measures")
+	task, ok = ob.loadTasks.Get(key)
+	s.Require().True(ok, "a group that lost a segment does not finish on the promotion")
+	s.EqualValues(66, task.LastProgress, "the fresh figure sees the drop: the channel and one of two segments, two targets of three")
+	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute, "and the stall clock starts from that tick")
+	s.Len(s.replicaIDsInRG(1900, rgB), 1)
+}
