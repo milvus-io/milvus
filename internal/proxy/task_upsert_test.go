@@ -2552,7 +2552,6 @@ func TestClassifyFullAutoIDUpsertPreservesRequestOrder(t *testing.T) {
 		Name:   "test_collection",
 		Fields: []*schemapb.FieldSchema{primaryField},
 	})
-	task.allowInsert = true
 	plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
 	require.NoError(t, err)
 	require.Equal(t, []bool{true, false, true}, plan.existing)
@@ -2593,7 +2592,6 @@ func TestClassifyFullAutoIDUpsertRejectsMalformedResults(t *testing.T) {
 			defer m.UnPatch()
 
 			task := createTestUpdateTask()
-			task.allowInsert = true
 			plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
 			require.ErrorIs(t, err, merr.ErrDataIntegrity)
 			require.Nil(t, plan)
@@ -2601,7 +2599,7 @@ func TestClassifyFullAutoIDUpsertRejectsMalformedResults(t *testing.T) {
 	}
 }
 
-func TestUpsertModeReadsAutoIDAllowInsertAfterFieldOpNormalization(t *testing.T) {
+func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -2683,72 +2681,60 @@ func TestUpsertModeReadsAutoIDAllowInsertAfterFieldOpNormalization(t *testing.T)
 
 			require.NoError(t, task.PreExecute(context.Background()))
 			require.True(t, task.req.GetPartialUpdate())
-			require.False(t, task.allowInsert)
 		})
 	}
 
+}
+
+func TestClassifyFullAutoIDUpsertCapturesAllowInsertBeforeQuery(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		value    string
-		expected bool
+		name    string
+		initial bool
+		updated bool
 	}{
-		{name: "enabled", value: "true", expected: true},
-		{name: "disabled", value: "false", expected: false},
+		{name: "enabled", initial: true, updated: true},
+		{name: "disabled", initial: false, updated: false},
+		{name: "disabled during query", initial: true, updated: false},
+		{name: "enabled during query", initial: false, updated: true},
 	} {
-		t.Run("full AutoID upsert reads "+tc.name+" proxy config", func(t *testing.T) {
-			installMetadataMocks(t)
-			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key, tc.value))
-			t.Cleanup(func() {
-				Params.Reset(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key)
-			})
-			m := mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+		t.Run(tc.name, func(t *testing.T) {
+			key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
+			original := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetValue()
+			t.Cleanup(func() { require.NoError(t, Params.Save(key, original)) })
+			task := newFullAutoIDUpsertPreExecuteTask()
+			primaryField, err := typeutil.GetPrimaryFieldSchema(task.schema.CollectionSchema)
+			require.NoError(t, err)
+			requestIDs := partialUpdateCASIDs([]int64{10, 20})
+			require.NoError(t, Params.Save(key, strconv.FormatBool(tc.initial)))
+			queryCalls := 0
+			m := mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+				queryCalls++
+				require.NoError(t, Params.Save(key, strconv.FormatBool(tc.updated)))
+				return &milvuspb.QueryResults{
+					Status: merr.Success(),
+					FieldsData: []*schemapb.FieldData{
+						partialUpdateCASPKFieldData([]int64{10}),
+					},
+				}, segcore.StorageCost{}, nil
+			}).Build()
 			defer m.UnPatch()
-			m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
-			defer m.UnPatch()
-			task := &upsertTask{
-				baseTask: baseTask{MetaCache: &MetaCache{}},
-				ctx:      context.Background(),
-				req:      newRequest(),
-			}
-			task.SetTs(100)
 
-			require.NoError(t, task.PreExecute(context.Background()))
-			require.Equal(t, tc.expected, task.allowInsert)
+			assertDecision := func(task *upsertTask, allowInsert bool) {
+				t.Helper()
+				plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
+				if allowInsert {
+					require.NoError(t, err)
+					require.Equal(t, []bool{true, false}, plan.existing)
+				} else {
+					require.ErrorIs(t, err, merr.ErrAutoIDUpsertTargetNotFound)
+					require.Nil(t, plan)
+				}
+			}
+			assertDecision(task, tc.initial)
+			assertDecision(newFullAutoIDUpsertPreExecuteTask(), tc.updated)
+			require.Equal(t, 2, queryCalls)
 		})
 	}
-
-	t.Run("refresh applies only to later admitted request", func(t *testing.T) {
-		installMetadataMocks(t)
-		key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
-		require.NoError(t, Params.Save(key, "true"))
-		t.Cleanup(func() {
-			Params.Reset(key)
-		})
-		m := mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
-		defer m.UnPatch()
-		m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
-		defer m.UnPatch()
-		newTask := func() *upsertTask {
-			task := &upsertTask{
-				baseTask: baseTask{MetaCache: &MetaCache{}},
-				ctx:      context.Background(),
-				req:      newRequest(),
-			}
-			task.SetTs(100)
-			return task
-		}
-
-		admitted := newTask()
-		require.NoError(t, admitted.PreExecute(context.Background()))
-		require.True(t, admitted.allowInsert)
-
-		require.NoError(t, Params.Save(key, "false"))
-		require.True(t, admitted.allowInsert)
-
-		later := newTask()
-		require.NoError(t, later.PreExecute(context.Background()))
-		require.False(t, later.allowInsert)
-	})
 }
 
 func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
@@ -2781,7 +2767,6 @@ func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
 		ctx:         context.Background(),
 		schema:      schema,
 		idAllocator: &allocator.IDAllocator{},
-		allowInsert: false,
 		req: &milvuspb.UpsertRequest{
 			CollectionName: "test_collection",
 			FieldsData:     fields,
@@ -2803,6 +2788,10 @@ func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
 }
 
 func TestClassifyFullAutoIDUpsertRejectsMixedBatchBeforeAllocation(t *testing.T) {
+	key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
+	original := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetValue()
+	require.NoError(t, Params.Save(key, "false"))
+	t.Cleanup(func() { require.NoError(t, Params.Save(key, original)) })
 	retrievePatch := mockey.Mock(retrieveByPKs).Return(
 		&milvuspb.QueryResults{
 			Status: merr.Success(),
@@ -2896,7 +2885,6 @@ func TestInsertPreExecuteFullAutoIDBuildsMixedRowPlan(t *testing.T) {
 		ctx:         context.Background(),
 		schema:      schema,
 		idAllocator: &allocator.IDAllocator{},
-		allowInsert: true,
 		req: &milvuspb.UpsertRequest{
 			CollectionName: "test_collection",
 			FieldsData:     fields,

@@ -73,7 +73,6 @@ type upsertTask struct {
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
 	schemaVersion   int32
-	allowInsert     bool
 
 	// write after read, generate write part by queryPreExecute
 	node types.ProxyComponent
@@ -91,6 +90,8 @@ type upsertTask struct {
 	storageCost segcore.StorageCost
 }
 
+// fullAutoIDUpsertPlan carries PK classification into payload preparation.
+// existing is indexed by request row; deleteIDs contains only existing lookup IDs.
 type fullAutoIDUpsertPlan struct {
 	requestIDs *schemapb.IDs
 	existing   []bool
@@ -280,7 +281,11 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	return queryResult, storageCost, err
 }
 
+// classifyFullAutoIDUpsert queries PK existence and builds a plan in request order.
+// It rejects disallowed missing targets before allocating IDs or preparing writes.
 func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *schemapb.IDs, primaryField *schemapb.FieldSchema) (*fullAutoIDUpsertPlan, error) {
+	// Capture once before Query so a config refresh cannot change this attempt's policy.
+	allowInsert := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetAsBool()
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-classifyFullAutoID")
 	resp, storageCost, err := retrieveByPKs(ctx, it, requestIDs, []string{primaryField.GetName()})
 	if err != nil {
@@ -313,6 +318,8 @@ func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *
 		)
 	}
 
+	// Require a unique subset of the lookup IDs before using the query result
+	// to decide which PKs to preserve and delete.
 	requestChecker, err := typeutil.NewIDsChecker(requestIDs)
 	if err != nil {
 		return nil, err
@@ -335,6 +342,8 @@ func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *
 		return nil, merr.WrapErrDataIntegrityMsg("full AutoID Upsert classification returned duplicate primary keys")
 	}
 	existing := make([]bool, typeutil.GetSizeOfIDs(requestIDs))
+	// Keep this non-nil even when empty so delete preparation does not fall
+	// back to deleting every caller-supplied lookup ID.
 	deleteIDs := &schemapb.IDs{}
 	notFoundCount := 0
 	for i := range existing {
@@ -349,7 +358,7 @@ func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *
 			notFoundCount++
 		}
 	}
-	if notFoundCount > 0 && !it.allowInsert {
+	if notFoundCount > 0 && !allowInsert {
 		return nil, merr.WrapErrAutoIDUpsertTargetNotFound(notFoundCount)
 	}
 
@@ -367,6 +376,7 @@ func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *
 	}, nil
 }
 
+// replacePrimaryFieldData replaces the PK column without changing field order.
 func replacePrimaryFieldData(fields []*schemapb.FieldData, primaryField *schemapb.FieldSchema, replacement *schemapb.FieldData) error {
 	for i, field := range fields {
 		if field.GetFieldId() == primaryField.GetFieldID() || field.GetFieldName() == primaryField.GetName() {
@@ -377,6 +387,9 @@ func replacePrimaryFieldData(fields []*schemapb.FieldData, primaryField *schemap
 	return merr.WrapErrServiceInternalMsg("validated Upsert payload lost primary key field %s", primaryField.GetName())
 }
 
+// finalizeFullAutoIDUpsert preserves existing PKs and uses allocated RowIDs as
+// PKs only for missing rows. It sets response IDs in request order and prepares
+// the delete subset from the original lookup IDs.
 func (it *upsertTask) finalizeFullAutoIDUpsert(primaryField *schemapb.FieldSchema, plan *fullAutoIDUpsertPlan) error {
 	if plan == nil {
 		return merr.WrapErrServiceInternalMsg("full AutoID Upsert row plan is unavailable")
@@ -1646,6 +1659,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	fullAutoIDUpsert := primaryField.GetAutoID() && !it.req.GetPartialUpdate()
 	var fullAutoIDPlan *fullAutoIDUpsertPlan
+	// Partial Upsert already classifies rows during its read-and-merge phase.
 	if fullAutoIDUpsert {
 		fullAutoIDPlan, err = it.classifyFullAutoIDUpsert(ctx, requestIDs, primaryField)
 		if err != nil {
@@ -1653,6 +1667,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
+	// Every inserted row version needs a new internal RowID, even when its
+	// business PK is preserved. Missing AutoID rows also use it as their PK.
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
@@ -1711,7 +1727,8 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		mlog.String("collectionName", collName))
 
 	if it.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
 		it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	}
 	if typeutil.GetSizeOfIDs(it.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
@@ -1866,9 +1883,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	if duplicate {
 		return merr.WrapErrParameterInvalidMsg("duplicate primary keys are not allowed in the same batch")
-	}
-	if primaryFieldSchema.GetAutoID() && !it.req.GetPartialUpdate() {
-		it.allowInsert = Params.ProxyCfg.AutoIDUpsertAllowInsert.GetAsBool()
 	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{

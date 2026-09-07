@@ -182,7 +182,10 @@ apply this configuration before that normalization.
   the request from `partial_update=false`.
 
 After mode normalization selects Full AutoID Upsert, Proxy reads the value once
-and stores it on the task. A refresh affects only later requests. This is a
+at the start of classification, before issuing the PK-only Query, and retains
+it in a local variable. A refresh during the Query does not change that
+classification's decision; classifications started afterward read the new value.
+The value is not captured at request admission or stored on the task. This is a
 Proxy configuration: it adds no collection metadata, RootCoord path, policy
 revision, WAL marker, or readiness protocol.
 
@@ -265,8 +268,9 @@ The public error omits PK values.
 After complete classification and deterministic validation, Proxy returns a
 request-indexed classification plan containing the request IDs, one existence
 bit per request row, and the Existing-row Delete IDs. The plan stays local to
-`insertPreExecute`; the task retains only the captured `allowInsert` setting
-as new state. Internal RowIDs remain in the task's existing allocation state.
+`insertPreExecute`; the configuration value stays local to classification.
+No new task fields are needed. Internal RowIDs remain in the task's existing
+allocation state.
 After allocation, Proxy copies the validated PK field and replaces only NotFound
 positions with generated IDs, leaving the lookup PKs and internal RowIDs
 unchanged. It derives `MutationResult.IDs` from that final field in request order.
@@ -457,7 +461,7 @@ Partial Upsert CAS change.
 | Contract | Required automated evidence |
 |---|---|
 | Full semantics | Existing, NotFound, and mixed batches under `true`; complete mixed-batch rejection under `false`; Int64 and VarChar final IDs |
-| Mode and configuration | Default and explicit values, one captured value per task, and effective Partial mode ignoring the configuration after `field_ops` normalization |
+| Mode and configuration | Default and explicit values, one captured value per classification before Query, refresh during Query affecting only later classifications, and effective Partial mode ignoring the configuration after `field_ops` normalization |
 | Input and Query failures | Invalid PK payloads, malformed Query results, and typed Query errors all fail before allocation |
 | Identity and routing | Allocator-owned `G`, controlled `G == P`, no Delete for NotFound, ordered result IDs, correct counts, and same-channel Existing-row routing |
 | Query visibility | Full Upsert leaves MVCC unpinned and uses standard Query metadata waits and TTL handling; Partial Upsert retains its fixed CAS read timestamp |

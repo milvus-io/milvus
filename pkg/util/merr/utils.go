@@ -700,6 +700,8 @@ func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ..
 	return wrapInner(ErrCollectionPartialUpdateConflict, formatMsg(format, args...), err)
 }
 
+// WrapErrAutoIDUpsertTargetNotFound reports missing lookup PKs rejected by the
+// Full AutoID Upsert policy. Query failures must retain their original errors.
 func WrapErrAutoIDUpsertTargetNotFound(notFoundCount int) error {
 	return wrapMsg(
 		ErrAutoIDUpsertTargetNotFound,
