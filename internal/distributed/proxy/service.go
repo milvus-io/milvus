@@ -215,6 +215,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
+	ginHandler.Use(httpserver.IdempotencyKeyHandlerFunc)
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "")
 	})

@@ -511,6 +511,28 @@ func TestComponentParam(t *testing.T) {
 		params.Reset(Params.MaxSearchAggregationResultEntries.Key)
 		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
 
+		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		assert.Equal(t, 1000, Params.RLSMaxPrincipalsPerCollection.GetAsInt())
+		assert.Equal(t, 50, Params.RLSMaxTagsPerPrincipal.GetAsInt())
+		assert.Equal(t, 4096, Params.RLSMaxExpressionLength.GetAsInt())
+		assert.Equal(t, 16384, Params.RLSMaxCombinedExpressionLength.GetAsInt())
+		assert.Equal(t, 255, Params.RLSMaxPolicyNameLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxPolicyDescriptionLength.GetAsInt())
+		assert.Equal(t, 255, Params.RLSMaxPrincipalNameLength.GetAsInt())
+		assert.Equal(t, 128, Params.RLSMaxTagKeyLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxTagValueLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxArrayLiteralElements.GetAsInt())
+		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "2")
+		assert.Equal(t, 2, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "0")
+		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		params.Reset(Params.RLSMaxPoliciesPerCollection.Key)
+		params.Save(Params.RLSMaxPrincipalsPerCollection.Key, "2")
+		assert.Equal(t, 2, Params.RLSMaxPrincipalsPerCollection.GetAsInt())
+		params.Save(Params.RLSMaxPrincipalsPerCollection.Key, "0")
+		assert.Equal(t, 1000, Params.RLSMaxPrincipalsPerCollection.GetAsInt())
+		params.Reset(Params.RLSMaxPrincipalsPerCollection.Key)
+
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
 
@@ -861,7 +883,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 		assert.Equal(t, 2, Params.FilesPerPreImportTask.GetAsInt())
-		assert.Equal(t, 10800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
+		assert.Equal(t, 172800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
 		assert.Equal(t, 16384, Params.MaxSizeInMBPerImportTask.GetAsInt())
 		assert.Equal(t, 2*time.Second, Params.ImportScheduleInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
@@ -1319,4 +1341,26 @@ func TestFallbackParam(t *testing.T) {
 	params.Save("common.chanNamePrefix.cluster", "foo")
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+}
+
+func TestImportIdempotencyParams(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
+
+	// The advertised idempotency window is the tombstone retention, so an import
+	// job must outlive its tombstone. Otherwise a retry inside the window resolves
+	// to a jobID GetImportProgress can no longer find.
+	assert.Equal(t, 172800, params.DataCoordCfg.ImportTaskRetention.GetAsInt())
+
+	// Headroom, not equality. A tombstone's age is measured from the last
+	// StreamingCoord start, so a restart extends its remaining life by up to another
+	// maxLifetime while this retention keeps counting from the job's own completion.
+	// Equal defaults satisfy the >= above yet break on the first restart, which is
+	// how adversarial review on milvus#52544 found this; one restart per tombstone
+	// lifetime is what the 2x covers.
+	assert.GreaterOrEqual(t,
+		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
+		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
 }
