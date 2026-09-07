@@ -915,6 +915,7 @@ func (s *CollectionObserverRGSuite) TestATimedOutGroupReleasesOnlyTheReplicasTha
 	s.Require().True(ok, "the group still holds replicas, so the task keeps watching them")
 	s.EqualValues(-1, task.LastProgress, "the survivors are measured afresh, not against the figure the stalled replica pinned")
 	s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute)
+	s.True(task.ReadySince.IsZero(), "a group that was just torn down is not one the readiness shield is keeping")
 
 	// The survivors carry everything; once the current target is promoted the
 	// task finishes exactly as a scoped task on a loaded group does.
@@ -975,6 +976,77 @@ func (s *CollectionObserverRGSuite) TestAGroupWithAnyServiceableLeaderIsKeptWhol
 		s.WithinDuration(time.Now(), task.LastProgressAt, time.Minute,
 			"tick %d: a Ready group refreshes its watermark instead of being torn down", tick)
 	}
+}
+
+// countCheckerRuns replaces the checker controller's Check with a counter for
+// the rest of the test. Every load task in the observer's map makes the tick
+// call Check, which runs every checker at once regardless of its interval; the
+// count is how a test sees whether a task is still pushing them.
+func (s *CollectionObserverRGSuite) countCheckerRuns() *int {
+	calls := 0
+	check := mockey.Mock((*checkers.CheckerController).Check).To(func(_ *checkers.CheckerController) { calls++ }).Build()
+	s.T().Cleanup(func() { check.UnPatch() })
+	return &calls
+}
+
+// TestATaskKeptByTheReadinessShieldDoesNotDriveTheCheckers pins the cost of
+// keeping a Ready group's task alive. A task in the map makes every tick call
+// checkerController.Check, which runs every checker immediately, bypassing its
+// interval; a Ready group whose figure never samples 100 -- a large collection
+// under continuous ingest -- keeps its task for as long as the ingest lasts,
+// and before this it ran the segment, channel, balance and index checkers at
+// the observer's own rate, 5 Hz, indefinitely.
+//
+// A task the shield has found Ready is not loading anything the checkers need
+// pushing for: the group is serving, as a Loaded collection on master does,
+// and master pushes nothing for those. So it stops counting toward the
+// signal. A task that is genuinely loading still drives the checkers.
+func (s *CollectionObserverRGSuite) TestATaskKeptByTheReadinessShieldDoesNotDriveTheCheckers() {
+	s.registerLoadingCollection(1600, 1601, "1600-dmc0", 2, 16001, 16002)
+	s.putReplica(1600, 160001, 71, rgA)
+	s.putServiceableDelegator(1600, 71, "1600-dmc0", 16001, 16002)
+	s.putReplica(1600, 160002, 72, rgB)
+	s.putServiceableDelegator(1600, 72, "1600-dmc0", 16001, 16002)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1600))
+	s.markCollectionLoaded(1600, 1601)
+
+	s.ob.LoadCollection(s.ctx, 1600, rgA)
+	key := s.taskKey(1600, rgA)
+	defer s.scriptResourceGroupPercentage(rgA, 99)()
+	calls := s.countCheckerRuns()
+
+	// The first tick records the figure. The task is loading as far as anyone
+	// can tell, and it drives the checkers.
+	s.ob.Observe(s.ctx)
+	s.Equal(1, *calls, "a task whose group has not been found Ready drives the checkers")
+
+	// A load timeout later the figure has not moved, the group is Ready, and
+	// the shield keeps the task. From here on it must not push the checkers,
+	// however many ticks it lives through.
+	for tick := 0; tick < 4; tick++ {
+		s.ageTaskWatermark(key, time.Hour)
+		s.ob.Observe(s.ctx)
+		s.Require().True(s.ob.loadTasks.Contain(key), "tick %d: the shield keeps the task", tick)
+		s.Len(s.replicaIDsInRG(1600, rgA), 1, "tick %d", tick)
+	}
+	s.Equal(1, *calls, "a task the readiness shield keeps alive must not run every checker on every tick")
+	task, _ := s.ob.loadTasks.Get(key)
+	s.False(task.ReadySince.IsZero(), "the task records that the shield found its group Ready")
+
+	// A task that is genuinely loading -- rg-b just added to another
+	// collection, carrying nothing -- still drives the checkers.
+	s.registerLoadingCollection(1610, 1611, "1610-dmc0", 2, 16101, 16102)
+	s.putReplica(1610, 161001, 73, rgA)
+	s.putDelegator(1610, 73, "1610-dmc0", 16101, 16102)
+	s.markCollectionLoaded(1610, 1611)
+	s.putReplica(1610, 161002, 74, rgB)
+	s.putDelegator(1610, 74, "1610-dmc0")
+	s.ob.LoadCollection(s.ctx, 1610, rgB)
+	*calls = 0
+
+	s.ob.Observe(s.ctx)
+	s.Equal(1, *calls, "a task that is loading still drives the checkers")
+	s.True(s.ob.loadTasks.Contain(key), "and the Ready task is still there, contributing nothing")
 }
 
 func TestCollectionObserverRG(t *testing.T) {
