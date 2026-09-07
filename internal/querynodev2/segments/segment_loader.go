@@ -1998,11 +1998,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {
@@ -2203,11 +2200,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {
