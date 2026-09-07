@@ -960,7 +960,7 @@ class MatchExpr : public ITypeFilterExpr {
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
 };
 
-// RoaringFilterExpr: exact integer membership filter (`roaring_match`).
+// RoaringFilterExpr: exact integer membership filter (`membership_match`, MRB1).
 // See docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md.
 //
 // membership_ holds the decoded, immutable bitmap. Unlike BloomFilterExpr —
@@ -987,7 +987,7 @@ class RoaringFilterExpr : public ITypeFilterExpr {
     const std::shared_ptr<const RoaringMembership> membership_;
 };
 
-// BloomFilterExpr: approximate membership filter (`bloom_match`).
+// BloomFilterExpr: approximate membership filter (`membership_match`, MBF1).
 // See docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
 //
 // filter_blob_ owns the MBF1-enveloped parquet SBBF blob (copied once out of

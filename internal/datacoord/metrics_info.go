@@ -184,20 +184,9 @@ func (s *Server) getDataCoordTopology(
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
-	nodes := s.nodeManager.GetClientIDs()
 	clusterTopology := metricsinfo.DataClusterTopology{
 		Self:               s.getDataCoordMetrics(ctx),
-		ConnectedDataNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
-	}
-
-	// for each data node, fetch metrics info
-	for _, node := range nodes {
-		infos, err := s.getDataNodeMetrics(ctx, req, node)
-		if err != nil {
-			mlog.Warn(ctx, "fails to get DataNode metrics", mlog.Err(err))
-			continue
-		}
-		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
+		ConnectedDataNodes: s.getConnectedDataNodeMetrics(ctx, req),
 	}
 
 	// compose topology struct
@@ -209,6 +198,22 @@ func (s *Server) getDataCoordTopology(
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
+}
+
+func (s *Server) getConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []metricsinfo.DataNodeInfos {
+	nodes := s.nodeManager.GetClientIDs()
+	connectedDataNodes := make([]metricsinfo.DataNodeInfos, 0, len(nodes))
+
+	for _, node := range nodes {
+		infos, err := s.getDataNodeMetrics(ctx, req, node)
+		if err != nil {
+			mlog.Warn(ctx, "fails to get DataNode metrics", mlog.Err(err))
+			continue
+		}
+		connectedDataNodes = append(connectedDataNodes, infos)
+	}
+
+	return connectedDataNodes
 }
 
 // getDataCoordMetrics composes datacoord infos
@@ -386,4 +391,12 @@ func (s *Server) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetr
 	}
 	topology := s.getDataCoordTopology(ctx, req)
 	return &topology, nil
+}
+
+// GetConnectedDataNodeMetrics returns metrics for all DataNodes connected to DataCoord.
+func (s *Server) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return s.getConnectedDataNodeMetrics(ctx, req), nil
 }

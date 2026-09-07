@@ -2088,12 +2088,11 @@ TEST(storage, InsertDataJsonNullable) {
 }
 
 TEST(storage, InsertDataJsonFillWithNull) {
-    auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::JSON, DataType::NONE, true);
     int64_t size = 2;
+    auto field_data = milvus::storage::CreateFieldDataFromDefaultValue(
+        storage::DataType::JSON, true, size, std::nullopt);
     uint8_t valid_data_storage[1] = {0xFC};
     uint8_t* valid_data = valid_data_storage;
-    field_data->FillFieldData(std::nullopt, size);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);

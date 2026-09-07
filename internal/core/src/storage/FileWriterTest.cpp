@@ -17,13 +17,17 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/mman.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
+#include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
@@ -31,6 +35,29 @@
 
 using namespace milvus;
 using namespace milvus::storage;
+
+namespace milvus::storage {
+
+class FileWriterTestAccessor {
+ public:
+    static bool
+    ShouldFdatasyncOnFinish(const FileWriter& writer) {
+        return writer.fdatasync_on_finish_ && !writer.use_direct_io_;
+    }
+
+    static void
+    SetSyncFileDataHook(FileWriter& writer, std::function<void()> hook) {
+        writer.sync_file_data_hook_for_test_ = std::move(hook);
+    }
+
+    static void
+    InvalidateFd(FileWriter& writer) {
+        close(writer.fd_);
+        writer.fd_ = -1;
+    }
+};
+
+}  // namespace milvus::storage
 
 class FileWriterTest : public testing::Test {
  protected:
@@ -57,6 +84,17 @@ class FileWriterTest : public testing::Test {
     const size_t kBufferSize = 4096;  // 4KB buffer size
 };
 
+namespace {
+
+std::string
+ReadFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file),
+            std::istreambuf_iterator<char>()};
+}
+
+}  // namespace
+
 // Test basic file writing functionality with buffered IO
 TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
@@ -73,6 +111,163 @@ TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     EXPECT_EQ(content, test_data);
+}
+
+TEST_F(FileWriterTest, FinishWithFdatasyncWriteback) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "fdatasync_writeback.txt").string();
+    FileWriter writer(filename);
+    writer.SetFdatasyncOnFinish();
+    EXPECT_TRUE(FileWriterTestAccessor::ShouldFdatasyncOnFinish(writer));
+
+    std::string test_data(kBufferSize + 17, 'x');
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    EXPECT_EQ(ReadFile(filename), test_data);
+}
+
+TEST_F(FileWriterTest, FinishSkipsFdatasyncWritebackWithDirectIO) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "direct_io_skips_fdatasync.txt").string();
+    FileWriter writer(filename);
+    writer.SetFdatasyncOnFinish();
+    EXPECT_FALSE(FileWriterTestAccessor::ShouldFdatasyncOnFinish(writer));
+
+    std::string test_data(kBufferSize + 17, 'x');
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    EXPECT_EQ(ReadFile(filename), test_data);
+}
+
+TEST_F(FileWriterTest, FinishKeepsFdatasyncInWriterPool) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(1);
+
+    for (bool has_tail_flush : {false, true}) {
+        SCOPED_TRACE(has_tail_flush ? "with tail flush" : "without tail flush");
+
+        auto first_filename =
+            (test_dir_ /
+             (has_tail_flush ? "sync_with_tail" : "sync_without_tail"))
+                .string();
+        FileWriter first_writer(first_filename);
+        first_writer.SetFdatasyncOnFinish();
+        std::string first_data(
+            has_tail_flush ? kBufferSize + 1 : kBufferSize * 2, 'x');
+        first_writer.Write(first_data.data(), first_data.size());
+
+        std::promise<void> sync_started;
+        auto sync_started_future = sync_started.get_future();
+        std::promise<void> release_sync;
+        auto release_sync_future = release_sync.get_future().share();
+        FileWriterTestAccessor::SetSyncFileDataHook(
+            first_writer, [&sync_started, release_sync_future]() {
+                sync_started.set_value();
+                release_sync_future.wait();
+            });
+
+        auto first_finish = std::async(std::launch::async, [&first_writer]() {
+            return first_writer.Finish();
+        });
+        sync_started_future.wait();
+
+        auto second_filename =
+            (test_dir_ /
+             (has_tail_flush ? "second_with_tail" : "second_without_tail"))
+                .string();
+        FileWriter second_writer(second_filename);
+        std::string second_data(kBufferSize, 'y');
+        second_writer.Write(second_data.data(), second_data.size());
+        auto second_finish = std::async(std::launch::async, [&second_writer]() {
+            return second_writer.Finish();
+        });
+
+        EXPECT_EQ(second_finish.wait_for(std::chrono::seconds(1)),
+                  std::future_status::timeout);
+
+        release_sync.set_value();
+        EXPECT_EQ(first_finish.get(), first_data.size());
+        EXPECT_EQ(second_finish.get(), second_data.size());
+    }
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+TEST_F(FileWriterTest, FinishPropagatesPooledSyncFailure) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(1);
+
+    std::string filename = (test_dir_ / "pooled_sync_failure.txt").string();
+    FileWriter writer(filename);
+    writer.SetFdatasyncOnFinish();
+    std::string test_data(kBufferSize * 2, 'x');
+    writer.Write(test_data.data(), test_data.size());
+    FileWriterTestAccessor::SetSyncFileDataHook(
+        writer, []() { throw std::runtime_error("injected sync failure"); });
+
+    EXPECT_THROW(writer.Finish(), std::runtime_error);
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+TEST_F(FileWriterTest, WritePropagatesPooledFailure) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+    FileWriteWorkerPool::GetInstance().Configure(1);
+
+    std::string filename = (test_dir_ / "pooled_write_failure.txt").string();
+    FileWriter writer(filename);
+    FileWriterTestAccessor::InvalidateFd(writer);
+    std::string test_data(kBufferSize * 2, 'x');
+
+    EXPECT_THROW(writer.Write(test_data.data(), test_data.size()),
+                 std::runtime_error);
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+TEST_F(FileWriterTest, MmapChunkTargetWithWriteback) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "mmap_chunk_target").string();
+    MmapChunkTarget target(filename,
+                           /*populate=*/false,
+                           kBufferSize,
+                           io::Priority::LOW,
+                           MmapChunkWritebackMode::FdatasyncOnFinish);
+
+    std::string test_data = "mmap writeback";
+    target.write(test_data.data(), test_data.size());
+    auto* data = target.release();
+    ASSERT_NE(data, nullptr);
+    EXPECT_EQ(std::string(data, test_data.size()), test_data);
+    target.TransferOwnership();
+
+    EXPECT_EQ(munmap(data, kBufferSize), 0);
+    EXPECT_EQ(unlink(filename.c_str()), 0);
+}
+
+TEST_F(FileWriterTest, MmapChunkTargetCleansUpFileWhenReleaseFails) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "mmap_release_failure").string();
+    {
+        MmapChunkTarget target(filename,
+                               /*populate=*/false,
+                               /*cap=*/0,
+                               io::Priority::LOW,
+                               MmapChunkWritebackMode::FdatasyncOnFinish);
+        ASSERT_TRUE(std::filesystem::exists(filename));
+        EXPECT_ANY_THROW(target.release());
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(filename));
 }
 
 // Test basic file writing functionality with direct IO

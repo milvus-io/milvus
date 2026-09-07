@@ -286,3 +286,84 @@ class TestFMIndexQuery(TestMilvusClientV2Base):
         )
         assert len(ids) == len(marked_ids) > 0
         assert set(ids) == marked_ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_general_like_recheck(self):
+        """
+        Selective general LIKE with an interior wildcard must match the
+        un-indexed twin field after FMINDEX is built over two flushed batches.
+        Fragment-only rows exercise the exact phase-2 recheck, while nullable
+        and empty values verify the surrounding string semantics.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(no_index_field_name, datatype=DataType.VARCHAR, max_length=600, nullable=True)
+        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=600, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        batch_nb = 1000
+        filler = "y" * 500
+        matching_ids = set()
+        qop_only_ids = set()
+        zebra_only_ids = set()
+        empty_ids = set()
+        for batch_id in range(2):
+            start = batch_id * batch_nb
+            rows = cf.gen_row_data_by_schema(nb=batch_nb, schema=schema, start=start)
+            for row in rows:
+                pk = row[pk_field_name]
+                case = pk % 500
+                if case == 0:
+                    text = "QOP" + filler + "ZEBRA"
+                    matching_ids.add(pk)
+                elif case == 1:
+                    text = "QOP" + filler
+                    qop_only_ids.add(pk)
+                elif case == 2:
+                    text = filler + "ZEBRA"
+                    zebra_only_ids.add(pk)
+                elif case == 3:
+                    text = ""
+                    empty_ids.add(pk)
+                elif case == 4:
+                    text = None
+                else:
+                    text = filler
+                row[no_index_field_name] = text
+                row[content_field_name] = text
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+        # Each fragment occurs only eight times in roughly one million indexed
+        # tokens: 8 * sample_rate(32) is below the default 0.001 cost threshold,
+        # so this interior-wildcard expression takes the FMINDEX Match path.
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+        index_params.add_index(field_name=content_field_name, index_type=index_type, params={"fm_sa_sample_rate": 32})
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
+        self.wait_for_index_ready(client, collection_name, index_name=content_field_name)
+        self.load_collection(client, collection_name)
+
+        ids = self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "QOP%ZEBRA"',
+            f'{no_index_field_name} LIKE "QOP%ZEBRA"',
+        )
+        assert set(ids) == matching_ids
+        assert set(ids).isdisjoint(qop_only_ids | zebra_only_ids)
+
+        # Empty strings match equality-style LIKE ""; nulls do not.
+        ids = self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE ""',
+            f'{no_index_field_name} LIKE ""',
+        )
+        assert set(ids) == empty_ids

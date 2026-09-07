@@ -17,101 +17,268 @@
 package metrics
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestPublishFilesystemMetrics(t *testing.T) {
-	// Test values
-	fsName := "test-filesystem"
-	readCount := int64(100)
-	writeCount := int64(50)
-	readBytes := int64(1024000)
-	writeBytes := int64(512000)
-	getFileInfoCount := int64(200)
-	failedCount := int64(5)
-	multiPartUploadCreated := int64(10)
-	multiPartUploadFinished := int64(8)
+func resetFilesystemMetrics() {
+	filesystemMetricsStateMu.Lock()
+	defer filesystemMetricsStateMu.Unlock()
 
-	// Call the function
-	PublishFilesystemMetrics(fsName, readCount, writeCount, readBytes, writeBytes,
-		getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished)
-
-	// Verify each metric
-	labels := prometheus.Labels{filesystemKeyLabelName: fsName}
-
-	// Check FilesystemReadCount
-	readCountMetric := FilesystemReadCount.With(labels)
-	assert.NotNil(t, readCountMetric)
-
-	// Check FilesystemWriteCount
-	writeCountMetric := FilesystemWriteCount.With(labels)
-	assert.NotNil(t, writeCountMetric)
-
-	// Check FilesystemReadBytes
-	readBytesMetric := FilesystemReadBytes.With(labels)
-	assert.NotNil(t, readBytesMetric)
-
-	// Check FilesystemWriteBytes
-	writeBytesMetric := FilesystemWriteBytes.With(labels)
-	assert.NotNil(t, writeBytesMetric)
-
-	// Check FilesystemGetFileInfoCount
-	getFileInfoMetric := FilesystemGetFileInfoCount.With(labels)
-	assert.NotNil(t, getFileInfoMetric)
-
-	// Check FilesystemFailedCount
-	failedMetric := FilesystemFailedCount.With(labels)
-	assert.NotNil(t, failedMetric)
-
-	// Check FilesystemMultiPartUploadCreated
-	multiPartCreatedMetric := FilesystemMultiPartUploadCreated.With(labels)
-	assert.NotNil(t, multiPartCreatedMetric)
-
-	// Check FilesystemMultiPartUploadFinished
-	multiPartFinishedMetric := FilesystemMultiPartUploadFinished.With(labels)
-	assert.NotNil(t, multiPartFinishedMetric)
+	FilesystemReadCount.Reset()
+	FilesystemWriteCount.Reset()
+	FilesystemReadBytes.Reset()
+	FilesystemWriteBytes.Reset()
+	FilesystemGetFileInfoCount.Reset()
+	FilesystemFailedCount.Reset()
+	FilesystemMultiPartUploadCreated.Reset()
+	FilesystemMultiPartUploadFinished.Reset()
+	clear(filesystemMetricsCacheKeys)
+	clear(filesystemMetricsLegacyKeys)
 }
 
-func TestPublishFilesystemMetricsMultipleFilesystems(t *testing.T) {
-	// Test with multiple filesystem names to ensure labels work correctly
-	fs1 := "minio"
-	fs2 := "s3"
-
-	// Publish metrics for first filesystem
-	PublishFilesystemMetrics(fs1, 100, 50, 1000, 500, 10, 1, 5, 3)
-
-	// Publish metrics for second filesystem
-	PublishFilesystemMetrics(fs2, 200, 100, 2000, 1000, 20, 2, 10, 6)
-
-	// Verify both filesystems have their own metric values
-	labels1 := prometheus.Labels{filesystemKeyLabelName: fs1}
-	labels2 := prometheus.Labels{filesystemKeyLabelName: fs2}
-
-	// Both should be non-nil and independently tracked
-	assert.NotNil(t, FilesystemReadCount.With(labels1))
-	assert.NotNil(t, FilesystemReadCount.With(labels2))
-	assert.NotNil(t, FilesystemWriteCount.With(labels1))
-	assert.NotNil(t, FilesystemWriteCount.With(labels2))
+func prepareFilesystemMetricsTest(t *testing.T) {
+	t.Helper()
+	resetFilesystemMetrics()
+	SetFilesystemMetricsCollectFn(nil)
+	t.Cleanup(func() {
+		resetFilesystemMetrics()
+		SetFilesystemMetricsCollectFn(nil)
+	})
 }
 
-func TestPublishFilesystemMetricsZeroValues(t *testing.T) {
-	// Test with zero values to ensure no issues with edge cases
-	fsName := "empty-filesystem"
+func TestPublishFilesystemMetricsCompatibility(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
 
-	PublishFilesystemMetrics(fsName, 0, 0, 0, 0, 0, 0, 0, 0)
+	const filesystemKey = "legacy-filesystem"
+	PublishFilesystemMetrics(filesystemKey, 1, 2, 3, 4, 5, 6, 7, 8)
 
-	labels := prometheus.Labels{filesystemKeyLabelName: fsName}
+	registry := prometheus.NewRegistry()
+	RegisterStorageMetrics(registry)
 
-	// All metrics should still be created with zero values
-	assert.NotNil(t, FilesystemReadCount.With(labels))
-	assert.NotNil(t, FilesystemWriteCount.With(labels))
-	assert.NotNil(t, FilesystemReadBytes.With(labels))
-	assert.NotNil(t, FilesystemWriteBytes.With(labels))
-	assert.NotNil(t, FilesystemGetFileInfoCount.With(labels))
-	assert.NotNil(t, FilesystemFailedCount.With(labels))
-	assert.NotNil(t, FilesystemMultiPartUploadCreated.With(labels))
-	assert.NotNil(t, FilesystemMultiPartUploadFinished.With(labels))
+	expected := map[string]float64{
+		"milvus_storage_filesystem_read_count":                 1,
+		"milvus_storage_filesystem_write_count":                2,
+		"milvus_storage_filesystem_read_bytes":                 3,
+		"milvus_storage_filesystem_write_bytes":                4,
+		"milvus_storage_filesystem_get_file_info_count":        5,
+		"milvus_storage_filesystem_failed_count":               6,
+		"milvus_storage_filesystem_multi_part_upload_created":  7,
+		"milvus_storage_filesystem_multi_part_upload_finished": 8,
+	}
+
+	gathered, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, gathered, len(expected))
+	for _, family := range gathered {
+		require.Contains(t, expected, family.GetName())
+		require.Len(t, family.Metric, 1)
+		require.Equal(t, filesystemKey, family.Metric[0].Label[0].GetValue())
+		require.Equal(t, expected[family.GetName()], family.Metric[0].GetGauge().GetValue())
+	}
+}
+
+func TestFilesystemMetricsCollector(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
+
+	const (
+		localKey  = "file:///tmp/a#fs:a"
+		remoteKey = "s3.example.com/bucket#fs:b"
+	)
+	metricsList := []FilesystemMetrics{
+		{
+			DisplayKey: localKey, ReadCount: 1, WriteCount: 2,
+			ReadBytes: 3, WriteBytes: 4, GetFileInfoCount: 5,
+			FailedCount: 6, MultiPartUploadCreated: 7, MultiPartUploadFinished: 8,
+		},
+		{
+			DisplayKey: remoteKey, ReadCount: 11, WriteCount: 12,
+			ReadBytes: 13, WriteBytes: 14, GetFileInfoCount: 15,
+			FailedCount: 16, MultiPartUploadCreated: 17, MultiPartUploadFinished: 18,
+		},
+	}
+	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(&filesystemMetricsCollector{})
+
+	expected := map[string]map[string]float64{
+		"milvus_storage_filesystem_read_count":                 {localKey: 1, remoteKey: 11},
+		"milvus_storage_filesystem_write_count":                {localKey: 2, remoteKey: 12},
+		"milvus_storage_filesystem_read_bytes":                 {localKey: 3, remoteKey: 13},
+		"milvus_storage_filesystem_write_bytes":                {localKey: 4, remoteKey: 14},
+		"milvus_storage_filesystem_get_file_info_count":        {localKey: 5, remoteKey: 15},
+		"milvus_storage_filesystem_failed_count":               {localKey: 6, remoteKey: 16},
+		"milvus_storage_filesystem_multi_part_upload_created":  {localKey: 7, remoteKey: 17},
+		"milvus_storage_filesystem_multi_part_upload_finished": {localKey: 8, remoteKey: 18},
+	}
+
+	gathered, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, gathered, len(expected))
+	for _, family := range gathered {
+		values, ok := expected[family.GetName()]
+		require.True(t, ok, family.GetName())
+		require.Len(t, family.Metric, len(values))
+		for _, metric := range family.Metric {
+			var filesystemKey string
+			for _, label := range metric.Label {
+				if label.GetName() == filesystemKeyLabelName {
+					filesystemKey = label.GetValue()
+				}
+			}
+			require.Equal(t, values[filesystemKey], metric.GetGauge().GetValue())
+		}
+	}
+
+	metricsList = metricsList[:1]
+	gathered, err = registry.Gather()
+	require.NoError(t, err)
+	for _, family := range gathered {
+		require.Len(t, family.Metric, 1)
+		require.Equal(t, localKey, family.Metric[0].Label[0].GetValue())
+	}
+}
+
+func TestFilesystemMetricsCollectorWithoutMetrics(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
+
+	tests := []struct {
+		name      string
+		collectFn func() []FilesystemMetrics
+	}{
+		{name: "nil callback"},
+		{name: "empty metrics", collectFn: func() []FilesystemMetrics { return nil }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			SetFilesystemMetricsCollectFn(test.collectFn)
+
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(&filesystemMetricsCollector{})
+
+			gathered, err := registry.Gather()
+			require.NoError(t, err)
+			require.Empty(t, gathered)
+		})
+	}
+}
+
+func TestFilesystemMetricsCollectorsShareCacheOwnership(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
+
+	metricsList := []FilesystemMetrics{{DisplayKey: "cache-a", ReadCount: 1}}
+	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
+
+	registryA := prometheus.NewRegistry()
+	registryA.MustRegister(&filesystemMetricsCollector{})
+	registryB := prometheus.NewRegistry()
+	registryB.MustRegister(&filesystemMetricsCollector{})
+
+	_, err := registryA.Gather()
+	require.NoError(t, err)
+
+	metricsList = []FilesystemMetrics{{DisplayKey: "cache-b", ReadCount: 2}}
+	gathered, err := registryB.Gather()
+	require.NoError(t, err)
+	for _, family := range gathered {
+		require.Len(t, family.Metric, 1)
+		require.Equal(t, "cache-b", family.Metric[0].Label[0].GetValue())
+	}
+}
+
+func TestPublishFilesystemMetricsTakesOwnershipFromCache(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
+
+	metricsList := []FilesystemMetrics{{DisplayKey: "shared-key", ReadCount: 1}}
+	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(&filesystemMetricsCollector{})
+	_, err := registry.Gather()
+	require.NoError(t, err)
+
+	PublishFilesystemMetrics("shared-key", 99, 0, 0, 0, 0, 0, 0, 0)
+	metricsList = nil
+
+	gathered, err := registry.Gather()
+	require.NoError(t, err)
+	var readCount float64
+	for _, family := range gathered {
+		require.Len(t, family.Metric, 1)
+		require.Equal(t, "shared-key", family.Metric[0].Label[0].GetValue())
+		if family.GetName() == "milvus_storage_filesystem_read_count" {
+			readCount = family.Metric[0].GetGauge().GetValue()
+		}
+	}
+	require.Equal(t, float64(99), readCount)
+}
+
+func TestFilesystemMetricsCollectorConcurrentRegistrationAndGather(t *testing.T) {
+	prepareFilesystemMetricsTest(t)
+
+	callbacks := []func() []FilesystemMetrics{
+		func() []FilesystemMetrics {
+			return []FilesystemMetrics{{DisplayKey: "fs-a", ReadCount: 1}}
+		},
+		func() []FilesystemMetrics {
+			return []FilesystemMetrics{{DisplayKey: "fs-b", ReadCount: 2}}
+		},
+	}
+	SetFilesystemMetricsCollectFn(callbacks[0])
+
+	registries := []*prometheus.Registry{
+		prometheus.NewRegistry(),
+		prometheus.NewRegistry(),
+	}
+	for _, registry := range registries {
+		registry.MustRegister(&filesystemMetricsCollector{})
+	}
+
+	const iterations = 100
+	start := make(chan struct{})
+	results := make(chan struct {
+		err                error
+		familyCount        int
+		oneMetricPerFamily bool
+	}, iterations*len(registries))
+	var wg sync.WaitGroup
+	wg.Add(1 + len(registries))
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < iterations; i++ {
+			SetFilesystemMetricsCollectFn(callbacks[i%len(callbacks)])
+		}
+	}()
+	for _, registry := range registries {
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < iterations; i++ {
+				gathered, err := registry.Gather()
+				oneMetricPerFamily := true
+				for _, family := range gathered {
+					oneMetricPerFamily = oneMetricPerFamily && len(family.Metric) == 1
+				}
+				results <- struct {
+					err                error
+					familyCount        int
+					oneMetricPerFamily bool
+				}{err: err, familyCount: len(gathered), oneMetricPerFamily: oneMetricPerFamily}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		require.NoError(t, result.err)
+		require.Equal(t, 8, result.familyCount)
+		require.True(t, result.oneMetricPerFamily)
+	}
 }

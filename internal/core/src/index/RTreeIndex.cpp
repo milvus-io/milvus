@@ -139,7 +139,7 @@ RTreeIndex<T>::~RTreeIndex() {
 }
 
 static std::string
-GetFileName(const std::string& path) {
+GetRTreeFileName(const std::string& path) {
     auto pos = path.find_last_of('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
@@ -165,7 +165,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         auto find_file = [&](const std::string& target) -> auto{
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
-                    return GetFileName(filename) == target;
+                    return GetRTreeFileName(filename) == target;
                 });
         };
 
@@ -196,7 +196,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             // sliced case: collect all parts with prefix index_null_offset
             null_offset_files.push_back(*it);
             for (auto& f : files) {
-                auto filename = GetFileName(f);
+                auto filename = GetRTreeFileName(f);
                 static constexpr std::string_view kName = "index_null_offset_";
                 if (filename.size() > kName.size() &&
                     filename.compare(

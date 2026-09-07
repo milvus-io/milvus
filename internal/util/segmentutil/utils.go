@@ -3,6 +3,7 @@ package segmentutil
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -12,6 +13,13 @@ import (
 // cloned copy, which is `newSeg`.
 // Note that `segCloned` should be a copied version of `seg`.
 func ReCalcRowCount(seg, segCloned *datapb.SegmentInfo) {
+	// V3 segments resolve row counts via SegmentInfo.NumOfRows (advanced from
+	// the writer checkpoint) and Statistics; their binlog arrays are a
+	// pass-through cache that may be empty (recovery) or delta-only (growing
+	// source flush), so array-derived counts are never authoritative for them.
+	if seg.GetStorageVersion() == storage.StorageV3 {
+		return
+	}
 	// `segment` is not mutated but only cloned above and is safe to be referred here.
 	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() && newCount > 0 {
 		mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",

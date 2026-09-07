@@ -17,20 +17,35 @@
 package rootcoord
 
 import (
+	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCheckTimeTickLagExceededUsesConnectedDataNodeMetrics(t *testing.T) {
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).
+		Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+	mixCoord.EXPECT().GetConnectedDataNodeMetrics(mock.Anything, mock.Anything).
+		Return([]metricsinfo.DataNodeInfos{}, nil).Once()
+
+	require.NoError(t, CheckTimeTickLagExceeded(context.Background(), mixCoord, time.Second))
+}
 
 func Test_EncodeMsgPositions(t *testing.T) {
 	mp := &msgstream.MsgPosition{

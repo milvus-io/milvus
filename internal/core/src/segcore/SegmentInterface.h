@@ -60,7 +60,6 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
 #include "pb/plan.pb.h"
@@ -71,6 +70,10 @@
 
 namespace milvus::exec {
 class SimpleGeometryCache;
+}
+
+namespace milvus::index {
+class JsonKeyStats;
 }
 
 namespace milvus::segcore {

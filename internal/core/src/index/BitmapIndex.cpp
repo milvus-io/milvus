@@ -46,7 +46,7 @@
 namespace milvus {
 namespace index {
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t BITMAP_INDEX_ALIGNMENT = 32;  // 32-byte alignment
 constexpr const char* BITMAP_INDEX_IS_NESTED = "is_nested_index";
 constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 
@@ -591,8 +591,9 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
 
             // convert roaring vaule to frozen mode
             int32_t frozen_size = value.getFrozenSizeInBytes();
-            auto aligned_size =
-                ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            auto aligned_size = ((frozen_size + BITMAP_INDEX_ALIGNMENT - 1) /
+                                 BITMAP_INDEX_ALIGNMENT) *
+                                BITMAP_INDEX_ALIGNMENT;
             std::vector<uint8_t> buf(aligned_size, 0);
             value.writeFrozen(reinterpret_cast<char*>(buf.data()));
 

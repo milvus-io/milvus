@@ -250,6 +250,37 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	assert.Equal(t, int64(-1), collectionID)
 }
 
+func TestParseVChannel(t *testing.T) {
+	pchannel, collectionID, index, err := ParseVChannel("by-dev-rootcoord-dml_0_12345v2")
+	require.NoError(t, err)
+	assert.Equal(t, "by-dev-rootcoord-dml_0", pchannel)
+	assert.Equal(t, int64(12345), collectionID)
+	assert.Equal(t, 2, index)
+
+	for _, vchannel := range []string{
+		"",
+		"_12345v2",
+		"by-dev-rootcoord-dml_0",
+		"by-dev-rootcoord-dml_0_v2",
+		"by-dev-rootcoord-dml_0_12345",
+		"by-dev-rootcoord-dml_0_12345v",
+		"by-dev-rootcoord-dml_0_-1v2",
+		"by-dev-rootcoord-dml_0_12345v-1",
+		"by-dev-rootcoord-dml_0_+12345v2",
+		"by-dev-rootcoord-dml_0_12345v+2",
+		"by-dev-rootcoord-dml_0_012345v2",
+		"by-dev-rootcoord-dml_0_12345v02",
+		"by-dev-rootcoord-dml_0_12345v2x",
+		"by-dev-rootcoord-dml_0_9223372036854775808v2",
+		"by-dev-rootcoord-dml_0_12345v9223372036854775808",
+	} {
+		t.Run(vchannel, func(t *testing.T) {
+			_, _, _, err := ParseVChannel(vchannel)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond

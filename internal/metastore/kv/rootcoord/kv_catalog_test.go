@@ -22,9 +22,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1275,6 +1277,28 @@ func TestCatalog_AlterCollectionDB(t *testing.T) {
 		err := kc.AlterCollectionDB(ctx, oldC, newC, 0)
 		assert.NoError(t, err)
 	})
+
+	t.Run("RLS metadata remains addressable", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
+		catalog := NewCatalog(kv).(*Catalog)
+		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 10}
+		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 11}
+		policy := &model.RLSPolicy{DBID: 10, CollectionID: collectionID, PolicyID: 100, PolicyName: "policy"}
+		principal := &model.RLSPrincipal{DBID: 10, CollectionID: collectionID, PrincipalName: "alice"}
+
+		require.NoError(t, catalog.SaveRLSPolicy(ctx, policy))
+		require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+		require.NoError(t, catalog.AlterCollectionDB(ctx, oldC, newC, 0))
+
+		policies, err := catalog.ListRLSPolicies(ctx, collectionID)
+		require.NoError(t, err)
+		require.Len(t, policies, 1)
+		assert.Equal(t, policy.PolicyName, policies[0].PolicyName)
+		principals, err := catalog.ListRLSPrincipals(ctx, collectionID)
+		require.NoError(t, err)
+		require.Len(t, principals, 1)
+		assert.Equal(t, principal.PrincipalName, principals[0].PrincipalName)
+	})
 }
 
 func TestCatalog_AlterPartition(t *testing.T) {
@@ -1516,6 +1540,34 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("drop collection with RLS metadata", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t)
+		var removeOtherKeys []string
+		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
+				removeOtherKeys = append(removeOtherKeys, keys...)
+				return nil
+			}).Once()
+
+		kc := NewCatalog(mockSnapshot)
+		ctx := context.Background()
+		coll := &model.Collection{
+			DBID:         10,
+			CollectionID: 20,
+			RLSPolicies: map[string]*model.RLSPolicy{
+				"dept_read": {PolicyID: 30, PolicyName: "dept_read"},
+			},
+			RLSPrincipals: []*model.RLSPrincipal{
+				{PrincipalName: "team/a user"},
+			},
+			State: pb.CollectionState_CollectionDropping,
+		}
+		err := kc.DropCollection(ctx, coll, 100)
+		require.NoError(t, err)
+		require.Contains(t, removeOtherKeys, BuildRLSPolicyKey(20, 30))
+		require.Contains(t, removeOtherKeys, buildRLSPrincipalKey(20, "team/a user"))
+	})
+
 	t.Run("drop collection with function", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
@@ -1570,6 +1622,114 @@ func TestCatalog_DropCollection(t *testing.T) {
 		err := kc.DropCollection(ctx, coll, 100)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCatalog_RLSMetadata(t *testing.T) {
+	ctx := context.Background()
+	kv := memkv.NewMemoryKV()
+	catalog := NewCatalog(kv).(*Catalog)
+
+	policyA := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     100,
+		PolicyName:   "dept_read",
+		PolicyType:   rlsutil.PolicyTypePermissive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:    "dept == $current_principal_tags['dept']",
+		Description:  "department read policy",
+	}
+	policyB := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     101,
+		PolicyName:   "owner_write",
+		PolicyType:   rlsutil.PolicyTypeRestrictive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
+		CheckExpr:    "owner == $current_principal",
+	}
+
+	require.NoError(t, catalog.SaveRLSPolicy(ctx, policyB))
+	require.NoError(t, catalog.SaveRLSPolicy(ctx, policyA))
+
+	policyKey := BuildRLSPolicyKey(20, policyA.PolicyID)
+	assert.Equal(t, RLSPolicyMetaPrefix+"/20/100", policyKey)
+	_, err := kv.Load(ctx, policyKey)
+	require.NoError(t, err)
+	require.ErrorIs(t, catalog.SaveRLSPolicy(ctx, &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyName:   "missing_id",
+	}), merr.ErrServiceInternal)
+
+	policies, err := catalog.ListRLSPolicies(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, "dept_read", policies[0].PolicyName)
+	assert.Equal(t, "owner_write", policies[1].PolicyName)
+	assert.Equal(t, policyA.UsingExpr, policies[0].UsingExpr)
+	assert.Equal(t, policyB.CheckExpr, policies[1].CheckExpr)
+
+	require.NoError(t, catalog.DropRLSPolicy(ctx, 20, policyA.PolicyID))
+	_, err = kv.Load(ctx, BuildRLSPolicyKey(20, policyA.PolicyID))
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	policies, err = catalog.ListRLSPolicies(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "owner_write", policies[0].PolicyName)
+	principal := &model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: "team/a user",
+		Tags: map[string]rlsutil.TagValue{
+			"dept":  rlsutil.NewStringTagValue("sales"),
+			"level": rlsutil.NewInt64TagValue(3),
+			"score": rlsutil.NewDoubleTagValue(0.75),
+		},
+	}
+	require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+
+	principalKey := buildRLSPrincipalKey(20, principal.PrincipalName)
+	assert.Equal(t, RLSPrincipalMetaPrefix+"/20/team%2Fa%20user", principalKey)
+	assert.Contains(t, principalKey, "team%2Fa%20user")
+	_, err = kv.Load(ctx, principalKey)
+	require.NoError(t, err)
+
+	loadedPrincipal, err := catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
+	require.NoError(t, err)
+	assert.Equal(t, principal.PrincipalName, loadedPrincipal.PrincipalName)
+	assert.Equal(t, principal.Tags, loadedPrincipal.Tags)
+
+	principals, err := catalog.ListRLSPrincipals(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, principals, 1)
+	assert.Equal(t, principal.PrincipalName, principals[0].PrincipalName)
+
+	require.NoError(t, catalog.DropRLSPrincipal(ctx, 20, principal.PrincipalName))
+	_, err = catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+}
+
+func TestCatalog_DropRLSPolicyUsesLogicalKey(t *testing.T) {
+	ctx := context.Background()
+	policy := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     100,
+		PolicyName:   "dept_read",
+		PolicyType:   rlsutil.PolicyTypePermissive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:    "dept == 'sales'",
+	}
+	logicalKey := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
+	kvmock := mocks.NewTxnKV(t)
+	kvmock.EXPECT().
+		Remove(mock.Anything, logicalKey).
+		Return(nil).
+		Once()
+
+	catalog := NewCatalog(kvmock).(*Catalog)
+	require.NoError(t, catalog.DropRLSPolicy(ctx, policy.CollectionID, policy.PolicyID))
 }
 
 func getUserInfoMetaString(username string) string {

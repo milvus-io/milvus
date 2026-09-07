@@ -14,12 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for the `bloom_match` C++ probe path (plan proto BloomFilterExpr →
-// expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
+// Tests for the Bloom-kind `membership_match` C++ probe path (plan proto
+// BloomFilterExpr → expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
 // docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
 //
 // Golden-vector conformance consumes the same
-// client/sbbf/testdata/golden_vectors.json used by the Go builder tests;
+// client/membership/sbbf/testdata/golden_vectors.json used by the Go builder tests;
 // the C++ prober must reproduce every membership answer bit-identically.
 
 #include <gtest/gtest.h>
@@ -49,7 +49,7 @@
 #include "knowhere/comp/index_param.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
-#include "exec/expression/BloomFilterExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
@@ -73,14 +73,14 @@ using namespace milvus::segcore;
 
 namespace {
 
-// Locate client/sbbf/testdata/golden_vectors.json relative to this source
+// Locate client/membership/sbbf/testdata/golden_vectors.json relative to this source
 // file (repo root is four levels up from internal/core/unittest/<file>).
 std::filesystem::path
 GoldenVectorsPath() {
     // Co-located with this test (internal/core/unittest/testdata/bloom) so the
     // C++ unittest environment — which does not check out the standalone
     // client/ module — can always find it. The authoritative copy the client
-    // SDK ships is client/sbbf/testdata/golden_vectors.json; both are generated
+    // SDK ships is client/membership/sbbf/testdata/golden_vectors.json; both are generated
     // from the same spec and pinned identical by CppGeneratedFixtureIsReproducible.
     auto path =
         std::filesystem::path(__FILE__).parent_path()  // internal/core/unittest
@@ -177,7 +177,7 @@ SerializeMbf1(std::string bitset,
     return out;
 }
 
-// Minimal SBBF builder mirroring client/sbbf (Go) and Arrow's
+// Minimal SBBF builder mirroring client/membership/sbbf (Go) and Arrow's
 // parquet::BlockSplitBloomFilter. Used only to construct filters for
 // expression-level tests; cross-language bit-compatibility of the layout is
 // pinned separately by the golden vectors.

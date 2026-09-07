@@ -476,7 +476,7 @@ func (s *WriteSuite) TestDelete() {
 		s.mock.EXPECT().Delete(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, dr *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 				s.Equal(collName, dr.GetCollectionName())
-				s.Equal("roaring_match(id, {ids})", dr.GetExpr())
+				s.Equal("membership_match(id, {ids}, type=roaring)", dr.GetExpr())
 				value := dr.GetExprTemplateValues()["ids"]
 				s.Require().NotNil(value)
 				bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
@@ -489,7 +489,7 @@ func (s *WriteSuite) TestDelete() {
 			}).Once()
 
 		result, err := s.client.Delete(ctx, NewDeleteOption(collName).
-			WithExpr("roaring_match(id, {ids})").
+			WithExpr("membership_match(id, {ids}, type=roaring)").
 			WithTemplateParam("ids", blob))
 		s.NoError(err)
 		s.EqualValues(3, result.DeleteCount)

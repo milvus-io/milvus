@@ -1,5 +1,11 @@
 # MEP: Exact Integer Membership with roaring_match
 
+> **Superseded.** `roaring_match` never shipped in a release. Its syntax is
+> superseded by the unified `membership_match` surface (identical MRB1 blob,
+> magic-header dispatch); see
+> [20260822-membership-match-expression.md](./20260822-membership-match-expression.md).
+> No deprecation period is needed because the name was never part of a release.
+
 - **Created:** 2026-07-14
 - **Author(s):** @xiaofan-luan
 - **Status:** Accepted (implementation under review in

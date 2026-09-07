@@ -179,27 +179,14 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncPersistsColumnGroupBinlogs() {
 			s.True(req.GetWithFullBinlogs())
 			s.EqualValues(storage.StorageV3, req.GetStorageVersion())
 			s.Equal("manifest", req.GetManifestPath())
-			s.Len(req.GetField2BinlogPaths(), 2)
-			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetFieldID())
-			s.EqualValues([]int64{100}, req.GetField2BinlogPaths()[0].GetChildFields())
-			s.Equal("parquet", req.GetField2BinlogPaths()[0].GetFormat())
-			s.Len(req.GetField2BinlogPaths()[0].GetBinlogs(), 1)
-			s.EqualValues(10, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetEntriesNum())
-			s.EqualValues(101, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetTimestampFrom())
-			s.EqualValues(200, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetTimestampTo())
-			s.EqualValues(1000, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetMemorySize())
-			s.EqualValues(2000, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetLogID())
-			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetFieldNullCounts()[100])
-			s.EqualValues(101, req.GetField2BinlogPaths()[1].GetFieldID())
-			s.EqualValues([]int64{101}, req.GetField2BinlogPaths()[1].GetChildFields())
-			s.Len(req.GetField2StatslogPaths(), 1)
-			s.EqualValues(100, req.GetField2StatslogPaths()[0].GetFieldID())
-			s.Equal("stats/100/31", req.GetField2StatslogPaths()[0].GetBinlogs()[0].GetLogPath())
-			s.Len(req.GetDeltalogs(), 1)
-			s.Equal("delta/41", req.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
-			s.Len(req.GetField2Bm25LogPaths(), 1)
-			s.EqualValues(102, req.GetField2Bm25LogPaths()[0].GetFieldID())
-			s.Equal("bm25/102/51", req.GetField2Bm25LogPaths()[0].GetBinlogs()[0].GetLogPath())
+			// V3 growing-source flush ships no per-FieldBinlog arrays: the
+			// manifest is the authoritative source of paths and the Statistics
+			// carries the aggregates.
+			s.Empty(req.GetField2BinlogPaths())
+			s.Empty(req.GetField2StatslogPaths())
+			s.Empty(req.GetField2Bm25LogPaths())
+			s.Empty(req.GetDeltalogs())
+			s.NotNil(req.GetStats())
 			return nil
 		})
 
@@ -273,14 +260,14 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncAppendsColumnGroupBinlogs() {
 		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
 			s.True(req.GetWithFullBinlogs())
 			s.Equal("manifest", req.GetManifestPath())
-			s.Len(req.GetField2BinlogPaths(), 4)
-			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetFieldID())
-			s.EqualValues([]int64{100}, req.GetField2BinlogPaths()[0].GetChildFields())
-			s.Equal("parquet", req.GetField2BinlogPaths()[0].GetFormat())
-			s.EqualValues(5, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetEntriesNum())
-			s.EqualValues(101, req.GetField2BinlogPaths()[1].GetFieldID())
-			s.EqualValues(10, req.GetField2BinlogPaths()[2].GetBinlogs()[0].GetEntriesNum())
-			s.EqualValues(30, req.GetField2BinlogPaths()[2].GetBinlogs()[0].GetTimestampFrom())
+			// V3 growing-source flush ships no per-FieldBinlog arrays: the
+			// manifest is the authoritative source of paths and the Statistics
+			// carries the aggregates.
+			s.Empty(req.GetField2BinlogPaths())
+			s.Empty(req.GetField2StatslogPaths())
+			s.Empty(req.GetField2Bm25LogPaths())
+			s.Empty(req.GetDeltalogs())
+			s.NotNil(req.GetStats())
 			return nil
 		})
 

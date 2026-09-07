@@ -136,9 +136,16 @@ func (w *roWALAdaptorImpl) IsAvailable() bool {
 	return w.availableCtx.Err() == nil
 }
 
-// Available returns a channel that will be closed when the wal is shut down.
-func (w *roWALAdaptorImpl) Available() <-chan struct{} {
+// Unavailable returns a channel that is closed when the WAL becomes unavailable.
+func (w *roWALAdaptorImpl) Unavailable() <-chan struct{} {
 	return w.availableCtx.Done()
+}
+
+// markUnavailable rejects new operations without closing the WAL from the
+// failing background task. The owner remains responsible for closing it.
+func (w *roWALAdaptorImpl) markUnavailable(err error) {
+	w.Logger().Error(context.TODO(), "wal is unavailable because a background task failed", mlog.Err(err))
+	w.availableCancel()
 }
 
 // Close overrides Scanner Close function.

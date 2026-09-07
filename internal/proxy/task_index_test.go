@@ -72,7 +72,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	assert.NoError(t, err)
 
 	gist := &getIndexStateTask{
-		baseTask: baseTask{metaCache: cache},
+		baseTask: baseTask{MetaCache: cache},
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
 			Base:           &commonpb.MsgBase{},
 			DbName:         dbName,
@@ -110,7 +110,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 	dit := dropIndexTask{
-		baseTask: baseTask{metaCache: mockCache},
+		baseTask: baseTask{MetaCache: mockCache},
 		ctx:      ctx,
 		DropIndexRequest: &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
@@ -141,12 +141,12 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(0), errors.New("error"))
-		dit.metaCache = mockCache
+		dit.MetaCache = mockCache
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
 
-	dit.metaCache = mockCache
+	dit.MetaCache = mockCache
 	mockCache.On("GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
@@ -223,7 +223,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("int64"),
 	).Return(&collectionInfo{}, nil)
 	cit := createIndexTask{
-		baseTask: baseTask{metaCache: mockCache},
+		baseTask: baseTask{MetaCache: mockCache},
 		ctx:      ctx,
 		req: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{

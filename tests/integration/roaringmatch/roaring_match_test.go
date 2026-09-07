@@ -319,7 +319,7 @@ func (s *RoaringMatchTestSuite) TestExactMembershipAllIntWidths() {
 
 	for _, field := range intWidthFields {
 		res := s.query(collectionName,
-			fmt.Sprintf("roaring_match(%s, {rb})", field),
+			fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", field),
 			[]string{creatorIDField}, rbParam(blob))
 		s.Require().NoError(merr.Error(res.GetStatus()), "field %s", field)
 
@@ -353,7 +353,7 @@ func (s *RoaringMatchTestSuite) TestNotRoaringMatchIsExactComplement() {
 	}
 
 	res := s.query(collectionName,
-		fmt.Sprintf("not roaring_match(%s, {rb})", creatorIDField),
+		fmt.Sprintf("not membership_match(%s, {rb}, type=roaring)", creatorIDField),
 		[]string{creatorIDField}, rbParam(blob))
 	s.Require().NoError(merr.Error(res.GetStatus()))
 	s.Equal(expected, sortedUnique(queryInt64Field(res, creatorIDField)),
@@ -369,13 +369,13 @@ func (s *RoaringMatchTestSuite) TestEmptyBitmap() {
 	blob := s.bitmapBlob(nil)
 
 	res := s.query(collectionName,
-		fmt.Sprintf("roaring_match(%s, {rb})", creatorIDField),
+		fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", creatorIDField),
 		[]string{creatorIDField}, rbParam(blob))
 	s.Require().NoError(merr.Error(res.GetStatus()))
 	s.Empty(queryInt64Field(res, creatorIDField), "an empty bitmap must match nothing")
 
 	resNot := s.query(collectionName,
-		fmt.Sprintf("not roaring_match(%s, {rb})", creatorIDField),
+		fmt.Sprintf("not membership_match(%s, {rb}, type=roaring)", creatorIDField),
 		[]string{creatorIDField}, rbParam(blob))
 	s.Require().NoError(merr.Error(resNot.GetStatus()))
 	s.Equal(sortedUnique(creators), sortedUnique(queryInt64Field(resNot, creatorIDField)),
@@ -399,7 +399,7 @@ func (s *RoaringMatchTestSuite) TestNarrowWidthValuesRoundTrip() {
 
 	for _, field := range []string{creatorID8Field, creatorID16Field, creatorID32Field} {
 		res := s.query(collectionName,
-			fmt.Sprintf("roaring_match(%s, {rb})", field),
+			fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", field),
 			[]string{field}, rbParam(blob))
 		s.Require().NoError(merr.Error(res.GetStatus()), "field %s", field)
 
@@ -431,7 +431,7 @@ func (s *RoaringMatchTestSuite) TestVectorAndHybridSearchApplyExactFilter() {
 		memberSet[value] = struct{}{}
 	}
 	blob := s.bitmapBlob(members)
-	expr := fmt.Sprintf("roaring_match(%s, {rb})", creatorIDField)
+	expr := fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", creatorIDField)
 	assertFiltered := func(result *milvuspb.SearchResults, path string) {
 		s.Require().NoError(merr.Error(result.GetStatus()), path)
 		values := searchInt64Field(result, creatorIDField)
@@ -478,11 +478,11 @@ func (s *RoaringMatchTestSuite) TestRejectsInvalidInput() {
 	s.setupCollection(collectionName)
 
 	literal := s.query(collectionName,
-		fmt.Sprintf("roaring_match(%s, [1, 2, 3])", creatorIDField), nil, nil)
+		fmt.Sprintf("membership_match(%s, [1, 2, 3], type=roaring)", creatorIDField), nil, nil)
 	s.False(merr.Ok(literal.GetStatus()), "a literal array argument must be rejected")
 
 	garbage := s.query(collectionName,
-		fmt.Sprintf("roaring_match(%s, {rb})", creatorIDField), nil,
+		fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", creatorIDField), nil,
 		rbParam([]byte("not-an-mrb1-blob")))
 	s.False(merr.Ok(garbage.GetStatus()), "a malformed blob must be rejected")
 
@@ -490,12 +490,12 @@ func (s *RoaringMatchTestSuite) TestRejectsInvalidInput() {
 	// declared body length — the check that a naive magic-only validator misses.
 	valid := s.bitmapBlob([]int64{1, 2, 3})
 	truncated := s.query(collectionName,
-		fmt.Sprintf("roaring_match(%s, {rb})", creatorIDField), nil,
+		fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", creatorIDField), nil,
 		rbParam(valid[:len(valid)-1]))
 	s.False(merr.Ok(truncated.GetStatus()), "a truncated blob must be rejected")
 
 	onVector := s.query(collectionName,
-		fmt.Sprintf("roaring_match(%s, {rb})", integration.FloatVecField), nil, rbParam(valid))
+		fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", integration.FloatVecField), nil, rbParam(valid))
 	s.False(merr.Ok(onVector.GetStatus()), "roaring_match on a vector field must be rejected")
 }
 
@@ -527,7 +527,7 @@ func (s *RoaringMatchTestSuite) TestDeleteWithRoaringMatch() {
 	delResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:             s.dbName,
 		CollectionName:     collectionName,
-		Expr:               fmt.Sprintf("roaring_match(%s, {rb})", creatorIDField),
+		Expr:               fmt.Sprintf("membership_match(%s, {rb}, type=roaring)", creatorIDField),
 		ExprTemplateValues: rbParam(blob),
 	})
 	s.Require().NoError(err)

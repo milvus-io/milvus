@@ -227,7 +227,7 @@ MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
 }
 
 std::string
-GetFileName(const std::string& path) {
+GetIndexFileBaseName(const std::string& path) {
     auto pos = path.find_last_of('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
@@ -265,7 +265,7 @@ ResolveHybridInternalIndexType(
 
     auto index_type_file =
         std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
-            return GetFileName(f) == INDEX_TYPE;
+            return GetIndexFileBaseName(f) == INDEX_TYPE;
         });
     if (index_type_file != index_files.end()) {
         auto index_datas = file_manager.LoadIndexToMemory(
@@ -559,9 +559,10 @@ IndexFactory::VecIndexLoadResource(
                                      num_rows,
                                      dim,
                                      config);
-            has_raw_data =
-                knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
-                    index_type, index_version, config);
+            has_raw_data = knowhere::IndexStaticFaced<
+                knowhere::sparse_u32_f32>::HasRawData(index_type,
+                                                      index_version,
+                                                      config);
             break;
         case milvus::DataType::VECTOR_INT8:
             resource = knowhere::IndexStaticFaced<

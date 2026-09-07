@@ -142,6 +142,14 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.Equal(t, ErrSegcore.code(), Status(SegcoreError(9999, "x")).GetCode())
 	})
 
+	t.Run("data_format_broken_identity", func(t *testing.T) {
+		err := SegcoreError(2024, "malformed vector data")
+		assert.True(t, IsSegcoreDataFormatBroken(err))
+		assert.False(t, IsSegcoreDataFormatBroken(SegcoreError(2001, "unexpected")))
+		assert.ErrorIs(t, err, ErrSegcore)
+		assert.Equal(t, ErrSegcore.code(), Status(err).GetCode())
+	})
+
 	t.Run("empty_message", func(t *testing.T) {
 		err := SegcoreError(2000, "")
 		assert.ErrorIs(t, err, ErrSegcore)

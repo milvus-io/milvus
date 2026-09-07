@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 )
 
 // decodeBlob deserializes the portable Roaring64 body of an MRB1 blob. The

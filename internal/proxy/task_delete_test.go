@@ -14,13 +14,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -127,16 +128,16 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 	chMgr := channelmgr.NewMockChannelsMgr(t)
 	chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 	dt := deleteTask{
-		baseTask: baseTask{metaCache: cache},
+		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		req: &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
 		},
 		chMgr: chMgr,
 	}
-	err := dt.setChannels()
+	err := dt.SetChannels()
 	assert.NoError(t, err)
-	resChannels := dt.getChannels()
+	resChannels := dt.GetChannels()
 	assert.ElementsMatch(t, channels, resChannels)
 	assert.ElementsMatch(t, channels, dt.pChannels)
 }
@@ -632,7 +633,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
-				Expr:           "bloom_match(pk, {bf})",
+				Expr:           "membership_match(pk, {bf}, type=bloom)",
 				ExprTemplateValues: map[string]*schemapb.TemplateValue{
 					"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
 				},
@@ -647,7 +648,8 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		dr.metaCache = s.mockCache
 		err = dr.Init(context.Background())
 		s.Error(err)
-		s.ErrorContains(err, "bloom_match is approximate and cannot be used in delete expressions")
+		s.ErrorContains(err, "approximate bloom filter blob")
+		s.ErrorContains(err, "cannot be used in delete expressions")
 	})
 
 	s.Run("partition key mode but delete with partition name", func() {
@@ -777,7 +779,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 	tsoAllocator := &mockTsoAllocator{}
 	idAllocator := &mockIDAllocatorInterface{}
 
-	queue, err := newTaskScheduler(ctx, tsoAllocator)
+	queue, err := scheduler.NewTaskScheduler(ctx, tsoAllocator)
 	assert.NoError(t, err)
 	queue.Start()
 	defer queue.Close()
@@ -823,7 +825,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			vChannels:       channels,
 			tsoAllocatorIns: tsoAllocator,
 			idAllocator:     idAllocator,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			lb:              lb,
 			result: &milvuspb.MutationResult{
 				Status: merr.Success(),
@@ -857,7 +859,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			idAllocator:     idAllocator,
 			tsoAllocatorIns: tsoAllocator,
 			metaCache:       metaCache,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -890,7 +892,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 		plan, err := planparserv2.CreateRetrievePlan(
 			schema.SchemaHelper,
-			"roaring_match(pk, {rb})",
+			"membership_match(pk, {rb}, type=roaring)",
 			map[string]*schemapb.TemplateValue{
 				"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
 			})
@@ -926,7 +928,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
@@ -994,7 +996,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		dr := deleteRunner{
 			chMgr:           mockMgr,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -1058,7 +1060,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		dr := deleteRunner{
 			chMgr:           mockMgr,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			schema:          schema,
 			collectionID:    collectionID,
@@ -1122,7 +1124,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
@@ -1195,7 +1197,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		dr := deleteRunner{
 			metaCache:       mockCache,
-			queue:           queue.dmQueue,
+			queue:           queue.DmQueue,
 			chMgr:           mockMgr,
 			schema:          schema,
 			collectionID:    collectionID,

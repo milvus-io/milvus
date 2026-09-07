@@ -32,12 +32,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -69,6 +71,28 @@ func init() {
 	metrics.Register(Registry.GoRegistry)
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
+	metrics.SetFilesystemMetricsCollectFn(func() []metrics.FilesystemMetrics {
+		entries, err := storagev2.ListFilesystemMetrics()
+		if err != nil {
+			mlog.RatedWarn(context.TODO(), rate.Every(time.Minute), "failed to list filesystem metrics", mlog.Err(err))
+			return nil
+		}
+		metricsList := make([]metrics.FilesystemMetrics, 0, len(entries))
+		for _, entry := range entries {
+			metricsList = append(metricsList, metrics.FilesystemMetrics{
+				DisplayKey:              entry.DisplayKey,
+				ReadCount:               entry.ReadCount,
+				WriteCount:              entry.WriteCount,
+				ReadBytes:               entry.ReadBytes,
+				WriteBytes:              entry.WriteBytes,
+				GetFileInfoCount:        entry.GetFileInfoCount,
+				FailedCount:             entry.FailedCount,
+				MultiPartUploadCreated:  entry.MultiPartUploadCreated,
+				MultiPartUploadFinished: entry.MultiPartUploadFinished,
+			})
+		}
+		return metricsList
+	})
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
 }
 

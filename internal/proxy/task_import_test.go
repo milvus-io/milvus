@@ -24,11 +24,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,7 +67,7 @@ func (s *ImportTaskSuite) TestExecute_GetDatabaseInfoFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -104,7 +107,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -146,7 +149,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -190,7 +193,7 @@ func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 		},
 		resp: resp,
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -241,7 +244,7 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -320,12 +323,12 @@ func (s *ImportTaskSuite) TestTaskBasicMethods() {
 
 func (s *ImportTaskSuite) TestSetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.NoError(task.setChannels())
+	s.NoError(task.SetChannels())
 }
 
 func (s *ImportTaskSuite) TestGetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.Nil(task.getChannels())
+	s.Nil(task.GetChannels())
 }
 
 // --------------------------------
@@ -373,7 +376,7 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	task.Execute(ctx)
 
@@ -401,10 +404,58 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 			CollectionName: "test_collection",
 		},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 
 	s.Error(err)
 	s.Contains(err.Error(), "collection not found")
+}
+
+// The idempotency key rides the gRPC metadata of the context, not the request
+// body, so Execute must hand the coordinator client the very context the request
+// arrived on. A context rebuilt or detached here would strip the key and the
+// client interceptor would have nothing to propagate.
+func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs(util.HeaderIdempotencyKey, "run-1-batch-1"))
+
+	mockCache := NewMockCache(s.T())
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+		DBID: 42,
+	}, nil)
+
+	var capturedCtx context.Context
+	mockMixCoord := mocks.NewMockMixCoordClient(s.T())
+	mockMixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+			capturedCtx = ctx
+			return &internalpb.ImportResponse{
+				Status: merr.Success(),
+				JobID:  "12345",
+			}, nil
+		})
+
+	task := &importTask{
+		ctx:      ctx,
+		mixCoord: mockMixCoord,
+		req: &internalpb.ImportRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+		},
+		collectionID: 100,
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+			},
+		},
+		resp: &internalpb.ImportResponse{},
+	}
+	task.metaCache = mockCache
+
+	err := task.Execute(ctx)
+
+	s.NoError(err)
+	s.Require().NotNil(capturedCtx)
+	s.Equal("run-1-batch-1", interceptor.IdempotencyKeyFromContext(capturedCtx))
 }

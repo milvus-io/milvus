@@ -123,6 +123,11 @@ const (
 	// Scalar index engine version 4:
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
+	// - Nested (struct sub-field) HYBRID indexes may select STL_SORT for
+	//   high-cardinality data (in addition to the existing INVERTED); an
+	//   older reader's ScalarIndexSort predates nested-index support and
+	//   cannot load a nested STL_SORT physical index
+	//   (see MinScalarIndexVersionForNestedHybridStlSort)
 	// - On-disk file format is unchanged from v3
 	//
 	// Scalar index engine version 5:
@@ -138,6 +143,14 @@ const (
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForNestedHybridStlSort is the minimum scalar index
+	// engine version at which nested (struct sub-field) HYBRID indexes may
+	// select STL_SORT for high-cardinality data instead of INVERTED. Below
+	// this version, nested HYBRID indexes always keep INVERTED at high
+	// cardinality so that an older reader (e.g. 2.6, whose ScalarIndexSort
+	// predates nested-index support) can still load the index.
+	MinScalarIndexVersionForNestedHybridStlSort = int32(4)
 
 	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
 	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
@@ -356,6 +369,10 @@ const (
 
 	// namespace sharding
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
+
+	// row level security
+	RLSEnabledKey = "rls.enabled"
+	RLSForceKey   = "rls.force"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -656,6 +673,115 @@ func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValueP
 		}
 		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
 			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateRLSEnabledNotAltered rejects attempts to update or delete
+// rls.enabled after collection creation.
+func ValidateRLSEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), RLSEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(key, RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, RLSEnabledKey)
+		}
+	}
+	return nil
+}
+
+// IsRLSEnabled extracts rls.enabled from collection properties.
+// Returns false if not set.
+func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSEnabledKey)
+	if !ok {
+		return false, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSEnabledKey, value)
+	}
+	return enabled, nil
+}
+
+// IsRLSForce extracts rls.force from collection properties.
+// Returns false if not set.
+func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSForceKey)
+	if !ok {
+		return false, nil
+	}
+	force, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
+	}
+	return force, nil
+}
+
+func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+	var value string
+	found := false
+	for _, kv := range kvs {
+		if kv.GetKey() == key {
+			value = kv.GetValue()
+			found = true
+		}
+	}
+	return value, found
+}
+
+// ValidateRLSProperties validates collection-level RLS properties.
+// Returns nil if the values are valid or if RLS properties are not set. Also
+// rejects case-variant keys that would be silently ignored.
+func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
+	seen := make(map[string]struct{}, 2)
+	for _, kv := range kvs {
+		switch kv.GetKey() {
+		case RLSEnabledKey:
+			if _, ok := seen[RLSEnabledKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
+			}
+			seen[RLSEnabledKey] = struct{}{}
+			enabled, err := IsRLSEnabled(kv)
+			if err != nil {
+				return err
+			}
+			// The management plane lands before the data-plane enforcement in
+			// the stacked rollout. Keep the public switch fail-closed until the
+			// enforcement slice removes this temporary gate.
+			if enabled {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
+			}
+		case RLSForceKey:
+			if _, ok := seen[RLSForceKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
+			}
+			seen[RLSForceKey] = struct{}{}
+			force, err := IsRLSForce(kv)
+			if err != nil {
+				return err
+			}
+			// rls.force only affects runtime enforcement. Reject it together
+			// with rls.enabled while the enforcement slice is not available.
+			if force {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
+			}
+		default:
+			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+				if strings.EqualFold(kv.GetKey(), key) {
+					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
+				}
+			}
 		}
 	}
 	return nil

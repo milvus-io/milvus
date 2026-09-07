@@ -17,7 +17,7 @@
 // Package roaringfilter validates the exact MRB1 membership-filter envelope.
 // It is the server-side half of the format: the proxy calls Validate on an
 // untrusted client blob before embedding it in a plan. Construction lives in
-// the SDK (client/v3/roaringfilter) and decoding lives in segcore
+// the SDK (client/v3/membership/roaringfilter) and decoding lives in segcore
 // (internal/core/src/common/RoaringMembership.cpp), so neither is exported
 // here.
 //
