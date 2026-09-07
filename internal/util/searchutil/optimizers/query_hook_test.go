@@ -72,7 +72,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, true, false, `{"param": 2}`)
 
@@ -84,7 +84,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, false, true, `{"param": 2}`)
 	})
@@ -112,7 +112,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
@@ -140,9 +140,41 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
+	})
+
+	suite.Run("knowhere_search_defaults", func() {
+		params := paramtable.Get()
+		searchKey := params.KnowhereConfig.IndexParam.KeyPrefix + "TEST_INDEX.search.default_param"
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(searchKey, "0.5")
+		defer params.Reset(params.KnowhereConfig.Enable.Key)
+		defer params.Remove(searchKey)
+
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{
+						Topk:         100,
+						SearchParams: `{"request_param":16}`,
+					},
+				},
+			},
+		}
+		bs, err := proto.Marshal(plan)
+		suite.Require().NoError(err)
+
+		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				SerializedExprPlan: bs,
+				IsTopkReduce:       true,
+			},
+		}, nil, 2, "TEST_INDEX")
+		suite.NoError(err)
+		suite.JSONEq(`{"default_param":0.5,"request_param":16}`, suite.getQueryInfo(req).GetSearchParams())
+		suite.False(req.GetReq().GetIsTopkReduce())
 	})
 
 	suite.Run("other_plannode", func() {
@@ -169,7 +201,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.NoError(err)
 		suite.Equal(bs, req.GetReq().GetSerializedExprPlan())
 	})
@@ -184,7 +216,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		_, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req:             &internalpb.SearchRequest{},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.Error(err)
 	})
 
@@ -218,7 +250,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			Req: &internalpb.SearchRequest{
 				SerializedExprPlan: bs,
 			},
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, "")
 		suite.Error(err)
 	})
 }
