@@ -189,6 +189,26 @@ func TestKnowhereConfig_MergeParameter(t *testing.T) {
 	}
 }
 
+func TestKnowhereConfig_MergeIndexParamsJSON(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	bt.Save("knowhere.CARDINAL_TIERED.search.ivf_search_ratio", "0.5")
+	bt.Save("knowhere.CARDINAL_TIERED.search.search_mode", "balanced")
+
+	result, err := cfg.MergeIndexParamsJSON("CARDINAL_TIERED", SearchStage, `{"ivf_search_ratio":0.8,"nprobe":16}`)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"ivf_search_ratio":0.8,"nprobe":16,"search_mode":"balanced"}`, result)
+
+	result, err = cfg.MergeIndexParamsJSON("CARDINAL_TIERED", SearchStage, `{"nprobe":16}`)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"ivf_search_ratio":0.5,"nprobe":16,"search_mode":"balanced"}`, result)
+
+	_, err = cfg.MergeIndexParamsJSON("CARDINAL_TIERED", SearchStage, "invalid")
+	assert.Error(t, err)
+}
+
 func TestKnowhereConfig_MergeWithResource(t *testing.T) {
 	cfg := &knowhereConfig{}
 
