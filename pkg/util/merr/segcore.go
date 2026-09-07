@@ -54,6 +54,28 @@ type segcoreClass struct {
 	// construction and never set this; permanent system failures (corruption,
 	// config, internal bug, missing object) leave it false.
 	retriable bool
+	// permanent marks system failures that are known to reproduce identically on
+	// every attempt and every node: corrupted data, a misconfigured bucket, a
+	// missing object, an index build that the same input always fails. It is
+	// distinct from simply leaving every flag unset, which also covers the
+	// unclassified fallback (2000/2001/2002) that callers must keep retrying
+	// because the underlying condition is unknown.
+	permanent bool
+}
+
+// segcoreErrorCode preserves the exact C++ ErrorCode without changing the
+// client-visible merr code projected by the wrapped sentinel.
+type segcoreErrorCode struct {
+	code int32
+	err  error
+}
+
+func (e *segcoreErrorCode) Error() string {
+	return e.err.Error()
+}
+
+func (e *segcoreErrorCode) Unwrap() error {
+	return e.err
 }
 
 // segcoreCodeTable is the registry of known C++ segcore error codes. Codes
@@ -121,9 +143,9 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	// mistake them for "unclassified" and flip them to retriable. They map to the
 	// same non-retriable ErrSegcore as the fallback; the raw code is kept in
 	// segcoreCode.
-	2004: {sentinel: ErrSegcore}, // IndexBuildError: build failed (bad data / permanent)
-	2016: {sentinel: ErrSegcore}, // BucketInvalid: misconfigured bucket (same on every replica)
-	2017: {sentinel: ErrSegcore}, // ObjectNotExist: object missing in shared storage (reroute won't help)
+	2004: {sentinel: ErrSegcore, permanent: true}, // IndexBuildError: build failed (bad data / permanent)
+	2016: {sentinel: ErrSegcore, permanent: true}, // BucketInvalid: misconfigured bucket (same on every replica)
+	2017: {sentinel: ErrSegcore, permanent: true}, // ObjectNotExist: object missing in shared storage (reroute won't help)
 
 	// Previously-unclassified C++ codes registered explicitly (review §2): an
 	// unknown code still falls back to non-retriable ErrSegcore, but registering
@@ -139,7 +161,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2010: {sentinel: ErrSegcore},                   // PathAlreadyExist (storage)
 	2011: {sentinel: ErrSegcore},                   // PathNotExist (storage)
 	2019: {sentinel: ErrSegcore},                   // RetrieveError: generic retrieve failure
-	2024: {sentinel: ErrSegcore},                   // DataFormatBroken: data corruption (permanent)
+	2024: {sentinel: ErrSegcore, permanent: true},  // DataFormatBroken: data corruption (permanent)
 	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
 	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
 	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound
@@ -176,7 +198,22 @@ func classifySegcoreError(code int32, msg string) error {
 	if msg != "" {
 		err = errors.Wrap(err, msg)
 	}
-	return err
+	return &segcoreErrorCode{code: code, err: err}
+}
+
+// IsPermanentSegcoreErr reports whether err carries a C++ segcore code that is
+// known to fail identically on every attempt and every node. Callers that would
+// otherwise retry — the index/stats/analyze scheduler in particular — must treat
+// it as terminal: re-dispatching burns a worker slot to reproduce the same
+// failure. Unregistered codes and the generic 2000/2001/2002 fallbacks are not
+// permanent: their cause is unknown, so they keep the retrying default.
+func IsPermanentSegcoreErr(err error) bool {
+	var segcoreErr *segcoreErrorCode
+	if !errors.As(err, &segcoreErr) {
+		return false
+	}
+	cls, ok := segcoreCodeTable[segcoreErr.code]
+	return ok && cls.permanent
 }
 
 // IsSegcoreSignal reports whether a segcore error code is a control-flow signal

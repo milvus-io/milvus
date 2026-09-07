@@ -189,7 +189,15 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
 
     auto builder = it->second;
     auto ast = AppendDataToBuilder(value, builder);
-    AssertInfo(ast.ok(), "failed to append data to builder");
+    if (!ast.ok()) {
+        // The value comes from the document being indexed, so the append fails
+        // the same way on every attempt. AssertInfo would report it as the
+        // generic UnexpectedError, which the build scheduler keeps retrying.
+        ThrowInfo(ErrorCode::JsonKeyInvalid,
+                  "failed to append data to builder for key {}: {}",
+                  key,
+                  ast.ToString());
+    }
 }
 
 void
@@ -205,7 +213,12 @@ JsonStatsParquetWriter::AppendRow(
 
         auto builder = it->second;
         auto status = AppendDataToBuilder(value, builder);
-        AssertInfo(status.ok(), "failed to append data to builder");
+        if (!status.ok()) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "failed to append data to builder for key {}: {}",
+                      key,
+                      status.ToString());
+        }
     }
 
     AddCurrentRow();
@@ -284,8 +297,10 @@ JsonStatsParquetWriter::AppendDataToBuilder(
                           type_id,
                           value);
         }
+    } catch (const SegcoreError&) {
+        throw;
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::JsonKeyInvalid,
                   "failed to append data to builder: {}",
                   e.what());
     }

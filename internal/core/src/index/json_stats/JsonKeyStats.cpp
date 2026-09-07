@@ -178,7 +178,7 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
         } else if (type == JSONType::NONE) {
             AddKeyStatsInfo(path, JSONType::NONE, nullptr, infos);
         } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
                       "unsupported json type: {} for build json stats",
                       type);
         }
@@ -223,7 +223,7 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
                 tokens.resize(token_capacity);
                 continue;
             } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::JsonKeyInvalid,
                           "Failed to parse Json: {}, error: {}",
                           json_str,
                           int(r));
@@ -424,7 +424,7 @@ JsonKeyStats::TraverseJsonForBuildStats(
         try {
             type = getType(value);
         } catch (const std::exception& e) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
                       "failed to get json type for value: {} with error: {}",
                       value,
                       e.what());
@@ -439,7 +439,7 @@ JsonKeyStats::TraverseJsonForBuildStats(
         } else if (type == JSONType::NONE) {
             AddKeyStats(path, JSONType::NONE, value, values);
         } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
                       "unsupported json type: {} for build json stats",
                       type);
         }
@@ -511,7 +511,7 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
                 tokens.resize(token_capacity);
                 continue;
             } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::JsonKeyInvalid,
                           "Failed to parse Json: {}, error: {}",
                           json_str,
                           int(r));
@@ -540,7 +540,23 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
             BsonBuilder::AppendToDom(root, path_vec, value, key.type_);
         } else {
             if (key.type_ == JSONType::ARRAY) {
-                auto bson_bytes = BuildBsonArrayBytesFromJsonString(value);
+                // Without this guard a simdjson_error escapes the whole cgo
+                // call and is flattened into the generic UnexpectedError by
+                // index_c.cpp, which makes a malformed document look like a
+                // retriable internal fault. The sibling call site in
+                // bson_builder.cpp already guards the same function.
+                std::vector<uint8_t> bson_bytes;
+                try {
+                    bson_bytes = BuildBsonArrayBytesFromJsonString(value);
+                } catch (const SegcoreError&) {
+                    throw;
+                } catch (const simdjson::simdjson_error& e) {
+                    ThrowInfo(JsonParseErrorCode(e.error()),
+                              "Failed to build bson array from json value: {}, "
+                              "{}",
+                              value,
+                              e.what());
+                }
                 parquet_writer_->AppendValue(
                     key.ToColumnName(),
                     std::string(
