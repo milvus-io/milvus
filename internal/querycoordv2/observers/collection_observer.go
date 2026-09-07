@@ -896,6 +896,7 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		}
 	}
 
+	invalidated := false
 	if len(stalled) > 0 {
 		mlog.Info(ctx, "releasing the replicas that stalled in a timed out resource group",
 			mlog.FieldCollectionID(task.CollectionID),
@@ -914,12 +915,29 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 				mlog.Err(err))
 			return
 		}
+		// The proxies cache the collection's shard leaders and learn of a
+		// change only through distribution events, which RemoveReplicas
+		// does not produce: it touches the catalog and the in-memory
+		// indexes alone. Until the checker releases the deleted replicas'
+		// channels, a search scoped to this group, or an unscoped one
+		// balanced onto those leaders, would reach a replica that no
+		// longer exists, fail on the query node, and be retried only
+		// then. Every job that removes replicas invalidates the cache
+		// right after (job_update, job_load, job_release); so does this.
+		ob.invalidateShardLeaderCache(ctx, task.CollectionID)
+		invalidated = true
 	}
 
 	remaining := ob.meta.GetByCollection(ctx, task.CollectionID)
 	if len(remaining) == 0 {
 		ob.meta.CollectionManager.RemoveCollection(ctx, task.CollectionID)
 		ob.targetObserver.ReleaseCollection(task.CollectionID)
+		// The collection is gone with its last replica; the proxies must
+		// not keep leaders for it. Once is enough when the replicas
+		// removed just above were that last one.
+		if !invalidated {
+			ob.invalidateShardLeaderCache(ctx, task.CollectionID)
+		}
 		ob.loadTasks.Remove(key)
 		return
 	}
@@ -1214,6 +1232,28 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, c
 		ob.invalidateCache(ctx, collectionID)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", collectionID, collectionPercentage)))
+}
+
+// invalidateShardLeaderCache tells every proxy to drop its cached shard
+// leaders of the collection, so that no search is routed to a replica that
+// has just been removed. An observer built without a proxy manager, as some
+// callers build it, has no proxies to tell. A proxy that cannot be reached is
+// logged and not retried: its cache is invalidated reactively by the first
+// search that fails on a released leader, which is what the other callers
+// rely on too.
+func (ob *CollectionObserver) invalidateShardLeaderCache(ctx context.Context, collectionID int64) {
+	if ob.proxyManager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	if err := ob.proxyManager.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+		CollectionIDs: []int64{collectionID},
+	}); err != nil {
+		mlog.Warn(ctx, "failed to invalidate the proxies' shard leader cache after releasing replicas",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
+	}
 }
 
 func (ob *CollectionObserver) invalidateCache(ctx context.Context, collectionID int64) {
