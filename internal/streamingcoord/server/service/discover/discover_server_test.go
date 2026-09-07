@@ -18,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestSendFullAssignmentPublishesSecondaryChannelsAndShardAssignments(t *testing.T) {
+func TestSendFullAssignmentPublishesSecondaryChannels(t *testing.T) {
 	mc := mock_manager.NewMockManagerClient(t)
 	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
 		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
@@ -39,16 +39,6 @@ func TestSendFullAssignmentPublishesSecondaryChannelsAndShardAssignments(t *test
 		assert.NotNil(t, node1Assignment)
 		assert.Equal(t, []string{"rw-channel"}, pchannelNames(node1Assignment.Channels))
 		assert.Equal(t, []string{"ro-channel"}, pchannelNames(node1Assignment.SecondaryChannels))
-		assert.Equal(t, types.ShardAssignmentInfo{
-			PChannelAssignments: []types.PChannelShardAssignment{
-				{
-					PChannel: "ro-channel",
-					Entries: []types.ShardAssignmentEntry{
-						{CollectionID: 100, ShardIndex: 1, ReplicaID: 10},
-					},
-				},
-			},
-		}, types.NewShardAssignmentInfoFromProto(node1Assignment.GetShardAssignment()))
 
 		node2Assignment := assignments[2]
 		assert.NotNil(t, node2Assignment)
@@ -71,18 +61,6 @@ func TestSendFullAssignmentPublishesSecondaryChannelsAndShardAssignments(t *test
 			{
 				Channel: types.PChannelInfo{Name: "ro-channel", Term: 2, AccessMode: types.AccessModeRO},
 				Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
-			},
-		},
-		ShardAssignments: map[int64]types.ShardAssignmentInfo{
-			1: {
-				PChannelAssignments: []types.PChannelShardAssignment{
-					{
-						PChannel: "ro-channel",
-						Entries: []types.ShardAssignmentEntry{
-							{CollectionID: 100, ShardIndex: 1, ReplicaID: 10},
-						},
-					},
-				},
 			},
 		},
 	})

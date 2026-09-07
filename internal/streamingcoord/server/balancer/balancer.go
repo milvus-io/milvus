@@ -22,7 +22,6 @@ type (
 	AllocVChannelParam                   = channel.AllocVChannelParam
 	WatchChannelAssignmentsCallbackParam = channel.WatchChannelAssignmentsCallbackParam
 	WatchChannelAssignmentsCallback      = channel.WatchChannelAssignmentsCallback
-	ShardAssignmentProvider              = channel.ShardAssignmentProvider
 )
 
 // Balancer is a load balancer to balance the load of log node.

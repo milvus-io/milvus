@@ -64,17 +64,6 @@ func TestAssignmentService(t *testing.T) {
 								SecondaryChannels: []*streamingpb.PChannelInfo{
 									{Name: "c1-ro", Term: 3, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY},
 								},
-								ShardAssignment: &streamingpb.ShardAssignmentInfo{
-									PchannelAssignments: []*streamingpb.PChannelShardAssignment{
-										{
-											Pchannel: "c1-ro",
-											Entries: []*streamingpb.ShardAssignmentEntry{
-												{CollectionId: 100, ShardIndex: 1, ReplicaId: 10},
-												{CollectionId: 101, ShardIndex: 2, ReplicaId: 11},
-											},
-										},
-									},
-								},
 							},
 							{
 								Node:     &streamingpb.StreamingNodeInfo{ServerId: 2},
@@ -122,15 +111,6 @@ func TestAssignmentService(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, assign.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
 	assert.Equal(t, types.AccessModeRO, assign.Assignments[1].SecondaryChannels["c1-ro"].AccessMode)
-	assert.Equal(t, []types.PChannelShardAssignment{
-		{
-			PChannel: "c1-ro",
-			Entries: []types.ShardAssignmentEntry{
-				{CollectionID: 100, ShardIndex: 1, ReplicaID: 10},
-				{CollectionID: 101, ShardIndex: 2, ReplicaID: 11},
-			},
-		},
-	}, assign.Assignments[1].ShardAssignment.PChannelAssignments)
 
 	resp, err := assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	assert.NoError(t, err)
