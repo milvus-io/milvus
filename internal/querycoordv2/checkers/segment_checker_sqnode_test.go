@@ -19,11 +19,13 @@ package checkers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -91,6 +94,9 @@ type sqnFixture struct {
 	// collection's next target; a test bumps it when a new sealed segment
 	// enters the target.
 	targetVersion int64
+	// clock is the time the checker reads; a test moves it forward to let a
+	// regular node's absence outlast the grace period, or not.
+	clock time.Time
 }
 
 func newSQNFixture(t *testing.T) *sqnFixture {
@@ -126,6 +132,7 @@ func newSQNFixture(t *testing.T) *sqnFixture {
 	targets.EXPECT().GetCollectionTargetVersion(mock.Anything, sqnCollection, mock.Anything).
 		RunAndReturn(func(context.Context, int64, int32) int64 { return f.targetVersion }).Maybe()
 
+	f.clock = time.Date(2026, time.September, 7, 12, 0, 0, 0, time.UTC)
 	f.checker = &SegmentChecker{
 		checkerActivation:        newCheckerActivation(),
 		meta:                     f.meta,
@@ -136,9 +143,26 @@ func newSQNFixture(t *testing.T) *sqnFixture {
 		assignPolicy:             f.firstNodePolicy(t),
 		versionCache:             make(map[int64]*collectionVersionCache),
 		replicasWithRegularNodes: typeutil.NewUniqueSet(),
+		lastRegularNodeSeenAt:    make(map[int64]time.Time),
+		now:                      func() time.Time { return f.clock },
 	}
 	return f
 }
+
+// grace is how long a group must have held no regular node before a replica's
+// record is released: the load timeout, which is not a new setting.
+func grace() time.Duration {
+	return params.Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
+}
+
+// advance moves the checker's clock forward by d.
+func (f *sqnFixture) advance(d time.Duration) {
+	f.clock = f.clock.Add(d)
+}
+
+// restartLength is how long a regular node's ordinary restart keeps it away:
+// well inside the grace period.
+const restartLength = 2 * time.Minute
 
 // recordingScheduler is a scheduler that keeps every task a check round hands
 // it, which is how a full round's load tasks are read: Check hands them over
@@ -235,10 +259,12 @@ func (f *sqnFixture) replicaObserverRound(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	utils.RecoverReplicaOfCollection(ctx, f.meta, sqnCollection)
-	replica := f.meta.Get(ctx, sqnReplica)
-	require.NotNil(t, replica)
-	if ro := replica.GetRONodes(); len(ro) > 0 {
-		require.NoError(t, f.meta.RemoveNode(ctx, sqnCollection, sqnReplica, ro...))
+	replicas := f.meta.GetByCollection(ctx, sqnCollection)
+	require.NotEmpty(t, replicas)
+	for _, replica := range replicas {
+		if ro := replica.GetRONodes(); len(ro) > 0 {
+			require.NoError(t, f.meta.RemoveNode(ctx, sqnCollection, replica.GetID(), ro...))
+		}
 	}
 }
 
@@ -294,7 +320,7 @@ func (f *sqnFixture) placeSealedSegment(t *testing.T, replica *meta.Replica, str
 	tasks = f.checker.createSegmentLoadTasks(context.Background(),
 		[]*datapb.SegmentInfo{f.segment},
 		[]commonpb.LoadPriority{commonpb.LoadPriority_HIGH},
-		replica)
+		replica, f.clock)
 	return f.offered, tasks
 }
 
@@ -308,7 +334,7 @@ func (f *sqnFixture) check(t *testing.T, replica *meta.Replica, leader *meta.DmC
 	defer shardLeader.UnPatch()
 
 	f.offered = nil
-	return f.checker.checkReplica(context.Background(), replica)
+	return f.checker.checkReplica(context.Background(), replica, f.clock)
 }
 
 // A replica whose resource group's only compute is a streaming node has no
@@ -456,11 +482,11 @@ func TestTheRegularNodeRecordIsForgottenWithTheReplica(t *testing.T) {
 	f.check(t, replica, &meta.DmChannel{})
 	require.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
 
-	f.checker.forgetReleasedReplicas(ctx)
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
 	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a replica that exists keeps its record")
 
 	require.NoError(t, f.meta.RemoveReplicas(ctx, sqnCollection, sqnReplica))
-	f.checker.forgetReleasedReplicas(ctx)
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
 	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a released replica's record goes with it")
 }
 
@@ -531,13 +557,14 @@ func TestAStockBinaryLeavesSealedSegmentsOnAStreamingQueryNodeAlone(t *testing.T
 
 // The reviewer's failure, in its permanent form: the operator moves a replica
 // that has been seen with a regular node into a group whose only compute is a
-// streaming node (TransferReplica keeps the replica's ID), and the record
-// made in the mixed group would gate the placement for good - empty RW set,
-// record hit, no fallback, no task, no log, until a coordinator restart. The
-// record reflects membership, not history alone: a group that holds no
-// regular node and asks for none has given them up, and the replica's sealed
-// segments go to its streaming query node the very next round.
-func TestAReplicaMovedToAStreamingOnlyGroupPlacesOnItsStreamingNode(t *testing.T) {
+// streaming node (TransferReplica keeps the replica's ID). Kept on history
+// alone, the record made in the mixed group would gate the placement for good
+// - empty RW set, record hit, no fallback, no task, until a coordinator
+// restart. The transfer strips the replica's regular node, so the grace is
+// measured from the round it arrived: the replica waits for a restart's
+// length, and its sealed segments go to its streaming query node once it has
+// held no regular node for the load timeout.
+func TestAReplicaMovedToAStreamingOnlyGroupPlacesOnItsStreamingNodeAfterTheGrace(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
@@ -558,19 +585,29 @@ func TestAReplicaMovedToAStreamingOnlyGroupPlacesOnItsStreamingNode(t *testing.T
 	require.Empty(t, moved.GetRWNodes(), "the regular node was the old group's, and is stripped")
 	require.Equal(t, []int64{sqnStreaming}, moved.GetRWSQNodes())
 
+	// The round the replica arrives is where the grace starts: that is the
+	// round its regular node was stripped.
 	f.newSealedSegmentEntersTheTarget()
 	tasks = f.round(t)
-	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the record goes with the regular nodes the group gave up")
-	require.Len(t, tasks, 1, "the very next round places the segment")
+	assert.Empty(t, tasks, "on arrival the replica waits, as it would for a restart")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+
+	f.advance(grace())
+	tasks = f.round(t)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the record goes once the replica has held no regular node for the load timeout")
+	require.Len(t, tasks, 1, "and that round places the segment")
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node(), "on the streaming node's query node")
 }
 
-// A regular node that is gone while its group still asks for one is merely
-// away - the resource manager pulls a node in for a group that is missing
-// one - and the replica waits for it, as on master. Only once the operator
-// declares the group regular-node-free is the record dropped and the segment
-// placed on the streaming query node.
-func TestAReplicaWaitsForARegularNodeUntilItsGroupGivesRegularNodesUp(t *testing.T) {
+// The reviewer's M3: a group that still asks for a regular node (requests=1)
+// loses it for good - the pod is deleted, no AlterResourceGroups, no spare
+// node anywhere - and the group's request outlives the node forever. Judged
+// on the request, the record would be kept until a coordinator restart, the
+// segments going nowhere and nothing logged. Judged on time, the replica
+// waits for a restart's length and is placed on its streaming query node
+// once it has held no regular node for the load timeout, whatever the group
+// asks for.
+func TestAReplicaStopsWaitingOnceItsGroupHasHadNoRegularNodeForTheLoadTimeout(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
@@ -586,32 +623,28 @@ func TestAReplicaWaitsForARegularNodeUntilItsGroupGivesRegularNodesUp(t *testing
 	f.replicaObserverRound(t)
 	group := f.meta.GetResourceGroup(ctx, sqnGroup)
 	require.Zero(t, group.NodeNum())
-	require.Equal(t, 1, group.MissingNumOfNodes(), "the group still asks for its regular node")
+	require.Equal(t, 1, group.MissingNumOfNodes(), "the group still asks for its regular node, and will forever")
 	require.Empty(t, f.meta.Get(ctx, sqnReplica).GetRWNodes())
 
+	f.advance(restartLength)
 	f.newSealedSegmentEntersTheTarget()
 	tasks = f.round(t)
-	assert.Empty(t, tasks, "the segment waits for the regular node the group is owed")
+	assert.Empty(t, tasks, "for a restart's length the segment waits for the regular node")
 	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
 
-	require.NoError(t, f.meta.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{sqnGroup: {
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
-	}}))
-	require.Zero(t, f.meta.GetResourceGroup(ctx, sqnGroup).MissingNumOfNodes(), "the group has given regular nodes up")
-
+	f.advance(grace() - restartLength)
 	f.newSealedSegmentEntersTheTarget()
 	tasks = f.round(t)
-	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
-	require.Len(t, tasks, 1, "the very next round places the segment")
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the group's request does not keep the record past the grace")
+	require.Len(t, tasks, 1, "the round the grace ends places the segment")
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
 }
 
 // The operator hands the mixed group's regular node to another group
-// (TransferNode). The node is alive and serving elsewhere, and the group it
-// left holds none and asks for none: the replica's record is dropped and its
-// sealed segments go to the streaming query node.
-func TestAReplicaWhoseRegularNodeWasTransferredAwayPlacesOnItsStreamingNode(t *testing.T) {
+// (TransferNode). The node is alive and serving elsewhere; the group it left
+// holds none, and once it has held none for the load timeout the replica's
+// record is dropped and its sealed segments go to the streaming query node.
+func TestAReplicaWhoseRegularNodeWasTransferredAwayPlacesOnItsStreamingNodeAfterTheGrace(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
@@ -626,27 +659,31 @@ func TestAReplicaWhoseRegularNodeWasTransferredAwayPlacesOnItsStreamingNode(t *t
 	f.addNamedGroup(t, sqnOtherGroup, 0)
 	require.NoError(t, f.meta.TransferNode(ctx, sqnGroup, sqnOtherGroup, 1))
 	require.True(t, f.meta.ContainsNode(ctx, sqnOtherGroup, sqnRegular), "the node now serves the other group")
-	group := f.meta.GetResourceGroup(ctx, sqnGroup)
-	require.Zero(t, group.NodeNum())
-	require.Zero(t, group.MissingNumOfNodes())
+	require.Zero(t, f.meta.GetResourceGroup(ctx, sqnGroup).NodeNum())
 	f.replicaObserverRound(t)
 	require.Empty(t, f.meta.Get(ctx, sqnReplica).GetRWNodes())
 
 	f.newSealedSegmentEntersTheTarget()
+	tasks = f.round(t)
+	assert.Empty(t, tasks, "the transfer is not told apart from a restart until the grace ends")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+
+	f.advance(grace())
 	tasks = f.round(t)
 	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
 	require.Len(t, tasks, 1)
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
 }
 
-// The default group asks for no regular node (its requests are 0) and holds
-// whatever arrives. A replica in it keeps its record for as long as the group
-// holds a regular node; once the group holds none, it reads exactly like a
-// group that gave regular nodes up - the coordinator cannot tell a restart
-// from a scale-down there - and a restart of that node is the bounded
-// one-window placement on the streaming query node that the move pass
-// repairs, as after a coordinator restart.
-func TestTheDefaultGroupKeepsTheRecordWhileItHoldsARegularNode(t *testing.T) {
+// The reviewer's M1: the default group asks for no regular node (its requests
+// are 0), so a rule that reads the group's request cannot tell its only
+// regular node's restart from a scale-down, and would read the restart as the
+// group giving regular nodes up - every lacking sealed segment of every
+// replica in the group loaded onto the streaming node's query node and moved
+// back in full once the node returned, a full load plus a full move per
+// restart. A restart is minutes; the grace is the load timeout. The record
+// stays, and the segments wait for the node, as on master.
+func TestTheDefaultGroupKeepsTheRecordThroughARegularNodeRestart(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
@@ -662,25 +699,131 @@ func TestTheDefaultGroupKeepsTheRecordWhileItHoldsARegularNode(t *testing.T) {
 	tasks := f.round(t)
 	require.Len(t, tasks, 1)
 	require.EqualValues(t, sqnRegular, tasks[0].Actions()[0].Node())
-	f.checker.forgetReleasedReplicas(ctx)
-	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a group that holds a regular node has not given them up, whatever it asks for")
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a group that holds a regular node keeps the record, whatever it asks for")
 
 	f.nodeMgr.Remove(sqnRegular)
 	f.meta.HandleNodeDown(ctx, sqnRegular)
 	f.replicaObserverRound(t)
 	require.Empty(t, f.meta.Get(ctx, sqnReplica).GetRWNodes())
 
+	f.advance(restartLength)
 	f.newSealedSegmentEntersTheTarget()
 	tasks = f.round(t)
-	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a group that holds none and asks for none has")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a restart is inside the grace: the record stays")
+	assert.Empty(t, tasks, "and the segment waits for the node rather than being loaded onto the streaming node")
+	assert.Empty(t, f.offered, "the streaming node's query node is not offered")
+}
+
+// The other side of the same rule: the default group's regular node is gone
+// for good - scaled to zero, with nothing to say so but time. Once the group
+// has held no regular node for the load timeout, the record is released, the
+// collection is taken out of the version cache, and the segment is placed on
+// the streaming query node that round.
+func TestTheDefaultGroupReleasesTheRecordOnceItsRegularNodeHasBeenGoneForTheLoadTimeout(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	ctx := context.Background()
+	f.addRegularNodeTo(t, sqnRegular, meta.DefaultResourceGroupName)
+	f.putReplica(t, meta.NewReplica(&querypb.Replica{
+		ID: sqnReplica, CollectionID: sqnCollection, ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes: []int64{sqnRegular}, RwSqNodes: []int64{sqnStreaming},
+	}))
+	tasks := f.round(t)
 	require.Len(t, tasks, 1)
+	require.EqualValues(t, sqnRegular, tasks[0].Actions()[0].Node())
+
+	f.nodeMgr.Remove(sqnRegular)
+	f.meta.HandleNodeDown(ctx, sqnRegular)
+	f.replicaObserverRound(t)
+	tasks = f.round(t)
+	require.Empty(t, tasks, "the segment waits")
+	require.Contains(t, f.checker.versionCache, sqnCollection, "and the waiting round marked the collection synced")
+
+	// Nothing but the clock moves: no new sealed segment, no distribution
+	// report.
+	f.advance(grace())
+	tasks = f.round(t)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the replica has held no regular node for the load timeout")
+	require.Len(t, tasks, 1, "the round the grace ends places, with no other change")
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
 }
 
-// A replica whose group the resource manager does not know is not judged:
-// there is no membership to read, so the record stays and the replica keeps
-// waiting, as it would on master.
-func TestAReplicaInAGroupTheResourceManagerDoesNotKnowKeepsItsRecord(t *testing.T) {
+// The grace is measured from the last round the replica held a regular node,
+// not from the first round it was seen with one: a node that has been up for
+// hours and then restarts is away for the restart's length only.
+func TestTheGraceIsMeasuredFromWhenTheReplicaLastHeldARegularNode(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.putReplica(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}))
+
+	tasks := f.round(t)
+	require.Len(t, tasks, 1)
+	require.EqualValues(t, sqnRegular, tasks[0].Actions()[0].Node())
+	f.putSealedSegmentOn(sqnRegular)
+
+	// Up for far longer than the grace, checked every round.
+	for i := 0; i < 3; i++ {
+		f.advance(grace())
+		f.round(t)
+	}
+
+	f.removeRegularNode(t, sqnRegular)
+	f.replicaObserverRound(t)
+	f.dist.SegmentDistManager.Update(sqnRegular)
+	f.advance(restartLength)
+	f.newSealedSegmentEntersTheTarget()
+	tasks = f.round(t)
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the record is dated by the last round the node was there")
+	assert.Empty(t, tasks)
+}
+
+// The reviewer's M3, at its minimum: while the record blocks the fallback and
+// the replica has no regular node, the checker says so - the replica, the
+// group and how long the replica has been without a regular node - rather than
+// producing no task in silence.
+func TestTheCheckerWarnsWhileARecordKeepsASealedSegmentWaiting(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.putReplica(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}))
+	require.Len(t, f.round(t), 1)
+
+	var warned []mlog.Field
+	warnings := 0
+	warn := mockey.Mock(mlog.RatedWarn).To(func(_ context.Context, _ rate.Limit, msg string, fields ...mlog.Field) {
+		if msg == "a sealed segment waits for a regular node its replica has lost" {
+			warnings++
+			warned = fields
+		}
+	}).Build()
+	defer warn.UnPatch()
+
+	f.removeRegularNode(t, sqnRegular)
+	f.replicaObserverRound(t)
+	f.advance(restartLength)
+	f.newSealedSegmentEntersTheTarget()
+	require.Empty(t, f.round(t), "sanity: the record keeps the segment waiting")
+
+	require.Equal(t, 1, warnings, "one warning per blocked placement")
+	byKey := make(map[string]mlog.Field)
+	for _, field := range warned {
+		byKey[field.Key] = field
+	}
+	assert.EqualValues(t, sqnReplica, byKey["replicaID"].Integer, "names the replica")
+	assert.Equal(t, sqnGroup, byKey["resourceGroup"].String, "names the group")
+	assert.EqualValues(t, restartLength, byKey["withoutRegularNodeFor"].Integer, "and how long the replica has been without a regular node")
+	assert.EqualValues(t, grace(), byKey["grace"].Integer, "and when the wait ends")
+}
+
+// A replica is judged on its own regular nodes, not on its group's: one
+// whose group the resource manager does not know keeps its record for as
+// long as it holds a regular node, however much time passes, and is released
+// like any other once it has held none for the grace period.
+func TestAReplicaIsJudgedOnItsOwnRegularNodesNotItsGroups(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
@@ -691,42 +834,161 @@ func TestAReplicaInAGroupTheResourceManagerDoesNotKnowKeepsItsRecord(t *testing.
 	require.False(t, f.meta.ContainResourceGroup(ctx, "rg-nobody-knows"))
 	f.checker.replicasWithRegularNodes.Insert(sqnReplica)
 
-	f.checker.forgetReleasedReplicas(ctx)
-	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+	f.advance(2 * grace())
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a replica holding a regular node keeps its record")
+
+	f.putReplica(t, meta.NewReplica(&querypb.Replica{
+		ID: sqnReplica, CollectionID: sqnCollection, ResourceGroup: "rg-nobody-knows",
+		RwSqNodes: []int64{sqnStreaming},
+	}))
+	f.advance(restartLength)
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "and waits for a restart's length")
+	f.advance(grace() - restartLength)
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "and is released once it has held none for the load timeout")
+	assert.NotContains(t, f.checker.lastRegularNodeSeenAt, sqnReplica, "the timestamp goes with the record")
 }
 
-// The reviewer's overlay: the group gives regular nodes up on a QUIET
-// cluster - neither the target nor the distribution moves afterwards. The
-// waiting round before the removal marked the collection synced, and the
-// version cache would keep skipping it until the next target re-pull; the
-// record drop must invalidate the cache, so the round right after the
-// removal places with no other change at all.
-func TestARecordDropPlacesEvenWhenNeitherTargetNorDistributionMoves(t *testing.T) {
+// The replica's timestamp goes with its record: what the checker remembers
+// stays bounded by the replicas there are.
+func TestAReplicasTimestampGoesWithItsRecord(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	ctx := context.Background()
 	f.addGroup(t, 1)
 	f.addRegularNode(t, sqnRegular)
 	f.putReplica(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}))
+	require.Len(t, f.round(t), 1)
+	require.Contains(t, f.checker.lastRegularNodeSeenAt, sqnReplica)
+
+	require.NoError(t, f.meta.RemoveReplicas(ctx, sqnCollection, sqnReplica))
+	f.checker.forgetReleasedReplicas(ctx, f.clock)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+	assert.NotContains(t, f.checker.lastRegularNodeSeenAt, sqnReplica)
+}
+
+// A checker built by the constructor reads the wall clock.
+func TestTheCheckerReadsTheWallClockByDefault(t *testing.T) {
+	f := newSQNFixture(t)
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+	t.Cleanup(assign.ResetGlobalAssignPolicyFactoryForTest)
+	assign.InitGlobalAssignPolicyFactory(task.NewMockScheduler(t), f.nodeMgr, f.dist, f.meta, f.checker.targetMgr)
+
+	checker := NewSegmentChecker(f.meta, f.dist, f.checker.targetMgr, f.nodeMgr, task.NewMockScheduler(t))
+	before := time.Now()
+	assert.False(t, checker.now().Before(before))
+	assert.NotNil(t, checker.lastRegularNodeSeenAt)
+}
+
+// The reviewer's nit: while sealed segments sit on the streaming node's query
+// node and the regular node has not returned, the move pass has nothing to
+// move them to. It must say so before fetching the target and asking each
+// shard for its leader, not after.
+func TestTheMovePassDoesNotFetchTheTargetWhileThereIsNoRegularNode(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.putSealedSegmentOn(sqnStreaming)
+	// A target manager with no expectations: any call fails the test.
+	f.checker.targetMgr = meta.NewMockTargetManager(t)
+
+	dist := f.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(sqnCollection))
+	require.Len(t, dist, 1)
+	tasks := f.checker.createMisplacedSegmentMoveTasks(context.Background(), f.replica(nil, []int64{sqnStreaming}), dist)
+	assert.Empty(t, tasks)
+}
+
+// The reviewer's hole in a per-group rule: a group asking for two regular
+// nodes, one per replica, loses one of them for good, and the recovery leaves
+// the survivor on the first replica. The group still holds a regular node,
+// so a rule that dates the GROUP would keep the second replica waiting for
+// ever - no task, and a warning saying the group has been without a regular
+// node for no time at all. The memory is the replica's, and so is the
+// grace: the second replica has held no regular node for the load timeout,
+// its record is released and its sealed segments go to its own streaming
+// query node; the first replica, which holds its node, is untouched.
+func TestAReplicaWhoseSiblingKeepsTheGroupsOnlyRegularNodeIsReleasedAfterTheGrace(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	ctx := context.Background()
+	const (
+		secondReplica   = int64(2)
+		secondRegular   = int64(12)
+		secondStreaming = int64(8)
+	)
+	f.addGroup(t, 2)
+	f.addRegularNode(t, sqnRegular)
+	f.addRegularNode(t, secondRegular)
+	f.putReplica(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}))
+	f.putReplica(t, meta.NewReplica(&querypb.Replica{
+		ID: secondReplica, CollectionID: sqnCollection, ResourceGroup: sqnGroup,
+		Nodes: []int64{secondRegular}, RwSqNodes: []int64{secondStreaming},
+	}))
+	// The first replica already serves the segment from its regular node;
+	// only the second has anything to place.
+	f.putSealedSegmentOn(sqnRegular)
 
 	tasks := f.round(t)
 	require.Len(t, tasks, 1)
-	require.EqualValues(t, sqnRegular, tasks[0].Actions()[0].Node())
+	require.EqualValues(t, secondRegular, tasks[0].Actions()[0].Node(), "sanity: the second replica's segment goes to its own regular node")
+	require.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+	require.True(t, f.checker.replicasWithRegularNodes.Contain(secondReplica))
+
+	f.removeRegularNode(t, secondRegular)
+	f.replicaObserverRound(t)
+	require.Equal(t, []int64{sqnRegular}, f.meta.Get(ctx, sqnReplica).GetRWNodes(), "the survivor stays with the first replica")
+	require.Empty(t, f.meta.Get(ctx, secondReplica).GetRWNodes())
+	require.Equal(t, 1, f.meta.GetResourceGroup(ctx, sqnGroup).NodeNum(), "and the group still holds a regular node")
+
+	f.advance(restartLength)
+	f.newSealedSegmentEntersTheTarget()
+	tasks = f.round(t)
+	assert.Empty(t, tasks, "for a restart's length the second replica waits")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(secondReplica))
+
+	f.advance(grace() - restartLength)
+	f.newSealedSegmentEntersTheTarget()
+	tasks = f.round(t)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(secondReplica), "the second replica has held no regular node for the load timeout")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "the first replica holds its node and keeps its record")
+	require.Len(t, tasks, 1, "the round the grace ends places the second replica's segment")
+	assert.EqualValues(t, secondStreaming, tasks[0].Actions()[0].Node(), "on its own streaming query node")
+}
+
+// A checker that is switched off dates nothing. Switched back on, the grace
+// restarts from that round rather than counting the time it was off: a
+// replica whose regular node left just before the switch-off is still
+// waiting for it afterwards, and is released a full load timeout later.
+func TestAReactivatedCheckerRestartsTheGrace(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.putReplica(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}))
+	require.Len(t, f.round(t), 1)
 
 	f.removeRegularNode(t, sqnRegular)
 	f.replicaObserverRound(t)
-	tasks = f.round(t)
-	require.Empty(t, tasks, "the segment waits for the regular node the group is owed")
-	require.Contains(t, f.checker.versionCache, sqnCollection, "and the waiting round marked the collection synced")
+	f.checker.Deactivate()
+	f.advance(2 * grace())
+	assert.Empty(t, f.round(t), "an inactive checker does nothing")
+	f.checker.Activate()
 
-	require.NoError(t, f.meta.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{sqnGroup: {
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
-	}}))
+	f.newSealedSegmentEntersTheTarget()
+	tasks := f.round(t)
+	assert.Empty(t, tasks, "the time the checker was off does not count")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
 
-	// No new sealed segment, no distribution report: nothing but the group.
+	f.advance(restartLength)
+	f.newSealedSegmentEntersTheTarget()
+	assert.Empty(t, f.round(t), "the grace runs from the reactivation round")
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
+
+	f.advance(grace() - restartLength)
+	f.newSealedSegmentEntersTheTarget()
 	tasks = f.round(t)
 	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
-	require.Len(t, tasks, 1, "the round right after the removal places, with no other change")
+	require.Len(t, tasks, 1)
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
 }
