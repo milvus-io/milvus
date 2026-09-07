@@ -85,6 +85,15 @@ type CollectionObserver struct {
 // percentage did not change at all. A percentage that could not be read is
 // carried over rather than recorded, so a failed read is never mistaken for a
 // stall. LastProgress is -1 until the first percentage is read.
+//
+// ReadySince is set the first time the readiness shield in
+// observeResourceGroupTimeout finds the task's resource group serving, and is
+// zero until then. A task with it set is kept alive by the shield rather than
+// by a load in progress, and it no longer counts as "loading" for the purpose
+// of pushing the checkers (observeLoadStatus): the group is serving, exactly
+// as a Loaded collection on master is, and master pushes nothing for those.
+// It is cleared when the task is re-armed to watch what a teardown left
+// behind, since that group has just proven it is not serving.
 type LoadTask struct {
 	LoadType     querypb.LoadType
 	CollectionID int64
@@ -94,6 +103,8 @@ type LoadTask struct {
 
 	LastProgress   int32
 	LastProgressAt time.Time
+
+	ReadySince time.Time
 }
 
 // NewCollectionObserver builds the observer. nodeMgr is read by the
@@ -658,8 +669,14 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 	// with the current target promoted, and it stays that way. The task lives
 	// on and is asked again a load timeout later, which is what a fully loaded
 	// group does anyway. A Ready group that never samples 100 therefore keeps
-	// its task indefinitely, one readiness read per load timeout; the task
-	// goes away with the collection, when it is released or dropped.
+	// its task indefinitely; the task goes away with the collection, when it
+	// is released or dropped.
+	//
+	// What that costs is one readiness read per load timeout, and nothing
+	// else: the task is marked ReadySince, and a task so marked no longer
+	// makes the tick push the checkers (observeLoadStatus). Without the mark
+	// a task kept this way would run every checker at the observer's own
+	// rate for as long as the ingest lasts, for a group that is serving.
 	if ob.resourceGroupIsReady(ctx, task) {
 		mlog.RatedInfo(ctx, 0.1, "resource group load percentage has not moved for the load timeout, but its shard leaders are ready, keeping it",
 			mlog.FieldCollectionID(task.CollectionID),
@@ -667,6 +684,9 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 			mlog.String("traceID", key),
 			mlog.Int32("loadPercentage", percentage))
 		task.LastProgressAt = now
+		if task.ReadySince.IsZero() {
+			task.ReadySince = now
+		}
 		ob.loadTasks.Insert(key, task)
 		return
 	}
@@ -821,9 +841,12 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 
 	if len(kept) > 0 {
 		// The group still holds replicas: keep watching them, from a fresh
-		// watermark, so they are judged on their own figure.
+		// watermark, so they are judged on their own figure. The group has
+		// just proven it is not serving, so the task is a load in progress
+		// again and drives the checkers again.
 		task.LastProgress = -1
 		task.LastProgressAt = time.Now()
+		task.ReadySince = time.Time{}
 		ob.loadTasks.Insert(key, task)
 		return
 	}
@@ -842,7 +865,13 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 	observeTaskNum := 0
 	observeStart := time.Now()
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
-		loading = true
+		// Every task is a load in progress, and pushes the checkers below,
+		// except a scoped task the readiness shield keeps alive: its group is
+		// serving, and master pushes nothing for a serving collection. An
+		// unscoped task never carries the mark and behaves as it always has.
+		if task.ReadySince.IsZero() {
+			loading = true
+		}
 		observeTaskNum++
 
 		start := time.Now()
