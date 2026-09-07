@@ -165,6 +165,37 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const BitsetView& bitset,
                 milvus::OpContext* op_context,
                 SearchResult& search_result) {
+    const auto* segment_ptr = &segment;
+    auto recreate_search_info = info;
+    Defer register_vector_iterator_recreator(
+        [&, segment_ptr, recreate_search_info] {
+            if (!search_result.allow_vector_iterator_recreation_ ||
+                !CanUseStrictGroupFilteredIterator(info, num_queries) ||
+                !search_result.vector_iterators_.has_value()) {
+                return;
+            }
+            search_result.SetVectorIteratorRecreator(
+                bitset,
+                [segment_ptr,
+                 recreate_search_info,
+                 query_data,
+                 query_offsets,
+                 num_queries,
+                 timestamp,
+                 op_context](const BitsetView& combined_filter,
+                             SearchResult& recreated_result) {
+                    SearchOnGrowing(*segment_ptr,
+                                    recreate_search_info,
+                                    query_data,
+                                    query_offsets,
+                                    num_queries,
+                                    timestamp,
+                                    combined_filter,
+                                    op_context,
+                                    recreated_result);
+                });
+        });
+
     auto schema = segment.get_schema_snapshot();
     auto& record = segment.get_insert_record();
 
