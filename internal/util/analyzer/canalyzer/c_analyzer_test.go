@@ -160,6 +160,56 @@ func TestAnalyzer(t *testing.T) {
 	}
 }
 
+func TestSynonymMappingExpand(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "legacy default",
+			params:   `{"tokenizer":"standard","filter":[{"type":"synonym","expand":true,"synonyms":["trans => translate","quick, fast"]}]}`,
+			input:    "trans fast",
+			expected: []string{"trans", "translate", "quick", "fast"},
+		},
+		{
+			name:     "disable explicit mapping expansion",
+			params:   `{"tokenizer":"standard","filter":[{"type":"synonym","expand":true,"expand_mapping":false,"synonyms":["trans => translate","quick, fast"]}]}`,
+			input:    "trans fast",
+			expected: []string{"translate", "quick", "fast"},
+		},
+		{
+			name:     "preserve legacy buffered synonym behavior",
+			params:   `{"tokenizer":"standard","filter":[{"type":"synonym","synonyms":["one => １２"]},"decimaldigit"]}`,
+			input:    "one",
+			expected: []string{"one", "１２"},
+		},
+		{
+			name:     "mutate buffered synonym",
+			params:   `{"tokenizer":"standard","filter":[{"type":"synonym","expand_mapping":false,"synonyms":["one => １２"]},"decimaldigit"]}`,
+			input:    "one",
+			expected: []string{"12"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			analyzer, err := NewAnalyzer(test.params, "")
+			require.NoError(t, err)
+			defer analyzer.Destroy()
+
+			tokenStream := analyzer.NewTokenStream(test.input)
+			defer tokenStream.Destroy()
+			var tokens []string
+			for tokenStream.Advance() {
+				tokens = append(tokens, tokenStream.Token())
+			}
+			assert.ElementsMatch(t, test.expected, tokens)
+		})
+	}
+}
+
 func TestValidateAnalyzer(t *testing.T) {
 	require.NoError(t, InitOptions())
 
