@@ -169,4 +169,11 @@ func TestInspectIndexDataV2ValidatesDescriptorAndCiphertext(t *testing.T) {
 		CollectionID: collectionID, PartitionID: partitionID, SegmentID: segmentID,
 		FieldID: fieldID, BuildID: buildID, EZID: ezID,
 	}), "plaintext event")
+	for _, suffix := range [][]byte{{0}, []byte("authentication-tag")} {
+		plaintextWithSuffix := append(append([]byte(nil), plaintext...), suffix...)
+		require.ErrorContains(t, InspectIndexDataV2(plaintextWithSuffix, VectorIndexObject{
+			CollectionID: collectionID, PartitionID: partitionID, SegmentID: segmentID,
+			FieldID: fieldID, BuildID: buildID, EZID: ezID,
+		}), "plaintext event")
+	}
 }

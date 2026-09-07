@@ -161,9 +161,9 @@ func LocateVectorIndex(ctx context.Context, client types.MixCoordClient, segment
 }
 
 // InspectIndexDataV2 is a deliberately small test-side parser. It validates
-// the cleartext descriptor and verifies that the remaining bytes are not a
-// complete plaintext IndexFileEvent. It does not call a production binlog
-// reader or ask the fixture cipher plugin to decrypt the payload.
+// the cleartext descriptor and verifies that the remaining bytes do not begin
+// with a complete plaintext IndexFileEvent. It does not call a production
+// binlog reader or ask the fixture cipher plugin to decrypt the payload.
 func InspectIndexDataV2(raw []byte, expected VectorIndexObject) error {
 	const descriptorPrefixSize = 4 + eventHeaderSize + descriptorFixedDataSize + postHeaderLengthsSize + 4
 	if len(raw) < descriptorPrefixSize {
@@ -227,7 +227,7 @@ func InspectIndexDataV2(raw []byte, expected VectorIndexObject) error {
 		return fmt.Errorf("V2 IndexData object has no ciphertext")
 	}
 	if isCompletePlaintextIndexEvent(ciphertext, nextPosition) {
-		return fmt.Errorf("V2 IndexData payload is a complete plaintext event")
+		return fmt.Errorf("V2 IndexData payload contains a complete plaintext event prefix")
 	}
 	return nil
 }
@@ -238,5 +238,5 @@ func isCompletePlaintextIndexEvent(data []byte, offset int) bool {
 	}
 	eventLength := int(binary.LittleEndian.Uint32(data[9:13]))
 	nextPosition := int(binary.LittleEndian.Uint32(data[13:17]))
-	return eventLength == len(data) && nextPosition == offset+eventLength
+	return eventLength > eventHeaderSize+16 && eventLength <= len(data) && nextPosition == offset+eventLength
 }

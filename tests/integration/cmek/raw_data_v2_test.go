@@ -161,8 +161,9 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	s.Require().NotEmpty(flushedIDs)
 	s.WaitForFlush(ctx, flushedIDs, flush.GetCollFlushTs()[collectionName], s.dbName, collectionName)
 
+	flushedSegments := s.rawFlushedSegments(collectionName, flushedIDs)
+	s.inspectRawObjects(ctx, flushedSegments, collectionID)
 	segments := s.rawSealedSegments(collectionName)
-	s.assertFlushProducedCurrentSegment(flushedIDs, segments)
 	s.inspectRawObjects(ctx, segments, collectionID)
 	if c.index {
 		s.assertNoPhysicalVectorIndex(ctx, segments, c.schema)
@@ -258,10 +259,6 @@ func (s *RawDataV2Suite) assertNoPhysicalVectorIndex(ctx context.Context, segmen
 	for _, segment := range segments {
 		ids = append(ids, segment.GetID())
 	}
-	response, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-		CollectionID: segments[0].GetCollectionID(), SegmentIDs: ids,
-	})
-	s.Require().NoError(merr.CheckRPCCall(response, err))
 	vectorIDs := make(map[int64]struct{})
 	for _, field := range schema.GetFields() {
 		if typeutil.IsVectorType(field.GetDataType()) {
@@ -275,18 +272,48 @@ func (s *RawDataV2Suite) assertNoPhysicalVectorIndex(ctx context.Context, segmen
 			}
 		}
 	}
+	s.Require().NotEmpty(vectorIDs)
+	var response *indexpb.GetIndexInfoResponse
+	s.Require().Eventually(func() bool {
+		candidate, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
+			CollectionID: segments[0].GetCollectionID(), SegmentIDs: ids,
+		})
+		if err = merr.CheckRPCCall(candidate, err); err != nil {
+			return false
+		}
+		if !completeVectorIndexMetadata(candidate, segments, vectorIDs) {
+			return false
+		}
+		response = candidate
+		return true
+	}, 2*time.Minute, 500*time.Millisecond, "vector-index metadata did not finish for segments %v and fields %v", ids, vectorIDs)
 	for _, segment := range segments {
-		seen := make(map[int64]int, len(vectorIDs))
 		for _, info := range response.GetSegmentInfo()[segment.GetID()].GetIndexInfos() {
 			if _, target := vectorIDs[info.GetFieldID()]; target {
-				seen[info.GetFieldID()]++
 				s.Require().Empty(info.GetIndexFilePaths(), "raw vector segment %d field %d unexpectedly has physical index files", segment.GetID(), info.GetFieldID())
 			}
 		}
-		for fieldID := range vectorIDs {
-			s.Require().Equal(1, seen[fieldID], "raw vector segment %d must report exactly one logical index for field %d", segment.GetID(), fieldID)
+	}
+}
+
+func completeVectorIndexMetadata(response *indexpb.GetIndexInfoResponse, segments []*datapb.SegmentInfo, vectorFieldIDs map[int64]struct{}) bool {
+	if response == nil {
+		return false
+	}
+	for _, segment := range segments {
+		seen := make(map[int64]int, len(vectorFieldIDs))
+		for _, info := range response.GetSegmentInfo()[segment.GetID()].GetIndexInfos() {
+			if _, target := vectorFieldIDs[info.GetFieldID()]; target {
+				seen[info.GetFieldID()]++
+			}
+		}
+		for fieldID := range vectorFieldIDs {
+			if seen[fieldID] != 1 {
+				return false
+			}
 		}
 	}
+	return true
 }
 
 func (s *RawDataV2Suite) assertLoadedFields(ctx context.Context, collectionID int64, expected []int64) {
@@ -445,22 +472,38 @@ func (s *RawDataV2Suite) rawSealedSegments(collection string) []*datapb.SegmentI
 	return segments
 }
 
-func (s *RawDataV2Suite) assertFlushProducedCurrentSegment(flushed []int64, current []*datapb.SegmentInfo) {
+func (s *RawDataV2Suite) rawFlushedSegments(collection string, flushed []int64) []*datapb.SegmentInfo {
+	var segments []*datapb.SegmentInfo
+	s.Require().Eventually(func() bool {
+		current, err := s.Cluster.ShowSegmentsWithDB(s.dbName, collection)
+		if err != nil {
+			return false
+		}
+		segments = selectFlushSegments(flushed, current)
+		return len(segments) > 0
+	}, 2*time.Minute, 500*time.Millisecond, "no inspectable Segment was found for flush %v", flushed)
+	return segments
+}
+
+func selectFlushSegments(flushed []int64, current []*datapb.SegmentInfo) []*datapb.SegmentInfo {
 	flushedIDs := make(map[int64]struct{}, len(flushed))
 	for _, id := range flushed {
 		flushedIDs[id] = struct{}{}
 	}
+	segments := make([]*datapb.SegmentInfo, 0, len(flushed))
 	for _, segment := range current {
-		if _, ok := flushedIDs[segment.GetID()]; ok {
-			return
-		}
-		for _, sourceID := range segment.GetCompactionFrom() {
-			if _, ok := flushedIDs[sourceID]; ok {
-				return
-			}
+		persisted := segment.GetState() == commonpb.SegmentState_Sealed || segment.GetState() == commonpb.SegmentState_Flushed
+		compacted := segment.GetState() == commonpb.SegmentState_Dropped && segment.GetCompacted()
+		if _, ok := flushedIDs[segment.GetID()]; ok &&
+			(persisted || compacted) &&
+			segment.GetNumOfRows() > 0 {
+			segments = append(segments, segment)
 		}
 	}
-	s.FailNow("no current sealed segment came from this flush", "flush=%v", flushed)
+	if len(segments) != len(flushedIDs) {
+		return nil
+	}
+	return segments
 }
 
 func (s *RawDataV2Suite) cleanupRawCollection(collection string) {
