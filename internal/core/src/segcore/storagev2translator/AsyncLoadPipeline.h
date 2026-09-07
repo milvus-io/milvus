@@ -45,12 +45,16 @@ struct AsyncLoadPipelineOptions {
     // work because Folly Task does not support inline-like executors. A dummy
     // keep-alive token does not extend lifetime, so its executor must otherwise
     // outlive the returned task and all work started by it.
+    // The selected submission method (add() or addWithPriority()) must accept
+    // initial tasks and every continuation without rejecting work or throwing.
+    // Apply backpressure before dispatch; queue-full rejection is unsupported.
     folly::Executor::KeepAlive<> executor{};
     // Empty means finalization runs on executor. Mmap callers may provide a
     // dedicated non-inline local-file executor so Arrow-to-local
     // materialization and the blocking file operations run as one scheduled
     // task. The provider is called after remote reads complete so they do not
-    // keep that executor alive while waiting on storage.
+    // keep that executor alive while waiting on storage. A returned executor
+    // must satisfy the same lifetime and submission requirements as executor.
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider{};
 };
@@ -61,8 +65,10 @@ using AsyncCellResult =
 // Lazy coroutine: admission, storage read, and finalization start when the task
 // is awaited. segment_id is required for diagnostics. The executor keep-alive
 // and ctx cancellation token are captured when this function is called.
-// Exceptions from setup or awaited work preserve SegcoreError codes; allocation
-// and Folly failures are classified, and untyped failures become UnexpectedError.
+// Exceptions that propagate from setup or awaited work preserve SegcoreError
+// codes; allocation and Folly failures are classified, and untyped failures
+// become UnexpectedError. Executor submission exceptions in Folly's noexcept
+// scheduling paths terminate the process and cannot be classified here.
 [[nodiscard]] folly::coro::Task<std::vector<AsyncCellResult>>
 LoadCellsAsync(const milvus::OpContext* ctx,
                int64_t segment_id,

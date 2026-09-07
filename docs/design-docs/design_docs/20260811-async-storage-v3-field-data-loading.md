@@ -373,17 +373,32 @@ Reader preparation and cell loading share the default process-wide
 `folly::CPUThreadPoolExecutor`, resolved through `ResolveAsyncLoadExecutor`, with:
 
 - `max(1, CPU_NUM)` workers;
-- two priority queues;
+- two unbounded priority queues;
 - thread name prefix `MILVUS_ASYNC_LOAD_`.
 
 Milvus `LoadPriority::HIGH` maps to Folly high priority and
 `LoadPriority::LOW` maps to Folly low priority. The continuation after an
 asynchronous storage future is also rebound to this executor and priority.
 
-The pipeline can accept a custom executor for tests or future integration. A
-custom executor must defer submitted work, support Folly keep-alive semantics
-or outlive the task, and implement priority submission if it advertises more
-than one priority.
+Reader opening and cell loading can accept a custom executor for tests or
+future integration. A custom executor must defer submitted work, support Folly
+keep-alive semantics or otherwise outlive the task and all its continuations,
+and implement priority submission if it advertises more than one priority.
+The selected submission method (`add()` or `addWithPriority()`) must accept
+initial tasks and every continuation without rejecting work or throwing. The
+same requirements apply to an executor returned by the mmap finalization
+provider.
+
+Backpressure belongs before dispatch, using the transient-budget admission for
+cell reads and the existing concurrency limit for reader opens. Executors that
+reject submissions when their queues fill are unsupported: a continuation
+must still be able to run so admitted work can complete and release resources.
+The production load and local-file executors use unbounded priority queues and
+keep-alive ownership. Folly schedules both initial tasks and continuations
+through `noexcept` paths; an exception during submission, including an
+allocation failure, terminates the process instead of reaching the pipeline's
+exception handlers. Executor submission failures are outside the recoverable
+error contract.
 
 ### Window submission
 
@@ -533,12 +548,19 @@ After the join:
 
 Both reader opening and cell loading translate Arrow/storage statuses through
 `milvus_storage::ToSegcoreError`. Their public entry points also classify native
-exceptions from setup and awaited work: `SegcoreError` codes are preserved,
-allocation failures become `MemAllocateFailed`, Folly cancellation becomes
-`FollyCancel`, other Folly future failures become `FollyOtherException`, and
-untyped failures become `UnexpectedError`. Awaited failures are classified after
+exceptions that propagate from setup and awaited work: `SegcoreError` codes
+are preserved, allocation failures become `MemAllocateFailed`, Folly
+cancellation becomes `FollyCancel`, other Folly future failures become
+`FollyOtherException`, and untyped failures become `UnexpectedError`.
+Awaited failures are classified after
 draining work and selecting the error to propagate. Categories already flattened
 into an untyped Arrow status upstream cannot be recovered here.
+
+This classification excludes executor submission failures in Folly's
+`noexcept` scheduling paths, including allocation failures during submission.
+Those failures terminate the process; the first-failure, draining, and lease
+release protocol does not provide recovery from them. Executors must meet the
+submission requirements described under [Load executor](#load-executor).
 
 ## Result Ordering and Ownership
 
@@ -679,7 +701,8 @@ Focused tests should cover the following contracts:
 - async storage continuation binding to the configured executor and priority;
 - budget-before-submit ordering, high-priority admission, FIFO behavior,
   oversized admission, dynamic capacity, and cancellation races;
-- budget release on storage, finalization, scheduling, and cancellation errors;
+- budget release on propagated setup, storage, finalization, and cancellation
+  errors;
 - first-failure publication before budget release;
 - cancellation while waiting for budget, after storage read, and between cell
   finalizations;

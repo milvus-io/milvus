@@ -47,7 +47,12 @@ struct AsyncChunkReaderOpenOptions {
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
     // Empty selects the process-wide async-load executor. The keep-alive is
-    // captured when the lazy task is created.
+    // captured when the lazy task is created. A custom executor must defer
+    // work and support keep-alive semantics or otherwise outlive the task and
+    // all its continuations. Executors advertising multiple priorities must
+    // implement addWithPriority(). The selected submission method must accept
+    // initial tasks and every continuation without rejecting work or throwing.
+    // Apply backpressure before dispatch; queue-full rejection is unsupported.
     folly::Executor::KeepAlive<> executor{};
 };
 
@@ -60,8 +65,10 @@ using ChunkReaderPtr = std::shared_ptr<milvus_storage::api::ChunkReader>;
 // Caller/context cancellation takes precedence over that failure and is checked
 // before each dispatch and after draining. The context token is captured at call
 // time, and Arrow statuses retain their Segcore error classification.
-// Exceptions from setup or awaited work preserve SegcoreError codes; allocation
-// and Folly failures are classified, and untyped failures become UnexpectedError.
+// Exceptions that propagate from setup or awaited work preserve SegcoreError
+// codes; allocation and Folly failures are classified, and untyped failures
+// become UnexpectedError. Executor submission exceptions in Folly's noexcept
+// scheduling paths terminate the process and cannot be classified here.
 [[nodiscard]] folly::coro::Task<std::vector<ChunkReaderPtr>>
 OpenChunkReadersAsync(const milvus::OpContext* ctx,
                       int64_t segment_id,
