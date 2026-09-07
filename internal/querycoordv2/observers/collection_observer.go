@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -121,9 +122,16 @@ func NewCollectionObserver(
 
 	// Add load task for collection recovery
 	collections := meta.GetAllCollections(context.TODO())
+	// Scoped tasks are registered by the incremental-expansion path alone,
+	// which only runs when a form is installed (job.isIncrementalExpansion),
+	// so on a stock binary there is nothing to rebuild -- and the rebuild is
+	// the one producer of scoped tasks that would otherwise run there. Read
+	// once: SetHook runs before milvus starts, so the answer cannot change
+	// underneath this loop.
+	formInstalled := extension.FormInstalled()
 	for _, collection := range collections {
 		ob.LoadCollection(context.Background(), collection.GetCollectionID(), "")
-		if collection.GetStatus() == querypb.LoadStatus_Loaded {
+		if formInstalled && collection.GetStatus() == querypb.LoadStatus_Loaded {
 			ob.recoverResourceGroupTasks(context.Background(), collection.GetCollectionID())
 		}
 	}
@@ -132,7 +140,11 @@ func NewCollectionObserver(
 }
 
 // recoverResourceGroupTasks rebuilds the resource-group-scoped tasks of one
-// already-loaded collection after a restart.
+// already-loaded collection after a restart. It runs only when a form is
+// installed: the path that registers scoped tasks in the first place is
+// form-gated, so a stock binary has none to rebuild, and handing a stock
+// binary teardown-capable tasks it never asked for would let a load timeout
+// release replicas of a Loaded collection -- something master never does.
 //
 // Scoped tasks live only in memory: the incremental-expansion path adds a
 // resource group to a collection that is already serving, deliberately leaves
