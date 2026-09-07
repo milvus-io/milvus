@@ -372,7 +372,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	// An unexpected GetPartitions call will still fail this strict mock.
 
 	task := &queryTask{
-		baseTask: baseTask{metaCache: cache},
+		baseTask: baseTask{MetaCache: cache},
 		ctx:      ctx,
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base:       &commonpb.MsgBase{},
