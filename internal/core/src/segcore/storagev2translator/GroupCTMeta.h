@@ -15,7 +15,15 @@
 // limitations under the License.
 #pragma once
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <utility>
+#include <vector>
+
 #include "cachinglayer/Translator.h"
+#include "common/Utils.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -26,12 +34,50 @@ constexpr size_t kRowGroupsPerCell = 4;
 static_assert(kRowGroupsPerCell > 0,
               "kRowGroupsPerCell must be greater than 0");
 
+inline std::pair<milvus::cachinglayer::ResourceUsage,
+                 milvus::cachinglayer::ResourceUsage>
+EstimateGroupChunkLoadingUsage(
+    const std::vector<int64_t>& cell_sizes,
+    const std::vector<milvus::cachinglayer::cid_t>& cids,
+    int64_t max_cell_size,
+    bool use_mmap,
+    size_t worker_count,
+    int64_t batch_target_bytes) {
+    if (cids.empty()) {
+        return {};
+    }
+
+    int64_t loaded_size = 0;
+    for (const auto cid : cids) {
+        assert(cid < cell_sizes.size());
+        loaded_size = SaturatingAdd(loaded_size, cell_sizes[cid]);
+    }
+
+    // All requested cells remain loaded. A load-pool worker owns at most one
+    // batch at a time, including both Arrow reads and finalization. A batch is
+    // bounded by the target size unless it contains one oversized cell.
+    const auto concurrent_batches =
+        std::min(cids.size(), std::max<size_t>(worker_count, 1));
+    const auto max_batch_size =
+        std::max({batch_target_bytes, max_cell_size, int64_t{1}});
+    const auto temporary_size =
+        std::min(loaded_size,
+                 SaturatingMultiply(max_batch_size,
+                                    static_cast<int64_t>(concurrent_batches)));
+
+    if (use_mmap) {
+        return {{0, loaded_size}, {temporary_size, loaded_size}};
+    }
+    return {{loaded_size, 0}, {SaturatingAdd(loaded_size, temporary_size), 0}};
+}
+
 struct GroupCTMeta : public milvus::cachinglayer::Meta {
     // num_rows_until_chunk_[i] = total rows(prefix sum) in cells [0, i-1]
     // the size of num_rows_until_chunk_ is num_cells + 1
     std::vector<int64_t> num_rows_until_chunk_;
     // memory size for each group chunk(cache cell)
     std::vector<int64_t> chunk_memory_size_;
+    int64_t max_chunk_memory_size_{0};
     size_t num_fields_;
     // total number of row groups
     size_t total_row_groups_;

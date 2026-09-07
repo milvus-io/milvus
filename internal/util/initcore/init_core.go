@@ -377,6 +377,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	maxLoadingMemoryRatio := C.double(params.QueryNodeCfg.TieredMaxLoadingMemoryRatio.GetAsFloat())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
@@ -392,7 +393,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
-		loadingTimeoutMs, warmupLoadingTimeoutMs)
+		loadingTimeoutMs, warmupLoadingTimeoutMs, maxLoadingMemoryRatio)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -436,6 +437,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	maxLoadingMemoryRatio := C.double(params.QueryNodeCfg.TieredMaxLoadingMemoryRatio.GetAsFloat())
 
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
@@ -444,7 +446,8 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 		scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
-		vectorIndexCacheWarmupPolicy)
+		vectorIndexCacheWarmupPolicy,
+		maxLoadingMemoryRatio)
 
 	return nil
 }
@@ -681,6 +684,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredMaxLoadingMemoryRatio.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 

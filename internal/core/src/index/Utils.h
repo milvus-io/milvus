@@ -38,6 +38,7 @@
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
+#include "pb/common.pb.h"
 
 namespace milvus::index {
 
@@ -186,6 +187,11 @@ GetIndexMetaFromConfig(const Config& config);
 Config
 ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
+
+uint64_t
+ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
+                                int32_t scalar_version,
+                                proto::common::LoadPriority load_priority);
 
 struct IndexDataCodec {
     std::list<std::unique_ptr<storage::DataCodec>> codecs_{};

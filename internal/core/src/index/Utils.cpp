@@ -28,6 +28,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "common/EasyAssert.h"
+#include "common/Consts.h"
 #include "common/Exception.h"
 #include "common/File.h"
 #include "common/FieldData.h"
@@ -38,10 +39,37 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include "storage/IndexData.h"
+#include "storage/PluginLoader.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::index {
+
+uint64_t
+ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
+                                int32_t scalar_version,
+                                proto::common::LoadPriority load_priority) {
+    if (index_size_in_bytes == 0) {
+        return 0;
+    }
+    if (scalar_version < 3) {
+        return index_size_in_bytes;
+    }
+
+    // Without persisted slice metadata an encrypted slice has no trustworthy
+    // ciphertext bound. Keep the existing whole-index estimate whenever a
+    // cipher plugin is active.
+    if (storage::PluginLoader::GetInstance().getCipherPlugin() != nullptr) {
+        return index_size_in_bytes;
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(PriorityForLoad(load_priority));
+    const auto worker_count = std::max<size_t>(1, pool.GetMaxThreadNum());
+    const auto pool_download_peak = SaturatingMultiply(
+        worker_count, static_cast<uint64_t>(DEFAULT_INDEX_FILE_SLICE_SIZE));
+    return std::min(index_size_in_bytes, pool_download_peak);
+}
 
 size_t
 get_file_size(int fd) {

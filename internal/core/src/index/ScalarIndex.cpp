@@ -33,6 +33,7 @@
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -249,9 +250,12 @@ ScalarIndex<T>::LoadUnified(const Config& config) {
 
     auto collection_id =
         GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
+    const auto load_priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
 
-    auto reader =
-        storage::IndexEntryReader::Open(input, file_size, collection_id);
+    auto reader = storage::IndexEntryReader::Open(
+        input, file_size, collection_id, PriorityForLoad(load_priority));
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
     LoadEntries(*reader, config);

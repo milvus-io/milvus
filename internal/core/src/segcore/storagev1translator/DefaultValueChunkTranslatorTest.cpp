@@ -13,7 +13,11 @@
 #include <fmt/core.h>
 #include <filesystem>
 #include <memory>
+#include <numeric>
 #include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
@@ -83,8 +87,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
         EXPECT_EQ(translator->cell_id_of(i), i);
     }
 
-    // Test estimated_byte_size_of_cell
-    auto [usage, peak_usage] = translator->estimated_byte_size_of_cell(0);
+    // Test estimated_loading_usage
+    auto [usage, peak_usage] = translator->estimated_loading_usage({0});
     if (use_mmap) {
         EXPECT_GT(usage.file_bytes, 0);
     } else {
@@ -542,7 +546,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
     EXPECT_EQ(translator->num_cells(), 0);
 }
 
-// Test estimated_byte_size_of_cell for different cell indices
+// Test estimated_loading_usage for different cell indices
 TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     bool use_mmap = GetParam();
     int64_t row_count = 5000000;  // Ensure multiple cells
@@ -563,8 +567,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     size_t num_cells = translator->num_cells();
     if (num_cells > 1) {
         for (size_t i = 0; i < num_cells; ++i) {
-            auto [usage, peak_usage] =
-                translator->estimated_byte_size_of_cell(i);
+            auto [usage, peak_usage] = translator->estimated_loading_usage({i});
             if (use_mmap) {
                 EXPECT_GT(usage.file_bytes, 0);
             } else {
@@ -572,6 +575,65 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
             }
         }
     }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, AccountsSharedBuffersOnce) {
+    const bool use_mmap = GetParam();
+    const std::string default_string = "shared_default_value";
+    const int64_t rows_per_cell =
+        DefaultValueChunkTranslator::kTargetCellBytes /
+        (default_string.size() + 1);
+    const int64_t row_count = rows_per_cell * 3 + rows_per_cell / 2;
+
+    DefaultValueType value_field;
+    value_field.set_string_data(default_string);
+    FieldMeta field_meta(FieldName("shared_buffer_accounting"),
+                         FieldId(1102),
+                         DataType::STRING,
+                         false,
+                         value_field);
+    FieldDataInfo field_data_info(1102, row_count, getMmapDirPath());
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    std::vector<cachinglayer::cid_t> cids(translator->num_cells());
+    std::iota(cids.begin(), cids.end(), 0);
+    const auto tail_cid = cids.back();
+    const auto [estimated, estimated_peak] =
+        translator->estimated_loading_usage({tail_cid});
+    auto cells = translator->get_cells(nullptr, {tail_cid});
+    cids.pop_back();
+    auto remaining_cells = translator->get_cells(nullptr, cids);
+    for (auto& cell : remaining_cells) {
+        cells.emplace_back(std::move(cell));
+    }
+
+    int64_t unique_buffer_bytes = 0;
+    int64_t charged_memory_bytes = 0;
+    int64_t charged_file_bytes = 0;
+    std::unordered_set<const char*> seen_buffers;
+    for (const auto& [cid, chunk] : cells) {
+        if (seen_buffers.insert(chunk->RawData()).second) {
+            unique_buffer_bytes += chunk->Size();
+        }
+        const auto charged = chunk->CellByteSize();
+        charged_memory_bytes += charged.memory_bytes;
+        charged_file_bytes += charged.file_bytes;
+    }
+    ASSERT_EQ(seen_buffers.size(), 2);
+
+    if (use_mmap) {
+        EXPECT_EQ(estimated,
+                  (cachinglayer::ResourceUsage{0, unique_buffer_bytes}));
+        EXPECT_EQ(charged_memory_bytes, 0);
+        EXPECT_EQ(charged_file_bytes, unique_buffer_bytes);
+    } else {
+        EXPECT_EQ(estimated,
+                  (cachinglayer::ResourceUsage{unique_buffer_bytes, 0}));
+        EXPECT_EQ(charged_memory_bytes, unique_buffer_bytes);
+        EXPECT_EQ(charged_file_bytes, 0);
+    }
+    EXPECT_EQ(estimated_peak, estimated);
 }
 
 // Parameterized test with both mmap modes

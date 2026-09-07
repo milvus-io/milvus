@@ -3485,6 +3485,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	TieredMaxLoadingMemoryRatio     ParamItem `refreshable:"true"`
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
@@ -3575,6 +3576,19 @@ type queryNodeConfig struct {
 
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
+
+	// MutatePoolSizeFactor controls the size of the online-write CGO pool
+	// (segment Insert/Delete) as CPUNum * factor. The mutate pool is isolated
+	// from load/management work so segment loading cannot starve online writes.
+	MutatePoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DynamicPoolSizeFactor controls the size of the dynamic CGO pool
+	// (segment create/release/statistics/index-info) as CPUNum * factor.
+	DynamicPoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DeletePoolSizeFactor controls the size of the DeleteBatch dispatch pool
+	// as CPUNum * factor.
+	DeletePoolSizeFactor ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -3959,6 +3973,22 @@ If set to 0, time based eviction is disabled.`,
 		Export: false,
 	}
 	p.TieredLoadingResourceFactor.Init(base.mgr)
+
+	p.TieredMaxLoadingMemoryRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.maxLoadingMemoryRatio",
+		Version:      "2.6.23",
+		DefaultValue: "1.0",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio <= 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "Maximum ratio of effective memory that may be used by concurrent caching-layer loading. Valid range: (0.0, 1.0].",
+		Export: false,
+	}
+	p.TieredMaxLoadingMemoryRatio.Init(base.mgr)
 
 	p.TieredLoadingTimeoutMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
@@ -4812,6 +4842,33 @@ user-task-polling:
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.MutatePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.mutatePoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "2",
+		Doc:          "size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes",
+		Export:       true,
+	}
+	p.MutatePoolSizeFactor.Init(base.mgr)
+
+	p.DynamicPoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.dynamicPoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info",
+		Export:       true,
+	}
+	p.DynamicPoolSizeFactor.Init(base.mgr)
+
+	p.DeletePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.deletePoolSizeFactor",
+		Version:      "2.6.20",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the DeleteBatch dispatch pool",
+		Export:       true,
+	}
+	p.DeletePoolSizeFactor.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",

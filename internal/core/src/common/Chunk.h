@@ -100,10 +100,18 @@ class Chunk {
 
     cachinglayer::ResourceUsage
     CellByteSize() const {
+        if (cell_size_override_.has_value()) {
+            return cell_size_override_.value();
+        }
         if (chunk_mmap_guard_ && chunk_mmap_guard_->is_file_backed()) {
             return cachinglayer::ResourceUsage(0, static_cast<int64_t>(size_));
         }
         return cachinglayer::ResourceUsage(static_cast<int64_t>(size_), 0);
+    }
+
+    void
+    SetCellSize(cachinglayer::ResourceUsage cell_size) {
+        cell_size_override_ = cell_size;
     }
 
     int64_t
@@ -251,6 +259,7 @@ class Chunk {
     bool nullable_;
 
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard_{nullptr};
+    std::optional<cachinglayer::ResourceUsage> cell_size_override_;
     mutable std::once_flag valid_rank_blocks_once_;
     mutable std::vector<int64_t> valid_rank_blocks_;
 };

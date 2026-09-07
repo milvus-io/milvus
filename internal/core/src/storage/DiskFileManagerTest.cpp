@@ -14,6 +14,7 @@
 #include <boost/filesystem/path.hpp>
 #include <cxxabi.h>
 #include <fcntl.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -90,6 +91,93 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 using namespace knowhere;
+
+namespace {
+
+std::string
+GetLocalStorageV2Path(const storage::FileManagerContext& context,
+                      const std::string& remote_path) {
+    return boost::filesystem::path(remote_path)
+        .lexically_relative(context.chunkManagerPtr->GetRootPath())
+        .string();
+}
+
+void
+ExpectMatchingRows(const TargetBitmap& bitmap,
+                   size_t row_count,
+                   std::initializer_list<size_t> matching_rows) {
+    std::vector<bool> expected(row_count, false);
+    for (auto row : matching_rows) {
+        ASSERT_LT(row, row_count);
+        expected[row] = true;
+    }
+
+    ASSERT_EQ(bitmap.size(), row_count);
+    EXPECT_EQ(bitmap.count(), matching_rows.size());
+    for (size_t row = 0; row < row_count; ++row) {
+        EXPECT_EQ(bitmap[row], expected[row]) << "offset " << row;
+    }
+}
+
+void
+VerifyStringSortPatternMatches(milvus::index::StringIndexSort& index,
+                               size_t row_count) {
+    using milvus::proto::plan::OpType;
+
+    ExpectMatchingRows(
+        index.PatternMatch("app%ion", OpType::Match), row_count, {1, 7});
+    ExpectMatchingRows(
+        index.PatternMatch("%ana%", OpType::Match), row_count, {3});
+    ExpectMatchingRows(
+        index.PatternMatch("a\\%b", OpType::Match), row_count, {8});
+    ExpectMatchingRows(index.PatternMatch("app", OpType::PrefixMatch),
+                       row_count,
+                       {0, 1, 2, 7});
+    ExpectMatchingRows(
+        index.PatternMatch("ion", OpType::PostfixMatch), row_count, {1, 7});
+    ExpectMatchingRows(
+        index.PatternMatch("cat", OpType::InnerMatch), row_count, {1, 5, 7});
+}
+
+void
+RunStringSortV3PatternMatchRoundtrip(const storage::FileManagerContext& context,
+                                     milvus::Config load_config) {
+    const std::vector<std::string> values = {
+        "apple",
+        "application",
+        "apply",
+        "banana",
+        "band",
+        "category",
+        "dog",
+        "application",
+        "a%b",
+        "application",
+    };
+    const bool valid_data[] = {
+        true, true, true, true, true, true, true, true, true, false};
+
+    milvus::index::StringIndexSort build_index(context);
+    build_index.Build(values.size(), values.data(), valid_data);
+
+    auto stats = build_index.UploadUnified({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+    auto local_index_path = GetLocalStorageV2Path(context, files.front());
+    auto cleanup_index_file = folly::makeGuard(
+        [path = local_index_path]() { (void)unlink(path.c_str()); });
+
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files.front()};
+    milvus::index::StringIndexSort load_index(context);
+    load_index.LoadUnified(load_config);
+
+    ASSERT_EQ(load_index.Count(), static_cast<int64_t>(values.size()));
+    VerifyStringSortPatternMatches(load_index, values.size());
+}
+
+}  // namespace
 
 class DiskAnnFileManagerTest : public testing::Test {
  public:
@@ -1369,6 +1457,9 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
+    auto local_index_path = GetLocalStorageV2Path(context, files.front());
+    auto cleanup_index_file = folly::makeGuard(
+        [path = local_index_path]() { (void)unlink(path.c_str()); });
 
     milvus::index::StringIndexSort load_index(context);
     milvus::Config load_config;
@@ -1394,6 +1485,33 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
         ASSERT_TRUE(val.has_value());
         EXPECT_EQ(val.value(), "str_000");
     }
+}
+
+TEST_F(DiskAnnFileManagerTest, StringIndexSortV3PatternMatchMemoryRoundtrip) {
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1001, 1, "index"};
+    storage::FileManagerContext context(field_data_meta, index_meta, cm_, fs_);
+
+    milvus::Config load_config;
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    RunStringSortV3PatternMatchRoundtrip(context, std::move(load_config));
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       StringIndexSortV3PatternMatchMmapLowPriorityRoundtrip) {
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1002, 1, "index"};
+    storage::FileManagerContext context(field_data_meta, index_meta, cm_, fs_);
+
+    milvus::Config load_config;
+    load_config[milvus::index::ENABLE_MMAP] = true;
+    load_config[milvus::index::MMAP_FILE_PATH] =
+        TestLocalPath + "string_sort_v3_pattern_match_low_mmap.idx";
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::LOW;
+    RunStringSortV3PatternMatchRoundtrip(context, std::move(load_config));
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {

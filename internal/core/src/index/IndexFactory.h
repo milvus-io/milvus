@@ -17,7 +17,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <shared_mutex>
 
@@ -57,6 +59,10 @@ class IndexFactory {
     static bool
     CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
+    // Metadata-only estimator for callers that do not own an index-file
+    // context, notably the Go/CGo segment-loader admission path. This overload
+    // performs no index-file I/O, so a HYBRID index uses the conservative
+    // HYBRID fallback because its selected internal index type is unavailable.
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
                       DataType element_type,
@@ -66,6 +72,22 @@ class IndexFactory {
                       bool mmap_enable,
                       int64_t num_rows,
                       int64_t dim);
+
+    // Context-aware estimator used by SealedIndexTranslator. The file context
+    // lets a HYBRID index resolve its persisted internal index type before
+    // estimating; vector and non-HYBRID scalar indexes share the metadata-only
+    // estimation logic above.
+    LoadResourceRequest
+    IndexLoadResource(DataType field_type,
+                      DataType element_type,
+                      IndexVersion index_version,
+                      uint64_t index_size_in_bytes,
+                      const std::map<std::string, std::string>& index_params,
+                      bool mmap_enable,
+                      int64_t num_rows,
+                      int64_t dim,
+                      const std::vector<std::string>& index_files,
+                      const storage::FileManagerContext& file_manager_context);
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
@@ -77,6 +99,7 @@ class IndexFactory {
                          int64_t num_rows,
                          int64_t dim);
 
+    // Shared metadata-only scalar estimator.
     LoadResourceRequest
     ScalarIndexLoadResource(
         DataType field_type,
@@ -85,6 +108,18 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows);
+
+    // HYBRID-aware scalar estimator backing the context-aware entry point.
+    LoadResourceRequest
+    ScalarIndexLoadResource(
+        DataType field_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& file_manager_context);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
