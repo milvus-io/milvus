@@ -703,7 +703,7 @@ func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ..
 func WrapErrAutoIDUpsertTargetNotFound(notFoundCount int) error {
 	return wrapMsg(
 		ErrAutoIDUpsertTargetNotFound,
-		"autoID full upsert target not found because proxy.autoIDUpsertInsertOnNotFound=false; not_found_count=%d",
+		"autoID full upsert target not found because proxy.autoIDUpsertAllowInsert=false; not_found_count=%d",
 		notFoundCount,
 	)
 }

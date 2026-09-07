@@ -212,6 +212,7 @@ func TestAutoIDUpsertTargetNotFound(t *testing.T) {
 	assert.Equal(t, "true", status.GetExtraInfo()[InputErrorFlagKey])
 	assert.False(t, status.GetRetriable())
 	assert.Contains(t, err.Error(), "not_found_count=2")
+	assert.Contains(t, err.Error(), "proxy.autoIDUpsertAllowInsert=false")
 	assert.NotContains(t, err.Error(), "[")
 	assert.ErrorIs(t, Error(status), ErrAutoIDUpsertTargetNotFound)
 }

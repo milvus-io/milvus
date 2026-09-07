@@ -970,7 +970,6 @@ func partialUpdateCASTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASIDs(finalInsertPKs),
 	}
-	task.insertPKs = partialUpdateCASIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASIDs(deletePKs)
 	task.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{}},
@@ -1015,7 +1014,6 @@ func partialUpdateCASRealPackTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASIDs(finalInsertPKs),
 	}
-	task.insertPKs = partialUpdateCASIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASIDs(deletePKs)
 	task.idAllocator = &allocator.IDAllocator{}
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
@@ -1453,13 +1451,20 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 }
 
 func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
-	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-	task.partitionKeys = partialUpdateCASPKFieldData([]int64{10})
+	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{20, 10}, nil)
+	task.partitionKeys = partialUpdateCASPKFieldData([]int64{20, 10})
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
-	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
-		Return([]streamingmessage.MutableMessage{}, nil).
-		Build()
+	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).To(
+		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg,
+			result *milvuspb.MutationResult, _ *schemapb.FieldData, _ *streamingmessage.CipherConfig,
+			_ *schemapb.CollectionSchema, _ int32, _ map[string]*messagespb.PartialUpdateCAS,
+		) ([]streamingmessage.MutableMessage, error) {
+			require.Same(t, task.result, result)
+			require.Equal(t, []int64{20, 10}, result.GetIDs().GetIntId().GetData())
+			return nil, nil
+		},
+	).Build()
 	defer partitionPatch.UnPatch()
 
 	msgs, err := task.packInsertMessage(context.Background(), nil)
@@ -1468,9 +1473,8 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 }
 
 func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
-	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-	task.insertPKs = partialUpdateCASIDs([]int64{10})
-	task.result.IDs = partialUpdateCASIDs([]int64{99})
+	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 1001}, []int64{10})
+	task.req.PartialUpdate = false
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
 
@@ -1480,13 +1484,18 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 			_ context.Context,
 			_ Cache,
 			_ []string,
-			_ *msgstream.InsertMsg,
+			insertMsg *msgstream.InsertMsg,
 			result *milvuspb.MutationResult,
 			_ *streamingmessage.CipherConfig,
 			_ int32,
 			_ map[string]*messagespb.PartialUpdateCAS,
 		) ([]streamingmessage.MutableMessage, error) {
 			routingIDs = result.GetIDs()
+			primaryData, err := typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), task.schema.GetFields()[0])
+			require.NoError(t, err)
+			payloadIDs, err := parsePrimaryFieldData2IDs(primaryData)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(payloadIDs, routingIDs))
 			return nil, nil
 		},
 	).Build()
@@ -1495,8 +1504,29 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 	msgs, err := task.packInsertMessage(context.Background(), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
-	require.Equal(t, []int64{10}, routingIDs.GetIntId().GetData())
-	require.Equal(t, []int64{99}, task.result.GetIDs().GetIntId().GetData())
+	require.Equal(t, []int64{10, 1001}, routingIDs.GetIntId().GetData())
+	require.True(t, proto.Equal(routingIDs, task.result.GetIDs()))
+}
+
+func TestPackInsertMessageRejectsMissingResultIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result *milvuspb.MutationResult
+	}{
+		{name: "nil result"},
+		{name: "nil IDs", result: &milvuspb.MutationResult{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+			task.result = tc.result
+			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
+			defer collectionPatch.UnPatch()
+
+			msgs, err := task.packInsertMessage(context.Background(), nil)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Empty(t, msgs)
+		})
+	}
 }
 
 func TestPackDeleteMessageSkipsEmptyPrimaryKeys(t *testing.T) {
@@ -1555,6 +1585,13 @@ func TestFullAutoIDMixedPlanRoutesExistingInsertAndDeleteTogether(t *testing.T) 
 	}
 	require.Contains(t, insertChannels, existingPK)
 	require.Contains(t, insertChannels, generatedPK)
+	require.Equal(t, []int64{existingPK, generatedPK}, task.result.GetIDs().GetIntId().GetData())
+	expectedChannels := groupPartialUpdateCASIntPKs(t, task.result.GetIDs().GetIntId().GetData(), partialUpdateCASTestVChannels)
+	for channel, ids := range expectedChannels {
+		for _, id := range ids {
+			require.Equal(t, channel, insertChannels[id])
+		}
+	}
 
 	deleteChannels := make(map[int64]string)
 	for _, msg := range deleteMsgs {
@@ -1621,7 +1658,6 @@ func partialUpdateCASStringTestTask(
 	task.result = &milvuspb.MutationResult{
 		IDs: partialUpdateCASStringIDs(finalInsertPKs),
 	}
-	task.insertPKs = partialUpdateCASStringIDs(finalInsertPKs)
 	task.deletePKs = partialUpdateCASStringIDs(deletePKs)
 	task.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{}},
@@ -1684,6 +1720,13 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Len(t, fakeWAL.appended, 2)
 	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9)
+	require.Equal(t, []int64{20, 10, 30}, task.result.GetIDs().GetIntId().GetData())
+	insert := streamingmessage.MustAsMutableInsertMessageV1(fakeWAL.appended[0])
+	primaryData, err := typeutil.GetPrimaryFieldData(insert.MustBody().GetFieldsData(), task.schema.GetFields()[0])
+	require.NoError(t, err)
+	payloadIDs, err := parsePrimaryFieldData2IDs(primaryData)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(payloadIDs, task.result.GetIDs()))
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
@@ -2384,9 +2427,8 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 
 func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 	const (
-		beginTS  = uint64(100)
-		readTS   = uint64(200)
-		updateTS = uint64(250)
+		beginTS = uint64(100)
+		readTS  = uint64(200)
 	)
 	var captured *queryTask
 
@@ -2417,8 +2459,8 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 
 	task := createTestUpdateTask()
 	task.SetTs(beginTS)
+	task.req.PartialUpdate = true
 	task.partialUpdateReadTs = readTS
-	task.collectionUpdateTimestamp = updateTS
 	task.partitionKeyMode = false
 	task.upsertMsg = &msgstream.UpsertMsg{
 		DeleteMsg: &msgstream.DeleteMsg{
@@ -2445,15 +2487,11 @@ func TestRetrieveByPKsUsesPartialUpdateReadTsAsSnapshotFence(t *testing.T) {
 	require.Equal(t, []string{"id"}, captured.request.GetOutputFields())
 	require.Equal(t, readTS, captured.GetMvccTimestamp())
 	require.Equal(t, readTS, captured.fixedSnapshotTimestamp)
-	require.Zero(t, captured.fixedGuaranteeTimestamp)
 	require.Equal(t, beginTS, task.BeginTs())
 }
 
-func TestRetrieveByPKsUsesFullAutoIDClassificationFences(t *testing.T) {
-	const (
-		classificationTS = uint64(200)
-		updateTS         = uint64(250)
-	)
+func TestRetrieveByPKsUsesStandardQueryForFullAutoID(t *testing.T) {
+	const beginTS = uint64(200)
 	var captured *queryTask
 
 	m := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, task *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
@@ -2465,9 +2503,7 @@ func TestRetrieveByPKsUsesFullAutoIDClassificationFences(t *testing.T) {
 	defer m.UnPatch()
 
 	task := createTestUpdateTask()
-	task.SetTs(classificationTS)
-	task.fullAutoIDUpsert = true
-	task.collectionUpdateTimestamp = updateTS
+	task.SetTs(beginTS)
 	task.partitionKeyMode = false
 	task.upsertMsg = &msgstream.UpsertMsg{
 		DeleteMsg: &msgstream.DeleteMsg{
@@ -2485,11 +2521,12 @@ func TestRetrieveByPKsUsesFullAutoIDClassificationFences(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, captured)
-	require.Equal(t, updateTS, captured.request.GetGuaranteeTimestamp())
+	require.Equal(t, commonpb.ConsistencyLevel_Customized, captured.request.GetConsistencyLevel())
+	require.False(t, captured.request.GetUseDefaultConsistency())
+	require.Equal(t, beginTS, captured.request.GetGuaranteeTimestamp())
 	require.Equal(t, []string{"id"}, captured.request.GetOutputFields())
-	require.Equal(t, classificationTS, captured.GetMvccTimestamp())
-	require.Equal(t, classificationTS, captured.fixedSnapshotTimestamp)
-	require.Equal(t, updateTS, captured.fixedGuaranteeTimestamp)
+	require.Zero(t, captured.GetMvccTimestamp())
+	require.Zero(t, captured.fixedSnapshotTimestamp)
 }
 
 func TestClassifyFullAutoIDUpsertPreservesRequestOrder(t *testing.T) {
@@ -2515,10 +2552,11 @@ func TestClassifyFullAutoIDUpsertPreservesRequestOrder(t *testing.T) {
 		Name:   "test_collection",
 		Fields: []*schemapb.FieldSchema{primaryField},
 	})
-	task.insertOnNotFound = true
-	require.NoError(t, task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField))
-	require.Equal(t, []bool{true, false, true}, task.fullAutoIDPlan.existing)
-	require.Equal(t, []int64{10, 30}, task.fullAutoIDPlan.deleteIDs.GetIntId().GetData())
+	task.allowInsert = true
+	plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, false, true}, plan.existing)
+	require.Equal(t, []int64{10, 30}, plan.deleteIDs.GetIntId().GetData())
 }
 
 func TestClassifyFullAutoIDUpsertRejectsMalformedResults(t *testing.T) {
@@ -2555,15 +2593,15 @@ func TestClassifyFullAutoIDUpsertRejectsMalformedResults(t *testing.T) {
 			defer m.UnPatch()
 
 			task := createTestUpdateTask()
-			task.insertOnNotFound = true
-			err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
+			task.allowInsert = true
+			plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
 			require.ErrorIs(t, err, merr.ErrDataIntegrity)
-			require.Nil(t, task.fullAutoIDPlan)
+			require.Nil(t, plan)
 		})
 	}
 }
 
-func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testing.T) {
+func TestUpsertModeReadsAutoIDAllowInsertAfterFieldOpNormalization(t *testing.T) {
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -2618,9 +2656,9 @@ func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testi
 	for _, value := range []string{"true", "false"} {
 		t.Run("non replace field op promotes to partial with config "+value, func(t *testing.T) {
 			installMetadataMocks(t)
-			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key, value))
+			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key, value))
 			t.Cleanup(func() {
-				Params.Reset(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key)
+				Params.Reset(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key)
 			})
 			m := mockey.Mock((*upsertTask).preparePartialUpdateCASGroups).Return(nil).Build()
 			defer m.UnPatch()
@@ -2645,8 +2683,7 @@ func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testi
 
 			require.NoError(t, task.PreExecute(context.Background()))
 			require.True(t, task.req.GetPartialUpdate())
-			require.False(t, task.fullAutoIDUpsert)
-			require.False(t, task.insertOnNotFound)
+			require.False(t, task.allowInsert)
 		})
 	}
 
@@ -2660,9 +2697,9 @@ func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testi
 	} {
 		t.Run("full AutoID upsert reads "+tc.name+" proxy config", func(t *testing.T) {
 			installMetadataMocks(t)
-			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key, tc.value))
+			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key, tc.value))
 			t.Cleanup(func() {
-				Params.Reset(Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key)
+				Params.Reset(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key)
 			})
 			m := mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
 			defer m.UnPatch()
@@ -2676,14 +2713,13 @@ func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testi
 			task.SetTs(100)
 
 			require.NoError(t, task.PreExecute(context.Background()))
-			require.True(t, task.fullAutoIDUpsert)
-			require.Equal(t, tc.expected, task.insertOnNotFound)
+			require.Equal(t, tc.expected, task.allowInsert)
 		})
 	}
 
 	t.Run("refresh applies only to later admitted request", func(t *testing.T) {
 		installMetadataMocks(t)
-		key := Params.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key
+		key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
 		require.NoError(t, Params.Save(key, "true"))
 		t.Cleanup(func() {
 			Params.Reset(key)
@@ -2704,14 +2740,14 @@ func TestUpsertModeReadsAutoIDInsertOnNotFoundAfterFieldOpNormalization(t *testi
 
 		admitted := newTask()
 		require.NoError(t, admitted.PreExecute(context.Background()))
-		require.True(t, admitted.insertOnNotFound)
+		require.True(t, admitted.allowInsert)
 
 		require.NoError(t, Params.Save(key, "false"))
-		require.True(t, admitted.insertOnNotFound)
+		require.True(t, admitted.allowInsert)
 
 		later := newTask()
 		require.NoError(t, later.PreExecute(context.Background()))
-		require.False(t, later.insertOnNotFound)
+		require.False(t, later.allowInsert)
 	})
 }
 
@@ -2742,11 +2778,10 @@ func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
 		},
 	}
 	return &upsertTask{
-		ctx:              context.Background(),
-		schema:           schema,
-		idAllocator:      &allocator.IDAllocator{},
-		fullAutoIDUpsert: true,
-		insertOnNotFound: false,
+		ctx:         context.Background(),
+		schema:      schema,
+		idAllocator: &allocator.IDAllocator{},
+		allowInsert: false,
 		req: &milvuspb.UpsertRequest{
 			CollectionName: "test_collection",
 			FieldsData:     fields,
@@ -2819,7 +2854,6 @@ func TestClassifyFullAutoIDUpsertPropagatesQueryErrorBeforeAllocation(t *testing
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.Equal(t, 0, allocationCalls)
 	require.Empty(t, task.rowIDs)
-	require.Nil(t, task.fullAutoIDPlan)
 }
 
 func TestInsertPreExecuteFullAutoIDBuildsMixedRowPlan(t *testing.T) {
@@ -2859,11 +2893,10 @@ func TestInsertPreExecuteFullAutoIDBuildsMixedRowPlan(t *testing.T) {
 	defer allocationPatch.UnPatch()
 
 	task := &upsertTask{
-		ctx:              context.Background(),
-		schema:           schema,
-		idAllocator:      &allocator.IDAllocator{},
-		fullAutoIDUpsert: true,
-		insertOnNotFound: true,
+		ctx:         context.Background(),
+		schema:      schema,
+		idAllocator: &allocator.IDAllocator{},
+		allowInsert: true,
 		req: &milvuspb.UpsertRequest{
 			CollectionName: "test_collection",
 			FieldsData:     fields,
@@ -2887,7 +2920,6 @@ func TestInsertPreExecuteFullAutoIDBuildsMixedRowPlan(t *testing.T) {
 	require.NoError(t, task.insertPreExecute(context.Background()))
 	task.refreshMutationResultCounts()
 	require.Equal(t, []int64{1000, 1001, 1002}, task.rowIDs)
-	require.Equal(t, []int64{10, 1001, 30}, task.insertPKs.GetIntId().GetData())
 	require.Equal(t, []int64{10, 1001, 30}, task.result.GetIDs().GetIntId().GetData())
 	require.Equal(t, []int64{10, 30}, task.upsertMsg.DeleteMsg.GetPrimaryKeys().GetIntId().GetData())
 	require.Equal(t, int64(2), task.upsertMsg.DeleteMsg.GetNumRows())
@@ -2902,6 +2934,7 @@ func TestFinalizeFullAutoIDUpsertUsesMixedFinalIDs(t *testing.T) {
 		primaryField   *schemapb.FieldSchema
 		requestIDs     *schemapb.IDs
 		requestField   *schemapb.FieldData
+		existing       []bool
 		expectedIDs    *schemapb.IDs
 		expectedDelete *schemapb.IDs
 	}{
@@ -2910,26 +2943,49 @@ func TestFinalizeFullAutoIDUpsertUsesMixedFinalIDs(t *testing.T) {
 			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
 			requestIDs:     partialUpdateCASIDs([]int64{10, 20, 30}),
 			requestField:   partialUpdateCASPKFieldData([]int64{10, 20, 30}),
+			existing:       []bool{true, false, true},
 			expectedIDs:    partialUpdateCASIDs([]int64{10, 1001, 30}),
 			expectedDelete: partialUpdateCASIDs([]int64{10, 30}),
 		},
 		{
 			name:           "VarChar",
 			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_VarChar},
-			requestIDs:     partialUpdateCASStringIDs([]string{"10", "lookup", "30"}),
-			requestField:   partialUpdateCASStringPKFieldData([]string{"10", "lookup", "30"}),
-			expectedIDs:    partialUpdateCASStringIDs([]string{"10", "1001", "30"}),
-			expectedDelete: partialUpdateCASStringIDs([]string{"10", "30"}),
+			requestIDs:     partialUpdateCASStringIDs([]string{"existing", "lookup", "30"}),
+			requestField:   partialUpdateCASStringPKFieldData([]string{"existing", "lookup", "30"}),
+			existing:       []bool{true, false, true},
+			expectedIDs:    partialUpdateCASStringIDs([]string{"existing", "1001", "30"}),
+			expectedDelete: partialUpdateCASStringIDs([]string{"existing", "30"}),
+		},
+		{
+			name:           "all existing",
+			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
+			requestIDs:     partialUpdateCASIDs([]int64{10, 20, 30}),
+			requestField:   partialUpdateCASPKFieldData([]int64{10, 20, 30}),
+			existing:       []bool{true, true, true},
+			expectedIDs:    partialUpdateCASIDs([]int64{10, 20, 30}),
+			expectedDelete: partialUpdateCASIDs([]int64{10, 20, 30}),
+		},
+		{
+			name:           "all missing",
+			primaryField:   &schemapb.FieldSchema{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_VarChar},
+			requestIDs:     partialUpdateCASStringIDs([]string{"first", "second", "third"}),
+			requestField:   partialUpdateCASStringPKFieldData([]string{"first", "second", "third"}),
+			existing:       []bool{false, false, false},
+			expectedIDs:    partialUpdateCASStringIDs([]string{"1000", "1001", "1002"}),
+			expectedDelete: &schemapb.IDs{},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			requestIDs, err := parsePrimaryFieldData2IDs(tc.requestField)
+			require.NoError(t, err)
+			originalField := proto.Clone(tc.requestField)
+			plan := &fullAutoIDUpsertPlan{
+				requestIDs: requestIDs,
+				existing:   tc.existing,
+				deleteIDs:  tc.expectedDelete,
+			}
 			task := &upsertTask{
 				rowIDs: []int64{1000, 1001, 1002},
-				fullAutoIDPlan: &fullAutoIDUpsertPlan{
-					requestIDs: tc.requestIDs,
-					existing:   []bool{true, false, true},
-					deleteIDs:  tc.expectedDelete,
-				},
 				upsertMsg: &msgstream.UpsertMsg{
 					InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{tc.requestField}}},
 					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
@@ -2937,12 +2993,13 @@ func TestFinalizeFullAutoIDUpsertUsesMixedFinalIDs(t *testing.T) {
 				result: &milvuspb.MutationResult{},
 			}
 
-			require.NoError(t, task.finalizeFullAutoIDUpsert(tc.primaryField))
-			require.True(t, proto.Equal(tc.expectedIDs, task.insertPKs))
+			require.NoError(t, task.finalizeFullAutoIDUpsert(tc.primaryField, plan))
 			require.True(t, proto.Equal(tc.expectedIDs, task.result.GetIDs()))
-			require.NotSame(t, task.insertPKs, task.result.GetIDs())
+			require.True(t, proto.Equal(tc.requestIDs, task.oldIDs))
+			require.True(t, proto.Equal(originalField, tc.requestField))
+			require.Equal(t, []int64{1000, 1001, 1002}, task.rowIDs)
 			require.True(t, proto.Equal(tc.expectedDelete, task.upsertMsg.DeleteMsg.GetPrimaryKeys()))
-			require.Equal(t, int64(2), task.upsertMsg.DeleteMsg.GetNumRows())
+			require.EqualValues(t, typeutil.GetSizeOfIDs(tc.expectedDelete), task.upsertMsg.DeleteMsg.GetNumRows())
 
 			primaryData, err := typeutil.GetPrimaryFieldData(task.upsertMsg.InsertMsg.GetFieldsData(), tc.primaryField)
 			require.NoError(t, err)
@@ -2953,18 +3010,51 @@ func TestFinalizeFullAutoIDUpsertUsesMixedFinalIDs(t *testing.T) {
 	}
 }
 
+func TestFinalizeFullAutoIDUpsertRejectsInvalidState(t *testing.T) {
+	primaryField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
+	}
+	plan := &fullAutoIDUpsertPlan{existing: []bool{true, false}}
+	for _, tc := range []struct {
+		name   string
+		plan   *fullAutoIDUpsertPlan
+		fields []*schemapb.FieldData
+	}{
+		{name: "missing plan"},
+		{name: "plan row count mismatch", plan: &fullAutoIDUpsertPlan{existing: []bool{true}}},
+		{name: "missing primary key field", plan: plan},
+		{name: "primary key row count mismatch", plan: plan, fields: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10})}},
+		{name: "primary key type mismatch", plan: plan, fields: []*schemapb.FieldData{partialUpdateCASStringPKFieldData([]string{"10", "20"})}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &upsertTask{
+				rowIDs: []int64{1000, 1001},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: tc.fields}},
+					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{}},
+				},
+				result: &milvuspb.MutationResult{},
+			}
+			err := task.finalizeFullAutoIDUpsert(primaryField, tc.plan)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Nil(t, task.result.GetIDs())
+			require.Nil(t, task.upsertMsg.DeleteMsg.GetPrimaryKeys())
+		})
+	}
+}
+
 func TestFinalizeFullAutoIDUpsertAcceptsAllocatorValueEqualToLookupKey(t *testing.T) {
 	primaryField := &schemapb.FieldSchema{
 		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
 	}
 	lookupIDs := partialUpdateCASIDs([]int64{1000})
+	plan := &fullAutoIDUpsertPlan{
+		requestIDs: lookupIDs,
+		existing:   []bool{false},
+		deleteIDs:  &schemapb.IDs{},
+	}
 	task := &upsertTask{
 		rowIDs: []int64{1000},
-		fullAutoIDPlan: &fullAutoIDUpsertPlan{
-			requestIDs: lookupIDs,
-			existing:   []bool{false},
-			deleteIDs:  &schemapb.IDs{},
-		},
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
 				FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1000})},
@@ -2974,7 +3064,7 @@ func TestFinalizeFullAutoIDUpsertAcceptsAllocatorValueEqualToLookupKey(t *testin
 		result: &milvuspb.MutationResult{},
 	}
 
-	require.NoError(t, task.finalizeFullAutoIDUpsert(primaryField))
+	require.NoError(t, task.finalizeFullAutoIDUpsert(primaryField, plan))
 	require.Equal(t, []int64{1000}, task.result.GetIDs().GetIntId().GetData())
 	require.Zero(t, task.upsertMsg.DeleteMsg.GetNumRows())
 	require.Zero(t, typeutil.GetSizeOfIDs(task.upsertMsg.DeleteMsg.GetPrimaryKeys()))

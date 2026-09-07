@@ -31,12 +31,12 @@ VChannels, the two messages may commit in different WAL transactions. A legal
 Snapshot cut can then contain `Delete(P)` without `Insert(G)`, and restoring
 that Snapshot loses the logical entity.
 
-The new Full Upsert path first retrieves the request PK at one fixed snapshot.
+The new Full Upsert path first retrieves the request PK through a standard Query.
 It preserves `P` when the row exists and applies a Proxy Boolean configuration
 when the row is not found:
 
 ```text
-proxy.autoIDUpsertInsertOnNotFound = true | false
+proxy.autoIDUpsertAllowInsert = true | false
 default = true
 ```
 
@@ -63,8 +63,8 @@ The required invariants are:
 3. A generated `G` comes from the same global allocator used by ordinary
    Insert, so concurrent and future Inserts cannot generate the same allocated
    ID.
-4. Existence and TTL visibility are evaluated at one explicit classification
-   timestamp across every queried VChannel.
+4. Existence and TTL visibility follow standard Query semantics; Full Upsert
+   does not pin a separate classification snapshot.
 5. Returned IDs remain aligned with Full Upsert request order.
 6. Partial Upsert semantics, CAS messages, read timestamps, and retries are
    unchanged.
@@ -77,7 +77,7 @@ stored row formats are unchanged.
 - Add one PK-only existence Retrieve before Full AutoID Upsert writes.
 - Preserve the identity of every existing AutoID entity updated by Full Upsert.
 - Keep an existing entity's Delete and Insert in one VChannel transaction.
-- Support allocator-generated insert-on-not-found and snapshot-checked
+- Support allocator-generated insert-on-not-found and query-checked
   update-only behavior for Full Upsert.
 - Support Int64 and VarChar AutoID, partition-key mode, and namespace modes.
 - Fail before RowID allocation and WAL append when the standard Query used for
@@ -135,7 +135,7 @@ The lookup key remains `P` and is not an idempotency key. After an ambiguous
 outcome, a retry may allocate another identity while `P` is still NotFound, or
 update `P` if it has become visible; it cannot recover the first generated ID.
 Applications that require update-only behavior set
-`proxy.autoIDUpsertInsertOnNotFound=false`.
+`proxy.autoIDUpsertAllowInsert=false`.
 
 Partial AutoID Upsert already performs a Retrieve and uses an attempt-scoped
 read timestamp plus Streaming CAS. It remains update-only: a missing request PK
@@ -149,7 +149,7 @@ Full Upsert.
 The system configuration is:
 
 ```text
-proxy.autoIDUpsertInsertOnNotFound = true | false
+proxy.autoIDUpsertAllowInsert = true | false
 default = true
 ```
 
@@ -170,9 +170,9 @@ apply this configuration before that normalization.
 - It applies only when `autoID=true` and `effectivePartialUpdate=false`.
 - Its default is `true`, preserving the historical Full Upsert
   create-on-not-found outcome.
-- It is defined by `ProxyCfg.AutoIDUpsertInsertOnNotFound` in
-  `pkg/util/paramtable/component_param.go` and uses the existing refreshable
-  configuration mechanism.
+- It is defined by `ProxyCfg.AutoIDUpsertAllowInsert` in
+  `pkg/util/paramtable/component_param.go`, introduced in `3.0.2`, and uses the
+  existing refreshable configuration mechanism.
 - It is independent of the collection property `allow_insert_auto_id`. That
   property remains part of ordinary Insert and Import handling; Full Upsert
   always requires a lookup PK and never reads that property to select its
@@ -190,35 +190,29 @@ Once Full mode is selected and before classification, Proxy validates and
 retains all Full Upsert fields and request PKs. It rejects omitted, null,
 wrong-type, row-misaligned, or duplicate PKs and malformed field data. PK
 omission is malformed Upsert input; it is not the same as a supplied PK that is
-not visible at the classification snapshot.
+not visible to the classification Query.
 
 ### 3.2 One PK-Only Retrieve for Full Upsert
 
-Each Full AutoID Upsert attempt selects one classification timestamp:
+Full AutoID Upsert uses standard Query preprocessing and visibility:
 
 ```text
-classificationTs           = Upsert.BeginTs()
-capturedCollectionUpdateTs = collectionInfo.updateTimestamp
-queryCollectionUpdateTs    = collectionInfo.updateTimestamp observed by Query
-
-ConsistencyLevel           = Customized
-GuaranteeTimestamp         = max(
-    classificationTs,
-    capturedCollectionUpdateTs,
-    queryCollectionUpdateTs)
-MvccTimestamp              = classificationTs
-EntityTtlPhysicalTime      = PhysicalTimeMicros(classificationTs)
-CollectionTtlTimestamps    = ComposeTS(
-    PhysicalTime(classificationTs) - collectionTTL)
+ConsistencyLevel                  = Customized
+Initial GuaranteeTimestamp        = Upsert.BeginTs()
+Explicit MvccTimestamp             = unset
+Full-specific snapshot / TTL logic = none
 ```
 
-`GuaranteeTimestamp` waits until both the captured schema and any newer
-collection metadata observed by the nested Query are serviceable. The nested
-Query may raise this wait fence, but it never changes the admitted request's
-captured configuration value.
-`MvccTimestamp` fixes row visibility at `classificationTs`, even when the
-guarantee is later. Entity and collection TTL evaluation also use
-`classificationTs`, so queueing delay cannot change an existence decision.
+The Query waits at least until `Upsert.BeginTs()` and raises its guarantee for
+newer collection metadata through the existing Query path. QueryNode selects
+the readable MVCC timestamp after that wait, and TTL evaluation follows normal
+Query behavior. The guarantee is a minimum wait fence, not a fixed snapshot.
+Full Upsert does not promise one shared MVCC timestamp across VChannels or an
+existence decision frozen at request admission; concurrent writes and expiry
+before the Query executes may affect its result.
+
+Only Partial Upsert pins its attempt read timestamp for the existing CAS
+protocol. Full Upsert adds no fields or special branches to `queryTask`.
 
 Proxy performs one logical internal Retrieve before allocating RowIDs or
 constructing DML messages:
@@ -228,8 +222,6 @@ constructing DML messages:
 - It uses one standard Query task and the existing collection-shard fan-out,
   load balancing, retry, cancellation, and namespace-sharding fast path. This
   MEP adds no PK-derived VChannel grouping or targeted Query scheduling.
-- Every executed channel request carries the same non-zero guarantee, MVCC
-  timestamp, and TTL cutoffs.
 - Result order is not trusted. Proxy builds a typed PK set and classifies rows
   in original request order.
 
@@ -257,24 +249,27 @@ Existing or NotFound. A successful response must contain the requested,
 correctly typed PK field even when it contains zero rows. An absent or malformed
 PK field is `merr.ErrDataIntegrity`, not an all-NotFound result.
 
-If at least one row is NotFound while `insertOnNotFound=false`, Proxy rejects
+If at least one row is NotFound while `allowInsert=false`, Proxy rejects
 the complete request before RowID allocation and WAL append with the dedicated
 non-retriable InputError `merr.ErrAutoIDUpsertTargetNotFound`:
 
 ```text
 autoID full upsert target not found because
-proxy.autoIDUpsertInsertOnNotFound=false; not_found_count=N
+proxy.autoIDUpsertAllowInsert=false; not_found_count=N
 ```
 
 The public error omits PK values.
 
 ### 3.3 Full Upsert Row Plan
 
-After complete classification and deterministic validation, Proxy stores a
+After complete classification and deterministic validation, Proxy returns a
 request-indexed classification plan containing the request IDs, one existence
-bit per request row, and the Existing-row Delete IDs. Internal RowIDs remain in
-the Upsert task's existing allocation state. After allocation, Proxy derives a
-separate final Insert-ID sequence in request order.
+bit per request row, and the Existing-row Delete IDs. The plan stays local to
+`insertPreExecute`; the task retains only the captured `allowInsert` setting
+as new state. Internal RowIDs remain in the task's existing allocation state.
+After allocation, Proxy copies the validated PK field and replaces only NotFound
+positions with generated IDs, leaving the lookup PKs and internal RowIDs
+unchanged. It derives `MutationResult.IDs` from that final field in request order.
 
 Proxy allocates one internal RowID for every inserted row version. The final
 business PK is:
@@ -282,14 +277,15 @@ business PK is:
 ```text
 FinalPK[i] = RequestPK[i]                   if row i exists
 FinalPK[i] = EncodeAutoID(InternalRowID[i]) if row i is NotFound
-                                               and insertOnNotFound
+                                               and allowInsert
 ```
 
 The same `InternalRowID` allocation supplies `G`; no second allocator request is
-made. Request IDs remain lookup state, result IDs remain response state, and
-Insert/Delete IDs are derived from the request-indexed classification state for
-message packing. `MutationResult.IDs` must not be reused as mutable routing
-state. A NotFound row's final PK is accepted based on its allocator provenance.
+made. Request IDs remain lookup state. `MutationResult.IDs` supplies both the
+response IDs and the Insert routing IDs; its values and order must match the
+Insert payload's PK field and must not be changed during message packing. Delete
+IDs contain only the request IDs classified as Existing. A NotFound row's final
+PK is accepted based on its allocator provenance.
 Unit coverage must include a controlled `G == P` value. A black-box regression
 may use lookup values outside the allocator domain and assert `G != P` only to
 prove that Proxy did not copy the lookup value.
@@ -312,7 +308,7 @@ UpsertCnt       = E + M
 DeleteCnt       = E
 ```
 
-When `insertOnNotFound=false`, a successful request always has `M = 0`.
+When `allowInsert=false`, a successful request always has `M = 0`.
 
 ### 3.4 Routing and WAL Boundary
 
@@ -340,16 +336,16 @@ request-level distributed atomicity.
 
 - Retrying an Existing row is identity-stable because its business PK remains
   the request PK.
-- Retrying a NotFound row with `insertOnNotFound=true` is not identity-stable.
+- Retrying a NotFound row with `allowInsert=true` is not identity-stable.
   A lost response or cross-VChannel partial success can produce another
   allocator-owned identity.
-- Existence is decided at each attempt's `classificationTs`. Another writer
-  may change the next attempt from generation to an update of `P`.
+- Existence is decided from each attempt's Query result. Another writer may
+  change the next attempt from generation to an update of `P`.
 - Concurrent writes after classification follow existing MVCC ordering. This
   design adds no row lock, CAS, lookup-key reservation, or durable mapping.
 
-The `false` configuration guarantees only that the target exists at the
-classification snapshot. It is not a commit-time existence guarantee.
+The `false` configuration requires every target to be present in the
+classification Query result. It is not a commit-time existence guarantee.
 Applications intentionally creating AutoID entities should use Insert.
 
 ## 4. API, Compatibility, and Operations
@@ -449,7 +445,7 @@ The implementation is limited to:
 
 - one refreshable Proxy Boolean and one typed not-found error;
 - Full AutoID Upsert classification, final-ID construction, and message routing;
-- fixed-snapshot and PK-only support in the existing internal Query path;
+- PK-only retrieval through the existing internal Query path;
 - Go row-SDK PK retention plus regression coverage for existing REST behavior.
 
 Streaming reuses the existing same-VChannel transaction. There is no RootCoord,
@@ -464,25 +460,15 @@ Partial Upsert CAS change.
 | Mode and configuration | Default and explicit values, one captured value per task, and effective Partial mode ignoring the configuration after `field_ops` normalization |
 | Input and Query failures | Invalid PK payloads, malformed Query results, and typed Query errors all fail before allocation |
 | Identity and routing | Allocator-owned `G`, controlled `G == P`, no Delete for NotFound, ordered result IDs, correct counts, and same-channel Existing-row routing |
-| Snapshot | Query `PreExecute` preserves one MVCC and TTL classification point while allowing its metadata guarantee to advance |
+| Query visibility | Full Upsert leaves MVCC unpinned and uses standard Query metadata waits and TTL handling; Partial Upsert retains its fixed CAS read timestamp |
 | Error contract | Code 112 is InputError, non-retriable, legacy-compatible, and round-trips through `merr.Status` |
 | Entry points | MiniCluster covers `false`; Go SDK covers row Insert versus Upsert PK handling; REST v1/v2 retain their existing contracts |
 | Regressions | Relevant Partial Upsert, non-AutoID Upsert, Insert, Import, Query, and replication tests pass unchanged |
 
-A real `queryTask.PreExecute` regression, rather than helper-only assertions,
-uses a newer collection-update fence observed by the nested Query and asserts:
-
-```text
-GuaranteeTimestamp == max(
-    classificationTs,
-    capturedCollectionUpdateTs,
-    queryCollectionUpdateTs)
-MvccTimestamp         == classificationTs
-MvccTimestamp         != 0
-EntityTtlPhysicalTime == PhysicalTimeMicros(classificationTs)
-CollectionTtlTimestamps ==
-    ComposeTS(PhysicalTime(classificationTs) - collectionTTL)
-```
+A real `queryTask.PreExecute` regression verifies that a newer collection
+update still raises the guarantee, MVCC remains unset for QueryNode to select,
+and TTL handling follows standard Query semantics. Request-construction tests
+verify that only Partial Upsert sets the fixed snapshot and MVCC timestamp.
 
 The implementation is ready when this table passes and both required Design
 Review approvals are recorded. The additional PK-only Query is an explicit
@@ -494,7 +480,7 @@ does not change the semantic acceptance criteria.
 | Alternative | Why it is not selected |
 |---|---|
 | Insert a missing request PK `P` | Bypasses allocator ownership and can collide with generated AutoIDs |
-| Always generate or always reject NotFound | Cannot provide both backward-compatible creation and snapshot-checked update-only behavior |
+| Always generate or always reject NotFound | Cannot provide both backward-compatible creation and query-checked update-only behavior |
 | Treat PK omission as Insert | Conflates identity lookup with creation; Insert already serves this use case |
 | Add a durable `P -> G` mapping | Requires a new identity namespace, persistence, replication, and lifecycle design |
 | Add a per-request or per-collection option | Expands the public API or RootCoord metadata without improving identity correctness; one Proxy configuration is sufficient |

@@ -48,51 +48,26 @@ import (
 
 func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
 	const snapshotTS = uint64(100)
-	legacyTask := &queryTask{
+	task := &queryTask{
 		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
 		fixedSnapshotTimestamp: snapshotTS,
 	}
-	require.Equal(t, snapshotTS, legacyTask.applyFixedSnapshotTimestamp(300))
-	require.Equal(t, snapshotTS, legacyTask.GetMvccTimestamp())
-
-	classificationTask := &queryTask{
-		RetrieveRequest:         &internalpb.RetrieveRequest{MvccTimestamp: 200},
-		fixedSnapshotTimestamp:  snapshotTS,
-		fixedGuaranteeTimestamp: 250,
-	}
-	require.Equal(t, uint64(300), classificationTask.applyFixedSnapshotTimestamp(300))
-	require.Equal(t, snapshotTS, classificationTask.GetMvccTimestamp())
+	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
+	require.Equal(t, snapshotTS, guaranteeTS)
+	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
 }
 
-func TestQueryTaskTTLReferenceTimestamps(t *testing.T) {
-	task := &queryTask{
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: &commonpb.MsgBase{Timestamp: 300},
-		},
-		fixedSnapshotTimestamp:  100,
-		fixedGuaranteeTimestamp: 250,
-	}
-	entityTS, collectionTS := task.ttlReferenceTimestamps(250)
-	require.Equal(t, uint64(100), entityTS)
-	require.Equal(t, uint64(100), collectionTS)
-
-	task.fixedGuaranteeTimestamp = 0
-	entityTS, collectionTS = task.ttlReferenceTimestamps(100)
-	require.Equal(t, uint64(100), entityTS)
-	require.Equal(t, uint64(300), collectionTS)
-}
-
-func TestQueryTaskPreExecutePreservesFixedSnapshot(t *testing.T) {
+func TestQueryTaskPreExecuteUsesStandardVisibility(t *testing.T) {
 	const (
 		collectionID = int64(100)
 		partitionID  = int64(200)
 	)
-	classificationTime := time.Unix(1_700_000_000, 0)
-	classificationTS := tsoutil.ComposeTSByTime(classificationTime)
-	capturedUpdateTS := tsoutil.ComposeTSByTime(classificationTime.Add(-time.Second))
-	fixedGuaranteeTS := max(classificationTS, capturedUpdateTS)
-	queryUpdateTS := tsoutil.ComposeTSByTime(classificationTime.Add(time.Second))
-	schedulerTS := tsoutil.ComposeTSByTime(classificationTime.Add(2 * time.Second))
+	beginTime := time.Unix(1_700_000_000, 0)
+	beginTS := tsoutil.ComposeTSByTime(beginTime)
+	queryUpdateTime := beginTime.Add(time.Second)
+	queryUpdateTS := tsoutil.ComposeTSByTime(queryUpdateTime)
+	schedulerTime := beginTime.Add(2 * time.Second)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
 	collectionTTL := time.Hour
 
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
@@ -127,8 +102,7 @@ func TestQueryTaskPreExecutePreservesFixedSnapshot(t *testing.T) {
 		baseTask:  baseTask{MetaCache: metaCache},
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base:          &commonpb.MsgBase{},
-			MvccTimestamp: schedulerTS,
+			Base: &commonpb.MsgBase{},
 		},
 		ctx: ctx,
 		request: &milvuspb.QueryRequest{
@@ -138,19 +112,19 @@ func TestQueryTaskPreExecutePreservesFixedSnapshot(t *testing.T) {
 			Expr:               "id in [1]",
 			OutputFields:       []string{"id"},
 			ConsistencyLevel:   commonpb.ConsistencyLevel_Customized,
-			GuaranteeTimestamp: fixedGuaranteeTS,
+			GuaranteeTimestamp: beginTS,
 		},
-		fixedSnapshotTimestamp:  classificationTS,
-		fixedGuaranteeTimestamp: fixedGuaranteeTS,
 	}
 	require.NoError(t, task.OnEnqueue())
 	task.SetTs(schedulerTS)
 
 	require.NoError(t, task.PreExecute(ctx))
 	require.Equal(t, queryUpdateTS, task.GetGuaranteeTimestamp())
-	require.Equal(t, classificationTS, task.GetMvccTimestamp())
-	require.Equal(t, uint64(classificationTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
-	require.Equal(t, tsoutil.ComposeTSByTime(classificationTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+	// Standard Query retains its metadata wait fence and lets QueryNode choose
+	// the readable MVCC timestamp. TTL clocks follow normal Query preprocessing.
+	require.Zero(t, task.GetMvccTimestamp())
+	require.Equal(t, uint64(queryUpdateTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+	require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
 }
 
 func TestQueryTask_all(t *testing.T) {

@@ -235,7 +235,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	}
 
 	componentParams := paramtable.Get()
-	configKey := componentParams.ProxyCfg.AutoIDUpsertInsertOnNotFound.Key
+	configKey := componentParams.ProxyCfg.AutoIDUpsertAllowInsert.Key
 	s.Require().NoError(componentParams.Save(configKey, "false"))
 	defer func() {
 		_ = componentParams.Reset(configKey)
@@ -255,7 +255,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.Zero(rejectedResult.GetUpsertCnt())
 
 	s.Require().NoError(componentParams.Reset(configKey))
-	s.True(componentParams.ProxyCfg.AutoIDUpsertInsertOnNotFound.GetAsBool())
+	s.True(componentParams.ProxyCfg.AutoIDUpsertAllowInsert.GetAsBool())
 	upsertResult, err := c.MilvusClient.Upsert(ctx, newUpsertRequest())
 	s.Require().NoError(err)
 	s.Require().NotNil(upsertResult)
