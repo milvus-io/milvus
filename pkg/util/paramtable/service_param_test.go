@@ -335,6 +335,27 @@ func TestServiceParam(t *testing.T) {
 			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
 		}
 
+		{
+			// an explicit web address must be an http(s) url, otherwise it is ignored in favor of the derived one
+			bt.Save(SParams.PulsarCfg.Address.Key, "pulsar://localhost:6650")
+			derived := "http://localhost:" + SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				webAddress string
+				expected   string
+			}{
+				{"https://pulsar-admin.example.com", "https://pulsar-admin.example.com"},
+				{" http://pulsar-web.example.com:8080 ", "http://pulsar-web.example.com:8080"},
+				{"   ", derived},                                  // blank
+				{"pulsar-web.example.com:8080", derived},          // no scheme
+				{"pulsar://pulsar-web.example.com:6650", derived}, // not http(s)
+				{"http://", derived},                              // no host
+			} {
+				bt.Save(SParams.PulsarCfg.WebAddress.Key, c.webAddress)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.webAddress)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
 		bt.Save(SParams.PulsarCfg.Address.Key, "")
 	})
 

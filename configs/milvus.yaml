@@ -283,6 +283,9 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
+  # Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+  # Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.
+  webaddress: 
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.

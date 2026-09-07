@@ -1343,10 +1343,20 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Doc: `Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.`,
+		Export: true,
 		Formatter: func(add string) string {
+			add = strings.TrimSpace(add)
 			if add != "" {
-				// honor an explicitly configured web address
-				return add
+				// An explicit web address is used as is, but unlike pulsar.address it has to carry
+				// its scheme: the admin API may be served over https, so it cannot be guessed here.
+				u, err := url.Parse(add)
+				if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+					return add
+				}
+				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address",
+					mlog.String("configured", add))
 			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
