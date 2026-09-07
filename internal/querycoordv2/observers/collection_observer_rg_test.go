@@ -1577,3 +1577,76 @@ func (s *CollectionObserverRGSuite) TestTheReplicaNumberWriteBackOfAReleasedColl
 	s.Require().Nil(s.meta.GetCollection(s.ctx, noSuchCollection))
 	s.True(s.ob.writeReplicaNumberBack(s.ctx, LoadTask{CollectionID: noSuchCollection, ResourceGroup: rgB}))
 }
+
+// countResourceGroupPercentageReads counts the per-resource-group percentage
+// walks the observer makes, leaving the walk itself to run for real.
+func (s *CollectionObserverRGSuite) countResourceGroupPercentageReads() (reads *int, unpatch func()) {
+	count := 0
+	var origin func(context.Context, *meta.Meta, meta.TargetManagerInterface, *meta.DistributionManager, int64, string) (map[int64]int32, error)
+	walk := mockey.Mock(utils.ReplicaLoadPercentagesByResourceGroup).
+		To(func(ctx context.Context, m *meta.Meta, t meta.TargetManagerInterface, d *meta.DistributionManager, collectionID int64, rg string) (map[int64]int32, error) {
+			count++
+			return origin(ctx, m, t, d, collectionID, rg)
+		}).Origin(&origin).Build()
+	return &count, func() { walk.UnPatch() }
+}
+
+// TestATaskAtHundredWaitingForPromotionIsNotReMeasured pins the per-tick cost
+// of a scoped task in the one state it can sit in for a while: its group
+// carries every target and only the promotion of the current target is
+// pending. Measuring it again every 200 ms walks every sealed-segment target
+// of the collection per replica, for every recovered task of every loaded
+// collection, until the promotion lands. The stored figure is reused instead,
+// and still feeds both consumers: the watermark refreshes, so nothing is torn
+// down, and the finish waits for the promotion as before. Measuring resumes
+// when the figure could have changed - a re-arm - and on the promotion tick.
+func (s *CollectionObserverRGSuite) TestATaskAtHundredWaitingForPromotionIsNotReMeasured() {
+	s.registerLoadingCollection(1700, 1701, "1700-dmc0", 2, 17001, 17002)
+	s.putReplica(1700, 170001, 81, rgA)
+	s.putDelegator(1700, 81, "1700-dmc0", 17001, 17002)
+	s.markCollectionLoaded(1700, 1701)
+	s.putReplica(1700, 170002, 82, rgB)
+	s.putDelegator(1700, 82, "1700-dmc0", 17001, 17002)
+
+	s.ob.LoadCollection(s.ctx, 1700, rgB)
+	key := s.taskKey(1700, rgB)
+	reads, unpatch := s.countResourceGroupPercentageReads()
+	defer unpatch()
+
+	s.ob.Observe(s.ctx)
+	s.Require().EqualValues(1, *reads, "the first tick measures")
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok, "the promotion is pending, so the task is not finished")
+	s.Require().EqualValues(100, task.LastProgress)
+	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 1700, 1701))
+
+	s.ob.Observe(s.ctx)
+	s.ob.Observe(s.ctx)
+	s.EqualValues(1, *reads, "a task at 100 that only waits for the promotion is not measured again")
+	s.True(s.ob.loadTasks.Contain(key))
+
+	// The reused figure is the watermark's too: a load timeout later the
+	// group is still at 100 as far as the task knows, and is not torn down.
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+	s.Len(s.replicaIDsInRG(1700, rgB), 1, "a group at 100 is never timed out, reused figure or not")
+	s.EqualValues(1, *reads)
+
+	// A re-arm says the figure may have changed: it is measured afresh.
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	task.LastProgress = -1
+	s.ob.loadTasks.Insert(key, task)
+	s.ob.Observe(s.ctx)
+	s.EqualValues(2, *reads, "a re-armed task is measured again")
+	task, ok = s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.EqualValues(100, task.LastProgress)
+
+	// The promotion tick measures once more, and the task finishes on it.
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1700))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1700))
+	s.ob.Observe(s.ctx)
+	s.EqualValues(3, *reads, "once the current target exists the figure is measured, not reused")
+	s.False(s.ob.loadTasks.Contain(key), "and the task finishes on it")
+}
