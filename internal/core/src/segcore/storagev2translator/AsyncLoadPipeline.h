@@ -61,6 +61,8 @@ using AsyncCellResult =
 // Lazy coroutine: admission, storage read, and finalization start when the task
 // is awaited. segment_id is required for diagnostics. The executor keep-alive
 // and ctx cancellation token are captured when this function is called.
+// Exceptions from setup or awaited work preserve SegcoreError codes; allocation
+// and Folly failures are classified, and untyped failures become UnexpectedError.
 [[nodiscard]] folly::coro::Task<std::vector<AsyncCellResult>>
 LoadCellsAsync(const milvus::OpContext* ctx,
                int64_t segment_id,

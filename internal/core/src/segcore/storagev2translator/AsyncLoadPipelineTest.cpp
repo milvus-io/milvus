@@ -20,10 +20,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -38,6 +41,7 @@
 #include "folly/CancellationToken.h"
 #include "folly/ExceptionWrapper.h"
 #include "folly/Executor.h"
+#include "folly/OperationCancelled.h"
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/Task.h"
@@ -65,6 +69,42 @@ using ChunkReadFuture = folly::SemiFuture<ChunkReadResult>;
 
 constexpr int64_t kTestSegmentId = 100;
 constexpr size_t kChunkReaderOpenConcurrencyLimit = 16;
+
+struct AsyncLoadExceptionCase {
+    const char* name;
+    std::exception_ptr exception;
+    ErrorCode expected_code;
+};
+
+// Exercise the exception channel independently of Arrow Status conversion.
+std::vector<AsyncLoadExceptionCase>
+AsyncLoadExceptionCases() {
+    return {
+        {"typed",
+         std::make_exception_ptr(SegcoreError(ErrorCode::StorageTransientError,
+                                              "typed load failure")),
+         ErrorCode::StorageTransientError},
+        {"allocation",
+         std::make_exception_ptr(std::bad_alloc{}),
+         ErrorCode::MemAllocateFailed},
+        {"cancellation",
+         std::make_exception_ptr(folly::OperationCancelled{}),
+         ErrorCode::FollyCancel},
+        {"future cancellation",
+         std::make_exception_ptr(folly::FutureCancellation{}),
+         ErrorCode::FollyCancel},
+        {"future failure",
+         std::make_exception_ptr(folly::FutureInvalid{}),
+         ErrorCode::FollyOtherException},
+        {"untyped",
+         std::make_exception_ptr(std::runtime_error(
+             "bad_alloc timeout: this text must not classify the error")),
+         ErrorCode::UnexpectedError},
+        {"non-standard",
+         std::make_exception_ptr(42),
+         ErrorCode::UnexpectedError},
+    };
+}
 
 // Builds open requests whose column-group indices match their request order.
 [[nodiscard]] std::vector<ChunkReaderOpenSpec>
@@ -392,9 +432,11 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     void
-    FailDeferredRead() {
+    FailDeferredRead(
+        folly::exception_wrapper error =
+            folly::make_exception_wrapper<std::runtime_error>("read failed")) {
         ASSERT_TRUE(deferred_read_ != nullptr);
-        deferred_read_->setException(std::runtime_error("read failed"));
+        deferred_read_->setException(std::move(error));
     }
 
     size_t
@@ -721,6 +763,26 @@ class AsyncLoadPipelineTest : public ::testing::Test {
             std::move(task).semi().via(folly::getKeepAliveToken(&executor_)));
     }
 
+    // Assert the exception and the C boundary agree on the original category.
+    template <typename F>
+    void
+    ExpectClassifiedFailure(F&& operation, const ErrorCode expected_code) {
+        try {
+            operation();
+            FAIL() << "expected load failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), expected_code);
+            auto status = FailureCStatus(&error);
+            EXPECT_EQ(status.error_code, expected_code);
+            EXPECT_STREQ(status.error_msg, error.what());
+            std::free(const_cast<char*>(status.error_msg));
+        } catch (const std::exception& error) {
+            ADD_FAILURE() << "unclassified exception: " << error.what();
+        } catch (...) {
+            ADD_FAILURE() << "unclassified non-standard exception";
+        }
+    }
+
     storage::TransientMemoryBudget& budget_ =
         storage::TransientMemoryBudget::GetLoadTransientBudget();
     RecordingManualExecutor executor_;
@@ -836,6 +898,177 @@ TEST_F(AsyncLoadPipelineTest, MapsChunkReaderOpenStorageErrors) {
             EXPECT_EQ(error.get_error_code(), expected_error_code);
         }
         EXPECT_EQ(reader->SyncCalls(), 0);
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, ClassifiesChunkReaderOpenExceptions) {
+    for (const auto& test_case : AsyncLoadExceptionCases()) {
+        for (const bool synchronous : {false, true}) {
+            SCOPED_TRACE(test_case.name);
+            SCOPED_TRACE(synchronous);
+            auto reader = std::make_shared<FakeReader>(&executor_);
+            if (synchronous) {
+                reader->SetOnAsyncCall([&test_case]() {
+                    std::rethrow_exception(test_case.exception);
+                });
+            }
+            auto future = Start(OpenChunkReadersAsync(
+                nullptr,
+                kTestSegmentId,
+                reader,
+                MakeChunkReaderOpenSpecs(kChunkReaderOpenConcurrencyLimit + 1),
+                OpenOptions()));
+            if (!synchronous) {
+                ASSERT_EQ(reader->AsyncCalls(),
+                          kChunkReaderOpenConcurrencyLimit);
+                reader->FailWithException(
+                    kChunkReaderOpenConcurrencyLimit - 1,
+                    folly::exception_wrapper(test_case.exception));
+                executor_.drain();
+                EXPECT_EQ(reader->AsyncCalls(),
+                          kChunkReaderOpenConcurrencyLimit);
+                EXPECT_FALSE(future.isReady());
+                // A later error must not replace the first exception while
+                // already-issued opens are being drained.
+                reader->Fail(0, arrow::Status::Invalid("later open failure"));
+                for (size_t i = 1; i + 1 < kChunkReaderOpenConcurrencyLimit;
+                     ++i) {
+                    reader->Complete(i);
+                }
+            } else {
+                EXPECT_EQ(reader->AsyncCalls(), 1);
+            }
+            ExpectClassifiedFailure([&]() { Get(std::move(future)); },
+                                    test_case.expected_code);
+        }
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, ClassifiesReadExceptionsAndReleasesBudget) {
+    budget_.SetCapacityBytes(1);
+    for (const auto& test_case : AsyncLoadExceptionCases()) {
+        for (const bool synchronous : {false, true}) {
+            SCOPED_TRACE(test_case.name);
+            SCOPED_TRACE(synchronous);
+            auto reader = std::make_shared<FakeChunkReader>(&executor_);
+            if (synchronous) {
+                reader->SetOnAsyncCall([&test_case]() {
+                    std::rethrow_exception(test_case.exception);
+                });
+            } else {
+                reader->DeferNextRead();
+            }
+            auto options = Options();
+            options.read_window_bytes = 1;
+            auto future =
+                Start(LoadCellsAsync(nullptr,
+                                     kTestSegmentId,
+                                     {{0, 0, 0, 1, 1}, {1, 0, 1, 1, 1}},
+                                     reader,
+                                     Finalizer(),
+                                     std::move(options)));
+            if (!synchronous) {
+                EXPECT_FALSE(future.isReady());
+                reader->FailDeferredRead(
+                    folly::exception_wrapper(test_case.exception));
+            }
+            ExpectClassifiedFailure([&]() { Get(std::move(future)); },
+                                    test_case.expected_code);
+            EXPECT_EQ(reader->AsyncCalls(), 1);
+            // Probe the full capacity without blocking if a lease leaked.
+            const bool acquired =
+                budget_.TryAcquire(1, storage::TransientBudgetPriority::High);
+            EXPECT_TRUE(acquired);
+            if (acquired) {
+                budget_.Release(1);
+            }
+        }
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, ClassifiesFinalizerExceptionsAndReleasesBudget) {
+    budget_.SetCapacityBytes(1);
+    for (const auto& test_case : AsyncLoadExceptionCases()) {
+        for (const bool dedicated_executor : {false, true}) {
+            SCOPED_TRACE(test_case.name);
+            SCOPED_TRACE(dedicated_executor);
+            RecordingManualExecutor finalization_executor;
+            auto reader = std::make_shared<FakeChunkReader>(&executor_);
+            auto options = Options();
+            options.read_window_bytes = 1;
+            if (dedicated_executor) {
+                options.finalization_executor_provider = [&]() {
+                    return folly::getKeepAliveToken(finalization_executor);
+                };
+            }
+            auto future = Start(LoadCellsAsync(
+                nullptr,
+                kTestSegmentId,
+                {{0, 0, 0, 1, 1}, {1, 0, 1, 1, 1}},
+                reader,
+                [&test_case](const auto&,
+                             int64_t) -> std::unique_ptr<GroupChunk> {
+                    std::rethrow_exception(test_case.exception);
+                },
+                std::move(options)));
+            finalization_executor.drain();
+            ExpectClassifiedFailure([&]() { Get(std::move(future)); },
+                                    test_case.expected_code);
+            EXPECT_EQ(reader->AsyncCalls(), 1);
+            const bool acquired =
+                budget_.TryAcquire(1, storage::TransientBudgetPriority::High);
+            EXPECT_TRUE(acquired);
+            if (acquired) {
+                budget_.Release(1);
+            }
+        }
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, ClassifiesSynchronousExecutorSetupExceptions) {
+    class FailingExecutor : public RecordingManualExecutor {
+     public:
+        explicit FailingExecutor(std::exception_ptr failure)
+            : failure_(std::move(failure)) {
+        }
+
+        uint8_t
+        getNumPriorities() const override {
+            std::rethrow_exception(failure_);
+        }
+
+     private:
+        std::exception_ptr failure_;
+    };
+
+    for (const auto& test_case : AsyncLoadExceptionCases()) {
+        SCOPED_TRACE(test_case.name);
+        FailingExecutor executor(test_case.exception);
+        auto reader = std::make_shared<FakeReader>(&executor_);
+        auto chunk_reader = std::make_shared<FakeChunkReader>(&executor_);
+        auto open_options = OpenOptions();
+        open_options.executor = folly::getKeepAliveToken(executor);
+        ExpectClassifiedFailure(
+            [&]() {
+                Run(OpenChunkReadersAsync(nullptr,
+                                          kTestSegmentId,
+                                          reader,
+                                          MakeChunkReaderOpenSpecs(1),
+                                          std::move(open_options)));
+            },
+            test_case.expected_code);
+        auto options = Options();
+        options.executor = folly::getKeepAliveToken(executor);
+        ExpectClassifiedFailure(
+            [&]() {
+                Run(LoadCellsAsync(nullptr,
+                                   kTestSegmentId,
+                                   {{0, 0, 0, 1, 1}},
+                                   chunk_reader,
+                                   Finalizer(),
+                                   std::move(options)));
+            },
+            test_case.expected_code);
     }
 }
 

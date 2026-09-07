@@ -60,6 +60,8 @@ using ChunkReaderPtr = std::shared_ptr<milvus_storage::api::ChunkReader>;
 // Caller/context cancellation takes precedence over that failure and is checked
 // before each dispatch and after draining. The context token is captured at call
 // time, and Arrow statuses retain their Segcore error classification.
+// Exceptions from setup or awaited work preserve SegcoreError codes; allocation
+// and Folly failures are classified, and untyped failures become UnexpectedError.
 [[nodiscard]] folly::coro::Task<std::vector<ChunkReaderPtr>>
 OpenChunkReadersAsync(const milvus::OpContext* ctx,
                       int64_t segment_id,

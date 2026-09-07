@@ -32,6 +32,7 @@
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/AsyncLoadException.h"
 #include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
@@ -491,24 +492,29 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                CellFinalizeFunc finalize_cell,
                AsyncLoadPipelineOptions options) {
-    auto executor_keep_alive = ResolveAsyncLoadExecutor(
-        std::move(options.executor), options.load_priority);
-    auto finalization_executor_provider =
-        std::move(options.finalization_executor_provider);
-    const auto budget_priority = BudgetPriority(options.load_priority);
-    const auto context_cancellation_token =
-        ctx ? ctx->cancellation_token : folly::CancellationToken{};
+    try {
+        auto executor_keep_alive = ResolveAsyncLoadExecutor(
+            std::move(options.executor), options.load_priority);
+        auto finalization_executor_provider =
+            std::move(options.finalization_executor_provider);
+        const auto budget_priority = BudgetPriority(options.load_priority);
+        const auto context_cancellation_token =
+            ctx ? ctx->cancellation_token : folly::CancellationToken{};
 
-    return LoadCellsAsyncImpl(std::move(cells),
-                              std::move(chunk_reader),
-                              std::move(finalize_cell),
-                              segment_id,
-                              options.read_window_bytes,
-                              std::move(executor_keep_alive),
-                              std::move(finalization_executor_provider),
-                              options.load_priority,
-                              budget_priority,
-                              context_cancellation_token);
+        return detail::ClassifyAsyncLoadExceptions(
+            LoadCellsAsyncImpl(std::move(cells),
+                               std::move(chunk_reader),
+                               std::move(finalize_cell),
+                               segment_id,
+                               options.read_window_bytes,
+                               std::move(executor_keep_alive),
+                               std::move(finalization_executor_provider),
+                               options.load_priority,
+                               budget_priority,
+                               context_cancellation_token));
+    } catch (...) {
+        detail::RethrowAsyncLoadException();
+    }
 }
 
 }  // namespace milvus::segcore::storagev2translator
