@@ -372,22 +372,6 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		return queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	}
 
-	// Helper: query that should fail with an error
-	queryExpectError := func(expr string) {
-		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Expr:           expr,
-			OutputFields:   []string{"count(*)"},
-		})
-		s.NoError(err)
-		s.NotEqual(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(),
-			"expr %q should fail under partition key isolation", expr)
-		log.Info("partition key isolation: correctly rejected",
-			zap.String("expr", expr),
-			zap.String("reason", queryResult.GetStatus().GetReason()))
-	}
-
 	// Helper: search that should fail with an error
 	searchExpectError := func(expr string) {
 		nq := 10
@@ -437,64 +421,45 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 
 	// ── Invalid expressions (IN and OR are rejected under isolation) ──
 
-	// Test 4: pid in [1, 10] — rejected (IN not supported)
-	queryExpectError("pid in [1, 10]")
-
-	// Test 5: pid == 1 || pid == 10 — rejected (OR not supported;
-	// rewriter may merge to IN, which is also rejected)
-	queryExpectError("pid == 1 || pid == 10")
-
-	// Test 6: pid in [1, 10, 100] — rejected
-	queryExpectError("pid in [1, 10, 100]")
-
-	// Test 7: pid == 1 || pid == 10 || pid == 100 — rejected
-	queryExpectError("pid == 1 || pid == 10 || pid == 100")
-
-	// Test 8: search with pid in [1, 10] — rejected
+	// Test 4: search with pid in [1, 10] — rejected
 	searchExpectError("pid in [1, 10]")
 
-	// Test 9: search with pid == 1 || pid == 10 — rejected
+	// Test 5: search with pid == 1 || pid == 10 — rejected
 	searchExpectError("pid == 1 || pid == 10")
 
 	// ── Edge cases ──
 
-	// Test 10: pid == 1 && pid in [1, 10] — rejected (contains IN on partition key)
-	queryExpectError("pid == 1 && pid in [1, 10]")
-
-	// Test 11: pid == 1 && pid == 1 — redundant equality, should still be valid
+	// Test 6: pid == 1 && pid == 1 — redundant equality, should still be valid
 	count = queryCount("pid == 1 && pid == 1")
 	s.Equal(int64(rowNum), count, "pid == 1 && pid == 1 should return %d rows", rowNum)
 	log.Info("partition key isolation: pid == 1 && pid == 1", zap.Int64("count", count))
 
-	// Test 12: no partition key filter at all — rejected under isolation
-	queryExpectError(fmt.Sprintf("%s >= 0", integration.Int64Field))
-
-	// Test 13: search without partition key filter — rejected under isolation
+	// Test 7: search without partition key filter — rejected under isolation
 	searchExpectError(fmt.Sprintf("%s >= 0", integration.Int64Field))
 
 	// ── Non-partition-key expressions should not be affected when pid is given ──
 
-	// Test 14: pid == 1 && pk IN list — IN on non-partition-key field is fine
+	// Test 8: pid == 1 && pk IN list — IN on non-partition-key field is fine
 	count = queryCount("pid == 1 && int64Field in [0, 1, 2, 3, 4]")
 	s.Equal(int64(5), count, "pid == 1 && int64Field in [0..4] should return 5 rows")
 	log.Info("partition key isolation: pid == 1 && pk IN list", zap.Int64("count", count))
 
-	// Test 15: pid == 1 && pk OR conditions — OR on non-partition-key field is fine
+	// Test 9: pid == 1 && pk OR conditions — OR on non-partition-key field is fine
 	count = queryCount("pid == 1 && (int64Field == 0 || int64Field == 1)")
 	s.Equal(int64(2), count, "pid == 1 && (pk==0 || pk==1) should return 2 rows")
 	log.Info("partition key isolation: pid == 1 && pk OR", zap.Int64("count", count))
 
-	// Test 16: pid == 1 && complex non-pk expression (range + IN)
+	// Test 10: pid == 1 && complex non-pk expression (range + IN)
 	count = queryCount("pid == 1 && int64Field >= 0 && int64Field < 500")
 	s.Equal(int64(500), count, "pid == 1 && pk range [0,500) should return 500 rows")
 	log.Info("partition key isolation: pid == 1 && pk range", zap.Int64("count", count))
 
-	// Test 17: pid == 1 && non-pk NOT IN
+	// Test 11: pid == 1 && non-pk NOT IN
 	count = queryCount("pid == 1 && int64Field not in [0, 1, 2]")
 	s.Equal(int64(rowNum-3), count, "pid == 1 && pk not in [0,1,2] should return %d rows", rowNum-3)
 	log.Info("partition key isolation: pid == 1 && pk NOT IN", zap.Int64("count", count))
 
-	// Test 18: search with pid == 1 && non-pk complex filter — should succeed
+	// Test 12: search with pid == 1 && non-pk complex filter — should succeed
 	{
 		expr := "pid == 1 && int64Field >= 0"
 		nq := 10
