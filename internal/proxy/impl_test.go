@@ -1804,9 +1804,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}
-		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
+		sched, err := scheduler.NewTaskScheduler(ctx, node.tsoAllocator)
 		assert.NoError(t, err)
-		node.sched = scheduler
+		node.sched = sched
 		assert.NoError(t, node.sched.Start())
 		defer node.sched.Close()
 		chMgr := channelmgr.NewMockChannelsMgr(t)

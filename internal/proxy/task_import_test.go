@@ -451,7 +451,7 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
