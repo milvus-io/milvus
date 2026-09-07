@@ -1336,6 +1336,8 @@ TEST(Expr, TestArrayContainsFloatLiteralCastsToElementType) {
         array_value);
     expect_only_first_match(std::make_shared<plan::FilterBitsNode>(
         DEFAULT_PLANNODE_ID, array_expr));
+}
+
 // Behavior coverage for ExecArrayContains across single- and multi-target
 // invocations and across INT64 / VARCHAR element types. Exercises the typed
 // cached set path (no MultiElement / variant round-trip).
