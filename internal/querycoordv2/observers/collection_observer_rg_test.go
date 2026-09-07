@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -75,8 +77,23 @@ func (s *CollectionObserverRGSuite) SetupSuite() {
 	paramtable.Init()
 }
 
+// formHook is the smallest thing a distribution can install: the observer only
+// asks whether a hook is there, never what it does.
+type formHook struct{ hook.Hook }
+
+// installForm makes this test's binary one a distribution compiled itself
+// into. Scoped tasks are a form-only feature -- the incremental-expansion path
+// that registers them is form-gated, and so is the rebuild after a restart --
+// so every test in this suite runs with a form installed unless it uninstalls
+// it again to look at the stock binary.
+func (s *CollectionObserverRGSuite) installForm() {
+	ext.ResetForTest()
+	ext.SetHook(formHook{})
+}
+
 func (s *CollectionObserverRGSuite) SetupTest() {
 	s.ctx = context.Background()
+	s.installForm()
 
 	config := GenerateEtcdConfig()
 	client, err := etcd.GetEtcdClient(
@@ -136,6 +153,7 @@ func (s *CollectionObserverRGSuite) waitForTargetObserverInit() {
 }
 
 func (s *CollectionObserverRGSuite) TearDownTest() {
+	ext.ResetForTest()
 	paramtable.Get().Reset(Params.QueryCoordCfg.LoadTimeoutSeconds.Key)
 	s.targetObserver.Stop()
 	s.kv.Close()
@@ -1092,6 +1110,59 @@ func (s *CollectionObserverRGSuite) TestRebuiltTasksWaitForTheFirstInformativeOb
 	s.NotNil(s.meta.GetCollection(s.ctx, 1040))
 	s.EqualValues(1, s.meta.GetCollection(s.ctx, 1040).GetReplicaNumber())
 	s.False(ob.loadTasks.Contain(keyB))
+}
+
+// TestRecoveryRegistersNoScopedTaskOnAStockBinary pins the gate that keeps a
+// stock binary exactly as it was. Scoped tasks are registered by the
+// incremental-expansion path, which only runs when a form is installed, so on
+// a stock binary there is by construction nothing to rebuild after a restart --
+// and rebuilding anyway is not harmless. Every other producer of scoped tasks
+// is form-gated; without this gate the rebuild is the ONLY thing on a stock
+// binary that can release a replica of a Loaded collection: a collection loaded
+// into two resource groups, one of which comes back from a restart with its
+// delegator reporting but its segments failing to load, reads a constant
+// sub-100 figure, is not Ready, and after the load timeout loses that group's
+// replicas and its ReplicaNumber for good -- a teardown master never performs
+// on a Loaded collection.
+//
+// The fixture is that exact shape, and the observer is built with no hook
+// installed. It must register the collection-wide task and nothing else, and
+// nothing may be released however many ticks arrive after the timeout.
+func (s *CollectionObserverRGSuite) TestRecoveryRegistersNoScopedTaskOnAStockBinary() {
+	s.registerLoadingCollection(1030, 1031, "1030-dmc0", 2, 10301, 10302)
+	s.putReplica(1030, 103001, 16, rgA)
+	s.putDelegator(1030, 16, "1030-dmc0", 10301, 10302)
+	s.putReplica(1030, 103002, 17, rgB)
+	// rg-b's delegator reports the channel and never loads a segment.
+	s.putDelegator(1030, 17, "1030-dmc0")
+	s.markCollectionLoaded(1030, 1031)
+
+	// The stock binary: no form installed.
+	ext.ResetForTest()
+	s.Require().False(ext.FormInstalled())
+
+	ob := NewCollectionObserver(s.dist, s.meta, s.targetMgr, s.targetObserver, s.checkerController, s.proxyManager, s.nodeMgr)
+
+	_, hasScopedA := findTask(ob, 1030, rgA)
+	s.False(hasScopedA, "a stock binary has no scoped tasks to rebuild")
+	_, hasScopedB := findTask(ob, 1030, rgB)
+	s.False(hasScopedB, "a stock binary has no scoped tasks to rebuild")
+	_, hasUnscoped := findTask(ob, 1030, "")
+	s.True(hasUnscoped, "the collection-wide task recovery is unchanged")
+	s.Equal(1, ob.loadTasks.Len())
+
+	// The unscoped task of a Loaded collection finishes on its first tick, as
+	// it always has, and nothing watches the stalled group: the ticks that
+	// follow -- each one a full load timeout later, if there were a clock to
+	// run -- change nothing.
+	for tick := 0; tick < 3; tick++ {
+		ob.Observe(s.ctx)
+		s.Len(s.replicaIDsInRG(1030, rgA), 1, "tick %d", tick)
+		s.Len(s.replicaIDsInRG(1030, rgB), 1, "tick %d: a stock binary never releases a replica of a Loaded collection", tick)
+		s.EqualValues(2, s.meta.GetCollection(s.ctx, 1030).GetReplicaNumber(), "tick %d", tick)
+		s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1030).GetStatus(), "tick %d", tick)
+	}
+	s.Zero(ob.loadTasks.Len(), "the collection-wide task of a Loaded collection finishes on its first tick")
 }
 
 // TestRecoveryRegistersNoScopedTaskWhileTheCollectionIsStillLoading pins the
