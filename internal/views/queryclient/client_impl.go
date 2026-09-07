@@ -45,7 +45,6 @@ func NewViewQueryClient(
 	queryPlanClient QueryPlanClient,
 	queryServiceClient ViewQueryServiceClient,
 	shardResolver resolver.ShardResolver,
-	replicaPicker ReplicaPicker,
 	fieldFetchPlanner FieldFetchPlanner,
 	rerankerBuilder reranker.Builder,
 	rendererBuilder renderer.Builder,
@@ -57,8 +56,8 @@ func NewViewQueryClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	return &viewQueryClientImpl{
-		shardClient:            newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient, shardResolver, replicaPicker),
-		legacyClient:           newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver, replicaPicker),
+		shardClient:            newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient),
+		legacyClient:           newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver),
 		shardResolver:          shardResolver,
 		fieldFetchPlanner:      fieldFetchPlanner,
 		rerankerBuilder:        rerankerBuilder,
@@ -77,7 +76,7 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*SearchResult, error) {
 	// === Stage: Plan ===
 
-	// Resolve vchannels first — cheapest operation, fast-fails on invalid collection.
+	// Resolve vchannels first — the provider reports the collection's shard layout;
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
@@ -176,7 +175,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*
 func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (*QueryResult, error) {
 	// === Stage: Plan ===
 
-	// Resolve vchannels first — cheapest operation, fast-fails on invalid collection.
+	// Resolve vchannels first — the provider reports the collection's shard layout;
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {
 		return nil, err

@@ -348,6 +348,89 @@ func TestSNHandler_AcquireLatestUpViewReturnsFullTopology(t *testing.T) {
 	assert.Equal(t, int64(102), lease.View.GetQueryNode()[1].GetNodeId())
 }
 
+func TestSNHandler_AcquireLatestUpViewResolvesByVChannelWhenReplicaUnknown(t *testing.T) {
+	cat := newMockCatalog()
+	mgr := newMockResourceManager()
+	h := recoverSNQueryViewHandler(testPChannel, cat, mgr, nil)
+
+	preparing := newFullSNViewWithState(1, viewpb.QueryViewState_QueryViewStatePreparing, 101)
+	h.ApplyViews([]handler.ApplyView{
+		{View: preparing},
+	})
+	acquired, ok := mgr.getAcquired(preparing.QueryViewKey())
+	require.True(t, ok)
+	acquired.OnReady()
+	h.ApplyViews([]handler.ApplyView{
+		{View: newFullSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp, 101)},
+	})
+
+	// The client resolves shards by vchannel with an unknown replica ID before
+	// Phase 1; the handler must find the view by vchannel.
+	unknownReplicaShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: testVChannel}
+	lease, err := h.AcquireLatestUpView(context.Background(), unknownReplicaShardID)
+	require.NoError(t, err)
+	defer lease.Release()
+	assert.Equal(t, testReplicaID, lease.Meta.GetReplicaId())
+	assert.Equal(t, testVChannel, lease.Meta.GetVchannel())
+
+	// A shard ID with an unknown replica ID for a vchannel the handler does not
+	// host must still be rejected.
+	_, err = h.AcquireLatestUpView(context.Background(), qviews.ShardID{
+		ReplicaID: qviews.UnknownReplicaID,
+		VChannel:  "unknown-vchannel",
+	})
+	require.Error(t, err)
+}
+
+func TestSNHandler_VChannelIndexTracksMultipleReplicas(t *testing.T) {
+	cat := newMockCatalog()
+	mgr := newMockResourceManager()
+	h := recoverSNQueryViewHandler(testPChannel, cat, mgr, nil)
+
+	// A vchannel maps to one shard per replica hosting it: index is 1:N.
+	replica1 := qviews.ShardID{ReplicaID: 1, VChannel: testVChannel}
+	replica2 := qviews.ShardID{ReplicaID: 2, VChannel: testVChannel}
+	require.NotNil(t, h.getOrCreateShard(replica1))
+	require.NotNil(t, h.getOrCreateShard(replica2))
+
+	h.mu.Lock()
+	indexed, ok := h.shardsByVChannel[testVChannel]
+	h.mu.Unlock()
+	require.True(t, ok)
+	assert.Len(t, indexed, 2)
+	assert.Contains(t, indexed, replica1)
+	assert.Contains(t, indexed, replica2)
+
+	// Removing one replica keeps the other resolvable by vchannel.
+	h.makeOnEmpty(replica1)()
+	h.mu.Lock()
+	indexed, ok = h.shardsByVChannel[testVChannel]
+	h.mu.Unlock()
+	require.True(t, ok)
+	assert.Equal(t, map[qviews.ShardID]struct{}{replica2: {}}, indexed)
+	_, ok = h.shards[replica1]
+	assert.False(t, ok)
+	_, ok = h.shards[replica2]
+	assert.True(t, ok)
+
+	// Removing the last replica drops the vchannel key entirely.
+	h.makeOnEmpty(replica2)()
+	h.mu.Lock()
+	_, ok = h.shardsByVChannel[testVChannel]
+	h.mu.Unlock()
+	assert.False(t, ok)
+
+	// Recovery registers the index from persisted views as well.
+	persisted := newFullSNViewWithState(3, viewpb.QueryViewState_QueryViewStateUp, 101)
+	recovered := recoverSNQueryViewHandler(testPChannel, cat, mgr,
+		[]*viewpb.QueryViewOfShard{persisted.IntoProto()})
+	recovered.mu.Lock()
+	recoveredIndexed, ok := recovered.shardsByVChannel[testVChannel]
+	recovered.mu.Unlock()
+	require.True(t, ok)
+	assert.Contains(t, recoveredIndexed, persisted.ShardID())
+}
+
 func TestSNHandler_QueryViewLeaseDefersResourceRelease(t *testing.T) {
 	cat := newMockCatalog()
 	mgr := newMockResourceManager()

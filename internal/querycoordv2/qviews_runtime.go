@@ -22,7 +22,6 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -148,12 +146,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 			balancerController.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
 		},
 	)
-	shardViewRegistry.RegisterStatsObserver(func(shardID qviews.ShardID, stats *coordview.ShardStats) {
-		if stats != nil && stats.UpVersion != nil {
-			loadManager.ObserveShardUp(shardID)
-		}
-	})
-	seedDiscoverableShards(loadManager, shardViewRegistry.Snapshot())
 
 	return &qviewsRuntime{
 		loadConfigStore:      loadConfigStore,
@@ -168,18 +160,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 }
 
 func (r *qviewsRuntime) start(ctx context.Context) {
-	if err := snmanager.StaticStreamingNodeManager.RegisterShardAssignmentProvider(ctx, r.loadManager); err != nil {
-		mlog.Warn(ctx, "failed to register query view shard assignment provider", mlog.Err(err))
-	} else {
-		r.loadManager.SetShardAssignmentNotifier(func() {
-			if err := snmanager.StaticStreamingNodeManager.TriggerShardAssignmentUpdate(context.Background()); err != nil {
-				mlog.Warn(context.Background(), "failed to trigger query view shard assignment update", mlog.Err(err))
-			}
-		})
-		if err := snmanager.StaticStreamingNodeManager.TriggerShardAssignmentUpdate(ctx); err != nil {
-			mlog.Warn(ctx, "failed to trigger initial query view shard assignment update", mlog.Err(err))
-		}
-	}
 	r.balancer.Start(ctx)
 }
 
@@ -197,14 +177,6 @@ func (r *qviewsRuntime) stop() {
 	}
 	if r.streamingCoordClient != nil {
 		r.streamingCoordClient.Close()
-	}
-}
-
-func seedDiscoverableShards(loadManager *loadmgr.CollectionLoadManager, snapshot *coordview.ShardViewSnapshot) {
-	for shardID, stats := range snapshot.StatsMap() {
-		if stats != nil && stats.UpVersion != nil {
-			loadManager.MarkShardDiscoverable(shardID)
-		}
 	}
 }
 

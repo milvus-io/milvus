@@ -8,7 +8,6 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -35,12 +34,7 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		},
 		&legacyResolver{
 			vchannels: []string{shardA.VChannel, shardB.VChannel},
-			replicas: map[string]*resolver.ShardReplicas{
-				shardA.VChannel: {VChannel: shardA.VChannel, PrimaryShardID: shardA, ShardIDs: []qviews.ShardID{shardA}},
-				shardB.VChannel: {VChannel: shardB.VChannel, PrimaryShardID: shardB, ShardIDs: []qviews.ShardID{shardB}},
-			},
 		},
-		firstReplicaPicker{},
 	)
 
 	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
@@ -57,12 +51,6 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		result.Results[1].GetBase().GetSourceID(),
 	})
 	require.Len(t, result.Plans, 2)
-}
-
-type firstReplicaPicker struct{}
-
-func (firstReplicaPicker) Pick(_ context.Context, info ReplicaPickInfo) (ReplicaPickResult, error) {
-	return ReplicaPickResult{ShardID: info.ShardReplicas.ShardIDs[0]}, nil
 }
 
 func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
@@ -88,11 +76,7 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 		},
 		&legacyResolver{
 			vchannels: []string{shardID.VChannel},
-			replicas: map[string]*resolver.ShardReplicas{
-				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
-			},
 		},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
@@ -125,11 +109,7 @@ func TestLegacyClientQuerySkipsEmptyDownstreamResults(t *testing.T) {
 		},
 		&legacyResolver{
 			vchannels: []string{shardID.VChannel},
-			replicas: map[string]*resolver.ShardReplicas{
-				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
-			},
 		},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
@@ -161,11 +141,7 @@ func TestLegacyClientQueryDoesNotDispatchWhenPlanHasNoWorkNodes(t *testing.T) {
 		service,
 		&legacyResolver{
 			vchannels: []string{shardID.VChannel},
-			replicas: map[string]*resolver.ShardReplicas{
-				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
-			},
 		},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
@@ -198,11 +174,7 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 		},
 		&legacyResolver{
 			vchannels: []string{shardID.VChannel},
-			replicas: map[string]*resolver.ShardReplicas{
-				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
-			},
 		},
-		fixedReplicaPicker{shardID: shardID},
 	)
 
 	_, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
@@ -216,15 +188,10 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 
 type legacyResolver struct {
 	vchannels []string
-	replicas  map[string]*resolver.ShardReplicas
 }
 
 func (r *legacyResolver) ResolveVChannels(context.Context, int64) ([]string, error) {
 	return r.vchannels, nil
-}
-
-func (r *legacyResolver) ResolveShard(_ context.Context, _ int64, vchannel string) (*resolver.ShardReplicas, error) {
-	return r.replicas[vchannel], nil
 }
 
 type legacyPlanClient struct {
