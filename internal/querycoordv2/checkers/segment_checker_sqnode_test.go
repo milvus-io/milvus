@@ -39,12 +39,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
 	sqnShard      = "by-dev-rootcoord-dml_0_100v0"
 	sqnGroup      = "rg-streaming"
 	sqnCollection = int64(100)
+	sqnReplica    = int64(1)
 	sqnStreaming  = int64(7)  // the streaming node's embedded query node
 	sqnRegular    = int64(11) // a regular query node
 )
@@ -64,13 +66,20 @@ func setForm(t *testing.T, installed bool) {
 	}
 }
 
-// sqnFixture is the smallest coordinator state the streaming-node placement
-// reads: a resource manager that knows the replica's group, a node manager,
-// and a distribution.
+// sqnFixture is one segment checker over the smallest coordinator state the
+// streaming-node placement reads: a resource manager that knows the replica's
+// group, a node manager, a distribution, and a target holding exactly one
+// sealed segment. The checker persists across calls, as it does across check
+// rounds, because what it remembers about a replica is under test.
 type sqnFixture struct {
 	meta    *meta.Meta
 	nodeMgr *session.NodeManager
 	dist    *meta.DistributionManager
+	segment *datapb.SegmentInfo
+
+	checker *SegmentChecker
+	// offered is the node set the assignment policy was last given.
+	offered []int64
 }
 
 func newSQNFixture(t *testing.T) *sqnFixture {
@@ -80,19 +89,69 @@ func newSQNFixture(t *testing.T) *sqnFixture {
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ReleaseReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
-	return &sqnFixture{meta: m, nodeMgr: nodeMgr, dist: meta.NewDistributionManager(nodeMgr)}
+	f := &sqnFixture{
+		meta:    meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr),
+		nodeMgr: nodeMgr,
+		dist:    meta.NewDistributionManager(nodeMgr),
+		segment: &datapb.SegmentInfo{ID: 1, CollectionID: sqnCollection, PartitionID: 10, InsertChannel: sqnShard, NumOfRows: 1},
+	}
+	require.NoError(t, f.meta.PutCollection(context.Background(), &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: sqnCollection, ReplicaNumber: 1},
+	}))
+
+	// The target holds the one segment, in the next target only: nothing is
+	// redundant, and the segment is lacking exactly when it is not in dist.
+	targets := meta.NewMockTargetManager(t)
+	targets.EXPECT().IsNextTargetExist(mock.Anything, sqnCollection).Return(true).Maybe()
+	targets.EXPECT().IsCurrentTargetExist(mock.Anything, sqnCollection, mock.Anything).Return(false).Maybe()
+	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, meta.CurrentTarget).Return(nil).Maybe()
+	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, mock.Anything).
+		Return(map[int64]*datapb.SegmentInfo{f.segment.GetID(): f.segment}).Maybe()
+	targets.EXPECT().GetCollectionTargetVersion(mock.Anything, sqnCollection, mock.Anything).Return(int64(1)).Maybe()
+
+	f.checker = &SegmentChecker{
+		meta:                     f.meta,
+		dist:                     f.dist,
+		targetMgr:                targets,
+		assignPolicy:             f.firstNodePolicy(t),
+		replicasWithRegularNodes: typeutil.NewUniqueSet(),
+	}
+	return f
 }
 
-// addGroup registers the replica's resource group asking for `requests`
-// regular query nodes. A group built to run on a streaming node alone asks
-// for none; a group that runs regular query nodes asks for as many as it has.
-func (f *sqnFixture) addGroup(t *testing.T, requests int32) {
+// firstNodePolicy is an assignment policy that places every segment on the
+// first node it is offered and records the nodes it was offered. What is
+// under test is which nodes reach the policy, not what it does with them.
+func (f *sqnFixture) firstNodePolicy(t *testing.T) assign.AssignPolicy {
+	t.Helper()
+	policy := assign.NewMockAssignPolicy(t)
+	policy.EXPECT().
+		AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, segments []*meta.Segment, nodes []int64, _ bool) []assign.SegmentAssignPlan {
+			f.offered = nodes
+			if len(nodes) == 0 {
+				return nil
+			}
+			plans := make([]assign.SegmentAssignPlan, 0, len(segments))
+			for _, segment := range segments {
+				plans = append(plans, assign.SegmentAssignPlan{Segment: segment, From: -1, To: nodes[0]})
+			}
+			return plans
+		}).Maybe()
+	return policy
+}
+
+// addGroup registers the replica's resource group asking for `nodes` regular
+// query nodes, requests and limits alike, which is the shape a form's running
+// query cluster has: it asks for its replica count while its compute is
+// streaming nodes alone.
+func (f *sqnFixture) addGroup(t *testing.T, nodes int32) {
 	t.Helper()
 	_, err := f.meta.AddResourceGroup(context.Background(), sqnGroup, &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: requests},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: requests},
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: nodes},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: nodes},
 	})
 	require.NoError(t, err)
 }
@@ -106,40 +165,23 @@ func (f *sqnFixture) addRegularNode(t *testing.T, nodeID int64) {
 	require.True(t, f.meta.ContainsNode(context.Background(), sqnGroup, nodeID), "the node must land in the group under test")
 }
 
-// replica builds a replica of the group with the given regular and streaming
-// query nodes.
+// replica builds the replica of the group with the given regular and
+// streaming query nodes.
 func (f *sqnFixture) replica(regular, streaming []int64) *meta.Replica {
 	return meta.NewReplica(&querypb.Replica{
-		ID: 1, CollectionID: sqnCollection, ResourceGroup: sqnGroup, Nodes: regular, RwSqNodes: streaming,
+		ID: sqnReplica, CollectionID: sqnCollection, ResourceGroup: sqnGroup, Nodes: regular, RwSqNodes: streaming,
 	})
 }
 
-// firstNodePolicy is an assignment policy that places every segment on the
-// first node it is offered and records the nodes it was offered. What is
-// under test is which nodes reach the policy, not what it does with them.
-func firstNodePolicy(t *testing.T, offered *[]int64) assign.AssignPolicy {
-	t.Helper()
-	policy := assign.NewMockAssignPolicy(t)
-	policy.EXPECT().
-		AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ int64, segments []*meta.Segment, nodes []int64, _ bool) []assign.SegmentAssignPlan {
-			*offered = nodes
-			if len(nodes) == 0 {
-				return nil
-			}
-			plans := make([]assign.SegmentAssignPlan, 0, len(segments))
-			for _, segment := range segments {
-				plans = append(plans, assign.SegmentAssignPlan{Segment: segment, From: -1, To: nodes[0]})
-			}
-			return plans
-		}).Maybe()
-	return policy
+// putSealedSegmentOn makes the fixture's segment resident on nodeID.
+func (f *sqnFixture) putSealedSegmentOn(nodeID int64) {
+	f.dist.SegmentDistManager.Update(nodeID, &meta.Segment{SegmentInfo: f.segment, Node: nodeID, Version: 1})
 }
 
-// sealedSegmentPlacement runs createSegmentLoadTasks against replica with one
-// sealed segment to place, and reports the nodes the assignment policy was
-// offered and the tasks that came out.
-func (f *sqnFixture) sealedSegmentPlacement(t *testing.T, replica *meta.Replica, streaming bool) (offered []int64, tasks []task.Task) {
+// placeSealedSegment runs createSegmentLoadTasks for the fixture's segment
+// against replica, and returns the nodes the policy was offered and the
+// tasks that came out.
+func (f *sqnFixture) placeSealedSegment(t *testing.T, replica *meta.Replica, streaming bool) (offered []int64, tasks []task.Task) {
 	t.Helper()
 	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(streaming).Build()
 	defer enabled.UnPatch()
@@ -147,32 +189,45 @@ func (f *sqnFixture) sealedSegmentPlacement(t *testing.T, replica *meta.Replica,
 	leader := mockey.Mock((*meta.ChannelDistManager).GetShardLeader).Return(&meta.DmChannel{}).Build()
 	defer leader.UnPatch()
 
-	c := &SegmentChecker{
-		meta:         f.meta,
-		dist:         f.dist,
-		assignPolicy: firstNodePolicy(t, &offered),
-	}
-	tasks = c.createSegmentLoadTasks(context.Background(),
-		[]*datapb.SegmentInfo{{ID: 1, CollectionID: sqnCollection, InsertChannel: sqnShard}},
+	f.offered = nil
+	tasks = f.checker.createSegmentLoadTasks(context.Background(),
+		[]*datapb.SegmentInfo{f.segment},
 		[]commonpb.LoadPriority{commonpb.LoadPriority_HIGH},
 		replica)
-	return offered, tasks
+	return f.offered, tasks
+}
+
+// check runs a full checkReplica round for replica, with the streaming
+// service on and the shard's delegator as given, and returns its tasks.
+func (f *sqnFixture) check(t *testing.T, replica *meta.Replica, leader *meta.DmChannel) []task.Task {
+	t.Helper()
+	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
+	defer enabled.UnPatch()
+	shardLeader := mockey.Mock((*meta.ChannelDistManager).GetShardLeader).Return(leader).Build()
+	defer shardLeader.UnPatch()
+
+	f.offered = nil
+	return f.checker.checkReplica(context.Background(), replica)
 }
 
 // A replica whose resource group's only compute is a streaming node has no
 // regular query node at all - milvus keeps the query node embedded in a
-// streaming node out of the resource manager - and the group asks for none.
-// For an installed form, its sealed segments must still have somewhere to go,
-// or the load is accepted and never converges: the segment is placed on the
-// streaming node's query node.
+// streaming node out of the resource manager - and never had one. For an
+// installed form, its sealed segments must still have somewhere to go, or the
+// load is accepted and never converges: the segment is placed on the
+// streaming node's query node. The group is shaped as a form's running query
+// cluster is, asking for its replica count; that count says nothing about
+// regular nodes and must not turn the placement off.
 func TestSealedSegmentsReachAStreamingQueryNodeWhenThereIsNoOther(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
-	f.addGroup(t, 0)
+	f.addGroup(t, 2)
 	replica := f.replica(nil, []int64{sqnStreaming})
 	require.Empty(t, replica.GetRWNodes(), "the case under test is a replica with no regular node")
+	require.Positive(t, f.meta.GetResourceGroup(context.Background(), sqnGroup).MissingNumOfNodes(),
+		"and a group that asks for regular nodes it does not have")
 
-	offered, tasks := f.sealedSegmentPlacement(t, replica, true)
+	offered, tasks := f.placeSealedSegment(t, replica, true)
 	assert.Equal(t, []int64{sqnStreaming}, offered,
 		"the group's streaming query node is the only compute the replica has")
 	require.Len(t, tasks, 1, "the sealed segment must be placed, not silently dropped")
@@ -181,50 +236,65 @@ func TestSealedSegmentsReachAStreamingQueryNodeWhenThereIsNoOther(t *testing.T) 
 	assert.EqualValues(t, 1, tasks[0].(*task.SegmentTask).SegmentID())
 }
 
-// A group the resource manager does not know cannot be asked for its regular
-// nodes; the replica's own node sets are the only evidence, and they say the
-// streaming node is all there is.
-func TestSealedSegmentsReachAStreamingQueryNodeOfAnUnknownGroup(t *testing.T) {
-	setForm(t, true)
-	f := newSQNFixture(t)
-	require.False(t, f.meta.ContainResourceGroup(context.Background(), sqnGroup))
-
-	offered, _ := f.sealedSegmentPlacement(t, f.replica(nil, []int64{sqnStreaming}), true)
-	assert.Equal(t, []int64{sqnStreaming}, offered)
-}
-
 // The reviewer's failure: a MIXED group - a regular query node next to the
 // streaming node - whose regular node restarts. The node leaves the resource
 // group and the replica at once, so for the length of the restart the
-// replica's RW set is empty exactly as a streaming-only replica's is. The
-// group still asks for its regular node, and that is what tells the two
-// apart: the sealed segments belong on it and wait for it, as they do on
-// master, rather than being loaded onto the streaming node's query node.
+// replica reads exactly like a streaming-only one. What tells the two apart
+// is that this replica has been seen with a regular node: its sealed
+// segments belong on one and wait for it, as they do on master, rather than
+// being loaded onto the streaming node's query node.
 func TestSealedSegmentsWaitForARegularNodeThatIsRestarting(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	f.addGroup(t, 1)
-	replica := f.replica(nil, []int64{sqnStreaming})
-	require.Empty(t, replica.GetRWNodes(), "the regular node is away")
-	rg := f.meta.GetResourceGroup(context.Background(), sqnGroup)
-	require.Zero(t, rg.NodeNum(), "and the group has no regular node while it is away")
+	f.addRegularNode(t, sqnRegular)
 
-	offered, tasks := f.sealedSegmentPlacement(t, replica, true)
-	assert.Empty(t, offered, "the streaming node's query node must not be offered while a regular node is expected")
+	// One check round with the regular node present.
+	f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	assert.Equal(t, []int64{sqnRegular}, f.offered, "sanity: the lacking segment goes to the regular node")
+
+	// The regular node restarts: gone from the group and from the replica.
+	f.meta.HandleNodeDown(context.Background(), sqnRegular)
+	away := f.replica(nil, []int64{sqnStreaming})
+	require.Empty(t, away.GetRWNodes())
+
+	offered, tasks := f.placeSealedSegment(t, away, true)
+	assert.Empty(t, offered, "the streaming node's query node must not be offered while the regular node is away")
 	assert.Empty(t, tasks)
+	tasks = f.check(t, away, &meta.DmChannel{})
+	assert.Empty(t, tasks, "and a full check round places nothing either")
 }
 
-// The same, one observer tick earlier: the regular node is back in the
-// resource group but the replica observer has not handed it to the replica
-// yet. The group holds a regular node, so the sealed segments wait for it.
-func TestSealedSegmentsWaitForARegularNodeTheReplicaHasNotReceived(t *testing.T) {
+// The bounded case: after a coordinator restart the checker's memory is
+// empty, so a mixed group whose regular node is down at that moment gets one
+// placement on the streaming node's query node. Once the regular node is
+// back, the move pass brings the segment onto it.
+func TestAFreshCheckerPlacesOnceOnTheStreamingNodeAndThenDrains(t *testing.T) {
 	setForm(t, true)
 	f := newSQNFixture(t)
 	f.addGroup(t, 1)
-	f.addRegularNode(t, sqnRegular)
-	replica := f.replica(nil, []int64{sqnStreaming})
+	away := f.replica(nil, []int64{sqnStreaming})
 
-	offered, tasks := f.sealedSegmentPlacement(t, replica, true)
+	tasks := f.check(t, away, &meta.DmChannel{})
+	require.Len(t, tasks, 1, "a checker that has never seen the regular node places on the streaming node")
+	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
+	f.putSealedSegmentOn(sqnStreaming)
+
+	f.addRegularNode(t, sqnRegular)
+	tasks = f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	require.Len(t, tasks, 1, "with the regular node back, the one task is the move")
+	assert.Equal(t, task.TaskTypeMove, task.GetTaskType(tasks[0]))
+	nodesByAction := make(map[task.ActionType]int64)
+	for _, action := range tasks[0].Actions() {
+		nodesByAction[action.Type()] = action.Node()
+	}
+	assert.EqualValues(t, sqnRegular, nodesByAction[task.ActionTypeGrow])
+	assert.EqualValues(t, sqnStreaming, nodesByAction[task.ActionTypeReduce])
+
+	// And from now on the replica is known to have a regular node: a later
+	// restart of it waits.
+	f.meta.HandleNodeDown(context.Background(), sqnRegular)
+	offered, tasks := f.placeSealedSegment(t, away, true)
 	assert.Empty(t, offered)
 	assert.Empty(t, tasks)
 }
@@ -237,7 +307,7 @@ func TestAStockBinaryPlacesNoSealedSegmentOnAStreamingQueryNode(t *testing.T) {
 	f := newSQNFixture(t)
 	f.addGroup(t, 0)
 
-	offered, tasks := f.sealedSegmentPlacement(t, f.replica(nil, []int64{sqnStreaming}), true)
+	offered, tasks := f.placeSealedSegment(t, f.replica(nil, []int64{sqnStreaming}), true)
 	assert.Empty(t, offered)
 	assert.Empty(t, tasks)
 }
@@ -250,7 +320,7 @@ func TestSealedSegmentsStayOffTheStreamingNodeWhenARegularOneExists(t *testing.T
 	f.addGroup(t, 1)
 	f.addRegularNode(t, sqnRegular)
 
-	offered, tasks := f.sealedSegmentPlacement(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), true)
+	offered, tasks := f.placeSealedSegment(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), true)
 	assert.Equal(t, []int64{sqnRegular}, offered)
 	require.Len(t, tasks, 1)
 	assert.EqualValues(t, sqnRegular, tasks[0].Actions()[0].Node())
@@ -263,49 +333,34 @@ func TestSealedSegmentCandidatesAreUnchangedWithTheStreamingServiceOff(t *testin
 	f := newSQNFixture(t)
 	f.addGroup(t, 0)
 
-	offered, _ := f.sealedSegmentPlacement(t, f.replica(nil, []int64{sqnStreaming}), true)
+	offered, _ := f.placeSealedSegment(t, f.replica(nil, []int64{sqnStreaming}), true)
 	require.NotEmpty(t, offered, "sanity: with the service on the streaming node is offered")
 
-	offered, tasks := f.sealedSegmentPlacement(t, f.replica(nil, []int64{sqnStreaming}), false)
+	offered, tasks := f.placeSealedSegment(t, f.replica(nil, []int64{sqnStreaming}), false)
 	assert.Empty(t, offered)
 	assert.Empty(t, tasks)
 }
 
-// checkReplicaWithASealedSegmentOnTheStreamingNode runs a full checkReplica
-// round for a replica whose one target segment is resident on the streaming
-// node's query node, and returns the tasks the round produced. The target
-// holds exactly that segment, so nothing is lacking and nothing is redundant:
-// whatever comes out is about where the segment sits.
-func (f *sqnFixture) checkReplicaWithASealedSegmentOnTheStreamingNode(t *testing.T, replica *meta.Replica, leader *meta.DmChannel) []task.Task {
-	t.Helper()
+// The record a checker keeps of a replica's regular node goes with the
+// replica: a released replica's ID is not carried forever.
+func TestTheRegularNodeRecordIsForgottenWithTheReplica(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
 	ctx := context.Background()
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer enabled.UnPatch()
-	shardLeader := mockey.Mock((*meta.ChannelDistManager).GetShardLeader).Return(leader).Build()
-	defer shardLeader.UnPatch()
 
-	require.NoError(t, f.meta.PutCollection(ctx, &meta.Collection{
-		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: sqnCollection, ReplicaNumber: 1},
-	}))
-	segment := &datapb.SegmentInfo{ID: 1, CollectionID: sqnCollection, PartitionID: 10, InsertChannel: sqnShard, NumOfRows: 1}
-	f.dist.SegmentDistManager.Update(sqnStreaming, &meta.Segment{SegmentInfo: segment, Node: sqnStreaming, Version: 1})
+	replica := f.replica([]int64{sqnRegular}, []int64{sqnStreaming})
+	require.NoError(t, f.meta.Put(ctx, replica))
+	f.check(t, replica, &meta.DmChannel{})
+	require.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica))
 
-	targets := meta.NewMockTargetManager(t)
-	targets.EXPECT().IsNextTargetExist(mock.Anything, sqnCollection).Return(true).Maybe()
-	targets.EXPECT().IsCurrentTargetExist(mock.Anything, sqnCollection, mock.Anything).Return(false).Maybe()
-	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, meta.CurrentTarget).Return(nil).Maybe()
-	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, mock.Anything).
-		Return(map[int64]*datapb.SegmentInfo{segment.GetID(): segment}).Maybe()
-	targets.EXPECT().GetCollectionTargetVersion(mock.Anything, sqnCollection, mock.Anything).Return(int64(1)).Maybe()
+	f.checker.forgetReleasedReplicas(ctx)
+	assert.True(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a replica that exists keeps its record")
 
-	var offered []int64
-	c := &SegmentChecker{
-		meta:         f.meta,
-		dist:         f.dist,
-		targetMgr:    targets,
-		assignPolicy: firstNodePolicy(t, &offered),
-	}
-	return c.checkReplica(ctx, replica)
+	require.NoError(t, f.meta.RemoveReplicas(ctx, sqnCollection, sqnReplica))
+	f.checker.forgetReleasedReplicas(ctx)
+	assert.False(t, f.checker.replicasWithRegularNodes.Contain(sqnReplica), "a released replica's record goes with it")
 }
 
 // The other half of the reviewer's failure: once a regular node is back, a
@@ -319,9 +374,9 @@ func TestSealedSegmentsMisplacedOnAStreamingQueryNodeMoveToARegularNode(t *testi
 	f := newSQNFixture(t)
 	f.addGroup(t, 1)
 	f.addRegularNode(t, sqnRegular)
-	replica := f.replica([]int64{sqnRegular}, []int64{sqnStreaming})
+	f.putSealedSegmentOn(sqnStreaming)
 
-	tasks := f.checkReplicaWithASealedSegmentOnTheStreamingNode(t, replica, &meta.DmChannel{})
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
 	require.Len(t, tasks, 1, "exactly one task, for the one misplaced segment")
 	move := tasks[0]
 	assert.Equal(t, task.TaskTypeMove, task.GetTaskType(move), "a move, not a bare release: the replica keeps serving the segment throughout")
@@ -340,8 +395,9 @@ func TestSealedSegmentsStayOnTheStreamingQueryNodeWhileThereIsNoRegularNode(t *t
 	setForm(t, true)
 	f := newSQNFixture(t)
 	f.addGroup(t, 0)
+	f.putSealedSegmentOn(sqnStreaming)
 
-	tasks := f.checkReplicaWithASealedSegmentOnTheStreamingNode(t, f.replica(nil, []int64{sqnStreaming}), &meta.DmChannel{})
+	tasks := f.check(t, f.replica(nil, []int64{sqnStreaming}), &meta.DmChannel{})
 	assert.Empty(t, tasks)
 }
 
@@ -352,8 +408,9 @@ func TestMisplacedSealedSegmentsWaitForAShardLeader(t *testing.T) {
 	f := newSQNFixture(t)
 	f.addGroup(t, 1)
 	f.addRegularNode(t, sqnRegular)
+	f.putSealedSegmentOn(sqnStreaming)
 
-	tasks := f.checkReplicaWithASealedSegmentOnTheStreamingNode(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), nil)
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), nil)
 	assert.Empty(t, tasks)
 }
 
@@ -365,7 +422,8 @@ func TestAStockBinaryLeavesSealedSegmentsOnAStreamingQueryNodeAlone(t *testing.T
 	f := newSQNFixture(t)
 	f.addGroup(t, 1)
 	f.addRegularNode(t, sqnRegular)
+	f.putSealedSegmentOn(sqnStreaming)
 
-	tasks := f.checkReplicaWithASealedSegmentOnTheStreamingNode(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
 	assert.Empty(t, tasks)
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const initialTargetVersion = int64(0)
@@ -62,6 +63,13 @@ type SegmentChecker struct {
 
 	// version cache for fast skip when nothing changed
 	versionCache map[int64]*collectionVersionCache
+
+	// replicasWithRegularNodes holds the ID of every replica that has been
+	// seen with a regular RW query node at some point in this coordinator's
+	// lifetime. It is what tells a replica whose regular node is merely away
+	// from one that never had any (see createSegmentLoadTasks); it is set on
+	// every check of a replica and forgotten with the replica.
+	replicasWithRegularNodes typeutil.UniqueSet
 }
 
 func NewSegmentChecker(
@@ -84,6 +92,8 @@ func NewSegmentChecker(
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
 		versionCache:      make(map[int64]*collectionVersionCache),
+
+		replicasWithRegularNodes: typeutil.NewUniqueSet(),
 	}
 }
 
@@ -144,6 +154,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 
 	// clean up version cache for released collections
 	c.cleanVersionCache(collectionIDs)
+	c.forgetReleasedReplicas(ctx)
 
 	// find already released segments which are not contained in target
 	results := make([]task.Task, 0)
@@ -212,6 +223,7 @@ func (c *SegmentChecker) cleanVersionCache(activeCollections []int64) {
 
 func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0)
+	c.noteRegularNodes(replica)
 
 	replicaSegmentDist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
@@ -541,8 +553,8 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// A sealed segment belongs on a regular query node, and the split
 		// between those and the streaming query nodes that carry delegators
 		// stays exactly as it was: this only runs when the replica has NO
-		// regular node at all, and its resource group runs on streaming
-		// nodes alone (see groupRunsOnStreamingNodesAlone).
+		// regular node at all, and never had one as far as this coordinator
+		// has seen (replicasWithRegularNodes, see noteRegularNodes).
 		//
 		// That is not a broken replica. A resource group whose only compute
 		// is a streaming node has none by construction - milvus keeps the
@@ -554,6 +566,31 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// partial progress until it times out, and nothing reports why,
 		// because no task was ever created to fail.
 		//
+		// The "never had one" half is what keeps a MIXED group - a regular
+		// query node next to the streaming node - off this path while its
+		// regular node restarts. The node leaves the resource group
+		// (handleNodeStopping/handleNodeDown unassign it) and the replica
+		// (the replica observer flips it rw->ro and removes it) at once, so
+		// for the length of the restart the replica reads exactly like a
+		// streaming-only one, and so does its group: neither the RW set nor
+		// the group's node set can tell the two apart, and the group's
+		// configured node count cannot either, since a form's running query
+		// cluster asks for N regular nodes while its compute is streaming
+		// nodes alone. What can is memory: a replica seen with a regular
+		// node keeps its sealed segments for one, and they wait while it is
+		// away, as on master.
+		//
+		// That memory is this coordinator's own, and empty after its restart,
+		// as it is for a replica just spawned by an update of the load config
+		// (job_update puts it into meta before RecoverReplicaOfCollection
+		// gives it nodes). A mixed group whose regular node happens to be
+		// down at that moment, or such a fresh replica checked before it
+		// received its node, therefore gets ONE placement on the streaming
+		// node's query node;
+		// the move pass in checkReplica (createMisplacedSegmentMoveTasks)
+		// brings those segments back onto the regular node once it returns,
+		// so the case is bounded to that one window and repairs itself.
+		//
 		// Only an installed form places segments there, the same gate the
 		// admission in utils.AssignReplica keys on: a stock deployment never
 		// admits a replica whose only compute is a streaming node, and if one
@@ -562,7 +599,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// GetRWNodes. A stock binary keeps the empty candidate set it always
 		// had.
 		if len(rwNodes) == 0 && extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() &&
-			c.groupRunsOnStreamingNodesAlone(ctx, replica) {
+			!c.replicasWithRegularNodes.Contain(replica.GetID()) {
 			rwNodes = replica.GetRWSQNodes()
 		}
 
@@ -589,38 +626,30 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
-// groupRunsOnStreamingNodesAlone answers whether the replica's resource group
-// holds no regular query node and asks for none, so that a streaming node's
-// embedded query node is the only compute it has by construction, and not
-// merely for the moment.
-//
-// The replica's own RW set cannot tell the two apart. A regular query node
-// that restarts leaves the resource group (handleNodeStopping/handleNodeDown
-// unassign it) and the replica (the replica observer flips it rw->ro and
-// removes it) at once, so a MIXED group - a regular node next to a streaming
-// node - reads exactly like a streaming-only one for the length of the
-// restart; placing the sealed segments on the streaming node's query node
-// then loads the whole replica onto compute it was never meant for. The
-// resource group's node set empties at the same moment, for the same reason,
-// so the count of present nodes is not enough either.
-//
-// What persists across the restart is what the group ASKS for: its
-// requests.nodeNum. A group that runs regular query nodes requests them, and
-// while they are away it is missing them (ResourceGroup.MissingNumOfNodes),
-// which is the same notion the replica manager waits on before assigning a
-// new replica (NeedWaitRGReady). Its sealed segments wait too, on master's
-// terms: nothing is placed until the regular node is back. A group whose only
-// compute is a streaming node requests no regular node, and holds none.
-//
-// A group the resource manager does not know cannot be asked; the replica's
-// node sets are then the only evidence, and they say the streaming node is
-// all there is.
-func (c *SegmentChecker) groupRunsOnStreamingNodesAlone(ctx context.Context, replica *meta.Replica) bool {
-	rg := c.meta.GetResourceGroup(ctx, replica.GetResourceGroup())
-	if rg == nil {
-		return true
+// noteRegularNodes records that the replica has a regular RW query node, if
+// it has one now. The record outlives the node: a replica whose regular node
+// is away keeps it, which is what createSegmentLoadTasks reads to keep the
+// replica's sealed segments waiting for that node rather than placing them
+// on a streaming node's query node. It is called on every check of a
+// replica, so the record is as fresh as the checker's own view.
+func (c *SegmentChecker) noteRegularNodes(replica *meta.Replica) {
+	if replica.RWNodesCount() > 0 {
+		c.replicasWithRegularNodes.Insert(replica.GetID())
 	}
-	return rg.NodeNum() == 0 && rg.MissingNumOfNodes() == 0
+}
+
+// forgetReleasedReplicas drops the regular-node record of every replica that
+// no longer exists, so the record stays bounded by the replicas there are.
+// One in-memory lookup per recorded replica, once per check round.
+func (c *SegmentChecker) forgetReleasedReplicas(ctx context.Context) {
+	released := make([]int64, 0)
+	c.replicasWithRegularNodes.Range(func(replicaID int64) bool {
+		if c.meta.Get(ctx, replicaID) == nil {
+			released = append(released, replicaID)
+		}
+		return true
+	})
+	c.replicasWithRegularNodes.Remove(released...)
 }
 
 // createMisplacedSegmentMoveTasks moves the sealed segments of the replica
