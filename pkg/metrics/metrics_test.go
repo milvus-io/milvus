@@ -302,6 +302,10 @@ func observeProxyCollection(nodeID, db, collection string) {
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	for _, parentType := range []string{"array", "struct_array"} {
+		ProxyPathReplaceParentOperations.WithLabelValues(nodeID, db, collection, parentType).Add(1)
+	}
+	ProxyPathReplaceMergeLatency.WithLabelValues(nodeID, db, collection).Observe(1)
 	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
 	ProxyFunctionlatency.WithLabelValues(nodeID, db, collection, "x", "x", "x").Observe(1)
 }
