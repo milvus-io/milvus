@@ -5514,11 +5514,14 @@ user-task-polling:
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
 
+	// TODO: Complete async loading support for data and indexes, including a
+	// non-zero default for common.loadTransientBudgetBytes to bound in-flight
+	// read buffers, before supporting enableAsyncLoad=true.
 	p.StorageV2EnableAsyncLoad = ParamItem{
 		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
 		Version:      "3.0.1",
 		DefaultValue: "false",
-		Doc:          "Temporary rollout switch for Storage V3 async field-data loading. Existing translators keep the mode captured at construction.",
+		Doc:          "Async loading support is incomplete; enabling it is currently unsupported. Existing translators keep the mode captured at construction.",
 		Export:       false,
 	}
 	p.StorageV2EnableAsyncLoad.Init(base.mgr)
