@@ -75,9 +75,9 @@ func (t *QueryStreamTask) Execute() error {
 	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), plan); err != nil {
 		return err
 	}
-	retrievePlan.SetTakeForOutputAllowed(requestAllowsTakeForOutput(
-		retrieveTakeForOutputResultCount(t.req.GetReq(), plan),
-	))
+	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), plan)
+	takeAllowed := requestAllowsTakeForOutput(resultCount)
+	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
 
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
