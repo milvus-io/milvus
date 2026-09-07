@@ -18,18 +18,11 @@ package walsummary
 
 import "github.com/cockroachdb/errors"
 
-var (
-	// ErrStoreCorrupted marks a summary store object (chunk or manifest) that
-	// cannot be decoded or is internally inconsistent. It is terminal: the
-	// manifest is the only index into the chunk set, so a damaged one means
-	// recovery cannot know what it is missing.
-	ErrStoreCorrupted = errors.New("walsummary store corrupted")
-	// ErrStoreFenced marks a write refused because the durable store already
-	// carries a newer WAL assignment term: this owner is stale (split-brain)
-	// and must stop persisting rather than overwrite the current owner's
-	// summary state. Terminal, never retried.
-	ErrStoreFenced = errors.New("walsummary store fenced by a newer term")
-)
+// ErrStoreCorrupted marks a summary store object (chunk or manifest) that cannot
+// be decoded or is internally inconsistent. It is terminal: the manifest is the
+// only index into the chunk set, so a damaged one means recovery cannot know
+// what it is missing.
+var ErrStoreCorrupted = errors.New("walsummary store corrupted")
 
 type markedStoreError struct {
 	err    error
@@ -60,11 +53,4 @@ func markStoreCorrupted(err error) error {
 
 func storeCorruptedf(format string, args ...any) error {
 	return markStoreCorrupted(errors.Errorf(format, args...))
-}
-
-func storeFencedf(format string, args ...any) error {
-	return &markedStoreError{
-		err:    errors.Errorf(format, args...),
-		target: ErrStoreFenced,
-	}
 }
