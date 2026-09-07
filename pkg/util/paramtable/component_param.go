@@ -43,6 +43,7 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize           = 16
 	DefaultLoadTransientBudgetBytes = 0
+	DefaultLoadAdmissionSlotsPerCPU = 2
 	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
 	// default for the Storage V3 async read-window threshold.
 	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
@@ -247,6 +248,7 @@ type commonConfig struct {
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
 	LoadTransientBudgetBytes            ParamItem `refreshable:"true"`
+	LoadAdmissionSlots                  ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -590,7 +592,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`values reduce peak transient memory at the cost of load throughput. ` +
 			`Oversized requests are still allowed to proceed exclusively to ` +
 			`guarantee progress. Set to 0 to disable the limit.`,
-		Export: true,
+		Export: false,
 		Formatter: func(v string) string {
 			if getAsInt64(v) < 0 {
 				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using unlimited",
@@ -601,6 +603,29 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		},
 	}
 	p.LoadTransientBudgetBytes.Init(base.mgr)
+
+	p.LoadAdmissionSlots = ParamItem{
+		Key:          "common.loadAdmissionSlots",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
+		Doc: `Process-wide limit on admitted, unfinished load work shared by scalar ` +
+			`index V3 entry streaming and storage v2/v3 field-data loading. Each ` +
+			`window, batch, or stream slice reserves one slot together with its ` +
+			`transient bytes until its temporary data is released after consumption ` +
+			`or finalization. Defaults to twice the CPU count reported by Milvus ` +
+			`at initialization. Reader opens are controlled separately. Set to 0 to ` +
+			`disable the slot limit.`,
+		Export: false,
+		Formatter: func(v string) string {
+			if getAsInt64(v) < 0 {
+				mlog.Warn(context.TODO(), "common.loadAdmissionSlots must be non-negative, using default",
+					mlog.String("configured", v))
+				return p.LoadAdmissionSlots.DefaultValue
+			}
+			return v
+		},
+	}
+	p.LoadAdmissionSlots.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",

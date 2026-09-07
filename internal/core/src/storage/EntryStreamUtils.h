@@ -28,7 +28,7 @@
 #include "common/Utils.h"
 #include "folly/CancellationToken.h"
 #include "storage/ThreadPools.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::storage {
 
@@ -111,7 +111,7 @@ EntryStreamMaxTransientBytes(size_t total_transient_bytes,
     const auto pool_bound =
         SaturatingMultiply(max_task_transient_bytes, max_tasks);
     const auto capacity =
-        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+        LoadAdmissionController::GetInstance().CapacityBytes();
     const auto budget_bound =
         capacity == 0 ? pool_bound
                       : std::min(std::max(capacity, max_task_transient_bytes),

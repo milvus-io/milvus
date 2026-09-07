@@ -35,6 +35,9 @@ void
 SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
+SetLoadAdmissionSlots(int64_t slots);
+
+void
 SetHighPriorityThreadCoreCoefficient(const float);
 
 void

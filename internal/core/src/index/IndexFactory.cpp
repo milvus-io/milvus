@@ -68,7 +68,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::index {
 
@@ -103,9 +103,8 @@ ScalarIndexStreamMemoryOverhead(
         // ciphertext task bound. When the runtime budget is disabled, keep
         // the conservative whole-stream fallback instead of applying the
         // executor bound.
-        if (encrypted &&
-            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                    .CapacityBytes() == 0) {
+        if (encrypted && milvus::storage::LoadAdmissionController::GetInstance()
+                                 .CapacityBytes() == 0) {
             return total_transient_bytes;
         }
     }

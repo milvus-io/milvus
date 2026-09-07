@@ -443,6 +443,15 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 	})
 }
 
+func TestUpdateLoadAdmissionSlots(t *testing.T) {
+	defer UpdateLoadAdmissionSlots(0)
+	assert.NotPanics(t, func() {
+		UpdateLoadAdmissionSlots(0)
+		UpdateLoadAdmissionSlots(16)
+		UpdateLoadAdmissionSlots(-1)
+	})
+}
+
 func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
 	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
 	t.Cleanup(func() {

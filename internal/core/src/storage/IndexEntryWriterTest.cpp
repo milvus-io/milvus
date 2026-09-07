@@ -55,7 +55,7 @@ namespace {
 class IndexEntryStreamConfigGuard {
  public:
     IndexEntryStreamConfigGuard()
-        : budget_(TransientMemoryBudget::GetLoadTransientBudget()),
+        : budget_(LoadAdmissionController::GetInstance()),
           capacity_bytes_(budget_.CapacityBytes()) {
     }
 
@@ -64,7 +64,7 @@ class IndexEntryStreamConfigGuard {
     }
 
  private:
-    TransientMemoryBudget& budget_;
+    LoadAdmissionController& budget_;
     size_t capacity_bytes_;
 };
 
@@ -1495,7 +1495,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidSliceSize) {
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     IndexEntryStreamConfigGuard guard;
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
-    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = LoadAdmissionController::GetInstance();
     const auto max_task_transient_bytes =
         EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), false);
     const auto unbounded_total = std::numeric_limits<size_t>::max();
@@ -1839,14 +1839,14 @@ TEST_F(IndexEntryWriterV3Test,
         writer.Finish();
     }
 
-    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(2 * entry_size);
-    budget.Acquire(entry_size, TransientBudgetPriority::High);
+    budget.Acquire({entry_size, 1}, LoadAdmissionPriority::High);
     bool budget_held = true;
     auto budget_cleanup = folly::makeGuard([&]() {
         if (budget_held) {
-            budget.Release(entry_size);
+            budget.Release({entry_size, 1});
         }
         budget.SetCapacityBytes(old_capacity);
     });
@@ -1883,7 +1883,7 @@ TEST_F(IndexEntryWriterV3Test,
     auto marker_future = pool.Submit([]() {});
     auto marker_status = marker_future.wait_for(std::chrono::milliseconds(200));
 
-    budget.Release(entry_size);
+    budget.Release({entry_size, 1});
     budget_held = false;
 
     ASSERT_EQ(load_future.wait_for(std::chrono::seconds(2)),
@@ -1898,6 +1898,11 @@ TEST_F(IndexEntryWriterV3Test,
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
+    auto& admission = LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto admission_cleanup =
+        folly::makeGuard([&]() { admission.SetCapacitySlots(old_slots); });
     const std::string file_path = kV3FilePath + "_stream_consumer_throw";
     const size_t slice_size = 64 * 1024;
     const size_t entry_size = 4 * slice_size;
@@ -1936,6 +1941,11 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsActiveTasksAfterError) {
+    auto& admission = LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(2);
+    auto admission_cleanup =
+        folly::makeGuard([&]() { admission.SetCapacitySlots(old_slots); });
     const std::string file_path = kV3FilePath + "_stream_active_task_error";
     const size_t slice_size = 64 * 1024;
     const size_t entry_size = 3 * slice_size;
@@ -1991,14 +2001,18 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
         writer.Finish();
     }
 
-    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
-    budget.SetCapacityBytes(slice_size);
-    budget.Acquire(slice_size, TransientBudgetPriority::High);
-    auto cleanup = folly::makeGuard([&budget, old_capacity, slice_size]() {
-        budget.Release(slice_size);
-        budget.SetCapacityBytes(old_capacity);
-    });
+    const auto old_slots = budget.CapacitySlots();
+    budget.SetCapacityBytes(0);
+    budget.SetCapacitySlots(1);
+    budget.Acquire({slice_size, 1}, LoadAdmissionPriority::High);
+    auto cleanup =
+        folly::makeGuard([&budget, old_capacity, old_slots, slice_size]() {
+            budget.Release({slice_size, 1});
+            budget.SetCapacityBytes(old_capacity);
+            budget.SetCapacitySlots(old_slots);
+        });
 
     folly::CancellationSource source;
     auto input = CreateInputStream(file_path);

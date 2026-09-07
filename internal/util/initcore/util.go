@@ -56,6 +56,10 @@ func UpdateLoadTransientBudgetBytes(bytes int64) {
 	C.SetLoadTransientBudgetBytes(C.int64_t(bytes))
 }
 
+func UpdateLoadAdmissionSlots(slots int64) {
+	C.SetLoadAdmissionSlots(C.int64_t(slots))
+}
+
 func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
 	C.SetHighPriorityThreadCoreCoefficient(C.float(coefficient))
 }

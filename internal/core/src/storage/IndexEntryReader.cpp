@@ -39,7 +39,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::storage {
 namespace {
@@ -53,32 +53,32 @@ struct ActiveSliceTask {
     std::future<void> future;
 };
 
-// Holds one transient-memory reservation for the lifetime of a slice task.
-class TransientBudgetGuard {
+// Holds the transient bytes and one slot for the lifetime of a slice task.
+class LoadAdmissionGuard {
  public:
-    TransientBudgetGuard(const size_t slice_transient_bytes,
-                         const TransientBudgetPriority priority,
-                         const folly::CancellationToken& cancellation_token,
-                         const std::string& operation)
+    LoadAdmissionGuard(const size_t slice_transient_bytes,
+                       const LoadAdmissionPriority priority,
+                       const folly::CancellationToken& cancellation_token,
+                       const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         const bool acquired =
-            TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                slice_transient_bytes_, priority, cancellation_token);
+            LoadAdmissionController::GetInstance().AcquireUntil(
+                {slice_transient_bytes_, 1}, priority, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
             ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
         }
     }
 
-    ~TransientBudgetGuard() {
-        TransientMemoryBudget::GetLoadTransientBudget().Release(
-            slice_transient_bytes_);
+    ~LoadAdmissionGuard() {
+        LoadAdmissionController::GetInstance().Release(
+            {slice_transient_bytes_, 1});
     }
 
-    TransientBudgetGuard(const TransientBudgetGuard&) = delete;
-    TransientBudgetGuard&
-    operator=(const TransientBudgetGuard&) = delete;
+    LoadAdmissionGuard(const LoadAdmissionGuard&) = delete;
+    LoadAdmissionGuard&
+    operator=(const LoadAdmissionGuard&) = delete;
 
  private:
     const size_t slice_transient_bytes_;
@@ -165,8 +165,8 @@ ReadOrderedEntryStream(
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
-    const auto budget_priority = TransientPriorityForThreadPool(priority);
+    auto& budget = LoadAdmissionController::GetInstance();
+    const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority);
     const size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
@@ -204,7 +204,7 @@ ReadOrderedEntryStream(
                 }
             }
             std::vector<uint8_t>{}.swap(task.result->data);
-            budget.Release(task.slice_transient_bytes);
+            budget.Release({task.slice_transient_bytes, 1});
         }
     };
 
@@ -223,20 +223,20 @@ ReadOrderedEntryStream(
 
         if (block_for_budget) {
             const bool acquired =
-                budget.AcquireUntil(slice_transient_byte_count,
+                budget.AcquireUntil({slice_transient_byte_count, 1},
                                     budget_priority,
                                     cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(slice_transient_byte_count,
+        } else if (!budget.TryAcquire({slice_transient_byte_count, 1},
                                       budget_priority)) {
             return false;
         }
 
         if (rememberCancellation()) {
-            budget.Release(slice_transient_byte_count);
+            budget.Release({slice_transient_byte_count, 1});
             return false;
         }
 
@@ -258,7 +258,7 @@ ReadOrderedEntryStream(
                 !active_tasks.back().future.valid()) {
                 active_tasks.pop_back();
             }
-            budget.Release(slice_transient_byte_count);
+            budget.Release({slice_transient_byte_count, 1});
             rememberError(std::current_exception());
             return false;
         }
@@ -312,7 +312,7 @@ ReadOrderedEntryStream(
         }
 
         std::vector<uint8_t>{}.swap(task.result->data);
-        budget.Release(task.slice_transient_bytes);
+        budget.Release({task.slice_transient_bytes, 1});
 
         if (first_error) {
             drainActiveTasks();
@@ -953,7 +953,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     auto input = input_;
     auto* writer = state.writer.get();
     const auto cancellation_token = cancellation_token_;
-    const auto budget_priority = TransientPriorityForThreadPool(priority_);
+    const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority_);
     futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
     if (meta.encrypted) {
@@ -972,7 +972,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+            auto budget_guard = std::make_shared<LoadAdmissionGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
                 budget_priority,
                 cancellation_token,
@@ -1031,7 +1031,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+            auto budget_guard = std::make_shared<LoadAdmissionGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
                 budget_priority,
                 cancellation_token,

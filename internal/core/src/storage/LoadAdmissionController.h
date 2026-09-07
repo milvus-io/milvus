@@ -28,87 +28,101 @@
 
 namespace milvus::storage {
 
-enum class TransientBudgetPriority {
+enum class LoadAdmissionPriority {
     High,
     Low,
 };
 
-// Maps a load thread-pool priority to the transient-budget admission class.
-[[nodiscard]] constexpr TransientBudgetPriority
-TransientPriorityForThreadPool(milvus::ThreadPoolPriority priority) noexcept {
+// Maps a load thread-pool priority to the load admission class.
+[[nodiscard]] constexpr LoadAdmissionPriority
+LoadAdmissionPriorityForThreadPool(
+    milvus::ThreadPoolPriority priority) noexcept {
     return priority == milvus::ThreadPoolPriority::LOW
-               ? TransientBudgetPriority::Low
-               : TransientBudgetPriority::High;
+               ? LoadAdmissionPriority::Low
+               : LoadAdmissionPriority::High;
 }
 
-class TransientMemoryBudget;
+// Resources reserved together for one load operation. All current production
+// callers request one slot per window, batch, or stream slice.
+struct LoadAdmissionRequest {
+    size_t transient_bytes{0};
+    size_t slots{0};
+};
 
-// Owns a transient-memory reservation and returns it to the budget on
+class LoadAdmissionController;
+
+// Owns both resource reservations and returns them to the controller on
 // destruction. A moved-from or default-constructed lease owns no reservation.
-class TransientBudgetLease {
+class LoadAdmissionLease {
  public:
-    TransientBudgetLease() = default;
-    TransientBudgetLease(const TransientBudgetLease&) = delete;
-    TransientBudgetLease&
-    operator=(const TransientBudgetLease&) = delete;
-    TransientBudgetLease(TransientBudgetLease&& other) noexcept;
-    TransientBudgetLease&
-    operator=(TransientBudgetLease&& other) noexcept;
-    ~TransientBudgetLease();
+    LoadAdmissionLease() = default;
+    LoadAdmissionLease(const LoadAdmissionLease&) = delete;
+    LoadAdmissionLease&
+    operator=(const LoadAdmissionLease&) = delete;
+    LoadAdmissionLease(LoadAdmissionLease&& other) noexcept;
+    LoadAdmissionLease&
+    operator=(LoadAdmissionLease&& other) noexcept;
+    ~LoadAdmissionLease();
 
     // Releases the reservation early; repeated calls are no-ops.
     void
     Release();
 
  private:
-    friend class TransientMemoryBudget;
+    friend class LoadAdmissionController;
 
-    TransientBudgetLease(TransientMemoryBudget* budget, size_t bytes)
-        : budget_(budget), bytes_(bytes) {
+    LoadAdmissionLease(LoadAdmissionController* controller,
+                       LoadAdmissionRequest request)
+        : controller_(controller), request_(request) {
     }
 
-    TransientMemoryBudget* budget_{nullptr};
-    size_t bytes_{0};
+    LoadAdmissionController* controller_{nullptr};
+    LoadAdmissionRequest request_;
 };
 
-// Coordinates transient bytes held by submitted load work. Capacity zero is
-// unlimited, while an oversized request is admitted exclusively to preserve
-// progress. Pending asynchronous work is admitted high-priority first.
-class TransientMemoryBudget {
+// Jointly admits transient bytes and slots held by submitted load work. Zero
+// capacity disables that dimension's limit. Oversized byte requests may run
+// when no other bytes are reserved, but must still satisfy the slot limit.
+// High priority precedes low priority; each class is FIFO. Sustained high
+// priority traffic may starve low priority work. Waiters reserve neither resource.
+// A weighted request above the total slot capacity waits for a capacity increase
+// or cancellation; callers must size requests to permit progress.
+class LoadAdmissionController {
  public:
-    // Returns the process-wide budget shared by all load paths.
-    [[nodiscard]] static TransientMemoryBudget&
-    GetLoadTransientBudget();
+    // Returns the process-wide controller shared by all load paths.
+    [[nodiscard]] static LoadAdmissionController&
+    GetInstance();
 
     // Updates the process-wide load budget and wakes newly admissible waiters.
     static void
     SetLoadTransientBudgetBytes(size_t bytes);
 
     // Asynchronously waits for a cancellable RAII reservation.
-    [[nodiscard]] folly::coro::Future<TransientBudgetLease>
-    AcquireAsync(size_t bytes,
-                 TransientBudgetPriority priority,
+    [[nodiscard]] folly::coro::Future<LoadAdmissionLease>
+    AcquireAsync(LoadAdmissionRequest request,
+                 LoadAdmissionPriority priority,
                  const folly::CancellationToken& cancellation_token = {});
 
     // Blocks until the requested reservation is admitted. The caller must not
     // hold inflight work whose completion is needed to release budget.
     void
-    Acquire(size_t bytes, TransientBudgetPriority priority);
+    Acquire(LoadAdmissionRequest request, LoadAdmissionPriority priority);
 
-    // Blocks until admitted or cancelled. False means no bytes were reserved.
+    // Blocks until admitted or cancelled. False means neither resource was reserved.
     [[nodiscard]] bool
-    AcquireUntil(size_t bytes,
-                 TransientBudgetPriority priority,
+    AcquireUntil(LoadAdmissionRequest request,
+                 LoadAdmissionPriority priority,
                  const folly::CancellationToken& cancellation_token);
 
     // Attempts immediate admission without waiting; refill loops use this to
     // avoid blocking while they still own inflight work.
     [[nodiscard]] bool
-    TryAcquire(size_t bytes, TransientBudgetPriority priority);
+    TryAcquire(LoadAdmissionRequest request, LoadAdmissionPriority priority);
 
-    // Releases exactly the bytes associated with a prior successful admission.
+    // Releases exactly the request associated with a successful blocking or
+    // TryAcquire admission. Never release a reservation also owned by a lease.
     void
-    Release(size_t bytes);
+    Release(LoadAdmissionRequest request);
 
     // Returns the configured capacity in bytes; zero means unlimited.
     [[nodiscard]] size_t
@@ -118,6 +132,15 @@ class TransientMemoryBudget {
     // expansion rejected by the controller leaves both capacities unchanged.
     void
     SetCapacityBytes(size_t bytes);
+
+    // Returns the configured slot capacity; zero means unlimited.
+    [[nodiscard]] size_t
+    CapacitySlots() const;
+
+    // Re-evaluates waiters after updating slots. Shrinking does not revoke
+    // admitted work; new requests wait until they fit the new capacity.
+    void
+    SetCapacitySlots(size_t slots);
 
     // Re-evaluates pending admissions after an external capacity change.
     void
@@ -134,8 +157,8 @@ class TransientMemoryBudget {
             Cancelled,
         };
 
-        size_t bytes{0};
-        folly::coro::Promise<TransientBudgetLease> promise;
+        LoadAdmissionRequest request;
+        folly::coro::Promise<LoadAdmissionLease> promise;
         std::unique_ptr<folly::CancellationCallback> cancellation_callback;
         State state{State::Pending};
         bool is_blocking_waiter{false};
@@ -148,22 +171,22 @@ class TransientMemoryBudget {
         PendingQueue admitted;
     };
 
-    TransientMemoryBudget() = default;
+    LoadAdmissionController() = default;
 
     // Methods suffixed with Locked require mu_ to be held by the caller.
     [[nodiscard]] size_t
     CapacityBytesLocked() const;
 
     [[nodiscard]] bool
-    CanAcquireCapacityLocked(size_t bytes) const;
+    CanAcquireCapacityLocked(LoadAdmissionRequest request) const;
 
     [[nodiscard]] bool
-    CanAdmitImmediatelyLocked(TransientBudgetPriority priority,
-                              size_t bytes) const;
+    CanAdmitImmediatelyLocked(LoadAdmissionPriority priority,
+                              LoadAdmissionRequest request) const;
 
     void
     EnqueuePendingLocked(const std::shared_ptr<PendingAdmission>& pending,
-                         TransientBudgetPriority priority);
+                         LoadAdmissionPriority priority);
 
     void
     MarkAdmittedLocked(const std::shared_ptr<PendingAdmission>& pending);
@@ -187,7 +210,9 @@ class TransientMemoryBudget {
     mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
+    size_t inflight_slots_{0};
     size_t capacity_bytes_{0};
+    size_t capacity_slots_{0};
     PendingQueue high_pending_;
     PendingQueue low_pending_;
 };

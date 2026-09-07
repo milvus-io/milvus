@@ -253,12 +253,23 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
+		assert.False(t, Params.LoadTransientBudgetBytes.Export)
 		defer params.Reset(Params.LoadTransientBudgetBytes.Key)
 		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
 		params.Save(Params.LoadTransientBudgetBytes.Key, "-1")
 		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
 		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
 		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
+
+		assert.False(t, Params.LoadAdmissionSlots.Export)
+		defer params.Reset(Params.LoadAdmissionSlots.Key)
+		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "-1")
+		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "16")
+		assert.Equal(t, int64(16), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "0")
+		assert.Equal(t, int64(0), Params.LoadAdmissionSlots.GetAsInt64())
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())

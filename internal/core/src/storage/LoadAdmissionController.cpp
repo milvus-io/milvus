@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 #include <utility>
 
@@ -24,57 +24,56 @@
 
 namespace milvus::storage {
 
-TransientBudgetLease::TransientBudgetLease(
-    TransientBudgetLease&& other) noexcept
-    : budget_(std::exchange(other.budget_, nullptr)),
-      bytes_(std::exchange(other.bytes_, 0)) {
+LoadAdmissionLease::LoadAdmissionLease(LoadAdmissionLease&& other) noexcept
+    : controller_(std::exchange(other.controller_, nullptr)),
+      request_(std::exchange(other.request_, {})) {
 }
 
-TransientBudgetLease&
-TransientBudgetLease::operator=(TransientBudgetLease&& other) noexcept {
+LoadAdmissionLease&
+LoadAdmissionLease::operator=(LoadAdmissionLease&& other) noexcept {
     if (this != &other) {
         Release();
-        budget_ = std::exchange(other.budget_, nullptr);
-        bytes_ = std::exchange(other.bytes_, 0);
+        controller_ = std::exchange(other.controller_, nullptr);
+        request_ = std::exchange(other.request_, {});
     }
     return *this;
 }
 
-TransientBudgetLease::~TransientBudgetLease() {
+LoadAdmissionLease::~LoadAdmissionLease() {
     Release();
 }
 
 void
-TransientBudgetLease::Release() {
-    if (budget_ == nullptr || bytes_ == 0) {
+LoadAdmissionLease::Release() {
+    if (controller_ == nullptr) {
         return;
     }
-    auto* const budget = std::exchange(budget_, nullptr);
-    const auto bytes = std::exchange(bytes_, 0);
-    budget->Release(bytes);
+    auto* const controller = std::exchange(controller_, nullptr);
+    const auto request = std::exchange(request_, {});
+    controller->Release(request);
 }
 
-TransientMemoryBudget&
-TransientMemoryBudget::GetLoadTransientBudget() {
-    static TransientMemoryBudget instance;
+LoadAdmissionController&
+LoadAdmissionController::GetInstance() {
+    static LoadAdmissionController instance;
     return instance;
 }
 
 void
-TransientMemoryBudget::SetLoadTransientBudgetBytes(const size_t bytes) {
-    GetLoadTransientBudget().SetCapacityBytes(bytes);
+LoadAdmissionController::SetLoadTransientBudgetBytes(const size_t bytes) {
+    GetInstance().SetCapacityBytes(bytes);
 }
 
-folly::coro::Future<TransientBudgetLease>
-TransientMemoryBudget::AcquireAsync(
-    const size_t bytes,
-    const TransientBudgetPriority priority,
+folly::coro::Future<LoadAdmissionLease>
+LoadAdmissionController::AcquireAsync(
+    const LoadAdmissionRequest request,
+    const LoadAdmissionPriority priority,
     const folly::CancellationToken& cancellation_token) {
     auto [promise, future] =
-        folly::coro::makePromiseContract<TransientBudgetLease>();
+        folly::coro::makePromiseContract<LoadAdmissionLease>();
     auto pending = std::make_shared<PendingAdmission>();
     pending->promise = std::move(promise);
-    pending->bytes = bytes;
+    pending->request = request;
 
     const auto merged_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, pending->promise.getCancellationToken());
@@ -93,7 +92,7 @@ TransientMemoryBudget::AcquireAsync(
     {
         std::lock_guard lock(mu_);
         if (pending->state != PendingAdmission::State::Cancelled) {
-            if (CanAdmitImmediatelyLocked(priority, bytes)) {
+            if (CanAdmitImmediatelyLocked(priority, request)) {
                 MarkAdmittedLocked(pending);
                 admitted = true;
             } else {
@@ -109,14 +108,14 @@ TransientMemoryBudget::AcquireAsync(
 }
 
 void
-TransientMemoryBudget::Acquire(const size_t bytes,
-                               const TransientBudgetPriority priority) {
+LoadAdmissionController::Acquire(const LoadAdmissionRequest request,
+                                 const LoadAdmissionPriority priority) {
     auto pending = std::make_shared<PendingAdmission>();
-    pending->bytes = bytes;
+    pending->request = request;
     pending->is_blocking_waiter = true;
 
     std::unique_lock lock(mu_);
-    if (CanAdmitImmediatelyLocked(priority, bytes)) {
+    if (CanAdmitImmediatelyLocked(priority, request)) {
         MarkAdmittedLocked(pending);
     } else {
         EnqueuePendingLocked(pending, priority);
@@ -125,16 +124,16 @@ TransientMemoryBudget::Acquire(const size_t bytes,
         });
     }
     AssertInfo(pending->state == PendingAdmission::State::Admitted,
-               "Blocking budget admission was not admitted");
+               "Blocking load admission was not admitted");
 }
 
 bool
-TransientMemoryBudget::AcquireUntil(
-    const size_t bytes,
-    const TransientBudgetPriority priority,
+LoadAdmissionController::AcquireUntil(
+    const LoadAdmissionRequest request,
+    const LoadAdmissionPriority priority,
     const folly::CancellationToken& cancellation_token) {
     auto pending = std::make_shared<PendingAdmission>();
-    pending->bytes = bytes;
+    pending->request = request;
     pending->is_blocking_waiter = true;
     if (cancellation_token.canBeCancelled()) {
         const std::weak_ptr<PendingAdmission> weak_pending = pending;
@@ -151,7 +150,7 @@ TransientMemoryBudget::AcquireUntil(
     {
         std::unique_lock lock(mu_);
         if (pending->state != PendingAdmission::State::Cancelled) {
-            if (CanAdmitImmediatelyLocked(priority, bytes)) {
+            if (CanAdmitImmediatelyLocked(priority, request)) {
                 MarkAdmittedLocked(pending);
             } else {
                 EnqueuePendingLocked(pending, priority);
@@ -168,27 +167,32 @@ TransientMemoryBudget::AcquireUntil(
 }
 
 bool
-TransientMemoryBudget::TryAcquire(const size_t bytes,
-                                  const TransientBudgetPriority priority) {
+LoadAdmissionController::TryAcquire(const LoadAdmissionRequest request,
+                                    const LoadAdmissionPriority priority) {
     std::lock_guard lock(mu_);
-    if (CanAdmitImmediatelyLocked(priority, bytes)) {
-        inflight_bytes_ += bytes;
+    if (CanAdmitImmediatelyLocked(priority, request)) {
+        inflight_bytes_ += request.transient_bytes;
+        inflight_slots_ += request.slots;
         return true;
     }
     return false;
 }
 
 void
-TransientMemoryBudget::Release(const size_t bytes) {
+LoadAdmissionController::Release(const LoadAdmissionRequest request) {
     PendingResolution resolution;
     {
         std::lock_guard lock(mu_);
-        AssertInfo(bytes <= inflight_bytes_,
-                   "Transient memory budget over-release: release {}, "
-                   "inflight {}",
-                   bytes,
-                   inflight_bytes_);
-        inflight_bytes_ -= bytes;
+        AssertInfo(
+            request.transient_bytes <= inflight_bytes_ &&
+                request.slots <= inflight_slots_,
+            "Load admission over-release: release ({}, {}), inflight ({}, {})",
+            request.transient_bytes,
+            request.slots,
+            inflight_bytes_,
+            inflight_slots_);
+        inflight_bytes_ -= request.transient_bytes;
+        inflight_slots_ -= request.slots;
         resolution = TakeAdmittedLocked();
     }
     ResolvePending(std::move(resolution));
@@ -196,13 +200,13 @@ TransientMemoryBudget::Release(const size_t bytes) {
 }
 
 size_t
-TransientMemoryBudget::CapacityBytes() const {
+LoadAdmissionController::CapacityBytes() const {
     std::lock_guard lock(mu_);
     return CapacityBytesLocked();
 }
 
 void
-TransientMemoryBudget::SetCapacityBytes(const size_t bytes) {
+LoadAdmissionController::SetCapacityBytes(const size_t bytes) {
     PendingResolution resolution;
     {
         std::lock_guard update_lock(capacity_update_mutex_);
@@ -226,8 +230,26 @@ TransientMemoryBudget::SetCapacityBytes(const size_t bytes) {
     cv_.notify_all();
 }
 
+size_t
+LoadAdmissionController::CapacitySlots() const {
+    std::lock_guard lock(mu_);
+    return capacity_slots_;
+}
+
 void
-TransientMemoryBudget::NotifyCapacityUpdated() {
+LoadAdmissionController::SetCapacitySlots(const size_t slots) {
+    PendingResolution resolution;
+    {
+        std::lock_guard lock(mu_);
+        capacity_slots_ = slots;
+        resolution = TakeAdmittedLocked();
+    }
+    ResolvePending(std::move(resolution));
+    cv_.notify_all();
+}
+
+void
+LoadAdmissionController::NotifyCapacityUpdated() {
     PendingResolution resolution;
     {
         std::lock_guard lock(mu_);
@@ -238,12 +260,19 @@ TransientMemoryBudget::NotifyCapacityUpdated() {
 }
 
 size_t
-TransientMemoryBudget::CapacityBytesLocked() const {
+LoadAdmissionController::CapacityBytesLocked() const {
     return capacity_bytes_;
 }
 
 bool
-TransientMemoryBudget::CanAcquireCapacityLocked(const size_t bytes) const {
+LoadAdmissionController::CanAcquireCapacityLocked(
+    const LoadAdmissionRequest request) const {
+    if (capacity_slots_ != 0 &&
+        (inflight_slots_ > capacity_slots_ ||
+         request.slots > capacity_slots_ - inflight_slots_)) {
+        return false;
+    }
+    const auto bytes = request.transient_bytes;
     const auto capacity_bytes = CapacityBytesLocked();
     if (capacity_bytes == 0) {
         return true;
@@ -256,43 +285,45 @@ TransientMemoryBudget::CanAcquireCapacityLocked(const size_t bytes) const {
 }
 
 bool
-TransientMemoryBudget::CanAdmitImmediatelyLocked(
-    const TransientBudgetPriority priority, const size_t bytes) const {
-    if (!CanAcquireCapacityLocked(bytes)) {
+LoadAdmissionController::CanAdmitImmediatelyLocked(
+    const LoadAdmissionPriority priority,
+    const LoadAdmissionRequest request) const {
+    if (!CanAcquireCapacityLocked(request)) {
         return false;
     }
-    if (priority == TransientBudgetPriority::High) {
+    if (priority == LoadAdmissionPriority::High) {
         return high_pending_.empty();
     }
     return high_pending_.empty() && low_pending_.empty();
 }
 
 void
-TransientMemoryBudget::EnqueuePendingLocked(
+LoadAdmissionController::EnqueuePendingLocked(
     const std::shared_ptr<PendingAdmission>& pending,
-    const TransientBudgetPriority priority) {
-    auto& queue = priority == TransientBudgetPriority::High ? high_pending_
-                                                            : low_pending_;
+    const LoadAdmissionPriority priority) {
+    auto& queue =
+        priority == LoadAdmissionPriority::High ? high_pending_ : low_pending_;
     const auto position = queue.insert(queue.end(), pending);
     pending->queue = &queue;
     pending->queue_position = position;
 }
 
 void
-TransientMemoryBudget::MarkAdmittedLocked(
+LoadAdmissionController::MarkAdmittedLocked(
     const std::shared_ptr<PendingAdmission>& pending) {
     pending->state = PendingAdmission::State::Admitted;
-    inflight_bytes_ += pending->bytes;
+    inflight_bytes_ += pending->request.transient_bytes;
+    inflight_slots_ += pending->request.slots;
 }
 
-TransientMemoryBudget::PendingResolution
-TransientMemoryBudget::TakeAdmittedLocked() {
+LoadAdmissionController::PendingResolution
+LoadAdmissionController::TakeAdmittedLocked() {
     PendingResolution resolution;
 
     const auto admit_queue = [this, &resolution](auto& queue) {
         while (!queue.empty()) {
             const auto& pending = queue.front();
-            if (!CanAcquireCapacityLocked(pending->bytes)) {
+            if (!CanAcquireCapacityLocked(pending->request)) {
                 break;
             }
             const auto admitted = pending;
@@ -310,26 +341,26 @@ TransientMemoryBudget::TakeAdmittedLocked() {
 }
 
 void
-TransientMemoryBudget::FulfillAdmission(
+LoadAdmissionController::FulfillAdmission(
     std::shared_ptr<PendingAdmission> pending) {
     if (pending->is_blocking_waiter) {
         // AcquireUntil owns and clears the callback after its wait completes.
         return;
     }
     pending->cancellation_callback.reset();
-    auto lease = TransientBudgetLease(this, pending->bytes);
+    auto lease = LoadAdmissionLease(this, pending->request);
     pending->promise.trySetValue(std::move(lease));
 }
 
 void
-TransientMemoryBudget::ResolvePending(PendingResolution resolution) {
+LoadAdmissionController::ResolvePending(PendingResolution resolution) {
     for (auto& pending : resolution.admitted) {
         FulfillAdmission(std::move(pending));
     }
 }
 
 void
-TransientMemoryBudget::CancelPending(
+LoadAdmissionController::CancelPending(
     std::shared_ptr<PendingAdmission> pending) {
     PendingResolution resolution;
     bool cancelled = false;

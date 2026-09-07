@@ -22,7 +22,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 #include "tantivy-binding.h"
 
 namespace milvus {
@@ -57,9 +57,20 @@ SetLoadTransientBudgetBytes(int64_t bytes) {
         LOG_WARN("ignore invalid load transient budget bytes: {}", bytes);
         return;
     }
-    storage::TransientMemoryBudget::SetLoadTransientBudgetBytes(
+    storage::LoadAdmissionController::SetLoadTransientBudgetBytes(
         static_cast<size_t>(bytes));
     LOG_INFO("set load transient budget bytes: {}", bytes);
+}
+
+void
+SetLoadAdmissionSlots(int64_t slots) {
+    if (slots < 0) {
+        LOG_WARN("ignore invalid load admission slots: {}", slots);
+        return;
+    }
+    storage::LoadAdmissionController::GetInstance().SetCapacitySlots(
+        static_cast<size_t>(slots));
+    LOG_INFO("set load admission slots: {}", slots);
 }
 
 void

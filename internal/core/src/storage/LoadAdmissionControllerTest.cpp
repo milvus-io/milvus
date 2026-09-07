@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/EntryStreamUtils.h"
+#include "storage/LoadAdmissionController.h"
 
 #include <algorithm>
 #include <chrono>
@@ -39,41 +39,208 @@ namespace milvus::storage {
 namespace {
 
 using AsyncAcquireReturn =
-    decltype(std::declval<TransientMemoryBudget&>().AcquireAsync(
-        1, TransientBudgetPriority::High));
+    decltype(std::declval<LoadAdmissionController&>().AcquireAsync(
+        {1, 1}, LoadAdmissionPriority::High));
 
 static_assert(std::is_same_v<AsyncAcquireReturn,
-                             folly::coro::Future<TransientBudgetLease>>);
+                             folly::coro::Future<LoadAdmissionLease>>);
 
-folly::coro::Task<TransientBudgetLease>
-AwaitAdmission(folly::coro::Future<TransientBudgetLease> admission) {
+folly::coro::Task<LoadAdmissionLease>
+AwaitAdmission(folly::coro::Future<LoadAdmissionLease> admission) {
     co_return co_await std::move(admission);
 }
 
-class TransientMemoryBudgetAsyncTest : public testing::Test {
+class LoadAdmissionControllerAsyncTest : public testing::Test {
  protected:
     void
     SetUp() override {
         budget_.SetCapacityBytes(0);
+        budget_.SetCapacitySlots(0);
     }
 
     void
     TearDown() override {
         budget_.SetCapacityBytes(0);
+        budget_.SetCapacitySlots(0);
     }
 
-    TransientMemoryBudget& budget_ =
-        TransientMemoryBudget::GetLoadTransientBudget();
+    LoadAdmissionController& budget_ = LoadAdmissionController::GetInstance();
 };
 
-TEST_F(TransientMemoryBudgetAsyncTest, AcquiresAndReleasesWithLease) {
+TEST_F(LoadAdmissionControllerAsyncTest,
+       SlotsLimitAdmissionWithUnlimitedBytes) {
+    budget_.SetCapacitySlots(1);
+    auto first = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    auto lease = folly::coro::blockingWait(std::move(first));
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(waiting.isReady());
+    lease.Release();
+    ASSERT_TRUE(waiting.isReady());
+    auto next = folly::coro::blockingWait(std::move(waiting));
+    next.Release();
+    budget_.SetCapacitySlots(0);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, SlotLeaseReleasesWhenBytesAreZero) {
+    budget_.SetCapacitySlots(1);
+    {
+        auto lease = folly::coro::blockingWait(
+            budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+        EXPECT_FALSE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    }
+    ASSERT_TRUE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    budget_.Release({0, 1});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       MoveTransfersBothResourcesExactlyOnce) {
+    budget_.SetCapacityBytes(10);
+    budget_.SetCapacitySlots(2);
+    auto first = folly::coro::blockingWait(
+        budget_.AcquireAsync({4, 1}, LoadAdmissionPriority::High));
+    auto second = folly::coro::blockingWait(
+        budget_.AcquireAsync({6, 1}, LoadAdmissionPriority::High));
+    LoadAdmissionLease moved(std::move(first));
+    first.Release();
+    EXPECT_FALSE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    second = std::move(moved);
+    moved.Release();
+    ASSERT_TRUE(budget_.TryAcquire({6, 1}, LoadAdmissionPriority::High));
+    budget_.Release({6, 1});
+    second.Release();
+    second.Release();
+    ASSERT_TRUE(budget_.TryAcquire({10, 2}, LoadAdmissionPriority::High));
+    budget_.Release({10, 2});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, ByteWaiterDoesNotReserveSlots) {
+    budget_.SetCapacityBytes(10);
+    budget_.SetCapacitySlots(2);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({10, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancellation;
+    auto waiting = budget_.AcquireAsync(
+        {1, 1}, LoadAdmissionPriority::Low, cancellation.getToken());
+    ASSERT_FALSE(waiting.isReady());
+    // High priority may bypass the low waiter and use the remaining slot.
+    ASSERT_TRUE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    budget_.Release({0, 1});
+    cancellation.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(waiting)),
+                 folly::OperationCancelled);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, SlotWaiterDoesNotReserveBytes) {
+    budget_.SetCapacityBytes(10);
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancellation;
+    auto waiting = budget_.AcquireAsync(
+        {9, 1}, LoadAdmissionPriority::Low, cancellation.getToken());
+    ASSERT_FALSE(waiting.isReady());
+    ASSERT_TRUE(budget_.TryAcquire({9, 0}, LoadAdmissionPriority::High));
+    budget_.Release({9, 0});
+    cancellation.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(waiting)),
+                 folly::OperationCancelled);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, OversizedBytesCannotBypassSlots) {
+    budget_.SetCapacityBytes(10);
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    auto oversized = budget_.AcquireAsync({11, 1}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(oversized.isReady());
+    running.Release();
+    ASSERT_TRUE(oversized.isReady());
+    auto lease = folly::coro::blockingWait(std::move(oversized));
+    EXPECT_FALSE(budget_.TryAcquire({1, 0}, LoadAdmissionPriority::High));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, CapacityUpdatesRespectBothDimensions) {
+    budget_.SetCapacityBytes(1);
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    budget_.SetCapacityBytes(2);
+    EXPECT_FALSE(waiting.isReady());
+    budget_.SetCapacitySlots(2);
+    EXPECT_EQ(budget_.CapacitySlots(), 2);
+    ASSERT_TRUE(waiting.isReady());
+    auto lease = folly::coro::blockingWait(std::move(waiting));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, ShrinkingSlotsWaitsForInflightWork) {
+    budget_.SetCapacitySlots(0);
+    auto first = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    auto second = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    budget_.SetCapacitySlots(1);
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(waiting.isReady());
+    first.Release();
+    EXPECT_FALSE(waiting.isReady());
+    second.Release();
+    ASSERT_TRUE(waiting.isReady());
+    auto lease = folly::coro::blockingWait(std::move(waiting));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, DisablingSlotsWakesWaiters) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    ASSERT_FALSE(waiting.isReady());
+    budget_.SetCapacitySlots(0);
+    ASSERT_TRUE(waiting.isReady());
+    auto lease = folly::coro::blockingWait(std::move(waiting));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, CancellingSlotQueueHeadPreservesFifo) {
+    budget_.SetCapacitySlots(2);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancellation;
+    auto head = budget_.AcquireAsync(
+        {1, 2}, LoadAdmissionPriority::High, cancellation.getToken());
+    auto next = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    auto low = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
+    EXPECT_FALSE(next.isReady());
+    EXPECT_FALSE(low.isReady());
+    cancellation.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(head)),
+                 folly::OperationCancelled);
+    ASSERT_TRUE(next.isReady());
+    EXPECT_FALSE(low.isReady());
+    auto next_lease = folly::coro::blockingWait(std::move(next));
+    next_lease.Release();
+    ASSERT_TRUE(low.isReady());
+    auto low_lease = folly::coro::blockingWait(std::move(low));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       WeightedSlotsWaitForSufficientCapacity) {
+    budget_.SetCapacitySlots(1);
+    auto waiting = budget_.AcquireAsync({1, 2}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(waiting.isReady());
+    budget_.SetCapacitySlots(2);
+    ASSERT_TRUE(waiting.isReady());
+    auto lease = folly::coro::blockingWait(std::move(waiting));
+    EXPECT_FALSE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, AcquiresAndReleasesWithLease) {
     budget_.SetCapacityBytes(1);
 
-    auto first = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto first = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     ASSERT_TRUE(first.isReady());
     auto first_lease = folly::coro::blockingWait(std::move(first));
 
-    auto waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     EXPECT_FALSE(waiting.isReady());
 
     first_lease.Release();
@@ -82,26 +249,28 @@ TEST_F(TransientMemoryBudgetAsyncTest, AcquiresAndReleasesWithLease) {
     waiting_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, LeaseDestructorReleasesBudget) {
+TEST_F(LoadAdmissionControllerAsyncTest, LeaseDestructorReleasesBudget) {
     budget_.SetCapacityBytes(1);
 
     {
-        auto acquired = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto acquired =
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
         auto lease = folly::coro::blockingWait(std::move(acquired));
-        EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::High));
+        EXPECT_FALSE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
     }
 
-    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
-    budget_.Release(1);
+    EXPECT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+    budget_.Release({1, 1});
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, GrantsHighPriorityBeforeLowPriority) {
+TEST_F(LoadAdmissionControllerAsyncTest, GrantsHighPriorityBeforeLowPriority) {
     budget_.SetCapacityBytes(1);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto low_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
-    auto high_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto low_waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
+    auto high_waiting =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
 
     running_lease.Release();
     EXPECT_TRUE(high_waiting.isReady());
@@ -114,14 +283,14 @@ TEST_F(TransientMemoryBudgetAsyncTest, GrantsHighPriorityBeforeLowPriority) {
     low_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, CancelsPendingAdmission) {
+TEST_F(LoadAdmissionControllerAsyncTest, CancelsPendingAdmission) {
     budget_.SetCapacityBytes(1);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     auto running_lease = folly::coro::blockingWait(std::move(running));
     folly::CancellationSource cancellation_source;
     auto waiting = budget_.AcquireAsync(
-        1, TransientBudgetPriority::High, cancellation_source.getToken());
+        {1, 1}, LoadAdmissionPriority::High, cancellation_source.getToken());
     ASSERT_FALSE(waiting.isReady());
 
     cancellation_source.requestCancellation();
@@ -132,29 +301,30 @@ TEST_F(TransientMemoryBudgetAsyncTest, CancelsPendingAdmission) {
     running_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, RejectsPreCancelledAdmission) {
+TEST_F(LoadAdmissionControllerAsyncTest, RejectsPreCancelledAdmission) {
     folly::CancellationSource cancellation_source;
     cancellation_source.requestCancellation();
 
     auto cancelled = budget_.AcquireAsync(
-        1, TransientBudgetPriority::High, cancellation_source.getToken());
+        {1, 1}, LoadAdmissionPriority::High, cancellation_source.getToken());
 
     ASSERT_TRUE(cancelled.isReady());
     EXPECT_THROW(folly::coro::blockingWait(std::move(cancelled)),
                  folly::OperationCancelled);
-    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
-    budget_.Release(1);
+    EXPECT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+    budget_.Release({1, 1});
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, CancellingQueueHeadAdmitsNextRequest) {
+TEST_F(LoadAdmissionControllerAsyncTest, CancellingQueueHeadAdmitsNextRequest) {
     budget_.SetCapacityBytes(10);
 
-    auto running = budget_.AcquireAsync(5, TransientBudgetPriority::High);
+    auto running = budget_.AcquireAsync({5, 1}, LoadAdmissionPriority::High);
     auto running_lease = folly::coro::blockingWait(std::move(running));
     folly::CancellationSource cancellation_source;
     auto blocked_head = budget_.AcquireAsync(
-        10, TransientBudgetPriority::High, cancellation_source.getToken());
-    auto fitting_next = budget_.AcquireAsync(5, TransientBudgetPriority::High);
+        {10, 1}, LoadAdmissionPriority::High, cancellation_source.getToken());
+    auto fitting_next =
+        budget_.AcquireAsync({5, 1}, LoadAdmissionPriority::High);
     ASSERT_FALSE(blocked_head.isReady());
     ASSERT_FALSE(fitting_next.isReady());
 
@@ -169,14 +339,16 @@ TEST_F(TransientMemoryBudgetAsyncTest, CancellingQueueHeadAdmitsNextRequest) {
     running_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        ConsumerCancellationRemovesPendingQueueHead) {
     budget_.SetCapacityBytes(10);
 
-    auto running = budget_.AcquireAsync(5, TransientBudgetPriority::High);
+    auto running = budget_.AcquireAsync({5, 1}, LoadAdmissionPriority::High);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto blocked_head = budget_.AcquireAsync(10, TransientBudgetPriority::High);
-    auto fitting_next = budget_.AcquireAsync(5, TransientBudgetPriority::High);
+    auto blocked_head =
+        budget_.AcquireAsync({10, 1}, LoadAdmissionPriority::High);
+    auto fitting_next =
+        budget_.AcquireAsync({5, 1}, LoadAdmissionPriority::High);
     ASSERT_FALSE(blocked_head.isReady());
     ASSERT_FALSE(fitting_next.isReady());
 
@@ -202,14 +374,17 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     running_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        ConsumerCancellationAndReleaseRaceResolvesOnce) {
-    budget_.SetCapacityBytes(1);
+    budget_.SetCapacityBytes(0);
+    budget_.SetCapacitySlots(1);
 
     for (size_t i = 0; i < 100; ++i) {
-        auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto running =
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
         auto running_lease = folly::coro::blockingWait(std::move(running));
-        auto waiting = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto waiting =
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
         folly::CancellationSource cancellation_source;
         folly::ManualExecutor executor;
         auto consumer = std::move(folly::coro::co_withCancellation(
@@ -235,20 +410,24 @@ TEST_F(TransientMemoryBudgetAsyncTest,
         }
         executor.drain();
 
-        ASSERT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
-        budget_.Release(1);
+        ASSERT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+        budget_.Release({1, 1});
     }
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, ReleaseAndCancellationRaceResolvesOnce) {
-    budget_.SetCapacityBytes(1);
+TEST_F(LoadAdmissionControllerAsyncTest,
+       ReleaseAndCancellationRaceResolvesOnce) {
+    budget_.SetCapacityBytes(0);
+    budget_.SetCapacitySlots(1);
 
     for (size_t i = 0; i < 100; ++i) {
-        auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto running =
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
         auto running_lease = folly::coro::blockingWait(std::move(running));
         folly::CancellationSource cancellation_source;
-        auto waiting = budget_.AcquireAsync(
-            1, TransientBudgetPriority::High, cancellation_source.getToken());
+        auto waiting = budget_.AcquireAsync({1, 1},
+                                            LoadAdmissionPriority::High,
+                                            cancellation_source.getToken());
 
         std::thread cancel_thread([&cancellation_source]() {
             cancellation_source.requestCancellation();
@@ -263,17 +442,17 @@ TEST_F(TransientMemoryBudgetAsyncTest, ReleaseAndCancellationRaceResolvesOnce) {
         } catch (const folly::OperationCancelled&) {
         }
 
-        ASSERT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
-        budget_.Release(1);
+        ASSERT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+        budget_.Release({1, 1});
     }
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, CapacityUpdateWakesPendingAdmission) {
+TEST_F(LoadAdmissionControllerAsyncTest, CapacityUpdateWakesPendingAdmission) {
     budget_.SetCapacityBytes(1);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto waiting = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     ASSERT_FALSE(waiting.isReady());
 
     budget_.SetCapacityBytes(2);
@@ -284,11 +463,12 @@ TEST_F(TransientMemoryBudgetAsyncTest, CapacityUpdateWakesPendingAdmission) {
     running_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, ZeroCapacityIsUnlimited) {
+TEST_F(LoadAdmissionControllerAsyncTest, ZeroCapacityIsUnlimited) {
     budget_.SetCapacityBytes(0);
+    budget_.SetCapacitySlots(0);
 
-    auto high = budget_.AcquireAsync(100, TransientBudgetPriority::High);
-    auto low = budget_.AcquireAsync(100, TransientBudgetPriority::Low);
+    auto high = budget_.AcquireAsync({100, 1}, LoadAdmissionPriority::High);
+    auto low = budget_.AcquireAsync({100, 1}, LoadAdmissionPriority::Low);
 
     ASSERT_TRUE(high.isReady());
     ASSERT_TRUE(low.isReady());
@@ -298,13 +478,13 @@ TEST_F(TransientMemoryBudgetAsyncTest, ZeroCapacityIsUnlimited) {
     low_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, OversizedRequestRunsExclusively) {
+TEST_F(LoadAdmissionControllerAsyncTest, OversizedRequestRunsExclusively) {
     budget_.SetCapacityBytes(10);
 
-    auto oversized = budget_.AcquireAsync(11, TransientBudgetPriority::Low);
+    auto oversized = budget_.AcquireAsync({11, 1}, LoadAdmissionPriority::Low);
     ASSERT_TRUE(oversized.isReady());
     auto oversized_lease = folly::coro::blockingWait(std::move(oversized));
-    auto waiting = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     EXPECT_FALSE(waiting.isReady());
 
     oversized_lease.Release();
@@ -313,37 +493,38 @@ TEST_F(TransientMemoryBudgetAsyncTest, OversizedRequestRunsExclusively) {
     waiting_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        LegacyTryAcquireCannotBypassGrantedAsyncWaiter) {
     budget_.SetCapacityBytes(1);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto waiting = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     ASSERT_FALSE(waiting.isReady());
 
     running_lease.Release();
 
     ASSERT_TRUE(waiting.isReady());
-    EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::High));
+    EXPECT_FALSE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
     auto waiting_lease = folly::coro::blockingWait(std::move(waiting));
     waiting_lease.Release();
-    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
-    budget_.Release(1);
+    EXPECT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+    budget_.Release({1, 1});
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        HighPriorityLegacyAdmissionBypassesQueuedLowWaiter) {
     budget_.SetCapacityBytes(2);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto low_waiting = budget_.AcquireAsync(2, TransientBudgetPriority::Low);
+    auto low_waiting = budget_.AcquireAsync({2, 1}, LoadAdmissionPriority::Low);
     ASSERT_FALSE(low_waiting.isReady());
 
     folly::CancellationToken token;
-    EXPECT_TRUE(budget_.AcquireUntil(1, TransientBudgetPriority::High, token));
-    budget_.Release(1);
+    EXPECT_TRUE(
+        budget_.AcquireUntil({1, 1}, LoadAdmissionPriority::High, token));
+    budget_.Release({1, 1});
     running_lease.Release();
 
     ASSERT_TRUE(low_waiting.isReady());
@@ -351,16 +532,16 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     low_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        LowPriorityLegacyAdmissionCannotBypassQueuedLowWaiter) {
     budget_.SetCapacityBytes(2);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
-    auto low_waiting = budget_.AcquireAsync(2, TransientBudgetPriority::Low);
+    auto low_waiting = budget_.AcquireAsync({2, 1}, LoadAdmissionPriority::Low);
     ASSERT_FALSE(low_waiting.isReady());
 
-    EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::Low));
+    EXPECT_FALSE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::Low));
     running_lease.Release();
 
     ASSERT_TRUE(low_waiting.isReady());
@@ -368,27 +549,27 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     low_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        QueuedHighLegacyAdmissionBlocksNewLowAsyncAdmission) {
     budget_.SetCapacityBytes(2);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
     folly::CancellationSource cancellation_source;
     auto high_legacy = std::async(
         std::launch::async, [&, token = cancellation_source.getToken()]() {
             return budget_.AcquireUntil(
-                2, TransientBudgetPriority::High, token);
+                {2, 1}, LoadAdmissionPriority::High, token);
         });
 
     bool high_registered = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+        if (!budget_.TryAcquire({1, 1}, LoadAdmissionPriority::Low)) {
             high_registered = true;
             break;
         }
-        budget_.Release(1);
+        budget_.Release({1, 1});
         std::this_thread::yield();
     }
     if (!high_registered) {
@@ -399,7 +580,7 @@ TEST_F(TransientMemoryBudgetAsyncTest,
         FAIL() << "high-priority legacy waiter was not tracked";
     }
 
-    auto low_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto low_waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     ASSERT_FALSE(low_waiting.isReady());
     running_lease.Release();
 
@@ -413,7 +594,7 @@ TEST_F(TransientMemoryBudgetAsyncTest,
 
     ASSERT_EQ(high_status, std::future_status::ready);
     EXPECT_TRUE(high_legacy.get());
-    budget_.Release(2);
+    budget_.Release({2, 1});
     EXPECT_TRUE(high_won);
 
     if (high_won) {
@@ -423,27 +604,82 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     }
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
-       QueuedHighLegacyAdmissionBlocksLaterHighAdmissions) {
-    budget_.SetCapacityBytes(2);
+TEST_F(LoadAdmissionControllerAsyncTest,
+       BlockingAndAsyncAdmissionsShareSlotPriorityQueue) {
+    budget_.SetCapacitySlots(2);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
     folly::CancellationSource cancellation_source;
     auto high_legacy = std::async(
         std::launch::async, [&, token = cancellation_source.getToken()]() {
             return budget_.AcquireUntil(
-                2, TransientBudgetPriority::High, token);
+                {0, 2}, LoadAdmissionPriority::High, token);
         });
 
     bool high_registered = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+        if (!budget_.TryAcquire({1, 1}, LoadAdmissionPriority::Low)) {
             high_registered = true;
             break;
         }
-        budget_.Release(1);
+        budget_.Release({1, 1});
+        std::this_thread::yield();
+    }
+    if (!high_registered) {
+        cancellation_source.requestCancellation();
+        ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_FALSE(high_legacy.get());
+        FAIL() << "high-priority legacy waiter was not tracked";
+    }
+
+    auto low_waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
+    ASSERT_FALSE(low_waiting.isReady());
+    running_lease.Release();
+
+    auto high_status = high_legacy.wait_for(std::chrono::seconds(2));
+    bool high_won = high_status == std::future_status::ready;
+    if (!high_won && low_waiting.isReady()) {
+        auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+        low_lease.Release();
+        high_status = high_legacy.wait_for(std::chrono::seconds(2));
+    }
+
+    ASSERT_EQ(high_status, std::future_status::ready);
+    EXPECT_TRUE(high_legacy.get());
+    budget_.Release({0, 2});
+    EXPECT_TRUE(high_won);
+
+    if (high_won) {
+        ASSERT_TRUE(low_waiting.isReady());
+        auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+        low_lease.Release();
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       QueuedHighLegacyAdmissionBlocksLaterHighAdmissions) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    folly::CancellationSource cancellation_source;
+    auto high_legacy = std::async(
+        std::launch::async, [&, token = cancellation_source.getToken()]() {
+            return budget_.AcquireUntil(
+                {2, 1}, LoadAdmissionPriority::High, token);
+        });
+
+    bool high_registered = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!budget_.TryAcquire({1, 1}, LoadAdmissionPriority::Low)) {
+            high_registered = true;
+            break;
+        }
+        budget_.Release({1, 1});
         std::this_thread::yield();
     }
     if (!high_registered) {
@@ -455,11 +691,11 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     }
 
     bool try_acquire_overtook =
-        budget_.TryAcquire(1, TransientBudgetPriority::High);
+        budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High);
     if (try_acquire_overtook) {
-        budget_.Release(1);
+        budget_.Release({1, 1});
     }
-    auto high_async = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    auto high_async = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
     bool async_overtook = high_async.isReady();
     if (async_overtook) {
         auto async_lease = folly::coro::blockingWait(std::move(high_async));
@@ -470,7 +706,7 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
     EXPECT_TRUE(high_legacy.get());
-    budget_.Release(2);
+    budget_.Release({2, 1});
 
     EXPECT_FALSE(try_acquire_overtook);
     EXPECT_FALSE(async_overtook);
@@ -481,27 +717,27 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     }
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest,
+TEST_F(LoadAdmissionControllerAsyncTest,
        CancellingHighLegacyAdmissionUnblocksLowAsyncAdmission) {
     budget_.SetCapacityBytes(2);
 
-    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     auto running_lease = folly::coro::blockingWait(std::move(running));
     folly::CancellationSource cancellation_source;
     auto high_legacy = std::async(
         std::launch::async, [&, token = cancellation_source.getToken()]() {
             return budget_.AcquireUntil(
-                2, TransientBudgetPriority::High, token);
+                {2, 1}, LoadAdmissionPriority::High, token);
         });
 
     bool high_registered = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+        if (!budget_.TryAcquire({1, 1}, LoadAdmissionPriority::Low)) {
             high_registered = true;
             break;
         }
-        budget_.Release(1);
+        budget_.Release({1, 1});
         std::this_thread::yield();
     }
     if (!high_registered) {
@@ -512,7 +748,7 @@ TEST_F(TransientMemoryBudgetAsyncTest,
         FAIL() << "high-priority legacy waiter was not tracked";
     }
 
-    auto low_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto low_waiting = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low);
     ASSERT_FALSE(low_waiting.isReady());
     cancellation_source.requestCancellation();
 
@@ -525,12 +761,13 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     running_lease.Release();
 }
 
-TEST_F(TransientMemoryBudgetAsyncTest, PendingQueueOperationsScaleLinearly) {
+TEST_F(LoadAdmissionControllerAsyncTest, PendingQueueOperationsScaleLinearly) {
     auto measure_queue_operations = [this](size_t waiter_count) {
         budget_.SetCapacityBytes(1);
-        auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto running =
+            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
         auto running_lease = folly::coro::blockingWait(std::move(running));
-        std::vector<folly::coro::Future<TransientBudgetLease>> waiters;
+        std::vector<folly::coro::Future<LoadAdmissionLease>> waiters;
         waiters.reserve(waiter_count);
         std::vector<std::unique_ptr<folly::CancellationSource>>
             cancellation_sources;
@@ -541,8 +778,8 @@ TEST_F(TransientMemoryBudgetAsyncTest, PendingQueueOperationsScaleLinearly) {
             auto cancellation_source =
                 std::make_unique<folly::CancellationSource>();
             waiters.push_back(
-                budget_.AcquireAsync(1,
-                                     TransientBudgetPriority::High,
+                budget_.AcquireAsync({1, 1},
+                                     LoadAdmissionPriority::High,
                                      cancellation_source->getToken()));
             cancellation_sources.push_back(std::move(cancellation_source));
         }

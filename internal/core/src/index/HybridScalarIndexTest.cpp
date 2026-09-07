@@ -705,7 +705,7 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
 }
 
 TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto budget_cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -997,7 +997,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -1123,7 +1123,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              EncryptedFileAwareResourceEstimateUsesFullOverhead) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto budget_cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });

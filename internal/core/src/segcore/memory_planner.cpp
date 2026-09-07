@@ -43,7 +43,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::segcore {
 
@@ -71,8 +71,7 @@ int64_t
 FieldDataLoadBatchSplitTargetBytes() {
     auto target = FieldDataLoadBatchTargetBytes();
     auto budget_capacity =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-            .CapacityBytes();
+        milvus::storage::LoadAdmissionController::GetInstance().CapacityBytes();
     if (budget_capacity == 0) {
         return target;
     }
@@ -383,7 +382,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         cell_specs.size(),
         batches.size(),
         memory_limit >> 20,
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+        milvus::storage::LoadAdmissionController::GetInstance()
                 .CapacityBytes() >>
             20,
         FieldDataReadWindowBytes() >> 20);
@@ -391,7 +390,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     const auto pool_priority = milvus::PriorityForLoad(priority);
     auto& pool = ThreadPools::GetThreadPool(pool_priority);
     const auto budget_priority =
-        milvus::storage::TransientPriorityForThreadPool(pool_priority);
+        milvus::storage::LoadAdmissionPriorityForThreadPool(pool_priority);
     const auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
     const auto shared_finalizer =
@@ -413,12 +412,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             batch.batch_loading_overhead_bytes;
         const auto reader_memory_limit = BatchReaderMemoryLimit(
             batch.batch_loaded_memory_bytes, memory_limit);
-        auto& budget =
-            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+        auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
         const auto cancellation_token =
             op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
-        const bool budget_admitted = budget.AcquireUntil(
-            batch_loading_overhead_bytes, budget_priority, cancellation_token);
+        const bool budget_admitted =
+            budget.AcquireUntil({batch_loading_overhead_bytes, 1},
+                                budget_priority,
+                                cancellation_token);
         if (!budget_admitted) {
             // AcquireUntil waits for budget and returns false only when the
             // caller's lifecycle ends before admission.
@@ -434,14 +434,14 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                               reader_memory_limit,
                                               shared_finalizer,
                                               op_ctx]() mutable {
-                auto& budget = milvus::storage::TransientMemoryBudget::
-                    GetLoadTransientBudget();
+                auto& budget =
+                    milvus::storage::LoadAdmissionController::GetInstance();
                 // This guard is declared before the Arrow table locals below,
                 // so their shared backing buffers are destroyed before the
                 // batch reservation is released.
                 auto release_guard =
                     folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
-                        budget.Release(batch_loading_overhead_bytes);
+                        budget.Release({batch_loading_overhead_bytes, 1});
                     });
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
@@ -486,8 +486,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             }));
         } catch (...) {
             if (budget_admitted) {
-                milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                    .Release(batch_loading_overhead_bytes);
+                milvus::storage::LoadAdmissionController::GetInstance().Release(
+                    {batch_loading_overhead_bytes, 1});
             }
             append_failed_future(std::current_exception());
         }

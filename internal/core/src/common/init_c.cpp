@@ -56,6 +56,11 @@ SetLoadTransientBudgetBytes(int64_t bytes) {
 }
 
 void
+SetLoadAdmissionSlots(int64_t slots) {
+    milvus::SetLoadAdmissionSlots(slots);
+}
+
+void
 SetHighPriorityThreadCoreCoefficient(const float value) {
     milvus::SetHighPriorityThreadCoreCoefficient(value);
 }

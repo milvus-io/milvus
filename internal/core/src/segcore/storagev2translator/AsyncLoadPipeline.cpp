@@ -36,7 +36,7 @@
 #include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
-#include "storage/TransientMemoryBudget.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -100,12 +100,12 @@ class WindowFailureState {
     folly::CancellationSource cancellation_source_;
 };
 
-// Maps load priority to the transient-memory admission class.
-[[nodiscard]] constexpr storage::TransientBudgetPriority
-BudgetPriority(const milvus::proto::common::LoadPriority priority) noexcept {
+// Maps load priority to the load admission class.
+[[nodiscard]] constexpr storage::LoadAdmissionPriority
+AdmissionPriority(const milvus::proto::common::LoadPriority priority) noexcept {
     return priority == milvus::proto::common::LoadPriority::LOW
-               ? storage::TransientBudgetPriority::Low
-               : storage::TransientBudgetPriority::High;
+               ? storage::LoadAdmissionPriority::Low
+               : storage::LoadAdmissionPriority::High;
 }
 
 // Throws FollyCancel when a pipeline phase observes cancellation.
@@ -173,7 +173,7 @@ FinalizeWindowAsync(const int64_t segment_id,
                     folly::CancellationToken cancellation_token,
                     AsyncReadWindow window,
                     std::shared_ptr<const CellFinalizeFunc> finalize_cell,
-                    storage::TransientBudgetLease lease,
+                    storage::LoadAdmissionLease lease,
                     RecordBatches batches,
                     std::shared_ptr<WindowFailureState> failure_state) {
     try {
@@ -197,7 +197,7 @@ LoadWindowAsync(const int64_t segment_id,
                 std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                 AsyncReadWindow window,
                 std::shared_ptr<const CellFinalizeFunc> finalize_cell,
-                storage::TransientBudgetLease lease,
+                storage::LoadAdmissionLease lease,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
                 const milvus::proto::common::LoadPriority load_priority,
@@ -265,7 +265,7 @@ LoadCellsAsyncImpl(
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider,
     const milvus::proto::common::LoadPriority load_priority,
-    const storage::TransientBudgetPriority budget_priority,
+    const storage::LoadAdmissionPriority admission_priority,
     folly::CancellationToken context_cancellation_token) {
     const auto caller_cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
@@ -293,18 +293,20 @@ LoadCellsAsyncImpl(
     const auto effective_read_window_bytes = read_window_bytes.value_or(
         static_cast<size_t>(StorageV2AsyncLoadReadWindowSizeBytes()));
     auto windows = BuildAsyncReadWindows(cells, effective_read_window_bytes);
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& admission = storage::LoadAdmissionController::GetInstance();
     const auto* const priority_name =
-        budget_priority == storage::TransientBudgetPriority::High ? "high"
-                                                                  : "low";
+        admission_priority == storage::LoadAdmissionPriority::High ? "high"
+                                                                   : "low";
     LOG_INFO(
         "[StorageV3] async load pipeline: segment {} loads {} cells in {} "
-        "windows (read_window={}MB, budget_capacity={}MB, priority={})",
+        "windows (read_window={}MB, budget_capacity={}MB, slot_capacity={}, "
+        "priority={})",
         segment_id,
         cells.size(),
         windows.size(),
         effective_read_window_bytes >> 20,
-        budget.CapacityBytes() >> 20,
+        admission.CapacityBytes() >> 20,
+        admission.CapacitySlots(),
         priority_name);
     const std::shared_ptr<const CellFinalizeFunc> shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
@@ -331,9 +333,9 @@ LoadCellsAsyncImpl(
                     priority_name);
             }
             auto lease =
-                co_await budget.AcquireAsync(windows[i].budget_bytes,
-                                             budget_priority,
-                                             window_cancellation_token);
+                co_await admission.AcquireAsync({windows[i].budget_bytes, 1},
+                                                admission_priority,
+                                                window_cancellation_token);
             if (debug_logging_enabled) {
                 const auto admission_wait_us =
                     std::chrono::duration_cast<std::chrono::microseconds>(
@@ -497,7 +499,8 @@ LoadCellsAsync(const milvus::OpContext* ctx,
             std::move(options.executor), options.load_priority);
         auto finalization_executor_provider =
             std::move(options.finalization_executor_provider);
-        const auto budget_priority = BudgetPriority(options.load_priority);
+        const auto admission_priority =
+            AdmissionPriority(options.load_priority);
         const auto context_cancellation_token =
             ctx ? ctx->cancellation_token : folly::CancellationToken{};
 
@@ -510,7 +513,7 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                                std::move(executor_keep_alive),
                                std::move(finalization_executor_provider),
                                options.load_priority,
-                               budget_priority,
+                               admission_priority,
                                context_cancellation_token));
     } catch (...) {
         detail::RethrowAsyncLoadException();

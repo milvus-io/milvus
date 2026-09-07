@@ -115,6 +115,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SetIndexSliceSize(cIndexSliceSize)
 	cLoadTransientBudgetBytes := C.int64_t(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
 	C.SetLoadTransientBudgetBytes(cLoadTransientBudgetBytes)
+	C.SetLoadAdmissionSlots(C.int64_t(paramtable.Get().CommonCfg.LoadAdmissionSlots.GetAsInt64()))
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())

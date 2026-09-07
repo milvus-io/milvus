@@ -638,6 +638,11 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.LoadAdmissionSlots.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			UpdateLoadAdmissionSlots(paramtable.Get().CommonCfg.LoadAdmissionSlots.GetAsInt64())
+			return nil
+		})
+
 		registerStorageV2AsyncLoadReadWindowConfig(paramtable.Get())
 
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
