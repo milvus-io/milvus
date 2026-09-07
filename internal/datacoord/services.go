@@ -696,17 +696,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 
 			// V3 checkpoints carry the authoritative cumulative row count; their
-			// in-memory binlog arrays may be empty or delta-only. V2 continues to
-			// derive the row count from its persisted binlog arrays.
+			// in-memory binlog arrays may be empty or delta-only. L0 also has no
+			// insert-binlog row count and retains the PR's checkpoint fallback. V2
+			// continues to derive the row count only from persisted insert binlogs.
 			count := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo)
-			if seg.GetStorageVersion() == storage.StorageV3 {
+			if seg.GetStorageVersion() == storage.StorageV3 || seg.GetLevel() == datapb.SegmentLevel_L0 {
 				if cpNumRows > 0 {
 					seg.NumOfRows = cpNumRows
 				}
 			} else if count > 0 {
 				seg.NumOfRows = count
-			} else if cpNumRows > 0 {
-				seg.NumOfRows = cpNumRows
 			}
 
 			// Manifest

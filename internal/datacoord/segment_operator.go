@@ -171,7 +171,20 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 			}
 
 			count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-			if count > 0 {
+			// StorageV3 checkpoints carry the authoritative cumulative row count.
+			// Their in-memory binlog arrays may be empty or contain only the newest
+			// flush delta, so an array-derived count must not override the checkpoint.
+			if segment.GetStorageVersion() == storage.StorageV3 {
+				if cpNumRows > 0 {
+					if cpNumRows != count && count > 0 {
+						mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
+							mlog.FieldSegmentID(segmentID),
+							mlog.Int64("binlog reported (wrong)", cpNumRows),
+							mlog.Int64("segment binlog row count (correct)", count))
+					}
+					segment.NumOfRows = cpNumRows
+				}
+			} else if count > 0 {
 				if cpNumRows != count {
 					mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
 						mlog.Int64("segmentID", segmentID),
@@ -179,8 +192,6 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 						mlog.Int64("segment binlog row count (correct)", count))
 				}
 				segment.NumOfRows = count
-			} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
-				segment.NumOfRows = cpNumRows
 			}
 			return BinlogIncrement{}, true
 		}},

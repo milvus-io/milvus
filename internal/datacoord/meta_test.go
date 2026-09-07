@@ -4410,6 +4410,48 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		require.ErrorIs(t, err, ErrKeyAlreadyExists)
 	})
 
+	t.Run("new segment persists derived stats before binlog fields are stripped", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := &datapb.SegmentInfo{
+			ID:           11,
+			CollectionID: 100,
+			PartitionID:  20,
+			State:        commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{
+					LogID:         101,
+					EntriesNum:    10,
+					MemorySize:    2048,
+					TimestampFrom: 100,
+					TimestampTo:   200,
+				}},
+			}},
+			Statslogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      102,
+					MemorySize: 64,
+				}},
+			}},
+		}
+		require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), nil, segment))
+
+		persisted, _, err := meta.segmentPersist.Scan(context.TODO(), segmentMetaPrefix)
+		require.NoError(t, err)
+		require.Len(t, persisted, 1)
+		require.Empty(t, persisted[0].GetBinlogs())
+		require.Empty(t, persisted[0].GetStatslogs())
+		require.NotNil(t, persisted[0].GetStats())
+		require.EqualValues(t, 2048, persisted[0].GetStats().GetInsertBinlogSize())
+		require.EqualValues(t, 64, persisted[0].GetStats().GetStatsBinlogSize())
+		require.EqualValues(t, 1, persisted[0].GetStats().GetInsertBinlogCount())
+		require.Equal(t, uint64(100), persisted[0].GetStats().GetTimestampFrom())
+		require.Equal(t, uint64(200), persisted[0].GetStats().GetTimestampTo())
+	})
+
 	t.Run("update binlogs from save binlog paths", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
@@ -4537,15 +4579,16 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, commonpb.SegmentState_Dropped)
 	})
 
-	t.Run("v3 storage segment with empty binlogs uses checkpoint NumOfRows", func(t *testing.T) {
+	t.Run("v3 storage segment uses authoritative checkpoint NumOfRows", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
-		// Create a V3 segment with no binlogs (V3 storage uses ManifestPath instead)
+		// A V3 segment's materialized binlog arrays can contain only the newest
+		// flush delta. The checkpoint remains the cumulative row-count source.
 		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1,
 			State:          commonpb.SegmentState_Growing,
-			Binlogs:        []*datapb.FieldBinlog{},
+			Binlogs:        []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 			Statslogs:      []*datapb.FieldBinlog{},
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   "files/binlogs/1/2/1000/manifest_0",
@@ -4554,32 +4597,15 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 0, segment1.NumOfRows)
 
-		// Checkpoint update with cpNumRows=100, segment has no binlogs
-		// CalcRowCountFromBinLog will return 0, so should fall back to cpNumRows
-		err = meta.UpdateSegmentsInfo(
-			context.TODO(),
-			map[int64][]SegmentOperator{
-				1: {allBinlogs(func(seg *datapb.SegmentInfo) bool {
-					cp := &datapb.CheckPoint{
-						SegmentID: 1,
-						NumOfRows: 100,
-						Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
-					}
-					seg.DmlPosition = cp.GetPosition()
-					count := segmentutil.CalcRowCountFromBinLog(seg)
-					if count > 0 {
-						seg.NumOfRows = count
-					} else {
-						seg.NumOfRows = cp.GetNumOfRows()
-					}
-					return true
-				})},
-			},
-		)
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateCheckPointOperator(1, []*datapb.CheckPoint{{
+			SegmentID: 1,
+			NumOfRows: 100,
+			Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
+		}}, true))
 		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
-		// NumOfRows should be set from checkpoint, not left at 0
+		// The partial in-memory binlog reports 10; the checkpoint reports 100.
 		assert.EqualValues(t, 100, updated.NumOfRows)
 	})
 

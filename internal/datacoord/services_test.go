@@ -446,6 +446,83 @@ func TestSaveBinlogPathCASRetryDiscardsDroppedSegment(t *testing.T) {
 	require.Empty(t, segment.GetBinlogs(), "the rejected retry must not publish binlogs")
 }
 
+func TestSaveBinlogPathRowCountSemantics(t *testing.T) {
+	tests := []struct {
+		name           string
+		storageVersion int64
+		level          datapb.SegmentLevel
+		binlogs        []*datapb.FieldBinlog
+		expectedRows   int64
+	}{
+		{
+			name:           "StorageV2 ignores checkpoint rows without insert binlogs",
+			storageVersion: storage.StorageV2,
+			level:          datapb.SegmentLevel_L1,
+			expectedRows:   0,
+		},
+		{
+			name:           "StorageV3 checkpoint overrides partial in-memory binlogs",
+			storageVersion: storage.StorageV3,
+			level:          datapb.SegmentLevel_L1,
+			binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 10}},
+			}},
+			expectedRows: 100,
+		},
+		{
+			name:           "L0 retains checkpoint fallback without insert binlogs",
+			storageVersion: storage.StorageV2,
+			level:          datapb.SegmentLevel_L0,
+			expectedRows:   100,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const segmentID = int64(30)
+			mt := newTestMetaFromCache(t, newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+				segmentID: NewSegmentInfo(&datapb.SegmentInfo{
+					ID:             segmentID,
+					CollectionID:   1,
+					PartitionID:    2,
+					State:          commonpb.SegmentState_Growing,
+					Level:          test.level,
+					StorageVersion: test.storageVersion,
+				}),
+			}), nil)
+			mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+			mt.AddCollection(&collectionInfo{ID: 1})
+
+			server := CreateServer(context.Background(), nil)
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			server.meta = mt
+			if test.level == datapb.SegmentLevel_L0 {
+				triggerManager := NewMockTriggerManager(t)
+				triggerManager.EXPECT().OnCollectionUpdate(int64(1)).Once()
+				server.compactionTriggerManager = triggerManager
+			}
+			resp, err := server.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+				SegmentID:         segmentID,
+				CollectionID:      1,
+				PartitionID:       2,
+				SegLevel:          test.level,
+				StorageVersion:    test.storageVersion,
+				Field2BinlogPaths: test.binlogs,
+				CheckPoints: []*datapb.CheckPoint{{
+					SegmentID: segmentID,
+					NumOfRows: 100,
+					Position:  &msgpb.MsgPosition{Timestamp: 100},
+				}},
+			})
+
+			require.NoError(t, err)
+			require.True(t, merr.Ok(resp))
+			require.Equal(t, test.expectedRows, mt.GetSegment(context.Background(), segmentID).GetNumOfRows())
+		})
+	}
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.testServer.meta.AddCollection(&collectionInfo{
 		ID: 0,
