@@ -1650,3 +1650,61 @@ func (s *CollectionObserverRGSuite) TestATaskAtHundredWaitingForPromotionIsNotRe
 	s.EqualValues(3, *reads, "once the current target exists the figure is measured, not reused")
 	s.False(s.ob.loadTasks.Contain(key), "and the task finishes on it")
 }
+
+// TestASurvivorsFinishDoesNotDropAnOwedReplicaNumber is the reviewer's probe:
+// the survivors of a teardown reach 100 and the current target is promoted
+// while the catalog is still refusing the count. The scoped finish must not
+// remove a task that still owes the write, or the stale count is the end
+// state exactly as before, in a narrower window; the task stays until the
+// catalog recovers, writes the count, and finishes on that tick.
+func (s *CollectionObserverRGSuite) TestASurvivorsFinishDoesNotDropAnOwedReplicaNumber() {
+	s.registerLoadingCollection(1800, 1801, "1800-dmc0", 4, 18001, 18002)
+	s.putReplica(1800, 180001, 91, rgA)
+	s.putServiceableDelegator(1800, 91, "1800-dmc0", 18001, 18002)
+	s.markCollectionLoaded(1800, 1801)
+	s.putReplica(1800, 180002, 92, rgB)
+	s.putDelegator(1800, 92, "1800-dmc0", 18001, 18002)
+	s.putReplica(1800, 180003, 93, rgB)
+	s.putDelegator(1800, 93, "1800-dmc0", 18001, 18002)
+	s.putReplica(1800, 180004, 94, rgB)
+	s.putDelegator(1800, 94, "1800-dmc0") // the channel and nothing else
+
+	s.ob.LoadCollection(s.ctx, 1800, rgB)
+	key := s.taskKey(1800, rgB)
+	s.ob.Observe(s.ctx)
+	s.ageTaskWatermark(key, time.Hour)
+
+	// The catalog is down for as long as the test says.
+	down := true
+	var origin func(querycoord.Catalog, context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) error
+	save := mockey.Mock(querycoord.Catalog.SaveCollection).
+		To(func(c querycoord.Catalog, ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
+			if down {
+				return errors.New("etcd unavailable")
+			}
+			return origin(c, ctx, collection, partitions...)
+		}).Origin(&origin).Build()
+	defer save.UnPatch()
+
+	s.ob.Observe(s.ctx)
+	s.ElementsMatch([]int64{180002, 180003}, s.replicaIDsInRG(1800, rgB))
+	s.EqualValues(4, s.meta.GetCollection(s.ctx, 1800).GetReplicaNumber(), "stale after the refused write")
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.Require().True(task.ReplicaNumberPending, "the task owes the count")
+
+	// The promotion lands while the catalog is still down: the survivors
+	// carry everything and the current target exists, the scoped finish
+	// condition. The task must stay.
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1800))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 1800))
+	s.ob.Observe(s.ctx)
+	s.True(s.ob.loadTasks.Contain(key), "a task that owes the count is not finished")
+	s.EqualValues(4, s.meta.GetCollection(s.ctx, 1800).GetReplicaNumber())
+
+	down = false
+	s.ob.Observe(s.ctx)
+	s.EqualValues(3, s.meta.GetCollection(s.ctx, 1800).GetReplicaNumber(), "the count is written once the catalog is back")
+	s.EqualValues(len(s.meta.GetByCollection(s.ctx, 1800)), s.meta.GetCollection(s.ctx, 1800).GetReplicaNumber())
+	s.False(s.ob.loadTasks.Contain(key), "and the task finishes on that tick")
+}
