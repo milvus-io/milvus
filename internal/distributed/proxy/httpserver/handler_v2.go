@@ -62,16 +62,62 @@ import (
 )
 
 type HandlersV2 struct {
-	proxy     types.ProxyComponent
-	metaCache func() proxy.Cache
-	checkAuth bool
+	proxy        types.ProxyComponent
+	metaCache    func() proxy.Cache
+	dqlQueueFull func() bool
+	checkAuth    bool
 }
 
+// The probe NewHandlersV2 asserts for must stay on the concrete proxy: a
+// rename must fail the build rather than silently disable admission.
+var _ interface{ IsDQLQueueFull() bool } = (*proxy.Proxy)(nil)
+
 func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
-	return &HandlersV2{
-		proxy:     proxyClient,
-		metaCache: getProxyMetaCache(proxyClient),
-		checkAuth: proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+	h := &HandlersV2{
+		proxy:        proxyClient,
+		metaCache:    getProxyMetaCache(proxyClient),
+		dqlQueueFull: func() bool { return false },
+		checkAuth:    proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+	}
+	// a component without the probe (e.g. a remote proxy client) admits everything
+	if provider, ok := proxyClient.(interface{ IsDQLQueueFull() bool }); ok {
+		h.dqlQueueFull = provider.IsDQLQueueFull
+	}
+	return h
+}
+
+// dqlAdmission rejects a DQL request with 429 while the proxy's DQL queue is
+// full, before the body is decoded. The scheduler's Enqueue stays the
+// authority; this only pre-fires the TooManyRequests verdict Enqueue would
+// return after the decoding cost had already been paid, so admitting a request
+// that later hits a full queue (or vice versa) is benign.
+func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() && h.dqlQueueFull() {
+			err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
+			// admission aborts before wrapperPost, the only ProxyFunctionCall
+			// site for v2 routes, so the rejection is recorded here. The
+			// method comes from the route; db and collection stay empty:
+			// neither authoritative value exists before decode, and a
+			// client-controlled header must not mint or shift per-database
+			// series.
+			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
+				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
+				label, cause := requestutil.ParseMetricLabel(nil, err)
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
+			}
+			c.Header("Retry-After", "1")
+			// Retry-After is not CORS-safelisted; expose it so browser
+			// callers can read the retry delay.
+			c.Header("Access-Control-Expose-Headers", "Retry-After")
+			HTTPAbortReturn(c, http.StatusTooManyRequests, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
+		handler(c)
 	}
 }
 
@@ -245,18 +291,18 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
-	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.query))), true))
+	}, wrapperTraceLog(h.query))), true)))
 	// Get
-	router.POST(EntityCategory+GetAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.get))), true))
+	}, wrapperTraceLog(h.get))), true)))
 	// Delete
 	router.POST(EntityCategory+DeleteAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionFilterReq{}
@@ -270,23 +316,23 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
-	router.POST(EntityCategory+SearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.search))), true))
+	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
-	router.POST(EntityCategory+AdvancedSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.advancedSearch))), true))
+	}, wrapperTraceLog(h.advancedSearch))), true)))
 	// HybridSearch
-	router.POST(EntityCategory+HybridSearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.advancedSearch))), true))
+	}, wrapperTraceLog(h.advancedSearch))), true)))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listPartitions))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.hasPartitions))))

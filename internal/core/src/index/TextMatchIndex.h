@@ -26,7 +26,8 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     // In-memory writer used by both growing segments and sealed interim index
     // builds. Growing segments enable background merge because periodic
     // commits would otherwise grow the segment count unbounded; sealed builds
-    // disable it to avoid merge write amplification.
+    // use INT64_MAX as the commit interval and disable background merge to
+    // avoid merge write amplification.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* analyzer_name,

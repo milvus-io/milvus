@@ -1031,6 +1031,138 @@ RedactMembershipFilterBlobs(google::protobuf::Message* message,
     }
 }
 
+using BloomBlobOwners =
+    std::unordered_map<const std::string*, std::shared_ptr<const std::string>>;
+
+// Move one Bloom body out of a uniquely owned protobuf tree before parsing.
+// The string object's address remains stable and is used only as a temporary
+// key; logical expressions take shared ownership of the moved string.
+static void
+ExtractBloomFilterBlob(planpb::BloomFilterExpr* bloom,
+                       BloomBlobOwners* owners) {
+    auto* source_blob = bloom->mutable_filter_blob();
+    const auto inserted =
+        owners
+            ->emplace(
+                source_blob,
+                std::make_shared<const std::string>(std::move(*source_blob)))
+            .second;
+    AssertInfo(inserted, "duplicate Bloom blob protobuf address");
+}
+
+// Follow only schema edges that can contain another Expr. In particular, Term
+// and JSONContains GenericValue lists are leaves, so large IN predicates do not
+// pay a reflection walk over every value while looking for Bloom expressions.
+static void
+ExtractBloomFilterBlobs(planpb::Expr* expr, BloomBlobOwners* owners) {
+    switch (expr->expr_case()) {
+        case planpb::Expr::kBloomFilterExpr:
+            ExtractBloomFilterBlob(expr->mutable_bloom_filter_expr(), owners);
+            return;
+        case planpb::Expr::kUnaryExpr: {
+            auto* unary = expr->mutable_unary_expr();
+            if (unary->has_child()) {
+                ExtractBloomFilterBlobs(unary->mutable_child(), owners);
+            }
+            return;
+        }
+        case planpb::Expr::kBinaryExpr: {
+            auto* binary = expr->mutable_binary_expr();
+            if (binary->has_left()) {
+                ExtractBloomFilterBlobs(binary->mutable_left(), owners);
+            }
+            if (binary->has_right()) {
+                ExtractBloomFilterBlobs(binary->mutable_right(), owners);
+            }
+            return;
+        }
+        case planpb::Expr::kBinaryArithExpr: {
+            auto* binary = expr->mutable_binary_arith_expr();
+            if (binary->has_left()) {
+                ExtractBloomFilterBlobs(binary->mutable_left(), owners);
+            }
+            if (binary->has_right()) {
+                ExtractBloomFilterBlobs(binary->mutable_right(), owners);
+            }
+            return;
+        }
+        case planpb::Expr::kCallExpr: {
+            auto* call = expr->mutable_call_expr();
+            for (int i = 0; i < call->function_parameters_size(); ++i) {
+                ExtractBloomFilterBlobs(call->mutable_function_parameters(i),
+                                        owners);
+            }
+            return;
+        }
+        case planpb::Expr::kRandomSampleExpr: {
+            auto* random_sample = expr->mutable_random_sample_expr();
+            if (random_sample->has_predicate()) {
+                ExtractBloomFilterBlobs(random_sample->mutable_predicate(),
+                                        owners);
+            }
+            return;
+        }
+        case planpb::Expr::kElementFilterExpr: {
+            auto* element_filter = expr->mutable_element_filter_expr();
+            if (element_filter->has_element_expr()) {
+                ExtractBloomFilterBlobs(element_filter->mutable_element_expr(),
+                                        owners);
+            }
+            if (element_filter->has_predicate()) {
+                ExtractBloomFilterBlobs(element_filter->mutable_predicate(),
+                                        owners);
+            }
+            return;
+        }
+        case planpb::Expr::kMatchExpr: {
+            auto* match = expr->mutable_match_expr();
+            if (match->has_predicate()) {
+                ExtractBloomFilterBlobs(match->mutable_predicate(), owners);
+            }
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+static BloomBlobOwners
+ExtractBloomFilterBlobs(planpb::PlanNode* root) {
+    BloomBlobOwners owners;
+    switch (root->node_case()) {
+        case planpb::PlanNode::kVectorAnns: {
+            auto* vector_anns = root->mutable_vector_anns();
+            if (vector_anns->has_predicates()) {
+                ExtractBloomFilterBlobs(vector_anns->mutable_predicates(),
+                                        &owners);
+            }
+            break;
+        }
+        case planpb::PlanNode::kPredicates:
+            ExtractBloomFilterBlobs(root->mutable_predicates(), &owners);
+            break;
+        case planpb::PlanNode::kQuery: {
+            auto* query = root->mutable_query();
+            if (query->has_predicates()) {
+                ExtractBloomFilterBlobs(query->mutable_predicates(), &owners);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return owners;
+}
+
+static BloomBlobOwners
+ExtractBloomFilterBlobs(planpb::ScoreFunction* root) {
+    BloomBlobOwners owners;
+    if (root->has_filter()) {
+        ExtractBloomFilterBlobs(root->mutable_filter(), &owners);
+    }
+    return owners;
+}
+
 std::string
 PlanProtoDebugString(const proto::plan::PlanNode& plan_node_proto) {
     const auto size = plan_node_proto.ByteSizeLong();
@@ -1067,6 +1199,11 @@ LogPlanProtoDebug(const char* what,
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("search", plan_node_proto);
+    return CreatePlanImpl(plan_node_proto);
+}
+
+std::unique_ptr<Plan>
+ProtoParser::CreatePlanImpl(const proto::plan::PlanNode& plan_node_proto) {
     auto plan = std::make_unique<Plan>(schema);
     plan->plan_node_ = PlanNodeFromProto(plan_node_proto);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
@@ -1086,9 +1223,25 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     return plan;
 }
 
+std::unique_ptr<Plan>
+ProtoParser::CreatePlan(
+    std::unique_ptr<proto::plan::PlanNode> plan_node_proto) {
+    AssertInfo(plan_node_proto != nullptr, "plan node owner must not be null");
+    LogPlanProtoDebug("search", *plan_node_proto);
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(plan_node_proto.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .CreatePlanImpl(*plan_node_proto);
+}
+
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("retrieve", plan_node_proto);
+    return CreateRetrievePlanImpl(plan_node_proto);
+}
+
+std::unique_ptr<RetrievePlan>
+ProtoParser::CreateRetrievePlanImpl(
+    const proto::plan::PlanNode& plan_node_proto) {
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
     retrieve_plan->plan_node_ = RetrievePlanNodeFromProto(plan_node_proto);
     retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
@@ -1100,6 +1253,16 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     return retrieve_plan;
+}
+
+std::unique_ptr<RetrievePlan>
+ProtoParser::CreateRetrievePlan(
+    std::unique_ptr<proto::plan::PlanNode> plan_node_proto) {
+    AssertInfo(plan_node_proto != nullptr, "plan node owner must not be null");
+    LogPlanProtoDebug("retrieve", *plan_node_proto);
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(plan_node_proto.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .CreateRetrievePlanImpl(*plan_node_proto);
 }
 
 expr::TypedExprPtr
@@ -1253,8 +1416,17 @@ ProtoParser::ParseBloomFilterExprs(
                       "data type: {}",
                       data_type);
     }
+    std::shared_ptr<const std::string> filter_blob;
+    if (const auto it =
+            bloom_blob_owners_.find(std::addressof(expr_pb.filter_blob()));
+        it != bloom_blob_owners_.end()) {
+        filter_blob = it->second;
+    } else {
+        filter_blob =
+            std::make_shared<const std::string>(expr_pb.filter_blob());
+    }
     return std::make_shared<expr::BloomFilterExpr>(
-        expr::ColumnInfo(column_info), expr_pb.filter_blob());
+        expr::ColumnInfo(column_info), std::move(filter_blob));
 }
 
 expr::TypedExprPtr
@@ -1603,6 +1775,14 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
         default:
             ThrowInfo(UnexpectedError, "unknown function type");
     }
+}
+
+std::shared_ptr<rescores::Scorer>
+ProtoParser::ParseScorer(std::unique_ptr<proto::plan::ScoreFunction> function) {
+    AssertInfo(function != nullptr, "score function owner must not be null");
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(function.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .ParseScorer(*function);
 }
 
 std::shared_ptr<plan::PlanNode>

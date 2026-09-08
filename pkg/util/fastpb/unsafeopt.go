@@ -8,11 +8,10 @@ import (
 // validUTF8 reports whether v is valid UTF-8 (matches proto3 string validation).
 func validUTF8(v []byte) bool { return utf8.Valid(v) }
 
-// This file isolates the only unsafe in the package. Both helpers are
-// little-endian (x86/arm64) and produce freshly-allocated, self-owned memory —
-// they do NOT alias the source buffer, so they are safe regardless of the
-// source buffer's lifetime (gRPC-pooled or owned). A separate zero-copy
-// aliasing variant (for the owned sliced_blob path) can be added later.
+// This file isolates the only unsafe in the package. The conversion helpers are
+// little-endian (x86/arm64). bytesToF32/bytesToF64 produce freshly-allocated,
+// self-owned memory; f32ReadOnlyBytes is explicitly a borrowed read-only view
+// used only while synchronously copying into a final protobuf payload.
 
 // bytesToF32 returns a new []float32 holding the little-endian float32s in v
 // via a single memcpy (len(v) must be a multiple of 4).
@@ -34,6 +33,17 @@ func bytesToF64(v []byte) []float64 {
 		copy(unsafe.Slice((*byte)(unsafe.Pointer(&out[0])), n*8), v)
 	}
 	return out
+}
+
+// f32ReadOnlyBytes returns a byte view over v without allocating. The returned
+// slice aliases v and must never be mutated or retained beyond the synchronous
+// encode that requested it. Float protobuf wire values are little-endian, which
+// matches every architecture Milvus currently supports (x86-64 and arm64).
+func f32ReadOnlyBytes(v []float32) []byte {
+	if len(v) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(&v[0])), len(v)*4)
 }
 
 // strings copies the string elements out of one StringArray submessage into

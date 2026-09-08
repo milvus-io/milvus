@@ -17,13 +17,17 @@
 package accesslog
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -183,6 +187,76 @@ func TestAccessLogger_Basic(t *testing.T) {
 
 	ok := _globalL.Write(accessInfo)
 	assert.True(t, ok)
+}
+
+func TestAccessLogger_RestfulMethodUsesURLPath(t *testing.T) {
+	newLogger := func(writer *bytes.Buffer) *AccessLogger {
+		formatters := NewFormatterManger()
+		formatters.Add(BaseFormatterKey, "base: $method_name")
+		formatters.Add("search", "search: $method_name")
+		formatters.SetMethod("search", "/v2/search")
+
+		logger := NewAccessLogger()
+		logger.enable.Store(true)
+		logger.writer = writer
+		logger.formatters = formatters
+		return logger
+	}
+
+	tests := []struct {
+		name     string
+		target   string
+		expected string
+	}{
+		{
+			name:     "exact path matches",
+			target:   "/v2/search",
+			expected: "search: /v2/search\n",
+		},
+		{
+			name:     "query does not change restful method",
+			target:   "/v2/search?cluster_id=123",
+			expected: "search: /v2/search?cluster_id=123\n",
+		},
+		{
+			name:     "different prefix does not match",
+			target:   "/search?cluster_id=123",
+			expected: "base: /search?cluster_id=123\n",
+		},
+		{
+			name:     "different path does not match",
+			target:   "/v2/searching?cluster_id=123",
+			expected: "base: /v2/searching?cluster_id=123\n",
+		},
+		{
+			name:     "child path does not match",
+			target:   "/v2/search/result?cluster_id=123",
+			expected: "base: /v2/search/result?cluster_id=123\n",
+		},
+		{
+			name:     "escaped question mark remains part of path",
+			target:   "/v2/search%3Fcluster_id=123",
+			expected: "base: /v2/search%3Fcluster_id=123\n",
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, test.target, nil)
+			accessInfo := info.NewRestfulInfo(ctx)
+			accessInfo.SetParams(&gin.LogFormatterParams{
+				Request: ctx.Request,
+				Path:    ctx.Request.URL.RequestURI(),
+			})
+
+			var writer bytes.Buffer
+			logger := newLogger(&writer)
+			require.True(t, logger.Write(accessInfo))
+			assert.Equal(t, test.expected, writer.String())
+		})
+	}
 }
 
 func TestAccessLogger_WriteFailed(t *testing.T) {

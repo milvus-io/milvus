@@ -12,17 +12,20 @@ ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
 ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
+ARG MILVUS_RUNTIME_USER=milvus:milvus
+
 # Upgrade openssl to fix CVE-2026-45447 (base image is a pinned/legacy ubuntu20.04 build)
 RUN apt-get update && \
     apt-get upgrade -y openssl libssl1.1 && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /milvus/bin
-COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus
+RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+    install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus
+COPY --chown=milvus:milvus --chmod=774 ./bin/milvus /milvus/bin/milvus
 
-COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
+COPY --chown=milvus:milvus --chmod=774 ./configs/ /milvus/configs/
 
-COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
+COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
 
 ENV PATH=/milvus/bin:$PATH
@@ -30,8 +33,5 @@ ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
-# Change user to milvus
-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
-    mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
-USER milvus:milvus
+# Run as milvus by default; downstream images may select another user at build time.
+USER ${MILVUS_RUNTIME_USER}

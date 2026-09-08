@@ -682,6 +682,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if err := t.appendNamespaceShardingEnabled(); err != nil {
 		return err
 	}
+	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
 		return err

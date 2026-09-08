@@ -85,9 +85,13 @@ func (s *RestfulAccessInfoSuite) TestTimeEnd() {
 }
 
 func (s *RestfulAccessInfoSuite) TestMethodName() {
-	s.info.params.Path = "/restful/test"
+	req, err := http.NewRequest(http.MethodPost, "/restful/test?cluster_id=123", nil)
+	s.NoError(err)
+	s.ctx.Request = req
+	s.info.params.Path = req.URL.RequestURI()
 	result := Get(s.info, "$method_name")
 	s.Equal(s.info.params.Path, result[0])
+	s.Equal("/restful/test", s.info.MethodNameForFormatter())
 }
 
 func (s *RestfulAccessInfoSuite) TestAddress() {

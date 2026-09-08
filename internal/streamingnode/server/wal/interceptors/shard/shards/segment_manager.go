@@ -149,11 +149,15 @@ func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegme
 		return nil, ErrNotGrowing
 	}
 
+	// Hold an acknowledge before allocation because a successful allocation can
+	// immediately trigger a capacity seal. The flush worker must wait until the
+	// corresponding insert has been appended to the WAL.
+	s.ackSem.Inc()
 	err := resource.Resource().SegmentStatsManager().AllocRows(s.GetSegmentID(), req.ModifiedMetrics, req.RuntimeFlushSize)
 	if err != nil {
+		s.ackSem.Dec()
 		return nil, err
 	}
-	s.ackSem.Inc()
 
 	// register the txn session cleanup to the segment.
 	if req.TxnSession != nil {

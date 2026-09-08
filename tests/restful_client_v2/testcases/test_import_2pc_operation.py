@@ -22,7 +22,6 @@ from utils.utils import gen_collection_name
 IMPORT_2PC_TIMEOUT = 360
 
 
-@pytest.mark.tags(CaseLabel.L0)
 class TestImport2PCRestOperation(TestBase):
     def _kubectl_get_release_pods(self, release_name, namespace="chaos-testing"):
         if not shutil.which("kubectl"):
@@ -2427,7 +2426,7 @@ class TestImport2PCRestOperation(TestBase):
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_list_empty_collection_filter_returns_no_records(self):
         """
         target: REST import list empty collectionName filter
@@ -2442,7 +2441,7 @@ class TestImport2PCRestOperation(TestBase):
         records = list_rsp.get("data", {}).get("records", [])
         assert records == [], list_rsp
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_list_rejects_numeric_collection_name(self):
         """
         target: REST import list collectionName type validation
@@ -2564,7 +2563,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "array", "list", "type", "string"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_string_options_value(self):
         """
         target: import create options type validation
@@ -2583,7 +2582,7 @@ class TestImport2PCRestOperation(TestBase):
             ("options", "object", "map", "type", "string"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_numeric_partition_name(self):
         """
         target: import create partitionName type validation
@@ -2603,7 +2602,7 @@ class TestImport2PCRestOperation(TestBase):
             ("partition", "string", "type", "number"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_numeric_file_path(self):
         """
         target: import create file path type validation
@@ -2622,7 +2621,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "string", "type", "number"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_flat_files_list(self):
         """
         target: import create files nested shape validation
@@ -2641,7 +2640,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "array", "list", "type", "string"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_empty_file_group(self):
         """
         target: import create empty file group validation
@@ -2660,7 +2659,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "file", "empty"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_numeric_timeout_option(self):
         """
         target: import create timeout option type validation
@@ -2687,7 +2686,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_read_job_endpoints_reject_boolean_job_id(self):
         """
         target: import read job endpoint jobId type validation
@@ -2705,7 +2704,7 @@ class TestImport2PCRestOperation(TestBase):
             ("job", "id", "type", "bool"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_write_job_endpoints_reject_boolean_job_id(self):
         """
         target: import write job endpoint jobId type validation
@@ -2723,7 +2722,7 @@ class TestImport2PCRestOperation(TestBase):
             ("job", "id", "type", "bool"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_null_collection_name(self):
         """
         target: import create collectionName null validation
@@ -2739,7 +2738,7 @@ class TestImport2PCRestOperation(TestBase):
             ("collection", "name", "string", "null"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_null_files(self):
         """
         target: import create files null validation
@@ -2758,7 +2757,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "array", "list", "null"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_partition_name(self):
         """
         target: import create partitionName array validation
@@ -2778,7 +2777,7 @@ class TestImport2PCRestOperation(TestBase):
             ("partition", "string", "array", "type"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_read_job_endpoints_reject_array_job_id(self):
         """
         target: import read job endpoint jobId array validation
@@ -2796,7 +2795,7 @@ class TestImport2PCRestOperation(TestBase):
             ("job", "id", "array", "type", "unmarshal", "parse"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_write_job_endpoints_reject_array_job_id(self):
         """
         target: import write job endpoint jobId array validation
@@ -2836,7 +2835,7 @@ class TestImport2PCRestOperation(TestBase):
                 ("job", "id", "object", "type", "unmarshal", "parse"),
             )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_collection_name(self):
         """
         target: import create collectionName array validation
@@ -2852,7 +2851,7 @@ class TestImport2PCRestOperation(TestBase):
             ("collection", "name", "array", "type", "unmarshal", "string"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_collection_name(self):
         """
         target: import create collectionName object validation
@@ -2868,7 +2867,7 @@ class TestImport2PCRestOperation(TestBase):
             ("collection", "name", "object", "type", "unmarshal", "string"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_files_value(self):
         """
         target: import create files object validation
@@ -2887,7 +2886,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "object", "array", "list", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_file_path(self):
         """
         target: import create nested file path object validation
@@ -2906,7 +2905,7 @@ class TestImport2PCRestOperation(TestBase):
             ("files", "path", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_options_value(self):
         """
         target: import create options array validation
@@ -2925,7 +2924,7 @@ class TestImport2PCRestOperation(TestBase):
             ("options", "array", "object", "map", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_numeric_options_value(self):
         """
         target: import create options numeric validation
@@ -2944,7 +2943,7 @@ class TestImport2PCRestOperation(TestBase):
             ("options", "number", "object", "map", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_boolean_auto_commit_option(self):
         """
         target: import create auto_commit option value type validation
@@ -2963,7 +2962,7 @@ class TestImport2PCRestOperation(TestBase):
             ("auto_commit", "bool", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_null_auto_commit_option(self):
         """
         target: import create auto_commit option null validation
@@ -2991,7 +2990,7 @@ class TestImport2PCRestOperation(TestBase):
         ), rsp
         assert "jobId" not in str(rsp), rsp
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_auto_commit_option(self):
         """
         target: import create auto_commit option array validation
@@ -3010,7 +3009,7 @@ class TestImport2PCRestOperation(TestBase):
             ("auto_commit", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_boolean_backup_option(self):
         """
         target: import create backup option value type validation
@@ -3030,7 +3029,7 @@ class TestImport2PCRestOperation(TestBase):
             ("backup", "bool", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_boolean_l0_import_option(self):
         """
         target: import create l0_import option value type validation
@@ -3049,7 +3048,7 @@ class TestImport2PCRestOperation(TestBase):
             ("l0_import", "bool", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_boolean_skip_disk_quota_check_option(self):
         """
         target: import create skip_disk_quota_check option value type validation
@@ -3068,7 +3067,7 @@ class TestImport2PCRestOperation(TestBase):
             ("skip_disk_quota_check", "bool", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_backup_option(self):
         """
         target: import create backup option array validation
@@ -3088,7 +3087,7 @@ class TestImport2PCRestOperation(TestBase):
             ("backup", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_backup_option(self):
         """
         target: import create backup option object validation
@@ -3108,7 +3107,7 @@ class TestImport2PCRestOperation(TestBase):
             ("backup", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_l0_import_option(self):
         """
         target: import create l0_import option array validation
@@ -3127,7 +3126,7 @@ class TestImport2PCRestOperation(TestBase):
             ("l0_import", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_l0_import_option(self):
         """
         target: import create l0_import option object validation
@@ -3146,7 +3145,7 @@ class TestImport2PCRestOperation(TestBase):
             ("l0_import", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_skip_disk_quota_check_option(self):
         """
         target: import create skip_disk_quota_check option array validation
@@ -3165,7 +3164,7 @@ class TestImport2PCRestOperation(TestBase):
             ("skip_disk_quota_check", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_skip_disk_quota_check_option(self):
         """
         target: import create skip_disk_quota_check option object validation
@@ -3184,7 +3183,7 @@ class TestImport2PCRestOperation(TestBase):
             ("skip_disk_quota_check", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_numeric_storage_version_option(self):
         """
         target: import create storage_version option value type validation
@@ -3204,7 +3203,7 @@ class TestImport2PCRestOperation(TestBase):
             ("storage_version", "number", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_start_ts_option(self):
         """
         target: import create start_ts option value type validation
@@ -3224,7 +3223,7 @@ class TestImport2PCRestOperation(TestBase):
             ("start_ts", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_end_ts_option(self):
         """
         target: import create end_ts option value type validation
@@ -3244,7 +3243,7 @@ class TestImport2PCRestOperation(TestBase):
             ("end_ts", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_boolean_sep_option(self):
         """
         target: import create CSV sep option value type validation
@@ -3263,7 +3262,7 @@ class TestImport2PCRestOperation(TestBase):
             ("sep", "bool", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_array_nullkey_option(self):
         """
         target: import create CSV nullkey option value type validation
@@ -3282,7 +3281,7 @@ class TestImport2PCRestOperation(TestBase):
             ("nullkey", "array", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_object_ezk_option(self):
         """
         target: import create ezk option value type validation
@@ -3302,7 +3301,7 @@ class TestImport2PCRestOperation(TestBase):
             ("ezk", "object", "string", "type", "unmarshal"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_create_rejects_invalid_timeout_option(self):
         """
         target: import create timeout option validation
@@ -3566,7 +3565,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_completed_job_observability_fields_are_reported(self):
         """
         target: completed import job REST observability
@@ -3625,7 +3624,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_completed_import_survives_release_and_reload(self):
         """
         target: completed import visibility after reload/target refresh
@@ -3689,7 +3688,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_db_name_body_and_header_route_same_job_deterministically(self):
         """
         target: import REST database routing
@@ -4032,6 +4031,7 @@ class TestImport2PCRestOperation(TestBase):
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_import_2pc_default_auto_commit_completed_and_visible(self):
         """
         target: default import compatibility
@@ -4081,7 +4081,7 @@ class TestImport2PCRestOperation(TestBase):
             ("auto_commit", "true", "false"),
         )
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_auto_commit_uppercase_false_stops_at_uncommitted(self):
         """
         target: auto_commit option contract
@@ -4127,7 +4127,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_empty_parquet_auto_commit_completes_with_zero_rows(self):
         """
         target: empty import file lifecycle
@@ -4236,7 +4236,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_manual_multi_file_import_accumulates_rows(self):
         """
         target: multi-file import request
@@ -4352,7 +4352,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_jsonl_file_manual_import_preserves_rows(self):
         """
         target: JSONL file import with 2PC
@@ -4409,7 +4409,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_csv_file_with_custom_separator_manual_import_preserves_rows(self):
         """
         target: CSV file import with custom separator and 2PC
@@ -4469,7 +4469,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_csv_nullkey_manual_import_preserves_nulls(self):
         """
         target: CSV nullkey import with 2PC
@@ -4550,7 +4550,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_numpy_field_per_file_manual_import_preserves_rows(self):
         """
         target: NumPy field-per-file import with 2PC
@@ -4607,7 +4607,7 @@ class TestImport2PCRestOperation(TestBase):
         finally:
             shutil.rmtree(local_dir, ignore_errors=True)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_invalid_file_suffix_fails_with_reason_and_no_visible_rows(self):
         """
         target: invalid import file suffix handling
@@ -4651,7 +4651,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_csv_invalid_separator_rejected_with_reason_and_no_visible_rows(self):
         """
         target: invalid CSV separator validation
@@ -4694,7 +4694,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_mixed_file_formats_across_file_groups_commits_all_rows(self):
         """
         target: mixed import file format support
@@ -4746,7 +4746,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_invalid_storage_version_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import storage_version parse contract
@@ -4792,7 +4792,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_storage_version_supported_values_reach_reader_validation(self):
         """
         target: backup import storage_version supported string values
@@ -4856,7 +4856,7 @@ class TestImport2PCRestOperation(TestBase):
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_reversed_time_range_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import start_ts/end_ts guardrail
@@ -4909,7 +4909,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_camelcase_time_range_alias_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import startTs/endTs alias guardrail
@@ -4962,7 +4962,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_invalid_start_ts_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import start_ts parse guardrail
@@ -5014,7 +5014,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_backup_invalid_end_ts_fails_with_reason_and_no_visible_rows(self):
         """
         target: backup import end_ts parse guardrail
@@ -5090,7 +5090,7 @@ class TestImport2PCRestOperation(TestBase):
         self.collection_client.refresh_load(collection_name)
         assert self._query_count(collection_name) == 0
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_skip_disk_quota_check_is_ignored_for_regular_import(self):
         """
         target: skip_disk_quota_check regular import contract
@@ -5311,6 +5311,7 @@ class TestImport2PCRestOperation(TestBase):
             "committed import segments with normal segments"
         )
     )
+    @pytest.mark.tags(CaseLabel.L0)
     def test_import_2pc_manual_compaction_after_commit_preserves_rows(self):
         """
         target: manual compaction after committed import rows
@@ -5857,7 +5858,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_flat_scann_manual_import_searches_after_commit(self):
         """
         target: FLAT and SCANN index import
@@ -6097,7 +6098,7 @@ class TestImport2PCRestOperation(TestBase):
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_sparse_struct_parquet_manual_import_searches_after_commit(self):
         """
         target: SparseFloatVector parquet struct encoding with manual 2PC
@@ -6151,7 +6152,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_bm25_function_input_only_manual_import_searches_after_commit(self):
         """
         target: BM25 function output generation with manual 2PC import
@@ -6223,7 +6224,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_bm25_function_output_field_rejected_and_no_visible_rows(self):
         """
         target: BM25 function output field guardrail with manual 2PC import
@@ -6276,7 +6277,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_scalar_indexes_manual_import_filters_after_commit(self):
         """
         target: scalar indexes with manual 2PC import
@@ -6349,7 +6350,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_half_vector_types_manual_import_searches_after_commit(self):
         """
         target: Float16Vector and BFloat16Vector import with 2PC
@@ -6416,7 +6417,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_int8_vector_manual_import_searches_after_commit(self):
         """
         target: Int8Vector import with 2PC
@@ -6476,7 +6477,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_array_of_vector_manual_import_searches_after_commit(self):
         """
         target: ArrayOfVector import with 2PC
@@ -6544,7 +6545,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_geometry_timestamptz_manual_import_filters_after_commit(self):
         """
         target: Geometry and Timestamptz import with 2PC
@@ -7191,7 +7192,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_partition_key_collection_rejects_explicit_partition_name(self):
         """
         target: explicit partitionName guardrail on partition-key collection import
@@ -7286,7 +7287,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_clustering_key_collection_manual_import_survives_clustering_compaction(self):
         """
         target: clustering-key collection import and clustering compaction with manual 2PC
@@ -7562,7 +7563,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_binary_vector_byte_length_mismatch_fails_with_reason_and_no_visible_rows(self):
         """
         target: BinaryVector byte-length validation for manual import
@@ -7670,7 +7671,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_varchar_overflow_fails_with_reason_and_no_visible_rows(self):
         """
         target: varchar max_length validation for manual import
@@ -7783,7 +7784,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_field_type_mismatch_fails_with_reason_and_no_visible_rows(self):
         """
         target: field type validation for manual import
@@ -7906,7 +7907,7 @@ class TestImport2PCRestOperation(TestBase):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_vector_nan_inf_fails_with_reason_and_no_visible_rows(self):
         """
         target: FloatVector finite-value validation for manual import
@@ -8167,7 +8168,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_flush_during_uncommitted_keeps_import_invisible(self):
         """
         target: manual flush while import is Uncommitted
@@ -8276,7 +8277,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_delete_after_commit_removes_import_rows(self):
         """
         target: delete timestamp after import commit timestamp
@@ -8330,7 +8331,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_mixed_delete_across_commit_boundary(self):
         """
         target: mixed delete timestamps around import commit timestamp
@@ -8403,7 +8404,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_auto_id_scalar_delete_respects_commit_timestamp(self):
         """
         target: auto_id collection delete timestamp boundary with scalar filter
@@ -8534,7 +8535,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_abort_is_idempotent_for_failed_job(self):
         """
         target: abort retry idempotency for terminal failed import job
@@ -8740,7 +8741,7 @@ class TestImport2PCRestOperation(TestBase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_import_2pc_abort_rejects_completed_job(self):
         """
         target: abort terminal committed import job

@@ -57,9 +57,10 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the aggregate serialized size budget for
-	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
-	// complex Delete request. It is deliberately below the default 256 MiB proxy
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for both the
+	// aggregate serialized size of membership-filter-bearing plans and the
+	// aggregate estimated decoded size of Roaring filters. The two totals are
+	// checked independently. It is deliberately below the default 256 MiB proxy
 	// gRPC client send limit so placeholders and the rest of the internal request
 	// retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
@@ -2351,6 +2352,9 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
+	// WAL payload chunking rollout switch.
+	SplitChunkProxy ParamItem `refreshable:"true"`
+
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
@@ -2403,6 +2407,17 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
+	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalsPerCollection     ParamItem `refreshable:"true"`
+	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
+	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
+	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
+	RLSMaxPolicyNameLength            ParamItem `refreshable:"true"`
+	RLSMaxPolicyDescriptionLength     ParamItem `refreshable:"true"`
+	RLSMaxPrincipalNameLength         ParamItem `refreshable:"true"`
+	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
+	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
+	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2419,7 +2434,27 @@ type proxyConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
+func positiveProxyLimitFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		if getAsInt64(v) <= 0 {
+			return defaultValue
+		}
+		return v
+	}
+}
+
 func (p *proxyConfig) init(base *BaseTable) {
+	p.SplitChunkProxy = ParamItem{
+		Key:          "proxy.splitChunk",
+		Version:      "3.0.2",
+		DefaultValue: "true",
+		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
+Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
+For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkProxy.Init(base.mgr)
+
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
 		Version:      "2.2.0",
@@ -2586,10 +2621,11 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The maximum aggregate serialized byte size of membership-filter-bearing expression plans " +
-			"in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans " +
-			"with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must " +
-			"be positive; invalid values fall back to 128 MiB.",
+		Doc: "The request-wide membership-filter budget in bytes. It independently limits both the aggregate " +
+			"serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded " +
+			"size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy " +
+			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
+			"filters share both totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -2999,6 +3035,127 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxSearchAggregationResultEntries.Init(base.mgr)
+
+	p.RLSMaxPoliciesPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPoliciesPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of row policies allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("100"),
+	}
+	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
+
+	p.RLSMaxPrincipalsPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPrincipalsPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of RLS principals allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1000"),
+	}
+	p.RLSMaxPrincipalsPerCollection.Init(base.mgr)
+
+	p.RLSMaxTagsPerPrincipal = ParamItem{
+		Key:          "proxy.rls.maxTagsPerPrincipal",
+		Version:      "3.0.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of tags allowed on one collection-scoped RLS principal.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("50"),
+	}
+	p.RLSMaxTagsPerPrincipal.Init(base.mgr)
+
+	p.RLSMaxExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of one RLS using_expr or check_expr in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("4096"),
+	}
+	p.RLSMaxExpressionLength.Init(base.mgr)
+
+	p.RLSMaxCombinedExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxCombinedExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "16384",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of the final combined RLS expression in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("16384"),
+	}
+	p.RLSMaxCombinedExpressionLength.Init(base.mgr)
+
+	p.RLSMaxPolicyNameLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPolicyNameLength.Init(base.mgr)
+
+	p.RLSMaxPolicyDescriptionLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyDescriptionLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy description length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxPolicyDescriptionLength.Init(base.mgr)
+
+	p.RLSMaxPrincipalNameLength = ParamItem{
+		Key:          "proxy.rls.maxPrincipalNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPrincipalNameLength.Init(base.mgr)
+
+	p.RLSMaxTagKeyLength = ParamItem{
+		Key:          "proxy.rls.maxTagKeyLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag key length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("128"),
+	}
+	p.RLSMaxTagKeyLength.Init(base.mgr)
+
+	p.RLSMaxTagValueLength = ParamItem{
+		Key:          "proxy.rls.maxTagValueLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxTagValueLength.Init(base.mgr)
+
+	p.RLSMaxArrayLiteralElements = ParamItem{
+		Key:          "proxy.rls.maxArrayLiteralElements",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxArrayLiteralElements.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -4302,7 +4459,12 @@ It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), 
 eviction is necessary and the amount of data to evict from memory/disk.
 - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
   until the memory/disk usage is below the low watermark.
-- The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.`,
+- Disk watermark ratios are fractions of the effective local-storage disk capacity, not fractions of
+  queryNode.maxDiskUsagePercentage. They must satisfy diskLowWatermarkRatio <= diskHighWatermarkRatio <=
+  queryNode.maxDiskUsagePercentage / 100. When lowering queryNode.maxDiskUsagePercentage, adjust the
+  disk watermarks as needed to preserve this ordering.
+- The max amount of memory/disk that can be used for cache is controlled by
+  queryCoord.overloadedMemoryThresholdPercentage and queryNode.maxDiskUsagePercentage.`,
 		Export: true,
 	}
 	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
@@ -5081,6 +5243,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			return fmt.Sprintf("%f", getAsFloat(v)/100)
 		},
+		Doc:    "Maximum disk usage as a percentage of the effective local-storage disk capacity.",
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
@@ -7046,10 +7209,26 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.FilesPerPreImportTask.Init(base.mgr)
 
 	p.ImportTaskRetention = ParamItem{
-		Key:          "dataCoord.import.taskRetention",
-		Version:      "2.4.0",
-		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
-		DefaultValue: "10800",
+		Key:     "dataCoord.import.taskRetention",
+		Version: "2.4.0",
+		Doc: `The retention period in seconds for tasks in the Completed or Failed state.
+Nothing else bounds the terminal set -- maxImportJobNum counts only jobs that are
+neither Completed nor Failed -- so this value alone decides how many finished
+importJob entries stay in etcd, each carrying its schema, file list and options
+plus every preimport and import task under it.
+The 48h default exists for BulkImport idempotency and only for it: the idempotency
+window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+earlier than its tombstone lets an in-window retry resolve to a jobID that
+GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
+as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
+age is measured from the last StreamingCoord start: every restart extends its
+remaining life by up to another maxLifetime, while this retention keeps counting
+from the job's own completion. Equal values hold only for a window with no restart,
+which is not a property a default may assume. Raise it further if StreamingCoord
+restarts more than once inside one tombstone lifetime.
+A cluster whose clients never send an Idempotency-Key is under no such requirement
+and can lower this freely; 10800 was the default before idempotency keys existed.`,
+		DefaultValue: "172800",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -8222,6 +8401,9 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	// WAL payload chunking rollout switch.
+	SplitChunkSN ParamItem `refreshable:"true"`
+
 	// primary resource group
 	PrimaryResourceGroup ParamItem `refreshable:"true"`
 
@@ -8255,6 +8437,9 @@ type streamingConfig struct {
 	WALBroadcasterTombstoneCheckInternal ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
+
+	// idempotency
+	IdempotencyMaxKeyLength ParamItem `refreshable:"true"`
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
@@ -8320,6 +8505,17 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	p.SplitChunkSN = ParamItem{
+		Key:          "streaming.splitChunkSN",
+		Version:      "3.0.2",
+		DefaultValue: "false",
+		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
+Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
+Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkSN.Init(base.mgr)
+
 	// primary resource group
 	p.PrimaryResourceGroup = ParamItem{
 		Key:     "streaming.primaryResourceGroup",
@@ -8557,6 +8753,19 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:     "streaming.idempotency.maxKeyLength",
+		Version: "2.6.6",
+		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
+The key is stored in the message properties of every write it guards, so an
+oversized key inflates both the WAL entry and the in-memory dedup index.
+A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
+requests that carry no key are accepted at any value.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

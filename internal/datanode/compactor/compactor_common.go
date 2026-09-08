@@ -226,7 +226,7 @@ func createTextIndex(ctx context.Context,
 	return textIndexLogs, nil
 }
 
-// Storage readers do not share compaction's schema-reconciliation contract, so filter physical fields before opening them.
+// V1 readers do not share compaction's schema-reconciliation contract, so filter physical fields before opening them.
 func newCompactionSegmentRecordReader(ctx context.Context, segment *datapb.CompactionSegmentBinlogs, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig, opts ...storage.RwOption) (storage.RecordReader, map[int64]struct{}, error) {
 	existingFields, err := compactionSegmentStorageFields(segment, storageConfig)
 	if err != nil {
@@ -299,8 +299,14 @@ func newCompactionSegmentRecordReaderWithFields(ctx context.Context, segment *da
 		return reader, existingFields, err
 	}
 
-	readFields := collectionSchemaFields(readSchema)
-	fieldBinlogs := filterCompactionFieldBinlogs(segment.GetFieldBinlogs(), readFields)
+	// Keep the complete packed path vector: V2 file metadata addresses column
+	// groups by path index, and the packed reader projects readSchema internally.
+	// V1 binlogs are independent per-field files and must still be filtered because
+	// its reader does not safely ignore blobs whose field is absent from readSchema.
+	fieldBinlogs := lo.Compact(segment.GetFieldBinlogs())
+	if segment.GetStorageVersion() == storage.StorageV1 {
+		fieldBinlogs = filterV1CompactionFieldBinlogs(fieldBinlogs, collectionSchemaFields(readSchema))
+	}
 	rootPath := ""
 	if storageConfig != nil {
 		rootPath = storageConfig.GetRootPath()
@@ -357,29 +363,17 @@ func compactionFieldReadable(field *schemapb.FieldSchema, existingFields map[int
 	return !field.GetIsFunctionOutput()
 }
 
-func filterCompactionFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, readFields map[int64]struct{}) []*datapb.FieldBinlog {
+func filterV1CompactionFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, readFields map[int64]struct{}) []*datapb.FieldBinlog {
 	filtered := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
 	for _, fieldBinlog := range fieldBinlogs {
-		if compactionFieldBinlogReadable(fieldBinlog, readFields) {
+		if fieldBinlog == nil {
+			continue
+		}
+		if _, ok := readFields[fieldBinlog.GetFieldID()]; ok {
 			filtered = append(filtered, fieldBinlog)
 		}
 	}
 	return filtered
-}
-
-func compactionFieldBinlogReadable(fieldBinlog *datapb.FieldBinlog, readFields map[int64]struct{}) bool {
-	if fieldBinlog == nil {
-		return false
-	}
-	if _, ok := readFields[fieldBinlog.GetFieldID()]; ok {
-		return true
-	}
-	for _, childFieldID := range fieldBinlog.GetChildFields() {
-		if _, ok := readFields[childFieldID]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 type EntityFilter struct {

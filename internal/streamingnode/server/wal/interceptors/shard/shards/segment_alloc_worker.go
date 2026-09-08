@@ -80,7 +80,7 @@ func (w *segmentAllocWorker) do() {
 		case <-w.ctx.Done():
 			w.Logger().Info(w.ctx, "segment allocation canceled", mlog.Err(w.ctx.Err()))
 			return
-		case <-w.wal.Available():
+		case <-w.wal.Unavailable():
 			// wal is unavailable, stop the worker.
 			w.Logger().Warn(w.ctx, "wal is unavailable, stop alloc new segment")
 			return

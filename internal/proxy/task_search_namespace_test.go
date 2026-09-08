@@ -52,7 +52,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Build task
 		task := &searchTask{
-			baseTask:      baseTask{metaCache: cache},
+			baseTask:      baseTask{MetaCache: cache},
 			Condition:     NewTaskCondition(context.Background()),
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			ctx:           context.Background(),
@@ -105,7 +105,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		for _, ns := range namespaces {
 			namespace := ns
 			task := &searchTask{
-				baseTask:      baseTask{metaCache: cache},
+				baseTask:      baseTask{MetaCache: cache},
 				Condition:     NewTaskCondition(context.Background()),
 				SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 				ctx:           context.Background(),

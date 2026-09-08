@@ -257,6 +257,7 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 	assert.Same(t, rs, capturedParam.RecoveryStorage)
 	assert.Equal(t, channel, capturedParam.ChannelInfo)
 	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
+	require.NotNil(t, capturedParam.OnFatal)
 	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
 }
 
@@ -322,4 +323,73 @@ func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testin
 	assert.Equal(t, uint64(50), replicateCheckpoint.GetTimeTick())
 	assert.Equal(t, sourceMessageID.IntoProto().GetWALName(), replicateCheckpoint.GetMessageId().GetWALName())
 	assert.Equal(t, sourceMessageID.Marshal(), replicateCheckpoint.GetMessageId().GetId())
+}
+
+func TestHandleAlterWALFlushingStageReturnsWhenFlusherFails(t *testing.T) {
+	channel := types.PChannelInfo{
+		Name:       "alter-wal-flusher-failure-test",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}
+	resource.InitForTest(t)
+
+	roWAL := adaptImplsToROWAL(&firstTimeTickWALImpls{
+		channel: channel,
+		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return rmq.NewRmqID(1), nil
+		},
+	}, func() {})
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().Close().Return()
+	snapshot := &recovery.RecoverySnapshot{
+		Checkpoint: &recovery.WALCheckpoint{
+			MessageID: rmq.NewRmqID(1),
+			TimeTick:  10,
+			AlterWalState: &streamingpb.AlterWALState{
+				TargetWalName: commonpb.WALName_Test,
+				TimeTick:      100,
+				Stage:         streamingpb.AlterWALStage_FLUSHING,
+			},
+		},
+		AlterWALInfo: &recovery.AlterWALInfo{
+			FoundAlterWALMsg: true,
+			TargetWALName:    commonpb.WALName_Test,
+			AlterWALTs:       100,
+		},
+	}
+
+	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
+		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
+			require.NotNil(t, param.OnFatal)
+			param.OnFatal(errors.New("flusher failed"))
+			return &flusherimpl.WALFlusherImpl{}
+		}).
+		Build()
+	defer mockRecoverFlusher.UnPatch()
+
+	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).
+		To(func(*flusherimpl.WALFlusherImpl) {
+			rs.Close()
+		}).
+		Build()
+	defer mockFlusherClose.UnPatch()
+
+	resources := &walOpenResources{
+		roWAL:           roWAL,
+		param:           &interceptors.InterceptorBuildParam{},
+		recoveryStorage: rs,
+	}
+	defer resources.Close()
+
+	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
+		context.Background(),
+		&wal.OpenOption{Channel: channel},
+		roWAL,
+		rs,
+		resources,
+		snapshot,
+	)
+	require.ErrorContains(t, err, "wal became unavailable")
+	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, snapshot.Checkpoint.AlterWalState.Stage)
 }

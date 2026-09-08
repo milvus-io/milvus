@@ -84,7 +84,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		}).Build()
 
 		task := &queryTask{
-			baseTask:        baseTask{metaCache: cache},
+			baseTask:        baseTask{MetaCache: cache},
 			Condition:       NewTaskCondition(context.Background()),
 			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 			ctx:             context.Background(),
@@ -149,7 +149,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		for _, ns := range namespaces {
 			namespace := ns
 			task := &queryTask{
-				baseTask:        baseTask{metaCache: cache},
+				baseTask:        baseTask{MetaCache: cache},
 				Condition:       NewTaskCondition(context.Background()),
 				RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 				ctx:             context.Background(),
