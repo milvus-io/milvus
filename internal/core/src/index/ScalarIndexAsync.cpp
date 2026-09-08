@@ -16,10 +16,16 @@
 
 #include "index/ScalarIndex.h"
 
+#include <algorithm>
+
 #include "common/Types.h"
+#include "folly/coro/WithCancellation.h"
 #include "index/Utils.h"
+#include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "storage/AsyncIndexEntryReader.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/IndexMaterializer.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
@@ -30,6 +36,9 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
                                  const Config& config,
                                  proto::common::LoadPriority load_priority,
                                  folly::CancellationToken cancellation_token) {
+    cancellation_token = folly::cancellation_token_merge(
+        cancellation_token,
+        co_await folly::coro::co_current_cancellation_token);
     auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
     AssertInfo(
         input != nullptr, "Failed to open packed index file: {}", packed_file);
@@ -46,8 +55,36 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
     plan.priority = load_priority;
     auto artifact = co_await storage::MaterializeIndexAsync(
         *reader, std::move(plan), cancellation_token);
-    FinalizeLoad(std::move(artifact), config);
-    artifact.CommitTargets();
+    const bool has_file_targets =
+        std::any_of(artifact.Entries().begin(),
+                    artifact.Entries().end(),
+                    [](const auto& entry) {
+                        return std::holds_alternative<storage::MmapEntryTarget>(
+                            entry.target);
+                    });
+    // Keep the artifact local to this coroutine body so both finalization and
+    // destructor cleanup run on the selected executor, including on failure.
+    auto finalize = [&]() -> folly::coro::Task<void> {
+        auto owned_artifact = std::move(artifact);
+        storage::ThrowIfCancelled(cancellation_token,
+                                  "ScalarIndex::FinalizeLoad");
+        FinalizeLoad(std::move(owned_artifact), config);
+        owned_artifact.CommitTargets();
+        co_return;
+    };
+    if (has_file_targets) {
+        // Acquire the local-file executor only after remote reads have drained,
+        // so disabling that pool does not wait for unrelated network I/O.
+        co_await folly::coro::co_withCancellation(
+            folly::CancellationToken{},
+            folly::coro::co_withExecutor(
+                segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                    storage::LocalFileIOPool::GetInstance().GetExecutor(),
+                    load_priority),
+                finalize()));
+    } else {
+        co_await finalize();
+    }
 }
 
 template folly::coro::Task<void>

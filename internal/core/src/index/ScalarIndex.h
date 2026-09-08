@@ -300,7 +300,7 @@ class ScalarIndex : public IndexBase {
     }
 
  protected:
-    // Entire new path executes on the shared async executor. No legacy reader fallback.
+    // Uses the shared async executor, with local-file phases on LocalFileIOPool.
     folly::coro::Task<void>
     LoadUnifiedAsync(const std::string& packed_file,
                      const Config& config,

@@ -23,6 +23,8 @@
 #include <folly/FBVector.h>
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -54,6 +56,7 @@
 #include "index/json_stats/JsonKeyStats.h"
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
@@ -111,6 +114,15 @@ GetTempFileManagerCtx(CDataType data_type) {
 
 class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
  public:
+    struct CleanupThreadRecorder {
+        explicit CleanupThreadRecorder(std::string& thread) : thread_(thread) {
+        }
+        ~CleanupThreadRecorder() {
+            thread_ = folly::getCurrentThreadName().value_or("");
+        }
+        std::string& thread_;
+    };
+
     explicit TestScalarIndexV3LoadRoute(
         const milvus::storage::FileManagerContext& ctx)
         : milvus::index::ScalarIndex<int32_t>("test_scalar_v3_async") {
@@ -217,14 +229,25 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
     PlanLoad(const milvus::storage::IndexEntryCatalog& catalog,
              const milvus::Config&) override {
         planned_thread_ = folly::getCurrentThreadName().value_or("");
-        auto payload = std::make_shared<std::vector<uint8_t>>(
-            catalog.At("payload").plaintext_size);
+        const auto bytes = catalog.At("payload").plaintext_size;
         milvus::storage::IndexLoadPlan plan;
+        plan.finalize_context =
+            std::make_shared<CleanupThreadRecorder>(cleanup_thread_);
+        milvus::storage::EntryTarget target;
+        if (mmap_target_path_.empty()) {
+            auto payload = std::make_shared<std::vector<uint8_t>>(bytes);
+            target = milvus::storage::MemoryEntryTarget{
+                payload, payload->data(), payload->size()};
+        } else {
+            auto staging = std::make_shared<milvus::storage::MmapFileTarget>(
+                milvus::storage::MmapFileTarget{
+                    mmap_target_path_, bytes, false, nullptr});
+            target = milvus::storage::MmapEntryTarget{staging, 0, bytes};
+        }
         plan.entries.push_back(milvus::storage::MakeEntryLoadPlan(
             catalog,
             "payload",
-            milvus::storage::MemoryEntryTarget{
-                payload, payload->data(), payload->size()},
+            std::move(target),
             milvus::storage::DefaultEntryStreamSliceSize()));
         return plan;
     }
@@ -232,16 +255,34 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
     void
     FinalizeLoad(milvus::storage::IndexLoadArtifact&& artifact,
                  const milvus::Config&) override {
-        const auto& target = std::get<milvus::storage::MemoryEntryTarget>(
-            artifact.At("payload").target);
-        ASSERT_EQ(target.bytes, sizeof(int32_t));
-        std::memcpy(&finalized_payload_, target.data, sizeof(int32_t));
         finalized_thread_ = folly::getCurrentThreadName().value_or("");
         finalize_load_calls_++;
+        if (fail_finalize_) {
+            ThrowInfo(milvus::ErrorCode::FileWriteFailed,
+                      "injected scalar finalization failure");
+        }
+        const auto& target = artifact.At("payload").target;
+        if (const auto* memory =
+                std::get_if<milvus::storage::MemoryEntryTarget>(&target)) {
+            ASSERT_EQ(memory->bytes, sizeof(int32_t));
+            std::memcpy(&finalized_payload_, memory->data, sizeof(int32_t));
+        } else {
+            const auto& mmap =
+                std::get<milvus::storage::MmapEntryTarget>(target);
+            EXPECT_THROW((void)mmap.staging->file->Region(0, 1),
+                         milvus::SegcoreError);
+            std::ifstream file(mmap.staging->path, std::ios::binary);
+            file.read(reinterpret_cast<char*>(&finalized_payload_),
+                      sizeof(finalized_payload_));
+            ASSERT_TRUE(file.good());
+        }
     }
 
     std::string planned_thread_;
     std::string finalized_thread_;
+    std::string cleanup_thread_;
+    std::string mmap_target_path_;
+    bool fail_finalize_{false};
     int load_entries_calls_{0};
     int finalize_load_calls_{0};
     int32_t finalized_payload_{0};
@@ -278,6 +319,104 @@ TEST(ScalarIndexV3AsyncLoadConfigTest, GlobalSwitchSelectsCompleteLoadPath) {
             }
         }
     }
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     FileTargetsFinalizeAndCleanUpOnLocalFileIOPool) {
+    using namespace milvus;
+    using namespace milvus::index;
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous = StorageV2AsyncLoadEnabled();
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    auto restore = folly::makeGuard([&] {
+        SetStorageV2AsyncLoadEnabled(previous);
+        pool.Configure(0);
+    });
+    SetStorageV2AsyncLoadEnabled(true);
+    auto ctx = GetTempFileManagerCtx(Int32);
+    TestScalarIndexV3LoadRoute build_index(ctx);
+    auto stats = build_index.UploadUnified({});
+    for (int workers : {0, 1}) {
+        pool.Configure(workers);
+        for (auto priority : {proto::common::LoadPriority::HIGH,
+                              proto::common::LoadPriority::LOW}) {
+            for (bool file_target : {false, true}) {
+                for (bool fail_finalize : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << workers << "/" << priority << "/"
+                                 << file_target << "/" << fail_finalize);
+                    TestScalarIndexV3LoadRoute loaded(ctx);
+                    if (file_target) {
+                        loaded.mmap_target_path_ =
+                            TestLocalPath + "/scalar_route_staging/payload";
+                    }
+                    loaded.fail_finalize_ = fail_finalize;
+                    Config config;
+                    config[INDEX_FILES] = stats->GetIndexFiles();
+                    config[LOAD_PRIORITY] = priority;
+                    // File-backed construction also occurs without final mmap.
+                    config[ENABLE_MMAP] = false;
+                    if (fail_finalize) {
+                        try {
+                            loaded.LoadUnified(config);
+                            FAIL() << "expected finalizer failure";
+                        } catch (const SegcoreError& error) {
+                            EXPECT_EQ(error.get_error_code(),
+                                      ErrorCode::FileWriteFailed);
+                        }
+                    } else {
+                        loaded.LoadUnified(config);
+                        EXPECT_EQ(loaded.finalized_payload_, 42);
+                    }
+                    EXPECT_EQ(loaded.load_entries_calls_, 0);
+                    EXPECT_EQ(loaded.finalize_load_calls_, 1);
+                    EXPECT_TRUE(
+                        loaded.planned_thread_.starts_with("MILVUS_ASYNC"));
+                    const auto prefix = workers > 0 && file_target
+                                            ? "MILVUS_LF_IO_"
+                                            : "MILVUS_ASYNC";
+                    EXPECT_TRUE(loaded.finalized_thread_.starts_with(prefix));
+                    EXPECT_TRUE(loaded.cleanup_thread_.starts_with(prefix));
+                    if (file_target) {
+                        EXPECT_FALSE(
+                            std::filesystem::exists(loaded.mmap_target_path_));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest, SortMmapLoadWithSingleLocalFileWorker) {
+    using namespace milvus;
+    using namespace milvus::index;
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous = StorageV2AsyncLoadEnabled();
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    auto restore = folly::makeGuard([&] {
+        SetStorageV2AsyncLoadEnabled(previous);
+        pool.Configure(0);
+    });
+    SetStorageV2AsyncLoadEnabled(true);
+    pool.Configure(1);
+    auto ctx = GetTempFileManagerCtx(Int32);
+    ScalarIndexSort<int32_t> built(ctx);
+    const std::vector<int32_t> values{30, 10, 20, 10};
+    built.Build(values.size(), values.data());
+    const auto stats = built.UploadUnified({});
+    Config config;
+    config[INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = true;
+    config[LOAD_PRIORITY] = proto::common::LoadPriority::LOW;
+    ScalarIndexSort<int32_t> loaded(ctx);
+    loaded.LoadUnified(config);
+    EXPECT_EQ(loaded.Count(), values.size());
+    const int32_t needle = 10;
+    auto hits = loaded.In(1, &needle);
+    ASSERT_EQ(hits.size(), values.size());
+    EXPECT_EQ(hits.count(), 2);
+    EXPECT_TRUE(hits[1]);
+    EXPECT_TRUE(hits[3]);
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,

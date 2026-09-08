@@ -54,6 +54,7 @@
 #include "storage/AsyncIndexEntryReader.h"
 #include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "storage/IndexMaterializer.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/IndexLoadPlan.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
@@ -66,6 +67,52 @@
 using namespace milvus::storage;
 
 namespace {
+// Occupies the single configured worker so a local-file phase stays queued.
+class LocalFileIOBlocker {
+ public:
+    LocalFileIOBlocker()
+        : executor_(LocalFileIOPool::GetInstance().GetExecutor()) {
+        auto started = std::make_shared<std::promise<void>>();
+        auto started_future = started->get_future();
+        executor_->add([started, release = release_.get_future().share()] {
+            started->set_value();
+            release.wait();
+        });
+        EXPECT_EQ(started_future.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+    }
+
+    ~LocalFileIOBlocker() {
+        Release();
+    }
+
+    void
+    Release() {
+        if (!released_) {
+            released_ = true;
+            release_.set_value();
+        }
+    }
+
+    bool
+    WaitForQueuedTask() const {
+        auto* worker =
+            dynamic_cast<folly::CPUThreadPoolExecutor*>(executor_.get());
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (worker->getPendingTaskCount() == 0 &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return worker->getPendingTaskCount() > 0;
+    }
+
+ private:
+    folly::Executor::KeepAlive<> executor_;
+    std::promise<void> release_;
+    bool released_{false};
+};
+
 std::unique_ptr<AsyncIndexEntryReader>
 OpenAsyncReader(std::shared_ptr<milvus::InputStream> input, int64_t file_size) {
     return folly::coro::blockingWait(
@@ -1034,6 +1081,196 @@ TEST_F(AsyncIndexEntryReaderTest,
                      MaterializeIndexAsync(*reader, std::move(plan))),
                  milvus::SegcoreError);
     EXPECT_FALSE(std::filesystem::exists(staging_path));
+}
+
+TEST_F(AsyncIndexEntryReaderTest, MaterializerCancelsQueuedMmapPreparation) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto restore = folly::makeGuard([&] { pool.Configure(0); });
+    const auto file_path = kV3FilePath + "_queued_mmap_prepare";
+    const auto staging_path = GetRootPath() + "/queued_mmap_prepare/payload";
+    const auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(file_path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
+    auto staging = std::make_shared<MmapFileTarget>(
+        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    IndexLoadPlan plan;
+    plan.entries.push_back(
+        MakeEntryLoadPlan(reader->Catalog(),
+                          "data",
+                          MmapEntryTarget{staging, 0, data.size()},
+                          kStreamSliceAlignment));
+    std::string cleanup_thread;
+    plan.finalize_context = std::shared_ptr<void>(nullptr, [&](void*) {
+        cleanup_thread = folly::getCurrentThreadName().value_or("");
+    });
+    LocalFileIOBlocker blocker;
+    folly::CancellationSource cancellation;
+    auto load = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(MaterializeIndexAsync(
+            *reader, std::move(plan), cancellation.getToken()));
+    });
+    auto unblock = folly::makeGuard([&] { blocker.Release(); });
+    ASSERT_TRUE(blocker.WaitForQueuedTask());
+    EXPECT_TRUE(direct_file->DirectReadCalls().empty());
+    cancellation.requestCancellation();
+    blocker.Release();
+    try {
+        (void)load.get();
+        FAIL() << "expected cancelled file preparation";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    EXPECT_TRUE(direct_file->DirectReadCalls().empty());
+    // No directory was created: cancellation was checked on the queued worker.
+    EXPECT_FALSE(std::filesystem::exists(
+        std::filesystem::path(staging_path).parent_path()));
+    EXPECT_TRUE(cleanup_thread.starts_with("MILVUS_LF_IO_"));
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       MaterializerFinishesAndCleansMmapOnLocalFileIOPool) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto restore = folly::makeGuard([&] { pool.Configure(0); });
+    const auto file_path = kV3FilePath + "_mmap_local_io";
+    const auto staging_path = GetRootPath() + "/mmap_local_io/payload";
+    const auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(file_path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    enum class Outcome { Success, Corrupt, Cancelled };
+    for (auto outcome :
+         {Outcome::Success, Outcome::Corrupt, Outcome::Cancelled}) {
+        SCOPED_TRACE(static_cast<int>(outcome));
+        milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+        auto reader = milvus::test::OpenDirectIndexEntryReader(
+            ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
+        if (outcome == Outcome::Corrupt) {
+            const auto& source =
+                std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+            direct_file->CorruptRemoteByte(source.remote_offset + 7);
+        }
+        direct_file->SetAutoComplete(false);
+        auto staging = std::make_shared<MmapFileTarget>(
+            MmapFileTarget{staging_path, data.size(), false, nullptr});
+        std::string cleanup_thread;
+        IndexLoadPlan plan;
+        plan.finalize_context = std::shared_ptr<void>(nullptr, [&](void*) {
+            cleanup_thread = folly::getCurrentThreadName().value_or("");
+        });
+        plan.entries.push_back(
+            MakeEntryLoadPlan(reader->Catalog(),
+                              "data",
+                              MmapEntryTarget{staging, 0, data.size()},
+                              kStreamSliceAlignment));
+        folly::CancellationSource cancellation;
+        auto load = std::async(std::launch::async, [&] {
+            return folly::coro::blockingWait(MaterializeIndexAsync(
+                *reader, std::move(plan), cancellation.getToken()));
+        });
+        auto drain = folly::makeGuard([&] {
+            direct_file->SetAutoComplete(true);
+            for (size_t i = 0; i < direct_file->DirectReadCalls().size(); ++i) {
+                direct_file->Complete(i);
+            }
+        });
+        ASSERT_TRUE(direct_file->WaitForCallCount(1));
+        // Preparation has finished. Occupy the pool before completing the read.
+        LocalFileIOBlocker blocker;
+        if (outcome == Outcome::Cancelled) {
+            cancellation.requestCancellation();
+            EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
+                      std::future_status::timeout);
+        }
+        direct_file->Complete(0);
+        ASSERT_TRUE(blocker.WaitForQueuedTask());
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+        ASSERT_NE(staging->file, nullptr);
+        EXPECT_NO_THROW((void)staging->file->Region(0, 1));
+        EXPECT_TRUE(std::filesystem::exists(staging_path));
+        blocker.Release();
+        if (outcome != Outcome::Success) {
+            try {
+                (void)load.get();
+                FAIL() << "expected failed materialization";
+            } catch (const milvus::SegcoreError& error) {
+                if (outcome == Outcome::Cancelled) {
+                    EXPECT_EQ(error.get_error_code(),
+                              milvus::ErrorCode::FollyCancel);
+                }
+            }
+            EXPECT_TRUE(cleanup_thread.starts_with("MILVUS_LF_IO_"));
+        } else {
+            auto artifact = load.get();
+            EXPECT_TRUE(artifact.At("data").ready);
+            EXPECT_THROW((void)staging->file->Region(0, 1),
+                         milvus::SegcoreError);
+        }
+        EXPECT_FALSE(std::filesystem::exists(staging_path));
+    }
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       DisablingLocalFileIOPoolDoesNotWaitForScalarRemoteRead) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto restore = folly::makeGuard([&] { pool.Configure(0); });
+    const auto file_path = kV3FilePath + "_disable_mmap_pool";
+    const auto staging_path = GetRootPath() + "/disable_mmap_pool/payload";
+    const auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(file_path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    milvus::test::ControlledDirectReadFile* direct_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
+    direct_file->SetAutoComplete(false);
+    auto staging = std::make_shared<MmapFileTarget>(
+        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    IndexLoadPlan plan;
+    plan.entries.push_back(
+        MakeEntryLoadPlan(reader->Catalog(),
+                          "data",
+                          MmapEntryTarget{staging, 0, data.size()},
+                          kStreamSliceAlignment));
+    auto load = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(
+            MaterializeIndexAsync(*reader, std::move(plan)));
+    });
+    auto drain = folly::makeGuard([&] {
+        direct_file->SetAutoComplete(true);
+        for (size_t i = 0; i < direct_file->DirectReadCalls().size(); ++i) {
+            direct_file->Complete(i);
+        }
+    });
+    ASSERT_TRUE(direct_file->WaitForCallCount(1));
+    auto configure = std::async(std::launch::async, [&] { pool.Configure(0); });
+    auto complete_before_join =
+        folly::makeGuard([&] { direct_file->Complete(0); });
+    ASSERT_EQ(configure.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    configure.get();
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
+              std::future_status::timeout);
+    direct_file->Complete(0);
+    auto artifact = load.get();
+    EXPECT_TRUE(artifact.At("data").ready);
+    EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,

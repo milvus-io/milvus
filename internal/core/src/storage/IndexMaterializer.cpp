@@ -32,16 +32,15 @@
 #include <vector>
 
 #include "folly/Unit.h"
-#include "folly/ScopeGuard.h"
 #include "folly/coro/AsyncScope.h"
 #include "folly/coro/Task.h"
 #include "folly/coro/SmallUnboundedQueue.h"
 #include "folly/coro/WithCancellation.h"
-#include "folly/executors/ExecutorWithPriority.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/IndexLoadPlan.h"
+#include "storage/LocalFileIOPool.h"
 #include "segcore/storagev2translator/AsyncLoadExecutor.h"
 
 namespace milvus::storage {
@@ -305,7 +304,9 @@ FinalizeEntry(EntryState& state) {
 }
 
 folly::coro::Task<void>
-PrepareMmapTargetAsync(MmapEntryTarget* target) {
+PrepareMmapTargetAsync(MmapEntryTarget* target,
+                       folly::CancellationToken cancellation_token) {
+    ThrowIfCancelled(cancellation_token, "IndexMaterializer::PrepareTarget");
     AssertInfo(target != nullptr && target->staging != nullptr,
                "Mmap Entry staging descriptor is null");
     auto& staging = *target->staging;
@@ -330,7 +331,6 @@ PrepareMmapTargetAsync(MmapEntryTarget* target) {
 
 folly::coro::Task<void>
 PrepareTargetsAsync(IndexLoadPlan& plan,
-                    folly::Executor::KeepAlive<> work_executor,
                     folly::CancellationToken cancellation_token) {
     for (auto& entry : plan.entries) {
         auto* target = std::get_if<MmapEntryTarget>(&entry.target);
@@ -340,11 +340,38 @@ PrepareTargetsAsync(IndexLoadPlan& plan,
         }
         ThrowIfCancelled(cancellation_token,
                          "IndexMaterializer::PrepareTarget");
-        co_await folly::coro::co_withExecutor(work_executor.copy(),
-                                              PrepareMmapTargetAsync(target));
+        co_await folly::coro::co_withExecutor(
+            segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                LocalFileIOPool::GetInstance().GetExecutor(), plan.priority),
+            PrepareMmapTargetAsync(target, cancellation_token));
         ThrowIfCancelled(cancellation_token,
                          "IndexMaterializer::PrepareTarget");
     }
+}
+
+// Runs after all slice writers have joined, on the local-file executor.
+folly::coro::Task<void>
+FinishMmapTargetsAsync(
+    const std::vector<std::shared_ptr<MmapFileTarget>>& targets,
+    folly::CancellationToken cancellation_token) {
+    ThrowIfCancelled(cancellation_token, "IndexMaterializer::FinishTargets");
+    for (const auto& target : targets) {
+        AssertInfo(target != nullptr && target->file != nullptr,
+                   "Materialized mmap target is not prepared");
+        target->file->Finish();
+    }
+    co_return;
+}
+
+// Cleanup cannot be skipped by cancellation. Release the index context here
+// too: file-backed index contexts can remove directories in their destructors.
+folly::coro::Task<void>
+CleanupMaterializationAsync(
+    IndexLoadPlan& plan,
+    const std::vector<std::shared_ptr<MmapFileTarget>>& targets) {
+    CleanupUncommittedMmapTargets(targets);
+    plan.finalize_context.reset();
+    co_return;
 }
 
 folly::coro::Task<void>
@@ -422,7 +449,7 @@ class IndexMaterializerAccess {
     BuildArtifact(
         std::vector<std::shared_ptr<index_materializer_detail::EntryState>>&
             states,
-        std::any finalize_context,
+        std::any& finalize_context,
         std::vector<std::shared_ptr<MmapFileTarget>> cleanup_targets) {
         IndexLoadArtifact artifact;
         artifact.entries_.reserve(states.size());
@@ -438,10 +465,16 @@ class IndexMaterializerAccess {
     }
 };
 
+namespace {
+
+// Keeps failure-cleanup ownership in the caller until every issued slice has
+// drained. Local-file executor tokens only span their individual I/O phase.
 folly::coro::Task<IndexLoadArtifact>
-MaterializeIndexAsync(AsyncIndexEntryReader& reader,
-                      IndexLoadPlan plan,
-                      folly::CancellationToken cancellation_token) {
+MaterializeIndexAsyncImpl(
+    AsyncIndexEntryReader& reader,
+    IndexLoadPlan& plan,
+    const std::vector<std::shared_ptr<MmapFileTarget>>& cleanup_targets,
+    folly::CancellationToken cancellation_token) {
     using namespace index_materializer_detail;
 
     auto caller_cancellation_token =
@@ -450,18 +483,12 @@ MaterializeIndexAsync(AsyncIndexEntryReader& reader,
         cancellation_token, caller_cancellation_token);
     ThrowIfCancelled(operation_cancellation_token,
                      "IndexMaterializer::PlanValidation");
-    auto cleanup_targets = CollectMmapFileTargets(plan.entries);
-    auto cleanup_guard = folly::makeGuard(
-        [&]() { CleanupUncommittedMmapTargets(cleanup_targets); });
     ValidatePlan(reader.Catalog(), plan);
     auto work_executor = segcore::storagev2translator::ResolveAsyncLoadExecutor(
         {}, plan.priority);
     AssertInfo(static_cast<bool>(work_executor),
                "Shared LoadExecutor is unavailable");
-    co_await PrepareTargetsAsync(
-        plan, work_executor.copy(), operation_cancellation_token);
-
-    auto finalize_context = std::move(plan.finalize_context);
+    co_await PrepareTargetsAsync(plan, operation_cancellation_token);
 
     std::vector<std::shared_ptr<EntryState>> states;
     states.reserve(plan.entries.size());
@@ -569,15 +596,42 @@ MaterializeIndexAsync(AsyncIndexEntryReader& reader,
                    "Required Entry '{}' is not READY",
                    state->plan.name);
     }
-    for (const auto& target : cleanup_targets) {
-        AssertInfo(target != nullptr && target->file != nullptr,
-                   "Materialized mmap target is not prepared");
-        target->file->Finish();
+    if (!cleanup_targets.empty()) {
+        co_await folly::coro::co_withExecutor(
+            segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                LocalFileIOPool::GetInstance().GetExecutor(), plan.priority),
+            FinishMmapTargetsAsync(cleanup_targets,
+                                   operation_cancellation_token));
     }
-    auto artifact = IndexMaterializerAccess::BuildArtifact(
-        states, std::move(finalize_context), cleanup_targets);
-    cleanup_guard.dismiss();
-    co_return artifact;
+    co_return IndexMaterializerAccess::BuildArtifact(
+        states, plan.finalize_context, cleanup_targets);
+}
+
+}  // namespace
+
+folly::coro::Task<IndexLoadArtifact>
+MaterializeIndexAsync(AsyncIndexEntryReader& reader,
+                      IndexLoadPlan plan,
+                      folly::CancellationToken cancellation_token) {
+    const auto cleanup_targets = CollectMmapFileTargets(plan.entries);
+    std::exception_ptr failure;
+    try {
+        co_return co_await MaterializeIndexAsyncImpl(
+            reader, plan, cleanup_targets, cancellation_token);
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (!cleanup_targets.empty()) {
+        co_await folly::coro::co_withCancellation(
+            folly::CancellationToken{},
+            folly::coro::co_withExecutor(
+                segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                    LocalFileIOPool::GetInstance().GetExecutor(),
+                    plan.priority),
+                index_materializer_detail::CleanupMaterializationAsync(
+                    plan, cleanup_targets)));
+    }
+    std::rethrow_exception(failure);
 }
 
 }  // namespace milvus::storage
