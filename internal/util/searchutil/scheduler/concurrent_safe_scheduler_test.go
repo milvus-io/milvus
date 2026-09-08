@@ -112,6 +112,16 @@ type SchedulerSuite struct {
 	suite.Suite
 }
 
+type doneCallbackTask struct {
+	Task
+	callback func()
+}
+
+func (t *doneCallbackTask) Done(err error) {
+	t.callback()
+	t.Task.Done(err)
+}
+
 func (s *SchedulerSuite) TestConsumeRecvChan() {
 	s.Run("consume_chan_closed", func() {
 		ch := make(chan addTaskReq, 10)
@@ -137,7 +147,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 			scheduler.consumeRecvChan(addTaskReq{
 				task: task,
 				err:  make(chan error, 1),
-			}, maxReceiveChanBatchConsumeNum, time.Now())
+			}, maxReceiveChanBatchConsumeNum, time.Now(), nil)
 		})
 	})
 }
@@ -161,7 +171,7 @@ func (s *SchedulerSuite) TestConsumeRecvChanUsesLoopTimestampForBatch() {
 	scheduler.consumeRecvChan(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  firstErrCh,
-	}, 2, now)
+	}, 2, now, nil)
 
 	s.NoError(<-firstErrCh)
 	s.NoError(<-secondErrCh)
@@ -184,7 +194,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, time.Now())
+	}, 1, time.Now(), nil)
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
@@ -193,7 +203,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 	keepConsuming = scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, time.Now())
+	}, 1, time.Now(), nil)
 	s.False(keepConsuming)
 	s.ErrorIs(<-errCh, merr.ErrServiceTooManyRequests)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
@@ -212,17 +222,99 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLi
 	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
 	added, err := scheduler.policy.Push(queued)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+	scheduler.updateWaitingTaskCounter(queued, int64(added), queued.NQ())
 
 	errCh := make(chan error, 1)
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, now)
+	}, 1, now, nil)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
 	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
+	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+}
+
+func (s *SchedulerSuite) TestHandleAddTaskRequestRechecksCancellationAfterCleanupBeforeMerge() {
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	active := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)
+	added, err := scheduler.policy.Push(active)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(active, int64(added), active.NQ())
+
+	incomingCtx, cancelIncoming := context.WithCancel(context.Background())
+	defer cancelIncoming()
+	incoming := newMockTask(mockTaskConfig{ctx: incomingCtx, mergeAble: true, nq: 2})
+
+	expiredCtx, cancelExpired := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
+	defer cancelExpired()
+	expiredBase := newMockTask(mockTaskConfig{ctx: expiredCtx, nq: 1})
+	expired := newQueuedTask(&doneCallbackTask{
+		Task:     expiredBase,
+		callback: cancelIncoming,
+	}, now.Add(-time.Second))
+	added, err = scheduler.policy.Push(expired)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(expired, int64(added), expired.NQ())
+
+	errCh := make(chan error, 1)
+	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
+		task: incoming,
+		err:  errCh,
+	}, 2, now, nil)
+
+	s.True(keepConsuming)
+	s.ErrorIs(<-errCh, context.Canceled)
+	s.ErrorIs(expiredBase.Wait(), context.DeadlineExceeded)
+	remaining := scheduler.policy.Pop(now)
+	s.Equal(int64(1), remaining.NQ())
+	s.Equal(1, remaining.originalRequestCount)
+	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+	s.Equal(int64(1), scheduler.GetWaitingTaskTotalNQ())
+}
+
+func (s *SchedulerSuite) TestHandleAddTaskRequestReturnsCancellationWhenCleanupLeavesQueueFull() {
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	active := newQueuedTask(newMockTask(mockTaskConfig{nq: 1}), now)
+	added, err := scheduler.policy.Push(active)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(active, int64(added), active.NQ())
+
+	incomingCtx, cancelIncoming := context.WithCancel(context.Background())
+	defer cancelIncoming()
+	incoming := newMockTask(mockTaskConfig{ctx: incomingCtx, nq: 1})
+
+	expiredCtx, cancelExpired := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
+	defer cancelExpired()
+	expiredBase := newMockTask(mockTaskConfig{ctx: expiredCtx, nq: 1})
+	staged := newQueuedTask(&doneCallbackTask{
+		Task:     expiredBase,
+		callback: cancelIncoming,
+	}, now.Add(-time.Second))
+	scheduler.updateWaitingTaskCounter(staged, 1, staged.NQ())
+
+	errCh := make(chan error, 1)
+	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
+		task: incoming,
+		err:  errCh,
+	}, 1, now, &staged)
+
+	s.False(keepConsuming)
+	s.ErrorIs(<-errCh, context.Canceled)
+	s.False(staged.valid())
+	s.ErrorIs(expiredBase.Wait(), context.DeadlineExceeded)
+	s.Equal(1, scheduler.policy.Len())
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
@@ -239,13 +331,13 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
 	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
 	added, err := scheduler.policy.Push(queued)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+	scheduler.updateWaitingTaskCounter(queued, int64(added), queued.NQ())
 
 	errCh := make(chan error, 1)
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 2, now)
+	}, 2, now, nil)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
@@ -270,18 +362,59 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 	queued := newQueuedTask(nearDeadlineTask, now.Add(-time.Second))
 	added, err := scheduler.policy.Push(queued)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+	scheduler.updateWaitingTaskCounter(queued, int64(added), queued.NQ())
 
 	errCh := make(chan error, 1)
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, now)
+	}, 1, now, nil)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
 	s.ErrorIs(nearDeadlineTask.Wait(), context.DeadlineExceeded)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+}
+
+func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredStagedTaskBeforeQueueLimit() {
+	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
+
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(time.Hour))
+	defer cancel()
+	expiredTask := newMockTask(mockTaskConfig{ctx: ctx, nq: 2})
+	queued := newQueuedTask(expiredTask, now)
+	added, err := scheduler.policy.Push(queued)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(queued, int64(added), queued.NQ())
+
+	staged, _, _ := scheduler.setupExecListener(nil, now)
+	s.True(staged.valid())
+	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+
+	errCh := make(chan error, 1)
+	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
+		task: newMockTask(mockTaskConfig{nq: 3}),
+		err:  errCh,
+	}, 1, now.Add(2*time.Hour), &staged)
+
+	s.False(keepConsuming)
+	s.NoError(<-errCh)
+	s.False(staged.valid())
+	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
+	s.Equal(1, scheduler.policy.Len())
+	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
+	s.Equal(int64(3), scheduler.GetWaitingTaskTotalNQ())
+	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 }
 
 func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
@@ -310,7 +443,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadli
 	queued := newQueuedTask(newMockTask(mockTaskConfig{nq: 1}), now.Add(-time.Second))
 	newTaskAdded, err := scheduler.policy.Push(queued)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(newTaskAdded), queued.NQ())
+	scheduler.updateWaitingTaskCounter(queued, int64(newTaskAdded), queued.NQ())
 
 	ctx, cancel := context.WithDeadline(context.Background(), now.Add(100*time.Millisecond))
 	defer cancel()
@@ -319,7 +452,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadli
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
 		err:  errCh,
-	}, 0, now)
+	}, 0, now, nil)
 
 	s.True(keepConsuming)
 	s.NoError(<-errCh)
@@ -340,7 +473,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty()
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
 		err:  errCh,
-	}, 0, now)
+	}, 0, now, nil)
 
 	s.True(keepConsuming)
 	s.NoError(<-errCh)
@@ -365,7 +498,7 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
 	added, err := scheduler.policy.Push(queued)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+	scheduler.updateWaitingTaskCounter(queued, int64(added), queued.NQ())
 
 	task, nq, execChan := scheduler.setupExecListener(nil, now)
 
@@ -397,12 +530,12 @@ func (s *SchedulerSuite) TestClearQueuedTasksRemovesPolicyAndCurrentTask() {
 	queuedPolicyTask := newQueuedTask(policyTask, now.Add(-time.Second))
 	added, err := scheduler.policy.Push(queuedPolicyTask)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queuedPolicyTask.NQ())
+	scheduler.updateWaitingTaskCounter(queuedPolicyTask, int64(added), queuedPolicyTask.NQ())
 	queuedKeepTask := newQueuedTask(keepTask, now.Add(-time.Second))
 	added, err = scheduler.policy.Push(queuedKeepTask)
 	s.NoError(err)
-	scheduler.updateWaitingTaskCounter(int64(added), queuedKeepTask.NQ())
-	scheduler.updateWaitingTaskCounter(1, currentTask.NQ())
+	scheduler.updateWaitingTaskCounter(queuedKeepTask, int64(added), queuedKeepTask.NQ())
+	scheduler.updateWaitingTaskCounter(currentTask, 1, currentTask.NQ())
 
 	result, remaining := scheduler.clearQueuedTasks(func(task Task) bool {
 		return task.Username() == "clear"
@@ -488,6 +621,15 @@ func (s *SchedulerSuite) TestRecordReadTaskQueueDurationSkipsInvalidTask() {
 	metric := &dto.Metric{}
 	s.NoError(observer.(interface{ Write(*dto.Metric) error }).Write(metric))
 	s.Equal(uint64(0), metric.GetHistogram().GetSampleCount())
+}
+
+func readTaskRequeryQueueDurationCount(outcome string) uint64 {
+	observer := metrics.QueryNodeReadTaskRequeryQueueDuration.WithLabelValues(paramtable.GetStringNodeID(), outcome)
+	metric := &dto.Metric{}
+	if err := observer.(interface{ Write(*dto.Metric) error }).Write(metric); err != nil {
+		return 0
+	}
+	return metric.GetHistogram().GetSampleCount()
 }
 
 func readTaskExecuteDurationCount(outcome string) uint64 {

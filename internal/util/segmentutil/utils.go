@@ -60,15 +60,29 @@ func CalcDelRowCountFromDeltaLog(seg *datapb.SegmentInfo) int64 {
 }
 
 // MergeRequestCost merges the costs of request; the cost may come from different worker in same channel
-// or different channel in same collection, for now we just choose the part with the highest response time
+// or different channel in same collection. Latency fields come from the snapshot with the highest
+// response time, while totalNQ takes the per-field maximum across workers so one worker's queued
+// backlog cannot be hidden by another worker's slower response. A per-field maximum stays safe
+// against duplicate worker snapshots because it never accumulates them.
 func MergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
 	var result *internalpb.CostAggregation
+	var maxTotalNQ int64
 	for _, cost := range requestCosts {
 		if cost == nil {
 			continue
 		}
+		maxTotalNQ = max(maxTotalNQ, cost.GetTotalNQ())
 		if result == nil || result.ResponseTime < cost.ResponseTime {
 			result = cost
+		}
+	}
+	if result != nil && result.GetTotalNQ() < maxTotalNQ {
+		// Copy before overwriting: result aliases a worker's response message.
+		result = &internalpb.CostAggregation{
+			ResponseTime:         result.GetResponseTime(),
+			ServiceTime:          result.GetServiceTime(),
+			TotalNQ:              maxTotalNQ,
+			TotalRelatedDataSize: result.GetTotalRelatedDataSize(),
 		}
 	}
 

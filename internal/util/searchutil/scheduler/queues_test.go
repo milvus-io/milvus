@@ -97,6 +97,27 @@ func TestMergeTaskQueueNQMergeRatio(t *testing.T) {
 	assert.Equal(t, int64(6), q.front().NQ())
 }
 
+func TestMergeTaskQueueTracksOriginalRequestCount(t *testing.T) {
+	now := time.Now()
+	q := newMergeTaskQueue("test_user")
+	base := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)
+	q.push(base)
+	assert.Equal(t, 1, q.front().originalRequestCount)
+
+	incoming := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)
+	assert.True(t, q.tryMerge(incoming, 64, 0, 0))
+	assert.Equal(t, 2, q.front().originalRequestCount)
+
+	groupedIncoming := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)
+	groupedIncoming.originalRequestCount = 3
+	assert.True(t, q.tryMerge(groupedIncoming, 64, 0, 0))
+	assert.Equal(t, 5, q.front().originalRequestCount)
+
+	notMergeable := newQueuedTask(newMockTask(mockTaskConfig{nq: 1}), now)
+	assert.False(t, q.tryMerge(notMergeable, 64, 0, 0))
+	assert.Equal(t, 5, q.pop().originalRequestCount)
+}
+
 func TestMergeTaskQueueDeadlineMergeGap(t *testing.T) {
 	now := time.Now()
 	baseDeadline := now.Add(time.Second)

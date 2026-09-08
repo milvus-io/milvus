@@ -110,7 +110,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		// delegator node won't be used to load sealed segment if stream node is enabled
 		// and if growing segment doesn't exists, delegator won't produce any cost metrics
-		// so we deprecate the EnableWorkerSQCostMetrics param
+		// so all workers' costs are collected (the enableWorkerSQCostMetrics toggle was removed)
 		return result.GetCostAggregation(), true
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
@@ -174,7 +174,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		// delegator node won't be used to load sealed segment if stream node is enabled
 		// and if growing segment doesn't exists, delegator won't produce any cost metrics
-		// so we deprecate the EnableWorkerSQCostMetrics param
+		// so all workers' costs are collected (the enableWorkerSQCostMetrics toggle was removed)
 		return result.GetCostAggregation(), true
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
