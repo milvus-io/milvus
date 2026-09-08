@@ -2261,38 +2261,38 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::future<void>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
-        auto future = pool.Submit([this,
-                                   column_groups,
-                                   properties,
-                                   cg_index = task.column_group_index,
-                                   field_ids = std::move(task.field_ids),
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   eager_load = task.eager_load,
-                                   column_size_estimate =
-                                       std::move(task.column_size_estimate),
-                                   preopened_chunk_reader =
-                                       std::move(task.preopened_chunk_reader),
-                                   op_ctx,
-                                   is_replace,
-                                   &committer]() mutable {
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            committer,
-                            std::move(column_size_estimate),
-                            std::move(preopened_chunk_reader));
-        });
+        auto future = pool.Submit(
+            [this,
+             column_groups,
+             properties,
+             cg_index = task.column_group_index,
+             field_ids = std::move(task.field_ids),
+             &segment_load_info,
+             schema_snapshot,
+             eager_load = task.eager_load,
+             column_size_estimate = std::move(task.column_size_estimate),
+             preopened_chunk_reader = std::move(task.preopened_chunk_reader),
+             op_ctx,
+             is_replace,
+             &committer]() mutable {
+                CheckCancellation(
+                    op_ctx,
+                    id_,
+                    cg_index,
+                    "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                LoadColumnGroup(column_groups,
+                                properties,
+                                cg_index,
+                                field_ids,
+                                segment_load_info,
+                                schema_snapshot,
+                                eager_load,
+                                op_ctx,
+                                is_replace,
+                                committer,
+                                std::move(column_size_estimate),
+                                std::move(preopened_chunk_reader));
+            });
         load_group_futures.emplace_back(std::move(future));
     }
     storage::WaitAllFutures(load_group_futures);
@@ -8317,38 +8317,38 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::future<void>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
-        auto future = pool.Submit([this,
-                                   column_groups,
-                                   properties,
-                                   cg_index = task.column_group_index,
-                                   field_ids = std::move(task.field_ids),
-                                   column_size_estimate =
-                                       std::move(task.column_size_estimate),
-                                   preopened_chunk_reader =
-                                       std::move(task.preopened_chunk_reader),
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   eager_load = task.eager_load,
-                                   op_ctx,
-                                   is_replace,
-                                   &committer]() mutable {
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            committer,
-                            std::move(column_size_estimate),
-                            std::move(preopened_chunk_reader));
-        });
+        auto future = pool.Submit(
+            [this,
+             column_groups,
+             properties,
+             cg_index = task.column_group_index,
+             field_ids = std::move(task.field_ids),
+             column_size_estimate = std::move(task.column_size_estimate),
+             preopened_chunk_reader = std::move(task.preopened_chunk_reader),
+             &segment_load_info,
+             schema_snapshot,
+             eager_load = task.eager_load,
+             op_ctx,
+             is_replace,
+             &committer]() mutable {
+                CheckCancellation(
+                    op_ctx,
+                    id_,
+                    cg_index,
+                    "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                LoadColumnGroup(column_groups,
+                                properties,
+                                cg_index,
+                                field_ids,
+                                segment_load_info,
+                                schema_snapshot,
+                                eager_load,
+                                op_ctx,
+                                is_replace,
+                                committer,
+                                std::move(column_size_estimate),
+                                std::move(preopened_chunk_reader));
+            });
         load_group_futures.emplace_back(std::move(future));
     }
     storage::WaitAllFutures(load_group_futures);

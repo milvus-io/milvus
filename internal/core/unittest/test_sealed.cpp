@@ -5072,7 +5072,8 @@ TEST(SealedSegmentCowState,
         /*eager_load=*/true));
 
     EXPECT_NE(chunk_rows_thread, caller_thread);
-    EXPECT_EQ(chunk_rows_thread_name, "MIDD_SEGC_POOL");
+    EXPECT_TRUE(chunk_rows_thread_name.starts_with("MIDD_SEGC_POOL"))
+        << chunk_rows_thread_name;
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {

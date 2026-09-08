@@ -944,6 +944,8 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
     return state;
 }
 
+// Each submitted slice releases admission when its execution scope exits,
+// before the caller drains futures. Future state may retain the task closure.
 void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
     const EntryMeta& meta,
@@ -972,7 +974,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
-            auto budget_guard = std::make_shared<LoadAdmissionGuard>(
+            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
                 budget_priority,
                 cancellation_token,
@@ -990,9 +992,11 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            i,
                                            &state,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                // Move out of packaged_task's closure: completed futures can
+                // retain that closure while submission waits for another slot.
+                auto reservation = std::move(budget_guard);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1031,7 +1035,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
-            auto budget_guard = std::make_shared<LoadAdmissionGuard>(
+            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
                 budget_priority,
                 cancellation_token,
@@ -1045,9 +1049,9 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            seq,
                                            &state,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                auto reservation = std::move(budget_guard);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
