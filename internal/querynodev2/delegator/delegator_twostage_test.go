@@ -365,7 +365,7 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1000: 10000}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 1)
@@ -413,7 +413,7 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1001: 10000}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.Error(err)
 		s.Nil(validCounts)
 	})
@@ -465,7 +465,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{2000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -527,7 +527,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -585,7 +585,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 			3101: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.True(fallback)
 		s.Nil(results)
@@ -681,7 +681,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3500: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -757,7 +757,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3600: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -811,7 +811,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{4000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -886,7 +886,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithMultipleSegments() {
 			5002: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1032,7 +1032,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		}
 		sealedRowCount := map[int64]int64{6000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1098,10 +1098,85 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchZeroValidCounts() {
 			7002: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
+	})
+}
+
+// The filter stage runs the expression once and stage 2 may serve the same
+// expression from the cache, so the execution feature bits the filter stage
+// recorded must reach the Proxy: OR-ed into every stage-2 result, and handed
+// back on fallback so the single-stage results carry them.
+func (s *TwoStageSearchSuite) TestTwoStageSearchCarriesFilterStageFeatureBits() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+
+	const stage1Bits, stage2Bits uint64 = 0b01, 0b10
+
+	s.Run("stage one bits are merged into stage two results", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		worker1 := &cluster.MockWorker{}
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+				if req.GetFilterOnly() {
+					return &internalpb.SearchResults{FilterValidCounts: []int64{100}, FeatureBits: stage1Bits}, nil
+				}
+				return &internalpb.SearchResults{FeatureBits: stage2Bits}, nil
+			})
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+		s.delegator.distribution.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 8000})
+
+		req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Topk: 100}, DmlChannels: []string{s.vchannelName}}
+		sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 8000, NodeID: 1}}}}
+
+		results, fallback, bits, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8000: 10000})
+		s.NoError(err)
+		s.False(fallback)
+		s.Equal(stage1Bits, bits)
+		s.Require().NotEmpty(results)
+		for _, r := range results {
+			s.Equal(stage1Bits|stage2Bits, r.GetFeatureBits())
+		}
+	})
+
+	s.Run("fallback hands the stage one bits back", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		worker1 := &cluster.MockWorker{}
+		// Two segments, one valid count: incomplete, so the delegator falls
+		// back to a single-stage search.
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Return(&internalpb.SearchResults{FilterValidCounts: []int64{100}, FeatureBits: stage1Bits}, nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+		s.delegator.distribution.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 8100},
+			SegmentEntry{NodeID: 1, SegmentID: 8101},
+		)
+
+		req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Topk: 100}, DmlChannels: []string{s.vchannelName}}
+		sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 8100, NodeID: 1}, {SegmentID: 8101, NodeID: 1}}}}
+
+		results, fallback, bits, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8100: 10000, 8101: 10000})
+		s.NoError(err)
+		s.True(fallback)
+		s.Nil(results)
+		s.Equal(stage1Bits, bits)
+	})
+
+	s.Run("orFeatureBits", func() {
+		results := []*internalpb.SearchResults{{FeatureBits: stage2Bits}, nil, {}}
+		orFeatureBits(results, 0)
+		s.Equal(stage2Bits, results[0].GetFeatureBits())
+		orFeatureBits(results, stage1Bits)
+		s.Equal(stage1Bits|stage2Bits, results[0].GetFeatureBits())
+		s.Equal(stage1Bits, results[2].GetFeatureBits())
 	})
 }
 
@@ -1188,7 +1263,7 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStageWithMultipleNodes() {
 			8002: 10000,
 		}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 3)

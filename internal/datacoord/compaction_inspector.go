@@ -625,6 +625,9 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
+	// After the queue accepted it: a full queue makes the trigger plan the
+	// same compaction again on its next tick.
+	recordCompactionType(task.GetType())
 	log.Info(context.TODO(), "Compaction plan submitted")
 	return nil
 }
