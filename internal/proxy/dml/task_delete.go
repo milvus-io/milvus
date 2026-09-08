@@ -442,6 +442,9 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The user's own filter, before the row-level-security predicate is
+	// merged into it.
+	dql.RecordPlanExprFeatures(userPlan, dr.req.GetExprTemplateValues())
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
@@ -531,6 +534,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 
 func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
+	recordDeleteMode(isSimple)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)

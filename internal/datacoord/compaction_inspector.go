@@ -620,6 +620,7 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
 		return err
 	}
+	recordCompactionType(task.GetType())
 	if err = c.submitTask(t); err != nil {
 		log.Warn(context.TODO(), "submit compaction task failed", mlog.Err(err))
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)

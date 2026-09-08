@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -1257,6 +1258,60 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 	}, nil
 }
 
+// GetFeatureUsage returns this QueryNode's view: the node-level configuration
+// switches in effect (config group) and the counters only a QueryNode can see
+// (two-stage search, segment pruning, run_analyzer). The execution features of
+// a request travel back on its results instead, as feature_bits.
+func (node *QueryNode) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(node.lifetime.GetState()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	entries := queryNodeConfigEntries()
+	entries = append(entries, featureusage.SnapshotFor(featureusage.RoleQueryNode)...)
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.QueryNodeRole,
+		NodeId:        node.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       entries,
+	}, nil
+}
+
+// queryNodeConfigEntries reports the boolean QueryNode configuration items that
+// switch a capability on or off, as key=true/false. Only booleans: the value is
+// then drawn from a closed set and cannot carry an operator string.
+func queryNodeConfigEntries() []*internalpb.FeatureEntry {
+	cfg := &paramtable.Get().QueryNodeCfg
+	items := []*paramtable.ParamItem{
+		&cfg.EnableDisk,
+		&cfg.EnableInterminSegmentIndex,
+		&cfg.TieredEvictionEnabled,
+		&cfg.TieredBackgroundEvictionEnabled,
+		&cfg.MultipleChunkedEnable,
+		&cfg.EnableGeometryCache,
+		&cfg.EnableGISSplitFusion,
+		&cfg.MmapVectorField,
+		&cfg.MmapVectorIndex,
+		&cfg.MmapScalarField,
+		&cfg.MmapScalarIndex,
+		&cfg.GrowingMmapEnabled,
+		&cfg.MmapJSONStats,
+		&cfg.ExprResCacheEnabled,
+		&cfg.EnableSegmentPrune,
+		&cfg.EnableSegmentFilter,
+		&cfg.SkipGrowingSegmentBF,
+		&cfg.EnableResultZeroCopy,
+		&cfg.PreferFieldDataWhenIndexHasRawData,
+		&cfg.IDFPreload,
+	}
+	entries := make([]*internalpb.FeatureEntry, 0, len(items))
+	for _, item := range items {
+		entries = append(entries, featureusage.BoolConfigEntry(item.Key, item.GetAsBool()))
+	}
+	return entries
+}
+
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
@@ -1768,6 +1823,7 @@ func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 		}, nil
 	}
 	defer node.lifetime.Done()
+	featureusage.Hit(featureusage.FeatureRunAnalyzer)
 
 	// build and run analyzer by analyzer params
 	// if channel not set

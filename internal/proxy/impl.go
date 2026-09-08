@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -2842,12 +2843,14 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
+	countFeatures := true
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot, countFeatures)
+		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2870,7 +2873,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true, rlsSnapshot)
+			rspGT, _, _, _, err = node.search(ctx, request, false, true, rlsSnapshot, false)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2913,7 +2916,11 @@ func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
 	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
+// countFeatures is true only for the first task built for a user request. The
+// Proxy can run the same request through this function again -- the
+// un-optimized retry, the recall-evaluation ground truth, a retry.Handle
+// re-entry -- and those runs must not move the feature counters again.
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2938,6 +2945,16 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
+
+	// Counted here, not in the search task: by the time a task exists the ids
+	// have been resolved into vectors and search_input overwritten, and this
+	// function returns before building one both when that resolution fails
+	// and when every id resolves to a null vector. The user asked for a search
+	// by primary key in all three cases. countFeatures keeps the repeat runs
+	// of one user request from counting it again.
+	if ids := request.GetIds(); countFeatures && ids != nil && typeutil.GetSizeOfIDs(ids) > 0 {
+		featureusage.Hit(featureusage.FeatureSearchByPrimaryKeys)
+	}
 
 	request, searchByPK, err := node.prepareSearchAttempt(ctx, request, rlsSnapshot)
 	if err != nil {
@@ -2971,6 +2988,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if !rlsSnapshot.presetTask(qt) && searchByPK != nil {
 		qt.SetResolvedRLSPredicate(rlsPredicate)
 	}
+	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
 	defer func() {
@@ -3120,12 +3138,14 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
+	countFeatures := true
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot, countFeatures)
+		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3169,7 +3189,9 @@ func (l *hybridSearchRequestExprLogger) String() string {
 	return builder.String()
 }
 
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
+// countFeatures carries the same meaning as in search: only the first task
+// built for a user request moves the feature counters.
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, rlsSnapshot *searchRLSSnapshot, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3191,6 +3213,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	newSearchReq = rlsSnapshot.pinRequest(newSearchReq)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
 	rlsSnapshot.presetTask(qt)
+	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
 	defer func() {
@@ -3718,6 +3741,9 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 	qt.SetSkipRuntimeRLS(true)
+	// The user issued a search, and the search path already counted it; this
+	// retrieval is how the Proxy serves it.
+	qt.MarkInternal()
 
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
@@ -7471,6 +7497,22 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	mlog.Info(context.TODO(), "GetQuotaMetrics success", mlog.String("metrics", metricsResp.GetMetricsInfo()))
 
 	return metricsResp, nil
+}
+
+// GetFeatureUsage returns this Proxy's request-level feature counters. The
+// counters are monotonic since process start; reading them changes nothing.
+func (node *Proxy) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.ProxyRole,
+		NodeId:        paramtable.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       featureusage.SnapshotFor(featureusage.RoleProxy),
+	}, nil
 }
 
 // AddFileResource add file resource to rootcoord
