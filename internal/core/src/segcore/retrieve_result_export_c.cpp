@@ -104,12 +104,12 @@ BuildEmptyRetrieveBatch(milvus::query::RetrievePlan* plan, int64_t total_rows) {
         if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
             auto arrow_type = arrow::int64();
             ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
-            fields.push_back(MilvusField(
-                field_id.get() == 0 ? "RowID" : "Timestamp",
-                arrow_type,
-                false,
-                field_id,
-                milvus::DataType::INT64));
+            fields.push_back(
+                MilvusField(field_id.get() == 0 ? "RowID" : "Timestamp",
+                            arrow_type,
+                            false,
+                            field_id,
+                            milvus::DataType::INT64));
             arrays.push_back(std::move(arr));
             continue;
         }
@@ -154,8 +154,8 @@ BuildRetrieveFieldsBatch(
                 "missing ordered field data for field id ", field_id.get());
         }
         if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
-            auto name =
-                field_id.get() == 0 ? std::string("RowID") : std::string("Timestamp");
+            auto name = field_id.get() == 0 ? std::string("RowID")
+                                            : std::string("Timestamp");
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
                 FieldDataToArrow(name, *it->second, total_rows));
@@ -261,8 +261,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 for (auto field_id : plan->field_ids_) {
                     milvus::futures::throwIfCancelled(cancel_token);
-                    if (milvus::SystemProperty::Instance().IsSystem(
-                            field_id)) {
+                    if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         auto system_type = milvus::SystemProperty::Instance()
                                                .GetSystemFieldType(field_id);
                         auto count = materialized.segment_offsets.size();
@@ -277,8 +276,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                         data_array->set_field_id(field_id.get());
                         data_array->set_type(
                             milvus::proto::schema::DataType::Int64);
-                        auto* obj = data_array->mutable_scalars()
-                                        ->mutable_long_data();
+                        auto* obj =
+                            data_array->mutable_scalars()->mutable_long_data();
                         auto* raw =
                             reinterpret_cast<const int64_t*>(output.data());
                         obj->mutable_data()->Add(raw, raw + count);
@@ -333,8 +332,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     continue;
                 }
                 for (auto field_id : plan->field_ids_) {
-                    if (milvus::SystemProperty::Instance().IsSystem(
-                            field_id)) {
+                    if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         continue;
                     }
                     auto& field_meta = plan->schema_->operator[](field_id);
@@ -370,20 +368,16 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                     auto merged = std::make_unique<DataArray>();
                     merged->set_field_id(field_id.get());
-                    merged->set_type(
-                        milvus::proto::schema::DataType::Int64);
-                    auto* obj =
-                        merged->mutable_scalars()->mutable_long_data();
+                    merged->set_type(milvus::proto::schema::DataType::Int64);
+                    auto* obj = merged->mutable_scalars()->mutable_long_data();
                     for (int64_t i = 0; i < total_rows; ++i) {
                         auto& base = result_pairs[i];
-                        auto it = base.fields_data_->find(field_id);
-                        AssertInfo(
-                            it != base.fields_data_->end(),
-                            "missing system field {} in segment data",
-                            field_id.get());
-                        auto val = it->second->scalars()
-                                       .long_data()
-                                       .data(base.src_offset_);
+                        auto* da = base.get_field_data(field_id);
+                        AssertInfo(da != nullptr,
+                                   "missing system field {} in segment data",
+                                   field_id.get());
+                        auto val =
+                            da->scalars().long_data().data(base.getOffset());
                         obj->add_data(val);
                     }
                     ordered_fields[field_id] = std::move(merged);
@@ -398,8 +392,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     bool has_subtype =
                         vecs.has_float_vector() || vecs.has_binary_vector() ||
                         vecs.has_float16_vector() ||
-                        vecs.has_bfloat16_vector() ||
-                        vecs.has_int8_vector() ||
+                        vecs.has_bfloat16_vector() || vecs.has_int8_vector() ||
                         vecs.has_sparse_float_vector() ||
                         vecs.has_vector_array();
                     if (!has_subtype) {
