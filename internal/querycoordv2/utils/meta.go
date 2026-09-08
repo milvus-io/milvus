@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -166,25 +167,47 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		// builds, so the count follows extension.FormInstalled and the stock
 		// admission stays exactly what it was.
 		//
-		// The two counts bound the group, they do not add up. With the
-		// streaming service on, every replica needs a streaming node of ITS
-		// OWN group for its delegator: the channel checker places delegators
-		// on the replica's streaming nodes only (GetRWSQNodes), and the
-		// replica manager hands a group's streaming nodes out without overlap
-		// between its replicas. The cluster-wide streaming-node check above
-		// is not per group, so this is where the group is bounded. Regular
-		// nodes alone give master's answer, so a regular-only group is
-		// admitted exactly as master admits it; streaming nodes give
-		// delegator capacity; a mixed group holds as many replicas as the
-		// larger of the two. Summed, one regular node and one streaming node
-		// would admit two replicas, and the second would never receive a
-		// streaming node: the channel checker would mark it unplaced every
-		// tick, and a scoped expansion waiting on it would neither complete
-		// nor time out.
+		// The two counts bound the group, they do not add up, and the bound
+		// follows how the replica manager hands streaming nodes out
+		// (ReplicaManager.buildSQNodeAssignmentHelpers). With the streaming
+		// service on, every replica needs a streaming node for its delegator:
+		// the channel checker places delegators on the replica's streaming
+		// nodes only (GetRWSQNodes), and those are handed out without overlap
+		// between the replicas of a group.
+		//
+		// A group that has streaming nodes of its own is served from them and
+		// nothing else, whatever streaming.strictResourceGroupIsolation.enabled
+		// says: that is what isolation gives it, and what the legacy default
+		// pool gives it too, since that pool takes in only the replicas of
+		// groups that have no streaming node. So such a group is bounded by
+		// its own streaming-node count, however many regular nodes sit beside
+		// them. Bounding it by the larger of the two counts would admit, for
+		// two regular nodes and one streaming node, a second replica that
+		// never receives a streaming node: the channel checker would mark it
+		// unplaced every tick, and a scoped expansion waiting on it would
+		// neither complete nor time out. The one mode this under-admits is
+		// flat allocation, which pools every streaming node for every replica
+		// but only while some replica of the collection sits in a group with
+		// no streaming node at all; a covered group is then refused a replica
+		// the pool could have served. That is accepted: admission cannot see
+		// which mode the assignment will pick, and refusing a load is
+		// recoverable where a replica that can never get a delegator is not.
+		//
+		// A group with no streaming node of its own is where the flag decides.
+		// Under strict isolation it cannot host a delegator and admits
+		// nothing. With the flag off, its replicas' delegators come from the
+		// pool - the legacy default pool or flat allocation - which the
+		// cluster-wide streaming-node check above bounds, so the group holds
+		// as many replicas as it has regular nodes: master's answer, and the
+		// stock admission for that group exactly.
 		available := len(nodes)
 		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
-			if sqNodes, ok := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName]; ok {
-				available = max(available, sqNodes.Len())
+			sqNodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName]
+			switch {
+			case sqNodes.Len() > 0:
+				available = sqNodes.Len()
+			case paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool():
+				available = 0
 			}
 		}
 
