@@ -104,24 +104,43 @@ AppendDomElementToBsonArray(simdjson::dom::element elem,
 }
 }  // namespace
 
-// Parse a JSON array string with simdjson and build an owning BSON array value
+// Classification lives here rather than at the call sites: every simdjson access
+// below -- the parse, the array iteration, and the element accessors inside
+// AppendDomElementToBsonArray -- throws simdjson_error, and a caller that forgets
+// to guard would let it escape to the cgo boundary and be flattened into the
+// generic UnexpectedError. Mirrors UnescapeJsonString, which classifies
+// in-function too.
 bsoncxx::array::value
 BuildBsonArrayFromJsonString(const std::string& json_array) {
-    simdjson::dom::parser parser;
-    simdjson::dom::element root = parser.parse(json_array);
-    if (root.type() != simdjson::dom::element_type::ARRAY) {
-        ThrowInfo(ErrorCode::JsonKeyInvalid,
-                  "input is not a JSON array: {}",
-                  json_array);
-    }
+    try {
+        simdjson::dom::parser parser;
+        simdjson::dom::element root = parser.parse(json_array);
+        if (root.type() != simdjson::dom::element_type::ARRAY) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "input is not a JSON array: {}",
+                      json_array);
+        }
 
-    bsoncxx::builder::basic::array out;
-    for (simdjson::dom::element elem : root.get_array()) {
-        AppendDomElementToBsonArray(elem, out);
+        bsoncxx::builder::basic::array out;
+        for (simdjson::dom::element elem : root.get_array()) {
+            AppendDomElementToBsonArray(elem, out);
+        }
+        return out.extract();
+    } catch (const SegcoreError&) {
+        // Already classified above; SegcoreError derives from std::runtime_error
+        // and would otherwise be swallowed by the simdjson handler's sibling.
+        throw;
+    } catch (const simdjson::simdjson_error& e) {
+        ThrowInfo(JsonParseErrorCode(e.error()),
+                  "Failed to build bson array from json string: {}, {}",
+                  json_array,
+                  e.what());
     }
-    return out.extract();
+    return bsoncxx::builder::basic::array{}.extract();
 }
 
+// BuildBsonArrayFromJsonString classifies its own failures, so a call site
+// that forgets to guard cannot leak a simdjson_error to the cgo boundary.
 std::vector<uint8_t>
 BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
     auto arr_value = BuildBsonArrayFromJsonString(json_array);
@@ -185,27 +204,9 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(bsoncxx::types::b_string{value});
         }
         case JSONType::ARRAY: {
-            try {
-                auto arr_value = BuildBsonArrayFromJsonString(value);
-                return DomNode(bsoncxx::types::b_array{arr_value.view()});
-            } catch (const SegcoreError&) {
-                // Already classified inside BuildBsonArrayFromJsonString;
-                // SegcoreError derives from std::runtime_error, so without this
-                // the generic handler below would rewrap it and lose the code.
-                throw;
-            } catch (const simdjson::simdjson_error& e) {
-                ThrowInfo(
-                    JsonParseErrorCode(e.error()),
-                    "Failed to build bson array (simdjson) from string: {}, {}",
-                    value,
-                    e.what());
-            } catch (const std::exception& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (generic) from string: {}, {}",
-                    value,
-                    e.what());
-            }
+            // BuildBsonArrayFromJsonString classifies its own failures.
+            auto arr_value = BuildBsonArrayFromJsonString(value);
+            return DomNode(bsoncxx::types::b_array{arr_value.view()});
         }
         case JSONType::OBJECT: {
             AssertInfo(value == "{}",
