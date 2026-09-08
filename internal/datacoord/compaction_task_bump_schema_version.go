@@ -231,6 +231,7 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
+		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 			mlog.FieldNodeID(nodeID),
@@ -238,7 +239,10 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+			return
 		}
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 
@@ -248,7 +252,10 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+		return
 	}
+	decCoordExecutingCompactionTaskNum(t.GetTaskProto().GetType())
+	incNodeExecutingCompactionTaskNum(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetType())
 }
 
 func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
@@ -260,8 +267,12 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
+			originNodeID := t.GetTaskProto().GetNodeID()
 			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+			} else {
+				decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+				incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 			}
 		}
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to get compaction result", mlog.Err(err))

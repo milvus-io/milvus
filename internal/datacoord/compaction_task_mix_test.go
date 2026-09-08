@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -316,4 +318,80 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	t1.QueryTaskOnWorker(cluster)
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
+}
+
+func (s *MixCompactionTaskSuite) TestCreateTaskOnWorkerRetryUpdatesCompactionMetrics() {
+	metrics.DataCoordCompactionTaskNum.Reset()
+	s.T().Cleanup(func() {
+		metrics.DataCoordCompactionTaskNum.Reset()
+	})
+
+	cluster := session.NewMockCluster(s.T())
+	channel := "Ch-1"
+	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Binlogs:       binLogs,
+		}}
+	}).Once()
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Channel:       channel,
+		Type:          datapb.CompactionType_MixCompaction,
+		NodeID:        NullNodeID,
+		State:         datapb.CompactionTaskState_pipelining,
+		InputSegments: []int64{200},
+		Schema:        &schemapb.CollectionSchema{Version: 1},
+	}, alloc, s.mockMeta, newMockVersionManager())
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.WrapErrNodeNotFound(123)).Once()
+
+	incCoordPendingCompactionTaskNum(task.GetTaskProto().GetType())
+	decCoordPendingCompactionTaskNum(task.GetTaskProto().GetType())
+	incCoordExecutingCompactionTaskNum(task.GetTaskProto().GetType())
+
+	task.CreateTaskOnWorker(123, cluster)
+
+	s.Equal(float64(0), testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		strconvNullNodeID(), task.GetTaskProto().GetType().String(), metrics.Executing)))
+	s.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		strconvNullNodeID(), task.GetTaskProto().GetType().String(), metrics.Pending)))
+}
+
+func (s *MixCompactionTaskSuite) TestQueryTaskOnWorkerRetryUpdatesCompactionMetrics() {
+	metrics.DataCoordCompactionTaskNum.Reset()
+	s.T().Cleanup(func() {
+		metrics.DataCoordCompactionTaskNum.Reset()
+	})
+
+	cluster := session.NewMockCluster(s.T())
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:    1,
+		Type:      datapb.CompactionType_MixCompaction,
+		StartTime: time.Now().Unix(),
+		Channel:   "ch-1",
+		State:     datapb.CompactionTaskState_executing,
+		NodeID:    111,
+	}, nil, s.mockMeta, newMockVersionManager())
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(111)).Once()
+
+	incNodeExecutingCompactionTaskNum(111, task.GetTaskProto().GetType())
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(float64(0), testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		"111", task.GetTaskProto().GetType().String(), metrics.Executing)))
+	s.Equal(float64(1), testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		strconvNullNodeID(), task.GetTaskProto().GetType().String(), metrics.Pending)))
 }

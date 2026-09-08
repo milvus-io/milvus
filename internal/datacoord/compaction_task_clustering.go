@@ -153,10 +153,14 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil || result == nil {
 		mlog.Warn(context.TODO(), "clusteringCompactionTask failed to get compaction result", mlog.Err(err))
+		originNodeID := t.GetTaskProto().GetNodeID()
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
+			return
 		}
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 	mlog.Debug(context.TODO(), "compaction result", mlog.String("result state", result.GetState().String()),
@@ -781,10 +785,17 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 			return err
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
+		return nil
 	}
-	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
+	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
+	if err != nil {
+		return err
+	}
+	decCoordExecutingCompactionTaskNum(t.GetTaskProto().GetType())
+	incNodeExecutingCompactionTaskNum(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetType())
+	return nil
 }
 
 func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
