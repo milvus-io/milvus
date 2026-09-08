@@ -220,6 +220,22 @@ func TestResolveLoadAdmissionLimits(t *testing.T) {
 	}
 }
 
+func TestResolveLoadAdmissionLimitsInvalidConfiguration(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	for _, enabled := range []bool{false, true} {
+		for _, invalid := range []string{"typo", "", "1.5", "9223372036854775808", "-1"} {
+			t.Run(fmt.Sprintf("enabled=%v/value=%q", enabled, invalid), func(t *testing.T) {
+				require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, invalid))
+				require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, invalid))
+				memory, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+				assert.EqualValues(t, DefaultLoadTransientBudgetBytes, memory)
+				assert.EqualValues(t, DefaultLoadAdmissionSlotsPerCPU*hardware.GetCPUNum(), slots)
+			})
+		}
+	}
+}
+
 func TestResolveLoadAdmissionLimitsPreservesConfiguredSources(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MILVUSCONF", dir)
@@ -248,6 +264,23 @@ func TestResolveLoadAdmissionLimitsPreservesConfiguredSources(t *testing.T) {
 		assert.EqualValues(t, 4096, memory)
 		assert.Zero(t, slots, "environment-sourced explicit zero must remain unlimited")
 	}
+}
+
+func TestStorageV2AsyncLoadThreadPoolSize(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	wantDefault := max(1, min(hardware.GetCPUNum(), 16))
+	assert.False(t, item.Export)
+	assert.Equal(t, wantDefault, item.GetAsInt())
+	for _, invalid := range []string{"0", "-1", "typo", "", "1.5", "2147483648"} {
+		require.NoError(t, pt.Save(item.Key, invalid))
+		assert.Equal(t, wantDefault, item.GetAsInt(), invalid)
+	}
+	require.NoError(t, pt.Save(item.Key, "3"))
+	assert.Equal(t, 3, item.GetAsInt())
+	require.NoError(t, pt.Remove(item.Key))
+	assert.Equal(t, wantDefault, item.GetAsInt())
 }
 
 func TestComponentParam(t *testing.T) {

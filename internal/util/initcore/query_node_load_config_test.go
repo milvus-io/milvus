@@ -123,6 +123,97 @@ func TestCommonCoreCallbacksDoNotOwnLoadAdmission(t *testing.T) {
 	assert.EqualValues(t, 7, gotSlots)
 }
 
+func TestQueryNodeAsyncLoadThreadPoolConfig(t *testing.T) {
+	previous := getStorageV2AsyncLoadThreadPoolSize()
+	t.Cleanup(func() { require.NoError(t, updateStorageV2AsyncLoadThreadPoolSize(previous)) })
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	wantDefault := max(1, min(hardware.GetCPUNum(), 16))
+	// The first synchronization must pick up an override set before registration.
+	require.NoError(t, pt.Save(item.Key, "3"))
+	require.NoError(t, registerQueryNodeAsyncLoadThreadPoolConfig(t.Context(), pt, updateStorageV2AsyncLoadThreadPoolSize))
+	assert.Equal(t, 3, getStorageV2AsyncLoadThreadPoolSize())
+	require.NoError(t, pt.Save(item.Key, "2"))
+	assert.Equal(t, 2, getStorageV2AsyncLoadThreadPoolSize())
+	require.NoError(t, pt.Save(item.Key, "typo"))
+	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+	require.NoError(t, pt.Save(item.Key, "1"))
+	require.NoError(t, pt.Remove(item.Key))
+	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+	// Native callers also reject zero instead of stranding queued work.
+	require.Error(t, updateStorageV2AsyncLoadThreadPoolSize(0))
+	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+}
+
+func TestQueryNodeAsyncLoadThreadPoolConfigReportsInitialFailure(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	err := registerQueryNodeAsyncLoadThreadPoolConfig(t.Context(), pt, func(int) error { return assert.AnError })
+	require.ErrorIs(t, err, assert.AnError)
+}
+
+func TestQueryNodeAsyncLoadThreadPoolConfigSerializesUpdates(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	require.NoError(t, pt.Save(item.Key, "1"))
+	firstApply := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	defer release()
+	var calls, active, lastThreads atomic.Int32
+	var overlap atomic.Bool
+	var tasks sync.WaitGroup
+	tasks.Add(1)
+	go func() {
+		defer tasks.Done()
+		err := registerQueryNodeAsyncLoadThreadPoolConfig(t.Context(), pt, func(threads int) error {
+			if active.Add(1) != 1 {
+				overlap.Store(true)
+			}
+			defer active.Add(-1)
+			if calls.Add(1) == 1 {
+				close(firstApply)
+				<-releaseFirst
+			}
+			lastThreads.Store(int32(threads))
+			return nil
+		})
+		assert.NoError(t, err)
+	}()
+	<-firstApply
+	tasks.Add(1)
+	go func() {
+		defer tasks.Done()
+		assert.NoError(t, pt.Save(item.Key, "2"))
+	}()
+	updated := assert.Eventually(t, func() bool { return item.GetAsInt() == 2 }, 2*time.Second, time.Millisecond)
+	release()
+	tasks.Wait()
+	require.True(t, updated)
+	assert.False(t, overlap.Load())
+	assert.EqualValues(t, 2, calls.Load())
+	assert.EqualValues(t, 2, lastThreads.Load())
+}
+
+func TestQueryNodeLoadConfigInvalidLimitsStayBounded(t *testing.T) {
+	beforeBytes, beforeSlots := nativeLoadAdmissionLimits(t)
+	t.Cleanup(func() { applyQueryNodeLoadConfig(false, beforeBytes, beforeSlots) })
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig)
+	require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "typo"))
+	require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, "9223372036854775808"))
+	for _, enabled := range []string{"true", "false"} {
+		require.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key, enabled))
+		bytes, slots := nativeLoadAdmissionLimits(t)
+		assert.EqualValues(t, paramtable.DefaultLoadTransientBudgetBytes, bytes)
+		assert.EqualValues(t, 2*hardware.GetCPUNum(), slots)
+	}
+}
+
 func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))

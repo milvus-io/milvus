@@ -153,23 +153,28 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
     try {
-        std::string mode_str(c_disk_write_config.mode);
+        const std::string mode_str(c_disk_write_config.mode);
+        auto mode = milvus::storage::FileWriter::WriteMode::BUFFERED;
         if (mode_str == "direct") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::DIRECT);
-            // buffer size checking is done in FileWriter::SetBufferSize,
-            // and it will try to find a proper and valid buffer size
-            milvus::storage::FileWriter::SetBufferSize(
-                c_disk_write_config.buffer_size_kb * 1024);  // convert to bytes
-        } else if (mode_str == "buffered") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::BUFFERED);
-        } else {
+            mode = milvus::storage::FileWriter::WriteMode::DIRECT;
+        } else if (mode_str != "buffered") {
             return milvus::FailureCStatus(milvus::ConfigInvalid,
                                           "Invalid mode");
         }
+        // Reject invalid input before publishing any part of the configuration.
+        const auto& rate_config = c_disk_write_config.rate_limiter_config;
+        milvus::storage::io::WriteRateLimiter::ValidateConfig(
+            rate_config.refill_period_us,
+            rate_config.avg_bps,
+            rate_config.max_burst_bps);
         milvus::storage::LocalFileIOPool::GetInstance().Configure(
             c_disk_write_config.nr_threads);
+        milvus::storage::FileWriter::SetMode(mode);
+        if (mode == milvus::storage::FileWriter::WriteMode::DIRECT) {
+            // SetBufferSize normalizes the configured size and alignment.
+            milvus::storage::FileWriter::SetBufferSize(
+                c_disk_write_config.buffer_size_kb * 1024);
+        }
         // configure rate limiter
         milvus::storage::io::WriteRateLimiter::GetInstance().Configure(
             c_disk_write_config.rate_limiter_config.refill_period_us,

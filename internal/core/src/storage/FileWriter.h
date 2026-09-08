@@ -54,13 +54,11 @@ class WriteRateLimiter {
         return instance;
     }
 
-    void
-    Configure(int64_t refill_period_us,
-              int64_t avg_bps,
-              int64_t max_burst_bps,
-              int32_t high_priority_ratio,
-              int32_t middle_priority_ratio,
-              int32_t low_priority_ratio) {
+    // Validates rate settings without changing shared limiter state.
+    static void
+    ValidateConfig(int64_t refill_period_us,
+                   int64_t avg_bps,
+                   int64_t max_burst_bps) {
         if (refill_period_us <= 0 || avg_bps <= 0 || max_burst_bps <= 0 ||
             avg_bps > max_burst_bps) {
             ThrowInfo(ErrorCode::InvalidParameter,
@@ -71,6 +69,16 @@ class WriteRateLimiter {
                       avg_bps,
                       max_burst_bps);
         }
+    }
+
+    void
+    Configure(int64_t refill_period_us,
+              int64_t avg_bps,
+              int64_t max_burst_bps,
+              int32_t high_priority_ratio,
+              int32_t middle_priority_ratio,
+              int32_t low_priority_ratio) {
+        ValidateConfig(refill_period_us, avg_bps, max_burst_bps);
         std::unique_lock<std::mutex> lock(mutex_);
         // avoid too small refill period, 1ms is used as the minimum refill period
         refill_period_us_ = std::max<int64_t>(1000, refill_period_us);

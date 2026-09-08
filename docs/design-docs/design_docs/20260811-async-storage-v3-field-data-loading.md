@@ -373,9 +373,22 @@ state.
 Reader preparation and cell loading share the default process-wide
 `folly::CPUThreadPoolExecutor`, resolved through `ResolveAsyncLoadExecutor`, with:
 
-- `max(1, CPU_NUM)` workers;
+- a positive worker limit from `queryNode.segcore.storageV2.asyncLoadThreadPoolSize`,
+  defaulting to `max(1, min(CPU_NUM, 16))`;
 - two unbounded priority queues;
 - thread name prefix `MILVUS_ASYNC_LOAD_`.
+
+QueryNode applies this limit at startup and watches updates and override deletion.
+Configuration alone does not create the executor; its first user creates it with
+the latest limit. Updates resize the same executor, preserving queued work and
+existing keep-alives. Shrinking may wait for running workers, so configuration
+runs off the load workers and does not hold the executor-acquisition lock while
+resizing. Resize errors are returned at startup and logged on hot updates; the
+resize path attempts to restore the previous limit on failure.
+
+This worker limit is independent of admission slots and the legacy HIGH/LOW
+thread-pool coefficients. It does not add preemption or reserve capacity for HIGH
+work already blocked behind admitted LOW work.
 
 Milvus `LoadPriority::HIGH` maps to Folly high priority and
 `LoadPriority::LOW` maps to Folly low priority. The continuation after an
@@ -673,18 +686,30 @@ remote record batches are not considered consumed until the final
 | Parameter | Default | Refresh behavior | Purpose |
 |---|---:|---|---|
 | `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured during preparation/construction | internal experimental switch; enabling is currently unsupported |
+| `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` | `min(CPUNUM, 16)`, at least 1 | watched dynamically; invalid/non-positive values restore the default | shared async executor worker limit; independent of admission slots |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
 | `common.loadTransientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
 | `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, and index stream slices |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
-The async switch and both load admission parameters are intentionally not
+The async switch, async executor size, and both load admission parameters are intentionally not
 exported in the generated public config surface or listed in `milvus.yaml`.
 The admission parameters remain available for explicit internal configuration
 and dynamic updates. Async loading support for data and indexes is incomplete; this document
 describes the implemented field-data stages, not complete async index support.
 Enabling the switch is currently unsupported. Complete async loading support
 and validate these defaults before supporting enablement.
+
+Admission limits must be non-negative integers. Malformed strings, values outside
+int64, and negative values fall back to their declared defaults (2 GiB and
+2 × CPUNUM); a valid explicit zero still disables that limit. The async executor
+size must be a positive int32, and invalid values restore its default.
+
+Disk writer configuration validates the mode and rate-limiter parameters before
+changing the mode, buffer size, or local-file pool. Pool configuration precedes
+the remaining updates. This prevents invalid input from partially applying a
+configuration; it is not a transaction across arbitrary allocation or thread
+creation failures.
 
 QueryNode registers one serialized watcher for the switch and both admission
 parameters during initialization, with an immediate post-registration sync to

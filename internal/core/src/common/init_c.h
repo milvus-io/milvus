@@ -130,6 +130,15 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes);
 void
 SetStorageV2AsyncLoadEnabled(bool enabled);
 
+// Sets a positive async executor worker limit without creating an unused pool.
+// Resizes an existing pool in place; reports invalid values or resize failures.
+CStatus
+SetStorageV2AsyncLoadThreadPoolSize(int threads);
+
+// Returns the effective worker limit, including before first executor use.
+int
+GetStorageV2AsyncLoadThreadPoolSize();
+
 // Target estimated-byte threshold for one Storage V3 async read window.
 // The value must be positive; non-positive values restore the process default.
 // A window always contains at least one cell, so an oversized cell may exceed

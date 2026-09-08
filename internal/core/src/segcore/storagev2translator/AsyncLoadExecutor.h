@@ -21,6 +21,16 @@
 
 namespace milvus::segcore::storagev2translator {
 
+// Configures workers without creating an unused executor. Positive values only.
+// Resizes the existing pool in place; call from a configuration thread because
+// shrinking may wait for running workers. Existing tasks and keep-alives survive.
+void
+SetAsyncLoadThreadPoolSize(int threads);
+
+// Returns the configured worker limit, including before first executor use.
+[[nodiscard]] int
+GetAsyncLoadThreadPoolSize();
+
 // Returns a priority-aware keep-alive for the supplied executor, or for the
 // process-wide async-load executor when executor is empty.
 [[nodiscard]] folly::Executor::KeepAlive<>

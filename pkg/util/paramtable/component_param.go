@@ -612,7 +612,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`Explicit values apply regardless of that switch; 0 disables the limit.`,
 		Export: false,
 		Formatter: func(v string) string {
-			if getAsInt64(v) < 0 {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
 				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using default",
 					mlog.String("configured", v))
 				return strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10)
@@ -636,7 +637,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`0 disables the slot limit. Reader opens are controlled separately.`,
 		Export: false,
 		Formatter: func(v string) string {
-			if getAsInt64(v) < 0 {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
 				mlog.Warn(context.TODO(), "common.loadAdmissionSlots must be non-negative, using default",
 					mlog.String("configured", v))
 				return p.LoadAdmissionSlots.DefaultValue
@@ -4250,6 +4252,8 @@ type queryNodeConfig struct {
 	// StorageV2EnableAsyncLoad is the historical-key rollout switch for the
 	// Storage V3 async field-data pipeline.
 	StorageV2EnableAsyncLoad ParamItem `refreshable:"true"`
+	// StorageV2AsyncLoadThreadPoolSize bounds workers in the shared async executor.
+	StorageV2AsyncLoadThreadPoolSize ParamItem `refreshable:"true"`
 	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
 	// by one Storage V3 async window.
 	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
@@ -5568,6 +5572,27 @@ user-task-polling:
 		Export:       false,
 	}
 	p.StorageV2EnableAsyncLoad.Init(base.mgr)
+
+	p.StorageV2AsyncLoadThreadPoolSize = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadThreadPoolSize",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(max(1, min(hardware.GetCPUNum(), DefaultThreadPoolMaxThreadsSize))),
+		Doc: `Worker count for the shared Storage V3 async-load executor. ` +
+			`Must be a positive integer; defaults to min(CPUNUM, 16). ` +
+			`Independent of admission slots and the legacy load-pool thread coefficients. ` +
+			`The executor is created on first use; updates resize the existing executor.`,
+		Export: false,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 32)
+			if err != nil || parsed <= 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadThreadPoolSize must be a positive int32, using default",
+					mlog.String("configured", v))
+				return p.StorageV2AsyncLoadThreadPoolSize.DefaultValue
+			}
+			return v
+		},
+	}
+	p.StorageV2AsyncLoadThreadPoolSize.Init(base.mgr)
 
 	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",

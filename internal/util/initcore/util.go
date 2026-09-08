@@ -263,6 +263,45 @@ func updateStorageV2AsyncLoadEnabled(enabled bool) {
 	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
 }
 
+// updateStorageV2AsyncLoadThreadPoolSize publishes the positive worker limit.
+func updateStorageV2AsyncLoadThreadPoolSize(threads int) error {
+	status := C.SetStorageV2AsyncLoadThreadPoolSize(C.int(threads))
+	return HandleCStatus(&status, "configure async load executor failed")
+}
+
+// getStorageV2AsyncLoadThreadPoolSize returns the effective native worker limit.
+func getStorageV2AsyncLoadThreadPoolSize() int {
+	return int(C.GetStorageV2AsyncLoadThreadPoolSize())
+}
+
+// registerQueryNodeAsyncLoadThreadPoolConfig applies startup configuration and
+// serializes read-then-resize updates, including deletion of an override.
+func registerQueryNodeAsyncLoadThreadPoolConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(int) error) error {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	var mu sync.Mutex
+	syncConfig := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		threads := item.GetAsInt()
+		if err := apply(threads); err != nil {
+			return err
+		}
+		mlog.Info(ctx, "Async load executor configuration updated", mlog.Int("threads", threads))
+		return nil
+	}
+	pt.Watch(item.Key, config.NewHandler(item.Key+".querynode", func(evt *config.Event) {
+		if evt.HasUpdated {
+			if err := syncConfig(); err != nil {
+				mlog.Warn(ctx, "Failed to update async load executor configuration", mlog.Err(err))
+			}
+		}
+	}))
+	return syncConfig()
+}
+
 // registerConfigWatcherWithCatchUp serializes config application and performs
 // one post-registration sync so startup cannot miss a concurrent update.
 func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConfig func()) {

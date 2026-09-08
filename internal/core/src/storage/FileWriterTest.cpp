@@ -37,6 +37,7 @@
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus;
@@ -101,6 +102,34 @@ ReadFile(const std::string& filename) {
 }
 
 }  // namespace
+
+TEST_F(FileWriterTest, InvalidDiskConfigDoesNotPublishState) {
+    const auto previous_mode = FileWriter::GetMode();
+    const auto previous_buffer_size = FileWriter::GetBufferSize();
+    auto restore = folly::makeGuard([&]() {
+        FileWriter::SetMode(previous_mode);
+        FileWriter::SetBufferSize(previous_buffer_size);
+    });
+    const std::vector<CDiskWriteRateLimiterConfig> invalid_configs = {
+        {0, 1024, 2048, -1, -1, -1},
+        {-1, 1024, 2048, -1, -1, -1},
+        {100000, 0, 2048, -1, -1, -1},
+        {100000, 1024, 0, -1, -1, -1},
+        {100000, 2048, 1024, -1, -1, -1},
+    };
+    for (const auto& rate_config : invalid_configs) {
+        FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+        FileWriter::SetBufferSize(4096);
+        LocalFileIOPool::GetInstance().Configure(0);
+        const CDiskWriteConfig config{"direct", 8, 1, rate_config};
+        auto status = InitDiskFileWriterConfig(config);
+        EXPECT_EQ(status.error_code, ErrorCode::InvalidParameter);
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(FileWriter::GetMode(), FileWriter::WriteMode::BUFFERED);
+        EXPECT_EQ(FileWriter::GetBufferSize(), 4096);
+        EXPECT_FALSE(LocalFileIOPool::GetInstance().GetExecutor());
+    }
+}
 
 // Test basic file writing functionality with buffered IO
 TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
