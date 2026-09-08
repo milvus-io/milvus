@@ -499,7 +499,12 @@ class TestcaseBase(Base):
         return collection_w, partition_w, df_partition, df_default
 
     def collection_insert_multi_segments_one_shard(
-        self, collection_prefix, num_of_segment=2, nb_of_segment=1, is_dup=True
+        self,
+        collection_prefix,
+        num_of_segment=2,
+        nb_of_segment=1,
+        is_dup=True,
+        collection_properties=None,
     ):
         """
         init collection with one shard, insert data into two segments on one shard (they can be merged)
@@ -507,10 +512,13 @@ class TestcaseBase(Base):
         :param num_of_segment: number of segments
         :param nb_of_segment: number of entities per segment
         :param is_dup: whether the primary keys of each segment is duplicated
+        :param collection_properties: properties to set before inserting data
         :return: collection wrap and partition wrap
         """
         collection_name = cf.gen_collection_name_by_testcase_name(2)
         collection_w = self.init_collection_wrap(name=collection_name, shards_num=1)
+        if collection_properties is not None:
+            collection_w.set_properties(collection_properties)
 
         for i in range(num_of_segment):
             start = 0 if is_dup else i * nb_of_segment

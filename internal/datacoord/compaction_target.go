@@ -90,6 +90,19 @@ func (m *compactionTargetMeta) GetCompactionTarget(targetID int64) *datapb.Compa
 	return target.Clone()
 }
 
+// GetCompactionTargetStatus returns the persisted record and whether its
+// materialized runtime behavior is active from one consistent snapshot.
+func (m *compactionTargetMeta) GetCompactionTargetStatus(targetID int64) (*datapb.CompactionTarget, bool) {
+	m.RLock()
+	defer m.RUnlock()
+
+	target, ok := m.targets[targetID]
+	if !ok {
+		return nil, false
+	}
+	return target.Clone(), target.active()
+}
+
 // GetCompactionTargets returns cloned targets keyed by target ID.
 func (m *compactionTargetMeta) GetCompactionTargets() map[int64]*datapb.CompactionTarget {
 	m.RLock()

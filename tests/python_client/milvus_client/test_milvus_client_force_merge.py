@@ -12,11 +12,13 @@ With maxSize=64MB and auto compaction disabled, small data volumes can trigger
 force merge compaction manually without interference from auto compaction.
 """
 
-import math
+import inspect
+import json
 import os
 import time
 from collections import Counter
 
+import grpc
 import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
@@ -24,9 +26,14 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
-from common.milvus_sys import MilvusSys
 from minio import Minio
 from pymilvus import DataType
+from pymilvus.client.call_context import _api_level_md
+from pymilvus.client.utils import check_status
+from pymilvus.decorators import IGNORE_RETRY_CODES
+from pymilvus.exceptions import ErrorCode, MilvusException
+from pymilvus.grpc_gen import common_pb2
+from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -50,6 +57,12 @@ default_string_field_name = ct.default_string_field_name
 max_int64 = (1 << 63) - 1
 auto_target_size_mb = max_int64 // (1024 * 1024) + 1  # Triggers server auto target-size mode.
 actual_output_size_tolerance = 0.10
+force_merge_target_size_tolerance = 0.05
+default_pooling_datanode_memory = 32 * 1024 * 1024 * 1024
+initial_query_retry_backoff = 0.01
+max_query_retry_backoff = 3
+query_retry_backoff_multiplier = 3
+system_info_request = json.dumps({"metric_type": "system_info"})
 
 
 def minio_endpoint(minio_host):
@@ -89,13 +102,526 @@ def get_insert_log_sizes(minio_client, bucket, collection_id, segment_ids):
     return {int(segment_id): size for segment_id, size in sizes.items()}
 
 
+def get_system_info_nodes_once(client, timeout=30):
+    handler = client._get_connection()
+    response = handler._stub.GetMetrics(
+        milvus_types.GetMetricsRequest(request=system_info_request),
+        wait_for_ready=True,
+        timeout=timeout,
+        metadata=_api_level_md(client._generate_call_context()),
+    )
+    check_status(response.status)
+    return json.loads(response.response).get("nodes_info", [])
+
+
 def get_segment_max_size_mb(client):
-    for node in MilvusSys(client=client).get_nodes_by_type("datacoord"):
+    for node in get_system_info_nodes_once(client):
+        if node.get("infos", {}).get("type", "").lower() != "datacoord":
+            continue
         configurations = node.get("infos", {}).get("system_configurations", {})
         max_size = configurations.get("segment_max_size")
         if max_size is not None:
             return int(max_size)
     return None
+
+
+def force_merge_machine_safe_size_mb(nodes, querynode_memory_factor, datanode_memory_factor):
+    """Mirror the server's memory ceiling using the same system-info metrics."""
+    # Failed node metrics may have no component type, so conservatively reject
+    # every untyped error as well as explicit QueryNode/DataNode errors.
+    if any(
+        node.get("infos", {}).get("has_error", False)
+        and node.get("infos", {}).get("type", "").lower() in {"", "querynode", "datanode"}
+        for node in nodes
+    ):
+        return None
+    query_nodes = [node for node in nodes if node.get("infos", {}).get("type", "").lower() == "querynode"]
+    data_nodes = [node for node in nodes if node.get("infos", {}).get("type", "").lower() == "datanode"]
+    if not query_nodes or not data_nodes:
+        return None
+
+    query_memory = [int(node.get("infos", {}).get("hardware_infos", {}).get("memory", 0)) for node in query_nodes]
+    raw_data_memory = [int(node.get("infos", {}).get("hardware_infos", {}).get("memory", 0)) for node in data_nodes]
+    is_pooling = any(memory == 0 for memory in raw_data_memory)
+    data_memory = [memory or default_pooling_datanode_memory for memory in raw_data_memory]
+    querynode_safe_size = min(query_memory) / querynode_memory_factor
+    datanode_safe_size = min(data_memory) / datanode_memory_factor
+    safe_size = min(querynode_safe_size, datanode_safe_size)
+
+    deploy_modes = {node.get("infos", {}).get("system_info", {}).get("deploy_mode", "").upper() for node in nodes}
+    if "STANDALONE" in deploy_modes and not is_pooling:
+        safe_size *= 0.5
+    return safe_size / (1024 * 1024)
+
+
+def get_force_merge_machine_safe_size_mb(client):
+    # Unlike MilvusSys.nodes, retain has_error=true records so an unavailable
+    # topology member cannot make the test overestimate the server ceiling.
+    nodes = get_system_info_nodes_once(client)
+    datacoord_nodes = [node for node in nodes if node.get("infos", {}).get("type", "").lower() == "datacoord"]
+    if not datacoord_nodes:
+        return None
+    configurations = datacoord_nodes[0].get("infos", {}).get("system_configurations", {})
+    querynode_memory_factor = configurations.get("force_merge_querynode_memory_factor")
+    datanode_memory_factor = configurations.get("force_merge_datanode_memory_factor")
+    if querynode_memory_factor is None or datanode_memory_factor is None:
+        return None
+    return force_merge_machine_safe_size_mb(
+        nodes,
+        float(querynode_memory_factor),
+        float(datanode_memory_factor),
+    )
+
+
+@pytest.mark.tags(CaseLabel.L0)
+def test_get_system_info_nodes_retains_error_records():
+    nodes = [
+        {"infos": {"type": "querynode", "has_error": False}},
+        {"infos": {"type": "", "has_error": True, "error_reason": "metrics unavailable"}},
+    ]
+
+    class FakeHandler:
+        def __init__(self):
+            self._stub = self
+
+        def GetMetrics(self, request, wait_for_ready, timeout, metadata):
+            assert json.loads(request.request) == {"metric_type": "system_info"}
+            assert wait_for_ready
+            assert timeout == 7
+            assert metadata is None
+            return milvus_types.GetMetricsResponse(
+                status=common_pb2.Status(error_code=common_pb2.Success),
+                response=json.dumps({"nodes_info": nodes}),
+            )
+
+    class FakeClient:
+        def _get_connection(self):
+            return FakeHandler()
+
+        def _generate_call_context(self):
+            return None
+
+    assert get_system_info_nodes_once(FakeClient(), timeout=7) == nodes
+
+
+@pytest.mark.tags(CaseLabel.L0)
+def test_force_merge_machine_safe_size_wrapper_rejects_untyped_error_node():
+    nodes = [
+        {
+            "infos": {
+                "type": "datacoord",
+                "has_error": False,
+                "system_configurations": {
+                    "force_merge_querynode_memory_factor": 4,
+                    "force_merge_datanode_memory_factor": 4,
+                },
+            }
+        },
+        {
+            "infos": {
+                "type": "querynode",
+                "has_error": False,
+                "hardware_infos": {"memory": 16 * 1024 * 1024 * 1024},
+            }
+        },
+        {
+            "infos": {
+                "type": "datanode",
+                "has_error": False,
+                "hardware_infos": {"memory": 32 * 1024 * 1024 * 1024},
+            }
+        },
+        {"infos": {"type": "", "has_error": True, "error_reason": "metrics unavailable"}},
+    ]
+
+    class FakeHandler:
+        def __init__(self):
+            self._stub = self
+
+        def GetMetrics(self, request, wait_for_ready, timeout, metadata):
+            assert json.loads(request.request) == {"metric_type": "system_info"}
+            assert wait_for_ready
+            assert timeout == 30
+            assert metadata is None
+            return milvus_types.GetMetricsResponse(
+                status=common_pb2.Status(error_code=common_pb2.Success),
+                response=json.dumps({"nodes_info": nodes}),
+            )
+
+    class FakeClient:
+        def _get_connection(self):
+            return FakeHandler()
+
+        def _generate_call_context(self):
+            return None
+
+    assert get_force_merge_machine_safe_size_mb(FakeClient()) is None
+
+
+def query_ids_page_once(client, collection_name, page_start, page_end, timeout):
+    """Run one query RPC without the SDK retry decorator reusing a stale timeout."""
+    handler = client._get_connection()
+    raw_query = inspect.unwrap(handler.query)
+    query_options = client._with_cluster_id({"consistency_level": "Strong"})
+    kwargs = {
+        "collection_name": collection_name,
+        "expr": f"{default_primary_key_field_name} >= {page_start} && {default_primary_key_field_name} < {page_end}",
+        "output_fields": [default_primary_key_field_name],
+        "timeout": timeout,
+        "context": client._generate_call_context(),
+        **query_options,
+    }
+    if inspect.ismethod(raw_query):
+        return raw_query(**kwargs)
+    return raw_query(handler, **kwargs)
+
+
+def collect_query_ids(
+    client,
+    collection_name,
+    total_rows,
+    timeout=180,
+    rpc_timeout=30,
+    page_size=4096,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+):
+    deadline = monotonic() + timeout
+    ids = []
+    for page_start in range(0, total_rows, page_size):
+        backoff = initial_query_retry_backoff
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Query pagination for {collection_name} exceeded {timeout} seconds")
+            try:
+                rows = query_ids_page_once(
+                    client,
+                    collection_name,
+                    page_start,
+                    min(page_start + page_size, total_rows),
+                    timeout=min(rpc_timeout, remaining),
+                )
+                if monotonic() >= deadline:
+                    raise TimeoutError(f"Query pagination for {collection_name} exceeded {timeout} seconds")
+                break
+            except grpc.RpcError as error:
+                if error.code() in IGNORE_RETRY_CODES:
+                    raise
+                if error.code() == grpc.StatusCode.UNAVAILABLE:
+                    handler = client._get_connection()
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"Query pagination for {collection_name} exceeded {timeout} seconds"
+                        ) from error
+                    handler.reconnect(timeout=remaining)
+                    if monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"Query pagination for {collection_name} exceeded {timeout} seconds"
+                        ) from error
+            except MilvusException as error:
+                is_rate_limit = error.code == ErrorCode.RATE_LIMIT or error.compatible_code == common_pb2.RateLimit
+                if not is_rate_limit:
+                    raise
+
+            remaining = deadline - monotonic()
+            if remaining <= backoff:
+                raise TimeoutError(f"Query pagination for {collection_name} exceeded {timeout} seconds")
+            sleep(backoff)
+            backoff = min(backoff * query_retry_backoff_multiplier, max_query_retry_backoff)
+        ids.extend(row[default_primary_key_field_name] for row in rows)
+    return ids
+
+
+@pytest.mark.tags(CaseLabel.L0)
+def test_collect_query_ids_bounds_every_page_rpc():
+    now = 0.0
+
+    def monotonic():
+        return now
+
+    class FakeHandler:
+        def __init__(self):
+            self.rpc_timeouts = []
+            self.expressions = []
+
+        def raw_query(self, collection_name, expr, output_fields, timeout, context, **kwargs):
+            nonlocal now
+            assert collection_name == "deadline_collection"
+            assert output_fields == [default_primary_key_field_name]
+            assert context == "deadline-context"
+            assert kwargs["consistency_level"] == "Strong"
+            assert kwargs["cluster_id"] == "cluster-a"
+            self.rpc_timeouts.append(timeout)
+            self.expressions.append(expr)
+            now += 2
+            return [{default_primary_key_field_name: 1}]
+
+        def query(self, *args, **kwargs):
+            raise AssertionError("the SDK retry wrapper must not be called")
+
+    FakeHandler.query.__wrapped__ = FakeHandler.raw_query
+    handler = FakeHandler()
+
+    class FakeClient:
+        def _get_connection(self):
+            return handler
+
+        def _generate_call_context(self):
+            return "deadline-context"
+
+        def _with_cluster_id(self, kwargs):
+            kwargs["cluster_id"] = "cluster-a"
+            return kwargs
+
+    with pytest.raises(TimeoutError, match="exceeded 3 seconds"):
+        collect_query_ids(
+            FakeClient(),
+            "deadline_collection",
+            total_rows=4,
+            timeout=3,
+            rpc_timeout=10,
+            page_size=2,
+            monotonic=monotonic,
+        )
+
+    assert handler.rpc_timeouts == [3, 1]
+    assert handler.expressions == ["id >= 0 && id < 2", "id >= 2 && id < 4"]
+
+
+@pytest.mark.tags(CaseLabel.L0)
+@pytest.mark.parametrize("failure", ["unavailable", "rate-limit", "legacy-rate-limit"])
+def test_collect_query_ids_retries_transient_page_failures(failure):
+    now = 0.0
+
+    def monotonic():
+        return now
+
+    def sleep(delay):
+        nonlocal now
+        now += delay
+
+    class RetryableRpcError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.UNAVAILABLE
+
+    class FakeHandler:
+        def __init__(self):
+            self.calls = 0
+            self.rpc_timeouts = []
+            self.reconnect_timeouts = []
+
+        def raw_query(self, collection_name, expr, output_fields, timeout, context, **kwargs):
+            nonlocal now
+            self.calls += 1
+            self.rpc_timeouts.append(timeout)
+            assert kwargs["cluster_id"] == "cluster-a"
+            if self.calls == 1:
+                now += 0.25
+                if failure == "unavailable":
+                    raise RetryableRpcError()
+                if failure == "rate-limit":
+                    raise MilvusException(code=ErrorCode.RATE_LIMIT, message="limited")
+                try:
+                    check_status(
+                        common_pb2.Status(
+                            error_code=common_pb2.RateLimit,
+                            reason="legacy limited",
+                        )
+                    )
+                except MilvusException as error:
+                    assert error.code == common_pb2.Success
+                    assert error.compatible_code == common_pb2.RateLimit
+                    raise
+            return [{default_primary_key_field_name: 0}, {default_primary_key_field_name: 1}]
+
+        def query(self, *args, **kwargs):
+            raise AssertionError("the SDK retry wrapper must not be called")
+
+        def reconnect(self, timeout):
+            self.reconnect_timeouts.append(timeout)
+
+    FakeHandler.query.__wrapped__ = FakeHandler.raw_query
+    handler = FakeHandler()
+
+    class FakeClient:
+        def _get_connection(self):
+            return handler
+
+        def _generate_call_context(self, **kwargs):
+            return "deadline-context"
+
+        def _with_cluster_id(self, kwargs):
+            kwargs["cluster_id"] = "cluster-a"
+            return kwargs
+
+    assert collect_query_ids(
+        FakeClient(),
+        "retry_collection",
+        total_rows=2,
+        timeout=1,
+        rpc_timeout=1,
+        page_size=2,
+        monotonic=monotonic,
+        sleep=sleep,
+    ) == [0, 1]
+    assert handler.calls == 2
+    assert handler.rpc_timeouts == pytest.approx([1, 0.74])
+    if failure == "unavailable":
+        assert handler.reconnect_timeouts == pytest.approx([0.75])
+    else:
+        assert handler.reconnect_timeouts == []
+
+
+@pytest.mark.tags(CaseLabel.L0)
+@pytest.mark.parametrize("failure", ["deadline-exceeded", "unexpected-status"])
+def test_collect_query_ids_fails_fast_for_non_retryable_error(failure):
+    class DeadlineExceededRpcError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.DEADLINE_EXCEEDED
+
+    if failure == "deadline-exceeded":
+        error = DeadlineExceededRpcError()
+    else:
+        with pytest.raises(MilvusException) as generated_error:
+            check_status(
+                common_pb2.Status(
+                    error_code=common_pb2.UnexpectedError,
+                    reason="unexpected business failure",
+                )
+            )
+        error = generated_error.value
+        assert error.code == common_pb2.Success
+        assert error.compatible_code == common_pb2.UnexpectedError
+
+    class FakeHandler:
+        def __init__(self):
+            self.calls = 0
+            self.reconnect_timeouts = []
+
+        def raw_query(self, collection_name, expr, output_fields, timeout, context, **kwargs):
+            self.calls += 1
+            raise error
+
+        def query(self, *args, **kwargs):
+            raise AssertionError("the SDK retry wrapper must not be called")
+
+        def reconnect(self, timeout):
+            self.reconnect_timeouts.append(timeout)
+
+    FakeHandler.query.__wrapped__ = FakeHandler.raw_query
+    handler = FakeHandler()
+
+    class FakeClient:
+        def _get_connection(self):
+            return handler
+
+        def _generate_call_context(self, **kwargs):
+            return "deadline-context"
+
+        def _with_cluster_id(self, kwargs):
+            kwargs["cluster_id"] = "cluster-a"
+            return kwargs
+
+    with pytest.raises(type(error)) as error_info:
+        collect_query_ids(
+            FakeClient(),
+            "fail_fast_collection",
+            total_rows=2,
+            timeout=1,
+            rpc_timeout=1,
+            page_size=2,
+        )
+
+    assert error_info.value is error
+    assert handler.calls == 1
+    assert handler.reconnect_timeouts == []
+
+
+@pytest.mark.tags(CaseLabel.L0)
+def test_collect_query_ids_stops_when_reconnect_exhausts_deadline():
+    now = 0.0
+
+    def monotonic():
+        return now
+
+    class RetryableRpcError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.UNAVAILABLE
+
+    class FakeHandler:
+        def __init__(self):
+            self.calls = 0
+            self.reconnect_timeouts = []
+
+        def raw_query(self, collection_name, expr, output_fields, timeout, context, **kwargs):
+            nonlocal now
+            self.calls += 1
+            assert timeout == pytest.approx(1)
+            now += 0.25
+            raise RetryableRpcError()
+
+        def query(self, *args, **kwargs):
+            raise AssertionError("the SDK retry wrapper must not be called")
+
+        def reconnect(self, timeout):
+            nonlocal now
+            self.reconnect_timeouts.append(timeout)
+            now += timeout
+
+    FakeHandler.query.__wrapped__ = FakeHandler.raw_query
+    handler = FakeHandler()
+
+    class FakeClient:
+        def _get_connection(self):
+            return handler
+
+        def _generate_call_context(self, **kwargs):
+            return "deadline-context"
+
+        def _with_cluster_id(self, kwargs):
+            kwargs["cluster_id"] = "cluster-a"
+            return kwargs
+
+    with pytest.raises(TimeoutError, match="exceeded 1 seconds"):
+        collect_query_ids(
+            FakeClient(),
+            "reconnect_deadline_collection",
+            total_rows=2,
+            timeout=1,
+            rpc_timeout=1,
+            page_size=2,
+            monotonic=monotonic,
+        )
+
+    assert handler.calls == 1
+    assert handler.reconnect_timeouts == pytest.approx([0.75])
+
+
+@pytest.mark.tags(CaseLabel.L0)
+def test_force_merge_machine_safe_size_uses_server_formula():
+    def node(node_type, memory, deploy_mode="DISTRIBUTED", has_error=False):
+        return {
+            "infos": {
+                "type": node_type,
+                "has_error": has_error,
+                "hardware_infos": {"memory": memory},
+                "system_info": {"deploy_mode": deploy_mode},
+            }
+        }
+
+    gib = 1024 * 1024 * 1024
+    distributed = [node("querynode", 2 * gib), node("datanode", 4 * gib)]
+    standalone = [node("querynode", 2 * gib, "STANDALONE"), node("datanode", 4 * gib, "STANDALONE")]
+    pooling = [node("querynode", 2 * gib, "STANDALONE"), node("datanode", 0, "STANDALONE")]
+
+    assert force_merge_machine_safe_size_mb(distributed, 4, 4) == 512
+    assert force_merge_machine_safe_size_mb(distributed, 8, 4) == 256
+    assert force_merge_machine_safe_size_mb(standalone, 4, 4) == 256
+    assert force_merge_machine_safe_size_mb(pooling, 4, 4) == 512
+    assert force_merge_machine_safe_size_mb([node("querynode", 2 * gib)], 4, 4) is None
+    assert force_merge_machine_safe_size_mb(distributed + [node("querynode", 0, has_error=True)], 4, 4) is None
 
 
 class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
@@ -327,51 +853,82 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
                 raise Exception(f"Compaction cost more than {cost}s")
         log.info("ForceMerge on empty collection completed successfully")
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_force_merge_with_multiple_segments(self):
         """
-        target: test ForceMerge with multiple segments
-        method: create collection, insert data in batches to create multiple segments,
-                flush, compact with target_size
-        expected: Segments merged, fewer segments after compaction
-        note: L3 - requires config change (segment.maxSize=64MB) to trigger actual force merge
+        target: verify ForceMerge rewrites a non-empty collection without losing data
+        method: write five flush batches, force merge at least three active segments, then inspect plans and data
+        expected: every input is replaced by a new target and all inserted primary keys remain queryable
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         dim = 128
-        # 1. create collection
-        self.create_collection(client, collection_name, dim)
-        # 2. insert data in multiple batches to create multiple segments
-        rng = np.random.default_rng(seed=19530)
+        self.create_collection(
+            client,
+            collection_name,
+            dim,
+            consistency_level="Strong",
+            properties={"collection.autocompaction.enabled": "false"},
+        )
+        rng = np.random.default_rng()
         batch_size = default_nb
         num_batches = 5
+        total_rows = batch_size * num_batches
         for batch in range(num_batches):
+            vectors = rng.random((batch_size, dim), dtype=np.float32)
             rows = [
                 {
                     default_primary_key_field_name: batch * batch_size + i,
-                    default_vector_field_name: list(rng.random((1, dim))[0]),
+                    default_vector_field_name: vectors[i].tolist(),
                 }
                 for i in range(batch_size)
             ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
-            log.info(f"Inserted batch {batch + 1}/{num_batches}")
 
-        # 3. compact with target_size
-        target_size = 2048  # 2GB
-        compact_id = self.compact(client, collection_name, target_size=target_size)[0]
-        # 4. wait for compaction to complete
-        cost = 300
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id)[0]
-            log.info(f"Compaction state: {res}")
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(f"Compaction cost more than {cost}s")
-        log.info("ForceMerge with multiple segments completed successfully")
+        segments_before = self.wait_for_compaction_eligible_segments(
+            client,
+            collection_name,
+            minimum_segment_count=num_batches,
+        )
+        source_ids = {segment.segment_id for segment in segments_before}
+        assert len(source_ids) >= num_batches, (
+            f"Expected at least {num_batches} sealed inputs after flushes, got {len(source_ids)}: {segments_before}"
+        )
+
+        compact_id = self.compact(client, collection_name, target_size=auto_target_size_mb)[0]
+        self.wait_for_compaction_ready(client, compact_id, timeout=300)
+
+        plans = client.get_compaction_plans(compact_id).plans
+        assert plans, f"ForceMerge {compact_id} completed without a compaction plan"
+        planned_source_counts = Counter(segment_id for plan in plans for segment_id in plan.sources)
+        target_ids = {plan.target for plan in plans}
+        assert set(planned_source_counts) == source_ids, (
+            f"ForceMerge plans did not cover every source: expected={source_ids}, actual={set(planned_source_counts)}"
+        )
+        assert all(count == 1 for count in planned_source_counts.values())
+        assert target_ids.isdisjoint(source_ids), (
+            f"ForceMerge targets must be new segments: sources={source_ids}, targets={target_ids}"
+        )
+
+        segments_after = self.list_persistent_segments(client, collection_name)[0]
+        output_ids = {segment.segment_id for segment in segments_after}
+        assert output_ids == target_ids, (
+            f"Active segments do not match ForceMerge targets: active={output_ids}, targets={target_ids}"
+        )
+        assert sum(segment.num_rows for segment in segments_after) == total_rows
+
+        query_res = self.query(
+            client,
+            collection_name,
+            filter=f"{default_primary_key_field_name} >= 0",
+            output_fields=[default_primary_key_field_name],
+            consistency_level="Strong",
+        )[0]
+        query_ids = [row[default_primary_key_field_name] for row in query_res]
+        assert len(query_ids) == total_rows
+        assert len(set(query_ids)) == total_rows
+        assert set(query_ids) == set(range(total_rows))
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_search_after_merge(self):
@@ -554,91 +1111,155 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         log.info(f"ForceMerge reduced segments from {segment_count_before} to {segment_count_after}")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_force_merge_target_size_controls_output_segments(self, minio_host, minio_bucket):
+    def test_force_merge_with_target_size_preserves_topology_and_data(self, minio_host, minio_bucket):
         """
-        target: prove explicit target_size controls Force Merge output count and size
-        method: create a 1.25x-2x target input scope, compact, inspect plans and insert logs
-        expected: rows and sources are conserved; output count matches target and sizes stay within tolerance
-        note: L3 - requires segment.maxSize=64MB, auto compaction disabled, and MinIO access
+        target: prove Force Merge honors explicit target_size without losing topology or data
+        method: compact equivalent data with two valid target sizes and compare output topology
+        expected: the smaller target creates more outputs; every plan target is active and every PK survives
+        note: L3 - requires segment.maxSize == 64MB and MinIO access
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
         dim = 1024
         batch_size = 2000
         num_batches = 18
         total_rows = batch_size * num_batches
-        target_size_mb = 80
-        target_size_bytes = target_size_mb * 1024 * 1024
         minio_client = new_minio_client(minio_host)
         assert minio_client.bucket_exists(minio_bucket), f"MinIO bucket {minio_bucket!r} does not exist"
+        segment_max_size_mb = get_segment_max_size_mb(client)
+        assert segment_max_size_mb is not None and segment_max_size_mb > 0
+        if segment_max_size_mb != 64:
+            pytest.skip(
+                f"comparative target-size fixture requires segment.maxSize == 64MB, got {segment_max_size_mb}MB"
+            )
 
-        self.create_collection(client, collection_name, dim)
-        rng = np.random.default_rng(seed=19530)
-        for batch in range(num_batches):
-            vectors = rng.random((batch_size, dim), dtype=np.float32)
-            rows = [
-                {
-                    default_primary_key_field_name: batch * batch_size + index,
-                    default_vector_field_name: vectors[index].tolist(),
-                }
-                for index in range(batch_size)
-            ]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
+        # With this fixture's ~140MiB MemorySize, 64/128MiB targets produce
+        # distinct output counts in the PR-gate topology (at most two
+        # QueryNodes per replica/shard). The machine-safe-size check below
+        # prevents the server from legally shrinking the larger target.
+        small_target_mb = segment_max_size_mb
+        large_target_mb = segment_max_size_mb * 2
+        required_machine_safe_size_mb = large_target_mb * (1 + force_merge_target_size_tolerance)
+        machine_safe_size_mb = get_force_merge_machine_safe_size_mb(client)
+        if machine_safe_size_mb is None or machine_safe_size_mb < required_machine_safe_size_mb:
+            pytest.skip(
+                f"comparative target-size fixture requires machineSafeSize >= "
+                f"{required_machine_safe_size_mb}MB, got {machine_safe_size_mb}MB"
+            )
 
-        segments_before = self.list_persistent_segments(client, collection_name)[0]
-        source_ids = {segment.segment_id for segment in segments_before}
-        assert len(source_ids) >= num_batches, (
-            f"Expected at least {num_batches} sealed inputs, got {len(source_ids)}: {segments_before}"
-        )
-        description = self.describe_collection(client, collection_name)[0]
-        collection_id = description["collection_id"]
-        input_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, source_ids)
-        total_input_size = sum(input_sizes.values())
-        assert target_size_bytes * 1.25 < total_input_size < target_size_bytes * 2, (
-            f"Fixture must produce between 1.25x and 2x target bytes; "
-            f"input={total_input_size}, target={target_size_bytes}, sizes={input_sizes}"
-        )
+        def run_force_merge(target_size_mb):
+            collection_name = cf.gen_unique_str(f"{prefix}_{target_size_mb}")
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(
+                default_vector_field_name,
+                index_type="FLAT",
+                metric_type="COSINE",
+            )
+            self.create_collection(
+                client,
+                collection_name,
+                dim,
+                index_params=index_params,
+                properties={"collection.autocompaction.enabled": "false"},
+            )
+            rng = np.random.default_rng(seed=19530)
+            for batch in range(num_batches):
+                vectors = rng.random((batch_size, dim), dtype=np.float32)
+                rows = [
+                    {
+                        default_primary_key_field_name: batch * batch_size + index,
+                        default_vector_field_name: vectors[index].tolist(),
+                    }
+                    for index in range(batch_size)
+                ]
+                self.insert(client, collection_name, rows)
+                self.flush(client, collection_name)
 
-        compact_id = self.compact(client, collection_name, target_size=target_size_mb)[0]
-        assert self.wait_for_compaction_ready(client, compact_id, timeout=600)
+            segments_before = self.wait_for_compaction_eligible_segments(
+                client,
+                collection_name,
+                minimum_segment_count=2,
+                timeout=180,
+            )
+            raw_source_ids = [segment.segment_id for segment in segments_before]
+            source_ids = set(raw_source_ids)
+            assert len(raw_source_ids) == len(source_ids), f"Duplicate ForceMerge input IDs: {segments_before}"
+            description = self.describe_collection(client, collection_name)[0]
+            collection_id = description["collection_id"]
+            input_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, source_ids)
+            total_input_size = sum(input_sizes.values())
 
-        plans = client.get_compaction_plans(compact_id).plans
-        planned_source_counts = Counter(segment_id for plan in plans for segment_id in plan.sources)
-        planned_source_ids = set(planned_source_counts)
-        assert planned_source_ids == source_ids, (
-            f"Force Merge plans must cover every input: "
-            f"expected={source_ids}, actual={planned_source_ids}, plans={plans}"
-        )
-        assert all(count == 1 for count in planned_source_counts.values()), (
-            f"Force Merge source IDs must occur in exactly one plan: {planned_source_counts}"
-        )
+            latest_machine_safe_size_mb = get_force_merge_machine_safe_size_mb(client)
+            if latest_machine_safe_size_mb is None or latest_machine_safe_size_mb < required_machine_safe_size_mb:
+                pytest.skip(
+                    f"machineSafeSize became insufficient before compaction: required >= "
+                    f"{required_machine_safe_size_mb}MB, got {latest_machine_safe_size_mb}MB"
+                )
+            compact_id = self.compact(client, collection_name, target_size=target_size_mb)[0]
+            assert self.wait_for_compaction_ready(client, compact_id, timeout=600)
 
-        segments_after = self.list_persistent_segments(client, collection_name)[0]
-        output_ids = {segment.segment_id for segment in segments_after}
-        assert output_ids.isdisjoint(source_ids), (
-            f"Completed Force Merge must replace all source segments: sources={source_ids}, outputs={output_ids}"
-        )
-        assert sum(segment.num_rows for segment in segments_after) == total_rows
+            plans = client.get_compaction_plans(compact_id).plans
+            assert plans, f"ForceMerge {compact_id} completed without plans"
+            assert all(len(plan.sources) == len(set(plan.sources)) for plan in plans), plans
+            planned_source_counts = Counter(segment_id for plan in plans for segment_id in plan.sources)
+            assert set(planned_source_counts) == source_ids, (
+                f"Force Merge plans must cover every input: expected={source_ids}, "
+                f"actual={set(planned_source_counts)}, plans={plans}"
+            )
+            assert all(count == 1 for count in planned_source_counts.values()), (
+                f"Force Merge source IDs must occur in exactly one plan: {planned_source_counts}"
+            )
+            raw_target_ids = [plan.target for plan in plans]
+            target_ids = set(raw_target_ids)
+            assert len(raw_target_ids) == len(target_ids), f"ForceMerge targets must be unique: {plans}"
+            assert target_ids.isdisjoint(source_ids), (
+                f"ForceMerge targets must be new segments: sources={source_ids}, targets={target_ids}"
+            )
 
-        output_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, output_ids)
-        total_output_size = sum(output_sizes.values())
-        rewrite_delta = abs(total_output_size - total_input_size) / total_input_size
-        assert rewrite_delta <= actual_output_size_tolerance, (
-            f"Rewrite changed total insert-log bytes by {rewrite_delta:.2%}: "
-            f"before={total_input_size}, after={total_output_size}"
-        )
+            segments_after = self.list_persistent_segments(client, collection_name)[0]
+            raw_output_ids = [segment.segment_id for segment in segments_after]
+            output_ids = set(raw_output_ids)
+            assert len(raw_output_ids) == len(output_ids), f"Duplicate active ForceMerge outputs: {segments_after}"
+            assert output_ids.isdisjoint(source_ids), (
+                f"Completed ForceMerge must retire every source: sources={source_ids}, outputs={output_ids}"
+            )
+            # CompactionMergeInfo has one legacy `target` field, while one
+            # ForceMerge task may split into several result segments. The API
+            # therefore exposes only ResultSegments[0] for a split task.
+            assert target_ids.issubset(output_ids), (
+                f"Every target exposed by the plan must be active: active={output_ids}, targets={target_ids}"
+            )
+            assert sum(segment.num_rows for segment in segments_after) == total_rows
 
-        expected_output_count = math.ceil(total_input_size / target_size_bytes)
-        assert len(output_sizes) == expected_output_count == 2, (
-            f"Expected two outputs for target={target_size_bytes}, got sizes={output_sizes}"
+            query_ids = collect_query_ids(client, collection_name, total_rows)
+            assert len(query_ids) == total_rows
+            assert len(set(query_ids)) == total_rows
+            assert set(query_ids) == set(range(total_rows))
+
+            output_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, output_ids)
+            total_output_size = sum(output_sizes.values())
+            rewrite_delta = abs(total_output_size - total_input_size) / total_input_size
+            assert rewrite_delta <= actual_output_size_tolerance, (
+                f"Rewrite changed total insert-log bytes by {rewrite_delta:.2%}: "
+                f"before={total_input_size}, after={total_output_size}"
+            )
+            log.info(
+                f"ForceMerge target={target_size_mb}MB: inputs={input_sizes}, outputs={output_sizes}, plans={plans}"
+            )
+            return output_ids, target_ids
+
+        small_output_ids, _ = run_force_merge(small_target_mb)
+        large_output_ids, _ = run_force_merge(large_target_mb)
+        assert len(small_output_ids) == 3, (
+            f"64MB target should produce 3 outputs from the fixed fixture, got {small_output_ids}"
         )
-        max_output_size = max(output_sizes.values())
-        assert target_size_bytes * (1 - actual_output_size_tolerance) <= max_output_size
-        assert all(size <= target_size_bytes * (1 + actual_output_size_tolerance) for size in output_sizes.values()), (
-            f"Output insert-log size exceeded target tolerance: target={target_size_bytes}, sizes={output_sizes}"
+        assert len(large_output_ids) == 2, (
+            f"128MB target should produce 2 outputs from the fixed fixture, got {large_output_ids}"
         )
-        log.info(f"Force Merge target-size evidence: input={input_sizes}, output={output_sizes}, plans={plans}")
+        assert len(small_output_ids) > len(large_output_ids), (
+            f"Explicit target_size did not change output topology: "
+            f"target={small_target_mb}MB produced {len(small_output_ids)}, "
+            f"target={large_target_mb}MB produced {len(large_output_ids)}"
+        )
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_max_int64_overflow(self):
