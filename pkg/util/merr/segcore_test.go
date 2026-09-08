@@ -206,7 +206,11 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.True(t, IsSegcoreDataFormatBroken(err))
 		assert.False(t, IsSegcoreDataFormatBroken(SegcoreError(2001, "unexpected")))
 		assert.ErrorIs(t, err, ErrSegcore)
-		assert.Equal(t, ErrSegcore.code(), Status(err).GetCode())
+		// The original C++ code travels the wire (see the wire-pass-through
+		// section of docs/dev/error_handling_casebook.md): a client sees 2024,
+		// not the collapsed family code 2000. errors.Is(ErrSegcore) above still
+		// holds through the relabeled inner sentinel.
+		assert.Equal(t, int32(2024), Status(err).GetCode())
 	})
 
 	t.Run("empty_message", func(t *testing.T) {

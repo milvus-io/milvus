@@ -2957,12 +2957,12 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                         list_array->value_offset(i + 1) - offset;
                     if (!(actual_length == expected_list_length)) {
                         ThrowInfo(ErrorCode::DataFormatBroken,
-                                   "vector list length mismatch{}, expected {}, "
-                                   "actual {} at row {}",
-                                   FieldErrorSuffix(field_meta),
-                                   expected_list_length,
-                                   actual_length,
-                                   i);
+                                  "vector list length mismatch{}, expected {}, "
+                                  "actual {} at row {}",
+                                  FieldErrorSuffix(field_meta),
+                                  expected_list_length,
+                                  actual_length,
+                                  i);
                     }
                     if (should_copy_row(
                             values, offset, offset + actual_length, i)) {

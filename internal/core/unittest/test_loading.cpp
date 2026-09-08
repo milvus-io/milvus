@@ -370,7 +370,7 @@ TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
     load_index_info.index_size = 1024 * 1024;
     load_index_info.num_rows = 1024;
 
-    auto request = EstimateLoadIndexResource(&load_index_info);
+    auto request = EstimateLoadIndexResourceChecked(&load_index_info);
 
     EXPECT_TRUE(request.has_raw_data);
 }

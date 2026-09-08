@@ -68,8 +68,6 @@ knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTransla
 knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTranslator.h
 knowhere	internal/core/src/segcore/storagev1translator/SealedIndexTranslator.cpp
 knowhere	internal/core/src/segcore/storagev1translator/SealedIndexTranslator.h
-knowhere	internal/core/src/segcore/storagev1translator/V1SealedIndexTranslator.cpp
-knowhere	internal/core/src/segcore/storagev1translator/V1SealedIndexTranslator.h
 knowhere	internal/core/src/segcore/Utils.cpp
 knowhere	internal/core/src/segcore/vector_index_c.cpp
 knowhere	internal/core/src/storage/DiskFileManagerImpl.cpp
@@ -92,7 +90,6 @@ arrow	internal/core/src/index/json_stats/utils.cpp
 arrow	internal/core/src/index/json_stats/utils.h
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
-arrow	internal/core/src/index/skipindex_stats/utils.h
 arrow	internal/core/src/segcore/boost_score.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.h
@@ -112,7 +109,7 @@ arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
-arrow	internal/core/src/segcore/Utils.cpp
+arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
 arrow	internal/core/src/storage/PayloadReader.h
@@ -154,6 +151,8 @@ milvus_storage	internal/core/src/segcore/storagev2translator/ManifestGroupTransl
 milvus_storage	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 milvus_storage	internal/core/src/segcore/TextColumnCache.cpp
 milvus_storage	internal/core/src/segcore/TextColumnCache.h
+milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
+milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.h
 milvus_storage	internal/core/src/storage/FileManager.h
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.cpp
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h
@@ -190,6 +189,4 @@ tantivy	internal/core/src/index/NgramInvertedIndex.cpp
 tantivy	internal/core/src/index/TextMatchIndex.cpp
 tantivy	internal/core/src/index/TextMatchIndex.h
 tantivy	internal/core/src/pb/index_cgo_msg.pb.h
-tantivy	internal/core/src/segcore/load_index_c.cpp
-tantivy	internal/core/src/segcore/storagev1translator/V1SealedIndexTranslator.cpp
 tantivy	internal/core/src/segcore/Utils.cpp
