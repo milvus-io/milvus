@@ -1,5 +1,27 @@
 # Analyzer Char Filters
 
+- **Feature DRI:** TBD
+- **Primary Approver:** @zhengbuqian
+- **Independent Approver:** TBD
+- **Design Review:** TBD
+
+## Motivation And Scope
+
+Milvus custom analyzers currently follow Tantivy's tokenizer-then-token-filter
+pipeline. They cannot normalize the complete input before tokenization, and a
+token filter cannot provide equivalent behavior after token boundaries have
+already been chosen.
+
+This design adds an ordered pre-tokenization character-filter stage while
+preserving offsets into the original input. Its intended final state is the
+scope delivered by this change: custom analyzers support inline character
+filters, the first implementation is `mapping`, and analyzers without character
+filters retain their current behavior.
+
+File-backed mappings, additional character-filter types, character filters on
+built-in analyzer templates, and UTF-16 offsets are out of scope. This change
+does not add a new public RPC or protobuf field.
+
 ## Summary
 
 Custom analyzers can run character filters over the complete input before
@@ -30,7 +52,7 @@ sequences, the last one is the separator. A literal arrow inside either side
 must be escaped as `\=\>`, so it contains no raw separator. Duplicate sources
 are rejected after trimming and unescaping.
 
-## Configuration
+## Public Interface And Validation
 
 `char_filter` is an ordered array on a custom analyzer:
 
@@ -51,6 +73,17 @@ are rejected after trimming and unescaping.
 Character filters run in array order before the tokenizer. Token filters run
 after the tokenizer as before. Built-in analyzer templates do not accept
 character-filter options.
+
+The configuration remains part of the existing analyzer JSON used by field
+`analyzer_params`, analyzer validation, and `RunAnalyzer`. Collection creation
+and schema changes use the existing validation path, which constructs the
+analyzer on a query node. Invalid character-filter configuration is returned as
+the existing invalid-parameter error; no new error code is introduced.
+
+Validation rejects a non-array `char_filter`, non-object entries, missing or
+unsupported `type`, missing or non-array `mappings`, non-string mapping entries,
+empty or duplicate sources, malformed escapes, and unsupported offset modes.
+`char_filter_offset_mode` requires `char_filter` to be present.
 
 `char_filter_offset_mode` is optional:
 
@@ -79,6 +112,13 @@ pre-tokenization character-filter role. For each input it:
 The wrapper retains the filtered text for the lifetime of the inner stream. It
 does not buffer emitted tokens.
 
+Analyzer JSON continues to be stored with the field schema and consumed through
+the existing analyzer construction paths for indexing, BM25 execution, and
+`RunAnalyzer`. Character filters add no independent identifiers, metadata,
+persistence, cache, WAL record, recovery procedure, lock, retry, or background
+task. Each analyzer instance owns immutable filter configuration, and each token
+stream owns the transformed text and offset corrections for one input.
+
 ## Offset Correction
 
 Offset metadata is sparse and monotonic.
@@ -103,9 +143,15 @@ filtered text. Source-span records are merged with a forward cursor. Boundary
 replacement construction performs one initial binary search and then advances
 through source corrections monotonically.
 
-## Compatibility And Limits
+## Compatibility, Rollout, And Limits
 
 - Existing analyzers without `char_filter` are unchanged.
+- Old binaries reject the new configuration. Operators must upgrade all nodes
+  that validate or execute analyzers before creating fields that use it.
+- There is no feature flag or data migration. Before data is analyzed, rollback
+  consists of removing the new options. After derived text or BM25 data has
+  been produced, changing the analyzer alone would make index-time and
+  query-time analysis inconsistent; affected derived data must be rebuilt.
 - `source_span` avoids ambiguous or zero-length provenance for expanded text.
 - `boundary` is available when consumers require character-boundary behavior.
 - UTF-16 offsets are not supported. Adding them would require a coordinate
@@ -114,6 +160,22 @@ through source corrections monotonically.
 - Every tokenizer, including the gRPC tokenizer, owns the contract of returning
   ordered UTF-8 byte offsets for its input. The character-filter wrapper trusts
   those offsets and does not validate or repair tokenizer output.
+- Mapping output size grows with replacement expansion. Inline mappings add no
+  file access or other external I/O; existing input and configuration transport
+  limits are unchanged.
+
+No new metrics or logs are added. Invalid configurations use the existing
+analyzer-validation response, and `RunAnalyzer` with detailed tokens exposes
+the corrected offsets for troubleshooting.
+
+## Alternatives
+
+- Applying normalization in a token filter was rejected because tokenization
+  has already fixed token boundaries and cannot represent whole-input rewrites.
+- Preprocessing outside the analyzer was rejected because indexing and query
+  paths could diverge and original-input offset correction would be lost.
+- Buffering all emitted tokens and storing one correction per output byte were
+  rejected in favor of lazy token streaming and sparse corrections.
 
 ## Verification
 
@@ -121,3 +183,6 @@ Rust unit and integration tests cover mapping, expansion, contraction, deletion,
 UTF-8 input and replacement text, chained character filters, both offset modes,
 configuration validation, and lazy token streaming. Cgo analyzer tests cover the
 default source-span behavior through the Go boundary.
+
+No design-review meeting conclusion has been recorded yet. The Feature DRI,
+Independent Approver, and review date remain required before design approval.
