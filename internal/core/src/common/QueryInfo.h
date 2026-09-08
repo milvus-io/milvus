@@ -20,6 +20,7 @@
 
 #include "common/ArrayOffsets.h"
 #include "common/Tracer.h"
+#include "common/StrictGroupSearchParams.h"
 #include "common/Types.h"
 #include "knowhere/config.h"
 
@@ -35,6 +36,8 @@ struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};
+    double strict_group_acceptance_threshold_{
+        kDefaultStrictGroupAcceptanceThreshold};
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;

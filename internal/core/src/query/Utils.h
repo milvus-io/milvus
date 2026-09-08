@@ -20,11 +20,20 @@
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
+inline bool
+CanUseStrictGroupFilteredIterator(const SearchInfo& search_info,
+                                  int64_t num_queries) {
+    return search_info.strict_group_size_ && search_info.group_size_ > 1 &&
+           search_info.topk_ > 0 && num_queries == 1 &&
+           search_info.array_offsets_ == nullptr;
+}
+
 inline void
 FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
     auto total_num = num_queries * topk;
