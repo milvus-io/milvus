@@ -15,6 +15,12 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <boost/math/distributions/binomial.hpp>
+#include <unordered_set>
+#include "monitor/Monitor.h"
+#include "exec/operator/Utils.h"
+#include "index/VectorMemIndex.h"
+#include "exec/operator/search-groupby/StrictGroupWorkEstimate.h"
 
 #include <unordered_map>
 
@@ -30,6 +36,26 @@
 namespace milvus::exec {
 
 namespace {
+
+class CountingScalarIndex : public index::ScalarIndexSort<int64_t> {
+ public:
+    size_t in_calls = 0;
+    size_t in_values = 0;
+    size_t null_calls = 0;
+
+    const TargetBitmap
+    In(size_t n, const int64_t* values) override {
+        ++in_calls;
+        in_values += n;
+        return index::ScalarIndexSort<int64_t>::In(n, values);
+    }
+
+    const TargetBitmap
+    IsNull() override {
+        ++null_calls;
+        return index::ScalarIndexSort<int64_t>::IsNull();
+    }
+};
 
 class SequenceIterator final : public knowhere::IndexNode::iterator {
  public:
@@ -231,6 +257,27 @@ TEST(StrictGroupPhase2ExecutorTest,
     std::vector<int64_t> offsets;
     std::vector<float> distances;
     std::vector<size_t> prefix_sum;
+    const auto before_candidates =
+        milvus::monitor::internal_core_strict_group_phase2_phase1_candidates
+            .Collect()
+            .histogram;
+    const auto before_latency =
+        milvus::monitor::
+            internal_core_strict_group_phase2_membership_build_latency.Collect()
+                .histogram;
+    const auto before_phase2 =
+        milvus::monitor::internal_core_strict_group_phase2_phase2_candidates
+            .Collect()
+            .histogram;
+    const auto before_bitmap =
+        milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
+            .Collect()
+            .histogram;
+    const auto before_ratio =
+        milvus::monitor::internal_core_strict_group_phase2_acceptance_ratio
+            .Collect()
+            .histogram;
+    const auto started = std::chrono::steady_clock::now();
     SearchGroupBy(nullptr,
                   *search_result.vector_iterators_,
                   search_info,
@@ -242,12 +289,45 @@ TEST(StrictGroupPhase2ExecutorTest,
                   nullptr,
                   &search_result);
 
-    EXPECT_EQ(recreate_count, 1);
-    const auto metrics = milvus::monitor::getPrometheusClient().GetMetrics();
-    EXPECT_NE(metrics.find("internal_core_strict_group_phase2_count"),
-              std::string::npos);
-    EXPECT_NE(metrics.find("type=\"phase1_candidates\""), std::string::npos);
-    EXPECT_NE(metrics.find("type=\"phase2_candidates\""), std::string::npos);
+    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - started)
+                                .count();
+    ASSERT_EQ(recreate_count, 1);
+    ASSERT_EQ(observed_filter.size(), kRowCount);
+    const auto after_candidates =
+        milvus::monitor::internal_core_strict_group_phase2_phase1_candidates
+            .Collect()
+            .histogram;
+    const auto after_latency =
+        milvus::monitor::
+            internal_core_strict_group_phase2_membership_build_latency.Collect()
+                .histogram;
+    EXPECT_EQ(after_candidates.sample_count - before_candidates.sample_count,
+              1);
+    EXPECT_EQ(after_candidates.sample_sum - before_candidates.sample_sum, 102);
+    EXPECT_EQ(after_latency.sample_count - before_latency.sample_count, 1);
+    EXPECT_GE(after_latency.sample_sum - before_latency.sample_sum, 0);
+    EXPECT_LE(after_latency.sample_sum - before_latency.sample_sum, elapsed_ms);
+    const auto after_phase2 =
+        milvus::monitor::internal_core_strict_group_phase2_phase2_candidates
+            .Collect()
+            .histogram;
+    const auto after_bitmap =
+        milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
+            .Collect()
+            .histogram;
+    const auto after_ratio =
+        milvus::monitor::internal_core_strict_group_phase2_acceptance_ratio
+            .Collect()
+            .histogram;
+    EXPECT_EQ(after_phase2.sample_count - before_phase2.sample_count, 1);
+    // Five candidates accept four rows; one belongs to a now-full group.
+    EXPECT_EQ(after_phase2.sample_sum - before_phase2.sample_sum, 5);
+    EXPECT_EQ(after_bitmap.sample_count - before_bitmap.sample_count, 1);
+    EXPECT_LE(after_bitmap.sample_sum - before_bitmap.sample_sum, elapsed_ms);
+    EXPECT_EQ(after_ratio.sample_count - before_ratio.sample_count, 1);
+    EXPECT_EQ(after_ratio.sample_sum - before_ratio.sample_sum, 0);
+    EXPECT_FALSE(search_result.CanRecreateVectorIterator());
     EXPECT_EQ(offsets.size(), 6);
     EXPECT_EQ(prefix_sum, (std::vector<size_t>{0, 6}));
     EXPECT_TRUE(observed_filter[candidates[0].first]);
@@ -288,9 +368,15 @@ TEST(StrictGroupPhase2ExecutorTest, EasyQuotaDoesNotRecreate) {
     result.total_data_cnt_ = 1000;
     result.vector_iterators_ = std::vector<std::shared_ptr<VectorIterator>>{
         MakeSequenceVectorIterator(candidates)};
-    result.SetVectorIteratorRecreator(BitsetView{}, [](auto&, auto&) {
-        ADD_FAILURE() << "easy quota must use the original iterator";
-    });
+    auto filter_owner = std::make_shared<TargetBitmap>(1000, false);
+    std::weak_ptr<TargetBitmap> weak_filter = filter_owner;
+    result.vector_iterator_filter_owner_ = filter_owner;
+    result.SetVectorIteratorRecreator(
+        BitsetView(*filter_owner), [](auto&, auto&) {
+            ADD_FAILURE() << "easy quota must use the original iterator";
+        });
+    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
+    filter_owner.reset();
     SearchInfo info;
     info.topk_ = 1;
     info.group_size_ = 2;
@@ -312,6 +398,9 @@ TEST(StrictGroupPhase2ExecutorTest, EasyQuotaDoesNotRecreate) {
                   nullptr,
                   &result);
     EXPECT_EQ(offsets.size(), 2);
+    EXPECT_TRUE(weak_filter.expired());
+    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
+    EXPECT_FALSE(result.CanRecreateVectorIterator());
 }
 
 namespace {
@@ -322,7 +411,10 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
                    int64_t topk,
                    int64_t group_size,
                    int expected_recreates,
-                   size_t expected_rows) {
+                   size_t expected_rows,
+                   std::optional<ErrorCode> recreate_error = std::nullopt,
+                   milvus::OpContext* op_ctx = nullptr,
+                   folly::CancellationSource* cancel_on_recreate = nullptr) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -350,8 +442,15 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
     result.SetVectorIteratorRecreator(
         BitsetView{}, [&](const BitsetView& invalid, SearchResult& batch) {
             ++recreated;
-            // These fixtures lock their groups in exactly topk candidates.
-            // The probe must consume exactly 100 more, with no off-by-one.
+            if (cancel_on_recreate != nullptr) {
+                cancel_on_recreate->requestCancellation();
+            }
+            if (recreate_error.has_value()) {
+                throw SegcoreError(*recreate_error,
+                                   "injected preparation failure");
+            }
+            // Locking consumes at least topk candidates, followed by a full
+            // 100-candidate probe. This prefix must not be returned again.
             for (int64_t i = 0; i < topk + 100; ++i) {
                 EXPECT_TRUE(invalid.test(i)) << i;
             }
@@ -370,7 +469,7 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
     std::vector<int64_t> offsets;
     std::vector<float> distances;
     std::vector<size_t> prefix;
-    SearchGroupBy(nullptr,
+    SearchGroupBy(op_ctx,
                   *result.vector_iterators_,
                   info,
                   groups,
@@ -382,6 +481,10 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
                   &result);
     EXPECT_EQ(recreated, expected_recreates);
     EXPECT_EQ(offsets.size(), expected_rows);
+    EXPECT_EQ(
+        std::unordered_set<int64_t>(offsets.begin(), offsets.end()).size(),
+        offsets.size());
+    EXPECT_FALSE(result.CanRecreateVectorIterator());
 }
 
 }  // namespace
@@ -395,13 +498,12 @@ TEST(StrictGroupPhase2ExecutorTest, ProbeBoundaryAndOnlyOneDecision) {
             labels[i] = 1;
         }
         // The second 100-candidate window has zero useful hits. A successful
-        // first window must not be re-evaluated. Total group coverage >10%
-        // must not prevent the low-acceptance case from recreating either.
+        // first window must not be re-evaluated. Nine accepted rows also stay
+        // on the original iterator because the estimated remaining work is low.
         for (size_t i = 201; i < labels.size(); ++i) {
             labels[i] = 1;
         }
-        CheckProbeScenario(
-            labels, labels.size(), 1, 20, accepted < 10 ? 1 : 0, 20);
+        CheckProbeScenario(labels, labels.size(), 1, 20, 0, 20);
     }
 }
 
@@ -412,7 +514,136 @@ TEST(StrictGroupPhase2ExecutorTest, FullGroupHitsAreNotAcceptedProbeRows) {
         labels[i] = 0;
     }
     // All 100 probe candidates hit a locked group, but only two can be used.
-    // A group-hit ratio would incorrectly suppress the recreation.
+    // A=2 enters cost estimation; H=100 estimates G near 2 and only four more
+    // candidates, so no membership scan or recreation is needed.
+    auto before =
+        milvus::monitor::internal_core_strict_group_phase2_estimated_groups
+            .Collect()
+            .histogram;
+    CheckProbeScenario(labels, labels.size(), 2, 3, 0, 6);
+    auto after =
+        milvus::monitor::internal_core_strict_group_phase2_estimated_groups
+            .Collect()
+            .histogram;
+    EXPECT_EQ(after.sample_count - before.sample_count, 1);
+    EXPECT_NEAR(after.sample_sum - before.sample_sum,
+                2 / kStrictGroupSelectivityLower95[100],
+                1e-9);
+}
+
+TEST(StrictGroupWorkEstimateTest, SelectivityTable) {
+    EXPECT_EQ(kStrictGroupSelectivityLower95[0], 0);
+    EXPECT_NEAR(kStrictGroupSelectivityLower95[1],
+                -std::expm1(std::log(0.95) / 100),
+                1e-15);
+    EXPECT_NEAR(
+        kStrictGroupSelectivityLower95[100], std::pow(0.05, 0.01), 1e-15);
+    for (size_t h = 1; h <= kStrictGroupProbeCandidates; ++h) {
+        SCOPED_TRACE(h);
+        const auto p = kStrictGroupSelectivityLower95[h];
+        EXPECT_GT(p, kStrictGroupSelectivityLower95[h - 1]);
+        EXPECT_LT(p, static_cast<double>(h) / kStrictGroupProbeCandidates);
+        const boost::math::binomial_distribution<double> dist(
+            kStrictGroupProbeCandidates, p);
+        EXPECT_NEAR(boost::math::cdf(boost::math::complement(dist, h - 1)),
+                    0.05,
+                    1e-12);
+    }
+}
+
+TEST(StrictGroupWorkEstimateTest, StrictThresholdAndSparseSample) {
+    EXPECT_FALSE(StrictGroupWorkExceedsLimit(9999));
+    EXPECT_FALSE(StrictGroupWorkExceedsLimit(10000));
+    EXPECT_TRUE(StrictGroupWorkExceedsLimit(10001));
+    std::vector<size_t> quotas(10, 2);
+    quotas[0] = 1;
+    const double work = EstimateStrictGroupRemainingCandidates(
+        10 / kStrictGroupSelectivityLower95[1], quotas);
+    EXPECT_NEAR(work, 88200.94719924426, 0.01);
+    EXPECT_TRUE(StrictGroupWorkExceedsLimit(work));
+    EXPECT_FALSE(
+        StrictGroupWorkExceedsLimit(EstimateStrictGroupRemainingCandidates(
+            1 / kStrictGroupSelectivityLower95[1], {1})));
+}
+
+TEST(StrictGroupWorkEstimateTest, AnalyticExpectations) {
+    EXPECT_DOUBLE_EQ(EstimateStrictGroupRemainingCandidates(100, {}), 0);
+    EXPECT_DOUBLE_EQ(EstimateStrictGroupRemainingCandidates(100, {0, 3}), 300);
+    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {1, 1, 1}),
+                100 * (1.0 + 0.5 + 1.0 / 3),
+                1e-9);
+    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {1, 2}), 225, 1e-5);
+    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {2, 2}), 275, 1e-5);
+    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(
+                    10000, std::vector<size_t>(50, 2)),
+                64959.45364644328,
+                0.01);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, EstimatedWorkThreshold) {
+    for (int quota : {6, 7, 8}) {
+        SCOPED_TRACE(quota);
+        std::vector<int64_t> labels(300, 2);
+        labels[0] = labels[1] = 1;
+        std::fill(labels.begin() + 101, labels.end(), 1);
+        auto before_groups =
+            milvus::monitor::internal_core_strict_group_phase2_estimated_groups
+                .Collect()
+                .histogram;
+        auto before_work =
+            milvus::monitor::
+                internal_core_strict_group_phase2_estimated_remaining_candidates
+                    .Collect()
+                    .histogram;
+        auto before_hits =
+            milvus::monitor::internal_core_strict_group_phase2_probe_group_hits
+                .Collect()
+                .histogram;
+        // A=H=1, conservative G near 1950. Remaining work crosses 10000
+        // between five and six missing rows.
+        CheckProbeScenario(
+            labels, labels.size(), 1, quota, quota == 8 ? 1 : 0, quota);
+        auto after_groups =
+            milvus::monitor::internal_core_strict_group_phase2_estimated_groups
+                .Collect()
+                .histogram;
+        auto after_work =
+            milvus::monitor::
+                internal_core_strict_group_phase2_estimated_remaining_candidates
+                    .Collect()
+                    .histogram;
+        auto after_hits =
+            milvus::monitor::internal_core_strict_group_phase2_probe_group_hits
+                .Collect()
+                .histogram;
+        EXPECT_EQ(after_groups.sample_count - before_groups.sample_count, 1);
+        EXPECT_NEAR(after_groups.sample_sum - before_groups.sample_sum,
+                    1 / kStrictGroupSelectivityLower95[1],
+                    1e-7);
+        EXPECT_EQ(after_work.sample_count - before_work.sample_count, 1);
+        EXPECT_NEAR(after_work.sample_sum - before_work.sample_sum,
+                    (quota - 2) / kStrictGroupSelectivityLower95[1],
+                    1e-7);
+        EXPECT_DOUBLE_EQ(after_hits.sample_sum - before_hits.sample_sum, 1);
+    }
+}
+
+TEST(StrictGroupPhase2ExecutorTest, NonzeroAcceptanceHighWork) {
+    std::vector<int64_t> labels(250, 99);
+    for (int i = 0; i < 50; ++i) {
+        labels[i] = i;
+        labels[150 + 2 * i] = labels[151 + 2 * i] = i;
+    }
+    labels[50] = 0;
+    // A=H=1: the conservative estimate still requires recreation.
+    CheckProbeScenario(labels, labels.size(), 50, 3, 1, 150);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, ZeroAcceptanceWithFullGroupHits) {
+    std::vector<int64_t> labels(106, 0);
+    labels[3] = labels[104] = labels[105] = 1;
+    // Group zero is full before locking group one. A=0 still recreates even
+    // though all 100 probe candidates hit the full locked group (H=100).
     CheckProbeScenario(labels, labels.size(), 2, 3, 1, 6);
 }
 
@@ -420,6 +651,104 @@ TEST(StrictGroupPhase2ExecutorTest, ProbeExhaustionDoesNotRecreate) {
     std::vector<int64_t> labels(120, 2);
     labels[0] = 1;
     CheckProbeScenario(labels, 50, 1, 3, 0, 1);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, PreparationFailureKeepsOriginalIterator) {
+    std::vector<int64_t> labels(104, 99);
+    labels[0] = labels[102] = labels[103] = 1;
+    CheckProbeScenario(
+        labels, labels.size(), 1, 3, 1, 3, ErrorCode::Unsupported);
+    CheckProbeScenario(
+        labels, labels.size(), 1, 3, 1, 3, ErrorCode::FileReadFailed);
+    for (auto code : {ErrorCode::FollyCancel,
+                      ErrorCode::FollyOtherException,
+                      ErrorCode::UnexpectedError,
+                      ErrorCode::DataFormatBroken}) {
+        EXPECT_THROW(
+            CheckProbeScenario(labels, labels.size(), 1, 3, 1, 3, code),
+            SegcoreError);
+    }
+    folly::CancellationSource source;
+    milvus::OpContext op_ctx(source.getToken());
+    EXPECT_THROW(CheckProbeScenario(labels,
+                                    labels.size(),
+                                    1,
+                                    3,
+                                    1,
+                                    3,
+                                    ErrorCode::Unsupported,
+                                    &op_ctx,
+                                    &source),
+                 SegcoreError);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, SharedBaseFilterIsLazyAndReleased) {
+    SearchResult result;
+    auto owner = std::make_shared<TargetBitmap>(1000, false);
+    (*owner)[17] = true;
+    std::weak_ptr<TargetBitmap> weak_owner = owner;
+    result.vector_iterator_filter_owner_ = owner;
+    result.SetVectorIteratorRecreator(
+        BitsetView(*owner), [](const BitsetView& filter, SearchResult&) {
+            EXPECT_TRUE(filter.test(17));
+            EXPECT_TRUE(filter.test(33));
+        });
+    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
+    owner.reset();
+    EXPECT_FALSE(weak_owner.expired());
+    TargetBitmap extra(1000, false);
+    extra[33] = true;
+    auto recreated = result.RecreateVectorIterators(std::move(extra));
+    ASSERT_TRUE(recreated.has_value());
+    EXPECT_NE(result.vector_iterator_base_filter_, nullptr);
+    result.ClearVectorIteratorRecreator();
+    EXPECT_TRUE(weak_owner.expired());
+    EXPECT_FALSE(result.CanRecreateVectorIterator());
+    EXPECT_EQ(result.GetVectorIteratorBaseFilter(), nullptr);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
+    class FailingIndex : public index::VectorMemIndex<float> {
+     public:
+        FailingIndex()
+            : VectorMemIndex(
+                  DataType::NONE,
+                  "FLAT",
+                  knowhere::metric::L2,
+                  knowhere::Version::GetCurrentVersion().VersionNumber()) {
+        }
+        ErrorCode error = ErrorCode::FollyCancel;
+        knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+        VectorIterators(const DatasetPtr,
+                        const knowhere::Json&,
+                        const BitsetView&,
+                        milvus::OpContext*) const override {
+            throw SegcoreError(error, "injected backend preparation failure");
+        }
+    } index;
+    SearchInfo info;
+    info.group_by_field_ids_ = {FieldId(100)};
+    info.topk_ = 1;
+    info.metric_type_ = knowhere::metric::L2;
+    for (bool original : {false, true}) {
+        SearchResult result;
+        result.allow_vector_iterator_recreation_ = original;
+        for (auto code : {ErrorCode::FollyCancel,
+                          ErrorCode::FollyOtherException,
+                          ErrorCode::DataFormatBroken,
+                          ErrorCode::Unsupported}) {
+            index.error = code;
+            try {
+                PrepareVectorIteratorsFromIndex(
+                    info, 1, nullptr, result, BitsetView{}, index);
+                FAIL() << "backend must throw";
+            } catch (const SegcoreError& error) {
+                // Master already preserves typed failures for both original
+                // and recreated searches; do not regress its retry contract.
+                EXPECT_EQ(error.get_error_code(), code);
+            }
+        }
+    }
 }
 
 TEST(StrictGroupPhase2ExecutorTest, FilledAtProbeBoundaryDoesNotRecreate) {
@@ -431,9 +760,9 @@ TEST(StrictGroupPhase2ExecutorTest, FilledAtProbeBoundaryDoesNotRecreate) {
 TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
     auto& config = storage::MmapManager::GetInstance().GetMmapConfig();
     const bool previous = config.GetEnableGrowingMmap();
-    config.growing_enable_mmap = true;
+    config.SetEnableGrowingMmap(true);
     auto restore = std::shared_ptr<void>(
-        nullptr, [&](void*) { config.growing_enable_mmap = previous; });
+        nullptr, [&](void*) { config.SetEnableGrowingMmap(previous); });
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::VARCHAR);
@@ -480,7 +809,8 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
 
     auto values = data.get_col<int64_t>(group_field);
     auto valid = data.get_col_valid(group_field);
-    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    auto scalar_index = std::make_unique<CountingScalarIndex>();
+    auto* counters = scalar_index.get();
     scalar_index->Build(kRowCount, values.data(), valid.data());
     segcore::LoadIndexInfo load_info;
     load_info.field_id = group_field.get();
@@ -503,6 +833,21 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
         nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
     ASSERT_TRUE(raw.has_value());
     ASSERT_TRUE(indexed.has_value());
+    EXPECT_EQ(counters->in_calls, 1);
+    EXPECT_EQ(counters->in_values, 3);
+    EXPECT_EQ(counters->null_calls, 1);
+    // Both sources present: phase two must use raw data, like phase one.
+    LoadGeneratedDataIntoSegment(
+        data,
+        index_segment.get(),
+        false,
+        {pk_field.get(), RowFieldID.get(), TimestampFieldID.get()});
+    ASSERT_TRUE(index_segment->HasFieldData(group_field));
+    auto both = BuildGroupMembership<int64_t>(
+        nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
+    ASSERT_TRUE(both.has_value());
+    EXPECT_EQ(counters->in_calls, 1);
+    EXPECT_EQ(counters->null_calls, 1);
     // The union bitmap owns its bits and no longer needs the source column.
     raw_segment->DropFieldData(group_field);
     auto raw_bitmap = std::move(raw);
@@ -512,6 +857,7 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
     ASSERT_EQ(raw_bitmap->size(), index_bitmap->size());
     for (size_t i = 0; i < raw_bitmap->size(); ++i) {
         EXPECT_EQ((*raw_bitmap)[i], (*index_bitmap)[i]) << "offset " << i;
+        EXPECT_EQ((*raw_bitmap)[i], (*both)[i]) << "offset " << i;
         if (base_filter[i]) {
             EXPECT_FALSE((*raw_bitmap)[i]);
         }

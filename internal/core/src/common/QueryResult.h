@@ -256,9 +256,34 @@ struct SearchResult {
     void
     SetVectorIteratorRecreator(const BitsetView& base_filter,
                                VectorIteratorRecreateFn recreate_fn) {
-        if (base_filter.empty()) {
-            vector_iterator_base_filter_.reset();
-        } else {
+        vector_iterator_base_filter_.reset();
+        vector_iterator_base_filter_view_ = base_filter;
+        // The execution pipeline shares its input column. Direct low-level
+        // callers without an owner retain the original defensive-copy contract.
+        if (!vector_iterator_filter_owner_) {
+            GetVectorIteratorBaseFilter();
+        }
+        vector_iterator_recreate_fn_ = std::move(recreate_fn);
+    }
+
+    void
+    ClearVectorIteratorRecreator() {
+        vector_iterator_recreate_fn_ = {};
+        vector_iterator_base_filter_view_ = {};
+        vector_iterator_base_filter_.reset();
+        vector_iterator_filter_owner_.reset();
+    }
+
+    bool
+    CanRecreateVectorIterator() const {
+        return allow_vector_iterator_recreation_ &&
+               static_cast<bool>(vector_iterator_recreate_fn_);
+    }
+
+    const TargetBitmap*
+    GetVectorIteratorBaseFilter() {
+        const auto& base_filter = vector_iterator_base_filter_view_;
+        if (!vector_iterator_base_filter_ && !base_filter.empty()) {
             auto copied_filter =
                 std::make_unique<TargetBitmap>(base_filter.size(), false);
             if (!base_filter.has_out_ids()) {
@@ -271,18 +296,9 @@ struct SearchResult {
                 }
             }
             vector_iterator_base_filter_ = std::move(copied_filter);
+            vector_iterator_base_filter_view_ =
+                BitsetView(*vector_iterator_base_filter_);
         }
-        vector_iterator_recreate_fn_ = std::move(recreate_fn);
-    }
-
-    bool
-    CanRecreateVectorIterator() const {
-        return allow_vector_iterator_recreation_ &&
-               static_cast<bool>(vector_iterator_recreate_fn_);
-    }
-
-    const TargetBitmap*
-    GetVectorIteratorBaseFilter() const {
         return vector_iterator_base_filter_.get();
     }
 
@@ -294,6 +310,7 @@ struct SearchResult {
         if (!CanRecreateVectorIterator()) {
             return std::nullopt;
         }
+        GetVectorIteratorBaseFilter();
         if (vector_iterator_base_filter_ != nullptr &&
             vector_iterator_base_filter_->size() != additional_filter.size()) {
             return std::nullopt;
@@ -374,6 +391,8 @@ struct SearchResult {
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
     VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
     TargetBitmapPtr vector_iterator_base_filter_{};
+    BitsetView vector_iterator_base_filter_view_{};
+    std::shared_ptr<const void> vector_iterator_filter_owner_{};
     bool allow_vector_iterator_recreation_{true};
 
     // For two-stage search: count of rows that pass the filter in this segment

@@ -45,17 +45,25 @@ ApplyBaseFilter(TargetBitmap& membership, const TargetBitmap* base_filter) {
 
 template <typename T>
 std::optional<TargetBitmap>
-BuildIndexMembership(milvus::OpContext* op_ctx,
-                     const segcore::SegmentInternalInterface& segment,
-                     FieldId field_id,
+BuildIndexMembership(const segcore::PinnedIndexView& pinned_indexes,
                      size_t row_count,
                      const std::vector<GroupKey<T>>& groups,
                      const TargetBitmap* base_filter) {
-    auto pinned_indexes = segment.PinIndex(op_ctx, field_id);
     if (pinned_indexes.empty()) {
         return std::nullopt;
     }
 
+    // Avoid vector<bool>: ScalarIndex<bool>::In needs a contiguous bool array.
+    auto values = std::make_unique<T[]>(groups.size());
+    size_t value_count = 0;
+    bool include_null = false;
+    for (const auto& group : groups) {
+        if (group.has_value()) {
+            values[value_count++] = *group;
+        } else {
+            include_null = true;
+        }
+    }
     TargetBitmap membership;
     membership.reserve(row_count);
     size_t remaining = row_count;
@@ -66,11 +74,11 @@ BuildIndexMembership(milvus::OpContext* op_ctx,
             return std::nullopt;
         }
         auto* mutable_index = const_cast<index::ScalarIndex<T>*>(scalar_index);
-        TargetBitmap chunk_membership(mutable_index->Count(), false);
-        for (const auto& group : groups) {
-            auto matches = group.has_value()
-                               ? mutable_index->In(1, &group.value())
-                               : mutable_index->IsNull();
+        auto chunk_membership =
+            value_count > 0 ? mutable_index->In(value_count, values.get())
+                            : TargetBitmap(mutable_index->Count(), false);
+        if (include_null) {
+            auto matches = mutable_index->IsNull();
             if (matches.size() != chunk_membership.size()) {
                 return std::nullopt;
             }
@@ -178,32 +186,24 @@ BuildGroupMembership(milvus::OpContext* op_ctx,
         return std::nullopt;
     }
     auto count = static_cast<size_t>(row_count);
-    // One union bitmap; no per-group counts or delayed batch scans.
+    // Match phase one's raw-first access policy. Do not pin an unused index.
+    if (segment.HasFieldData(field_id)) {
+        std::unordered_set<GroupKey<T>> target_groups(groups.begin(),
+                                                      groups.end());
+        TargetBitmap membership(count, false);
+        auto scanned = ScanRawField<T>(
+            op_ctx, segment, field_id, count, [&](size_t offset, auto group) {
+                if (IsEligible(base_filter, offset) &&
+                    target_groups.find(group) != target_groups.end()) {
+                    membership[offset] = true;
+                }
+            });
+        if (scanned) {
+            return membership;
+        }
+    }
     auto indexes = segment.PinIndex(op_ctx, field_id);
-    const bool has_scalar_index =
-        !indexes.empty() &&
-        std::all_of(indexes.begin(), indexes.end(), [](const auto& pinned) {
-            return dynamic_cast<const index::ScalarIndex<T>*>(pinned.get()) !=
-                   nullptr;
-        });
-    if (has_scalar_index) {
-        return BuildIndexMembership<T>(
-            op_ctx, segment, field_id, count, groups, base_filter);
-    }
-
-    std::unordered_set<GroupKey<T>> target_groups(groups.begin(), groups.end());
-    TargetBitmap membership(count, false);
-    auto scanned = ScanRawField<T>(
-        op_ctx, segment, field_id, count, [&](size_t offset, auto group) {
-            if (IsEligible(base_filter, offset) &&
-                target_groups.find(group) != target_groups.end()) {
-                membership[offset] = true;
-            }
-        });
-    if (!scanned) {
-        return std::nullopt;
-    }
-    return membership;
+    return BuildIndexMembership<T>(indexes, count, groups, base_filter);
 }
 
 template std::optional<TargetBitmap>
