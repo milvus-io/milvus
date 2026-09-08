@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -296,6 +297,135 @@ func TestTheAdmissionIsUnchangedWithTheStreamingServiceOff(t *testing.T) {
 	defer disabled.UnPatch()
 
 	_, err := AssignReplica(ctx, m, []string{"rg_no_streaming"}, 1, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+}
+
+// withStrictResourceGroupIsolation sets the streaming query node assignment
+// mode for the test and restores the default when it ends.
+func withStrictResourceGroupIsolation(t *testing.T, enabled bool) {
+	t.Helper()
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key, strconv.FormatBool(enabled)))
+	t.Cleanup(func() { p.Reset(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key) })
+}
+
+// The reviewer's shape: two regular nodes and one streaming node in the
+// group, asked for two replicas. Under strict isolation every replica's
+// delegator must come from a streaming node of its OWN group, and the group
+// has one: the second replica would never get one. The larger of the two
+// counts over-admits here, so under strict isolation the bound is the group's
+// own streaming-node count.
+func TestUnderStrictIsolationAFormBoundsAGroupByItsOwnStreamingNodes(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1, 2)
+
+	// A second streaming node elsewhere keeps the cluster-wide check out of
+	// the way: what refuses is the group.
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed":     typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
+		"two regular nodes do not give a second replica a delegator when only its own group's streaming nodes may")
+}
+
+// The same group admits the one replica its streaming node can serve.
+func TestUnderStrictIsolationAMixedGroupAdmitsAsManyReplicasAsItsStreamingNodes(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1, 2)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed": typeutil.NewUniqueSet(101),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_mixed": 1}, assignment)
+}
+
+// A regular-only group cannot host a delegator under strict isolation: no
+// streaming node of its own, no replica, whatever the cluster holds elsewhere.
+func TestUnderStrictIsolationARegularOnlyGroupHostsNoReplica(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_regular", 1, 2)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_regular"}, 1, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
+		"under strict isolation a group with no streaming node of its own cannot give a replica a delegator")
+}
+
+// A streaming-only group admits as many replicas as it has streaming nodes,
+// under strict isolation as under the pooled modes.
+func TestUnderStrictIsolationAStreamingOnlyGroupAdmitsOneReplicaPerStreamingNode(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_streaming")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_streaming": typeutil.NewUniqueSet(101, 102),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_streaming": 2}, assignment)
+}
+
+// The flag does not change the answer for a group that has streaming nodes of
+// its own: with strict isolation off, the replica manager still serves such a
+// group from its own streaming nodes (isolation, or the legacy default pool,
+// which pools only the replicas of groups that have none), so the reviewer's
+// shape is refused for two replicas and admitted for one exactly as under
+// strict isolation. The regular nodes beside the streaming node do not give
+// the second replica a delegator.
+func TestWithStrictIsolationOffAMixedGroupIsBoundedByItsOwnStreamingNodes(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, false)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1, 2)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed":     typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
+		"one streaming node of its own gives one replica a delegator, whatever the flag says")
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_mixed": 1}, assignment)
+}
+
+// A stock binary is unchanged by the mode: it counts the resource manager's
+// nodes and nothing else, strict isolation or not.
+func TestAStockBinaryIsUnchangedByStrictIsolation(t *testing.T) {
+	stockBinary(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1, 2)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed":     typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202, 203),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	require.NoError(t, err, "two regular nodes admit two replicas on a stock binary, as master does")
+	assert.Equal(t, map[string]int{"rg_mixed": 2}, assignment)
+
+	_, err = AssignReplica(ctx, m, []string{"rg_mixed"}, 3, true)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 }
