@@ -142,3 +142,73 @@ func TestShowLoadCollectionsScopedAnswersMinusOneForAnUnloadedCollection(t *test
 		"scoped, an unloaded collection with no recorded failure holds no replica in the group: -1, not a refusal")
 	assert.False(t, resp.GetQueryServiceAvailable()[0])
 }
+
+// putReplicaWithRONode registers a replica of collectionID in rgName homed on
+// nodeID, with roNodeID as a read-only node the node manager does not know:
+// under the availability rule ShowLoadCollections answers with, which is
+// master's - a replica is available when every one of its read-only nodes is
+// known to the node manager - that is a replica that is not available.
+func (f *rgLoadPercentageFixture) putReplicaWithRONode(t *testing.T, collectionID, nodeID, roNodeID int64, rgName string) {
+	t.Helper()
+	f.putResourceGroup(t, rgName)
+	require.Nil(t, f.nodeMgr.Get(roNodeID), "the read-only node must be unknown to the node manager")
+	require.NoError(t, f.meta.Put(context.Background(), meta.NewReplica(&querypb.Replica{
+		ID:            nodeID,
+		CollectionID:  collectionID,
+		ResourceGroup: rgName,
+		Nodes:         []int64{nodeID},
+		RoNodes:       []int64{roNodeID},
+	})))
+}
+
+// The reviewer's L2: a scoped row's percentage spoke for the group, but its
+// query_service_available still spoke for the whole collection, so a group
+// that could not serve was reported as serving whenever any other group
+// could. A collection loaded in rg-a and expanding into rg-b, whose replica
+// is at 40 with no serving delegator yet and is not available, answers 40 and
+// false for rg-b, and the collection-wide 100 and true without a scope.
+//
+// What makes rg-b's replica unavailable is a read-only node the node manager
+// does not know. The rule looks at nothing else - not at the delegator, whose
+// absence only shows in the percentage - and the scoped answer is that same
+// rule restricted to the group's replicas.
+func TestShowLoadCollectionsScopedAnswersQueryServiceAvailableForTheGroupOnly(t *testing.T) {
+	withFailedLoadCache(t)
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2, 3, 4)
+	f.putReplica(t, 100, 10, "rg-a")
+	f.putDelegator(100, 10, "100-dmc0", 1, 2, 3, 4)
+	// The collection-wide figure is the mean of its partitions' own: rg-a
+	// carries everything, so the collection reads as loaded.
+	require.NoError(t, f.meta.PutPartitionWithoutSave(context.Background(), &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 100, PartitionID: 1000},
+		LoadPercentage:    100,
+	}))
+	f.putReplicaWithRONode(t, 100, 20, 21, "rg-b")
+	// The channel is watched and one segment of four is there: two of the
+	// five targets, 40, and no serving delegator yet.
+	f.putDelegator(100, 20, "100-dmc0", 1)
+
+	show := func(rg string) *querypb.ShowCollectionsResponse {
+		resp, err := f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+			CollectionIDs: []int64{100},
+			ResourceGroup: rg,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Equal(t, []int64{100}, resp.GetCollectionIDs())
+		return resp
+	}
+
+	scoped := show("rg-b")
+	assert.EqualValues(t, 40, scoped.GetInMemoryPercentages()[0], "sanity: the group's own progress")
+	assert.False(t, scoped.GetQueryServiceAvailable()[0],
+		"scoped, the answer is whether THIS group can serve, and rg-b cannot")
+
+	unscoped := show("")
+	assert.EqualValues(t, 100, unscoped.GetInMemoryPercentages()[0])
+	assert.True(t, unscoped.GetQueryServiceAvailable()[0],
+		"unscoped, the collection-wide answer is unchanged: rg-a serves")
+
+	assert.True(t, show("rg-a").GetQueryServiceAvailable()[0], "and rg-a answers for itself")
+}
