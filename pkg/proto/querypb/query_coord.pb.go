@@ -661,9 +661,11 @@ type ShowCollectionsResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status                *commonpb.Status      `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	CollectionIDs         []int64               `protobuf:"varint,2,rep,packed,name=collectionIDs,proto3" json:"collectionIDs,omitempty"`
-	InMemoryPercentages   []int64               `protobuf:"varint,3,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
+	Status              *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	CollectionIDs       []int64          `protobuf:"varint,2,rep,packed,name=collectionIDs,proto3" json:"collectionIDs,omitempty"`
+	InMemoryPercentages []int64          `protobuf:"varint,3,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
+	// Follows the request's scope: with resource_group set it says whether
+	// that group can serve, otherwise whether any replica of the collection can.
 	QueryServiceAvailable []bool                `protobuf:"varint,4,rep,packed,name=query_service_available,json=queryServiceAvailable,proto3" json:"query_service_available,omitempty"`
 	RefreshProgress       []int64               `protobuf:"varint,5,rep,packed,name=refresh_progress,json=refreshProgress,proto3" json:"refresh_progress,omitempty"`
 	LoadFields            []*schemapb.LongArray `protobuf:"bytes,6,rep,name=load_fields,json=loadFields,proto3" json:"load_fields,omitempty"`
