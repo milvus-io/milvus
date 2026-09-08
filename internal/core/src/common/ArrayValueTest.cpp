@@ -882,6 +882,8 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     schema->AddField(NestedArrayFieldMeta(array_field, type));
 
     auto config = segcore::SegcoreConfig::default_config();
+    const auto original_chunk_rows = config.get_chunk_rows();
+    DeferLambda([&]() { config.set_chunk_rows(original_chunk_rows); });
     config.set_chunk_rows(2);
     auto segment =
         segcore::CreateGrowingSegment(schema, empty_index_meta, 1, config);

@@ -1192,6 +1192,8 @@ common:
     varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
     dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
     sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
+  metrics:
+    collectionLevelMode: full # controls collection/VChannel-scoped Prometheus metrics: full keeps collection and VChannel values, aggregate replaces them with all and suppresses gauges without a truthful aggregate
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks

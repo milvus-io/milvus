@@ -385,7 +385,8 @@ func (c *dispatcherManager) uploadMetric() {
 	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
 	fn := func(gauge interface {
 		WithLabelValues(lvs ...string) prometheus.Gauge
-	}) {
+	},
+	) {
 		if c.mainDispatcher == nil {
 			return
 		}
