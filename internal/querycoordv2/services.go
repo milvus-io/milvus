@@ -66,6 +66,19 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
+	// A scope names a resource group; one the resource manager does not know
+	// is refused before any collection is looked at. The loaded path below
+	// validates it too, but a collection that is not loaded answers -1 for
+	// the group without reaching that path, and a client polling a misspelled
+	// group after a refused load would wait on -1 forever.
+	if rgName := req.GetResourceGroup(); rgName != "" && !s.meta.ContainResourceGroup(ctx, rgName) {
+		err := merr.WrapErrResourceGroupNotFound(rgName)
+		mlog.Warn(ctx, "show collection failed on an unknown resource group", mlog.String("resourceGroup", rgName), mlog.Err(err))
+		return &querypb.ShowCollectionsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	isGetAll := false
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {

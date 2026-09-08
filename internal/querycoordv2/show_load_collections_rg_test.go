@@ -96,6 +96,26 @@ func TestShowLoadCollectionsScopedToAnUnknownResourceGroupIsRefused(t *testing.T
 	})
 	require.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrResourceGroupNotFound)
+
+	// The reviewer's finding: a collection that is not loaded took the -1
+	// branch before anything looked at the group, so a client polling
+	// ShowLoadCollections{C, "rg_typo"} after a refused load waited on -1
+	// forever. The group is validated before the collections are.
+	const neverLoaded = int64(777)
+	resp, err = f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{neverLoaded},
+		ResourceGroup: "rg-missing",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrResourceGroupNotFound,
+		"an unknown group is refused whether or not the collection is loaded")
+
+	resp, err = f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+		ResourceGroup: "rg-missing",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrResourceGroupNotFound,
+		"and so is a request that names no collection at all")
 }
 
 func TestShowLoadCollectionsScopedAnswersMinusOneForAnUnloadedCollection(t *testing.T) {
