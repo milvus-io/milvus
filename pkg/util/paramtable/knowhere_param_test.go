@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func TestKnowhereConfig_GetIndexParam(t *testing.T) {
@@ -197,15 +198,18 @@ func TestKnowhereConfig_MergeIndexParamsJSON(t *testing.T) {
 	bt.Save("knowhere.TEST_INDEX.search.default_number", "0.5")
 	bt.Save("knowhere.TEST_INDEX.search.default_string", "balanced")
 
-	result, err := cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, `{"default_number":0.8,"request_param":16}`)
+	params := map[string]any{common.SearchParamKey: `{"default_number":0.8,"request_param":16}`}
+	err := cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
 	assert.NoError(t, err)
-	assert.JSONEq(t, `{"default_number":0.8,"default_string":"balanced","request_param":16}`, result)
+	assert.JSONEq(t, `{"default_number":0.8,"default_string":"balanced","request_param":16}`, params[common.SearchParamKey].(string))
 
-	result, err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, `{"request_param":16}`)
+	params[common.SearchParamKey] = `{"request_param":16}`
+	err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
 	assert.NoError(t, err)
-	assert.JSONEq(t, `{"default_number":0.5,"default_string":"balanced","request_param":16}`, result)
+	assert.JSONEq(t, `{"default_number":0.5,"default_string":"balanced","request_param":16}`, params[common.SearchParamKey].(string))
 
-	_, err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, "invalid")
+	params[common.SearchParamKey] = "invalid"
+	err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
 	assert.Error(t, err)
 }
 
