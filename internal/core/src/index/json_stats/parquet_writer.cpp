@@ -18,6 +18,7 @@
 
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
+#include <algorithm>
 #include <exception>
 #include <utility>
 
@@ -183,7 +184,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
     }
 
     auto& builder = it->second;
-    auto ast = AppendDataToBuilder(value, builder);
+    auto ast = AppendJsonStatsValueToBuilder(value, builder);
     AssertInfo(ast.ok(), "failed to append data to builder");
 }
 
@@ -199,7 +200,7 @@ JsonStatsParquetWriter::AppendRow(
         }
 
         auto& builder = it->second;
-        auto status = AppendDataToBuilder(value, builder);
+        auto status = AppendJsonStatsValueToBuilder(value, builder);
         AssertInfo(status.ok(), "failed to append data to builder");
     }
 
@@ -207,7 +208,73 @@ JsonStatsParquetWriter::AppendRow(
 }
 
 arrow::Status
-JsonStatsParquetWriter::AppendDataToBuilder(
+JsonStatsParquetWriter::AppendRecordBatch(
+    const std::shared_ptr<arrow::RecordBatch>& batch) {
+    if (batch == nullptr) {
+        return arrow::Status::Invalid(
+            "cannot append a null json stats record batch");
+    }
+    if (schema_ == nullptr || packed_writer_ == nullptr) {
+        return arrow::Status::Invalid(
+            "json stats parquet writer is not initialized");
+    }
+    if (schema_->num_fields() != batch->num_columns()) {
+        return arrow::Status::Invalid(
+            "json stats record batch column count does not match writer "
+            "schema");
+    }
+    if (!schema_->Equals(*batch->schema(), true)) {
+        return arrow::Status::Invalid(
+            "json stats record batch schema does not match writer schema");
+    }
+    auto validate_status = batch->Validate();
+    if (!validate_status.ok()) {
+        return validate_status;
+    }
+
+    if (batch->num_rows() == 0) {
+        return arrow::Status::OK();
+    }
+
+    // Preserve row order if a caller switches from the row-oriented API to
+    // pre-materialized record batches. The parallel JSON-stats path does not
+    // normally have pending builder rows.
+    if (unflushed_row_count_ > 0) {
+        auto result = WriteCurrentBatch();
+        if (!result.ok()) {
+            return result.status();
+        }
+    }
+
+    // MaterializeKeyStatsRange already produced complete Arrow arrays. Pass
+    // them straight through so the writer does not copy every value into a
+    // second set of builders merely to finish those builders back into arrays.
+    // Keep batch_size_ as an upper bound for a single write; Slice shares the
+    // original buffers and therefore remains zero-copy.
+    const auto max_batch_rows = static_cast<int64_t>(batch_size_);
+    int64_t offset = 0;
+    while (offset < batch->num_rows()) {
+        const auto rows_to_write =
+            std::min(max_batch_rows, batch->num_rows() - offset);
+        auto slice = offset == 0 && rows_to_write == batch->num_rows()
+                         ? batch
+                         : batch->Slice(offset, rows_to_write);
+        auto status = packed_writer_->Write(slice);
+        if (!status.ok()) {
+            return status;
+        }
+        offset += rows_to_write;
+    }
+
+    // Account for the original arrays once. Multiple zero-copy slices share
+    // these buffers, so accounting each slice would overstate their size.
+    UpdatePathSizeMap(batch->columns());
+    all_row_count_ += static_cast<size_t>(batch->num_rows());
+    return arrow::Status::OK();
+}
+
+arrow::Status
+AppendJsonStatsValueToBuilder(
     const std::string& value,
     const std::shared_ptr<arrow::ArrayBuilder>& builder) {
     auto type_id = builder->type()->id();

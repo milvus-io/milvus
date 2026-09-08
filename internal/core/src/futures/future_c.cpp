@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+
 #include "Executor.h"
 #include "Future.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -18,6 +20,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "prometheus/gauge.h"
+#include "storage/EntryStreamUtils.h"
 
 extern "C" void
 future_cancel(CFuture* future) {
@@ -68,4 +71,27 @@ executor_set_load_thread_num(int thread_num) {
     milvus::monitor::internal_cgo_pool_size_load.Set(thread_num);
     LOG_INFO("future executor setup load cpu executor with thread num: {}",
              thread_num);
+}
+
+extern "C" void
+executor_set_json_stats_build_thread_num(int thread_num) {
+    auto normalized_thread_num = std::max(1, thread_num);
+    milvus::futures::getJsonStatsBuildExecutor()->setNumThreads(
+        normalized_thread_num);
+    LOG_INFO(
+        "future executor setup json stats build cpu executor with thread num: "
+        "{}",
+        normalized_thread_num);
+}
+
+extern "C" void
+executor_set_json_stats_build_max_inflight_bytes(int64_t max_inflight_bytes) {
+    auto normalized_max_inflight_bytes =
+        static_cast<size_t>(std::max<int64_t>(0, max_inflight_bytes));
+    milvus::storage::TransientMemoryBudget::SetJsonStatsBuildBudgetBytes(
+        normalized_max_inflight_bytes);
+    LOG_INFO(
+        "json stats build transient memory budget setup with max inflight "
+        "bytes: {}",
+        normalized_max_inflight_bytes);
 }

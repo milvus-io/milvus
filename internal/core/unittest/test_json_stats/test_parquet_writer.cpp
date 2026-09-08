@@ -142,4 +142,63 @@ TEST_F(ParquetWriterFactoryTest, CloseReturnsStatusAndIsIdempotent) {
     std::filesystem::remove_all(path_prefix);
 }
 
+TEST_F(ParquetWriterFactoryTest,
+       AppendRecordBatchDoesNotRematerializeIntoWriterBuilders) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto path_prefix = std::filesystem::path(TestLocalPath) /
+                       "json_stats_writer_direct_record_batch";
+    std::filesystem::remove_all(path_prefix);
+    ASSERT_TRUE(std::filesystem::create_directories(path_prefix));
+
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+    auto context =
+        ParquetWriterFactory::CreateContext(column_map, path_prefix.string());
+    auto schema = context.schema;
+    auto writer_builders = context.builders;
+
+    milvus_storage::StorageConfig storage_config;
+    JsonStatsParquetWriter writer(fs, storage_config, 16 * 1024 * 1024, 1024);
+    writer.Init(std::move(context));
+
+    writer.AppendValue(JsonKey("/int", JSONType::INT64).ToColumnName(), "5");
+    writer.AppendSharedRow(nullptr, 0);
+    writer.AddCurrentRow();
+    for (const auto& builder : writer_builders) {
+        ASSERT_EQ(builder->length(), 1);
+    }
+
+    auto input_builders = CreateArrowBuilders(column_map).first;
+    auto int_builder =
+        std::static_pointer_cast<arrow::Int64Builder>(input_builders.front());
+    auto shared_builder =
+        std::static_pointer_cast<arrow::BinaryBuilder>(input_builders.back());
+    for (int64_t value : {int64_t{10}, int64_t{20}, int64_t{30}}) {
+        ASSERT_TRUE(int_builder->Append(value).ok());
+        ASSERT_TRUE(shared_builder->AppendNull().ok());
+    }
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(input_builders.size());
+    for (auto& builder : input_builders) {
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder->Finish(&array).ok());
+        arrays.push_back(std::move(array));
+    }
+    auto batch = arrow::RecordBatch::Make(schema, 3, std::move(arrays));
+
+    auto status = writer.AppendRecordBatch(batch);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    for (const auto& builder : writer_builders) {
+        EXPECT_EQ(builder->length(), 0);
+    }
+    EXPECT_FALSE(writer.GetPathsToSize().empty());
+
+    status = writer.Close();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    std::filesystem::remove_all(path_prefix);
+}
+
 }  // namespace milvus::index
