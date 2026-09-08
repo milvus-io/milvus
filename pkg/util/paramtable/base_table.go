@@ -25,6 +25,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -219,10 +220,9 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		etcdConfig.EtcdTLSCert.GetValue(),
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue(),
-		etcd.WithDialTimeout(etcdConfig.DialTimeout.GetAsDuration(time.Millisecond)))
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		mlog.Warn(context.TODO(), "init with etcd client failed", mlog.Err(err))
+		log.Warn("init with etcd client failed", zap.Error(err))
 		return
 	}
 	bt.etcdClient = etcdCli

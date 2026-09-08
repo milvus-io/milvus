@@ -63,8 +63,7 @@ func newEtcdClient(etcdInfo *EtcdInfo) (*clientv3.Client, error) {
 		etcdInfo.CertFile,
 		etcdInfo.KeyFile,
 		etcdInfo.CaCertFile,
-		etcdInfo.MinVersion,
-		etcd.WithDialTimeout(etcdInfo.DialTimeout))
+		etcdInfo.MinVersion)
 }
 
 // NewEtcdSource creates an etcd config source over the given client. The

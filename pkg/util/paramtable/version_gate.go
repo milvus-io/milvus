@@ -233,16 +233,8 @@ func (c *confirmator) watchLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-<<<<<<< HEAD
 			log.Warn("version gate: session scan failed, retry", zap.Error(err))
-			if !sleepCtx(ctx, checkInterval) {
-||||||| parent of 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
-			mlog.Warn(ctx, "version gate: session scan failed, retry", mlog.Err(err))
-			if !sleepCtx(ctx, checkInterval) {
-=======
-			mlog.Warn(ctx, "version gate: session scan failed, retry", mlog.Err(err))
 			if !sleepCtx(ctx, scanBackoff) {
->>>>>>> 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
 				return
 			}
 			scanBackoff *= 2
@@ -394,14 +386,7 @@ func (c *confirmator) processGates(ctx context.Context) bool {
 			c.mu.Lock()
 			g.resolved = true
 			c.mu.Unlock()
-<<<<<<< HEAD
-			log.Info("version gate: gate flipped",
-				zap.String("key", g.key), zap.String("value", g.switcher.TargetValue))
-||||||| parent of 0b6420667b (fix: address team2 review follow-ups on embedded-etcd gate, flip logging, tests (#52988))
-			mlog.Info(ctx, "version gate: gate flipped",
-				mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
-=======
->>>>>>> 0b6420667b (fix: address team2 review follow-ups on embedded-etcd gate, flip logging, tests (#52988))
+
 			continue
 		}
 		allDone = false
@@ -418,17 +403,9 @@ func (c *confirmator) processGates(ctx context.Context) bool {
 func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 	min, _, err := c.scanSessions(ctx)
 	if err != nil {
-<<<<<<< HEAD
+		c.backoffForRetryLocked(g)
 		log.Warn("version gate: re-check sessions failed, retry later",
 			zap.String("key", g.key), zap.Error(err))
-||||||| parent of 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
-		mlog.Warn(ctx, "version gate: re-check sessions failed, retry later",
-			mlog.String("key", g.key), mlog.Err(err))
-=======
-		c.backoffForRetryLocked(g)
-		mlog.Warn(ctx, "version gate: re-check sessions failed, retry later",
-			mlog.String("key", g.key), mlog.Err(err))
->>>>>>> 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
 		return false
 	}
 	if isZero(min) || !min.GE(g.version) {
@@ -444,17 +421,9 @@ func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 		return false
 	}
 	if err := c.flip(ctx, g); err != nil {
-<<<<<<< HEAD
+		c.backoffForRetryLocked(g)
 		log.Warn("version gate: flip failed, will retry",
 			zap.String("key", g.key), zap.Error(err))
-||||||| parent of 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
-		mlog.Warn(ctx, "version gate: flip failed, will retry",
-			mlog.String("key", g.key), mlog.Err(err))
-=======
-		c.backoffForRetryLocked(g)
-		mlog.Warn(ctx, "version gate: flip failed, will retry",
-			mlog.String("key", g.key), mlog.Err(err))
->>>>>>> 0f1193323a (fix: back off version-gate flip retries, activate gate in schema-version tests, document flip semantics (#52988))
 		return false
 	}
 	// Flip succeeded (or the gate was superseded by an explicit value):
@@ -494,8 +463,8 @@ func (c *confirmator) flip(ctx context.Context, g *gate) error {
 	// may have set an explicit value (e.g. the false escape hatch) after the
 	// confirmator started; that value must win over the flip.
 	if v, ok := currentConfigValue(g.key); ok && v != g.switcher.EnableAutoSwitchValue {
-		mlog.Info(ctx, "version gate: local config value is explicit, skip flip",
-			mlog.String("key", g.key), mlog.String("value", v))
+		log.Info("version gate: local config value is explicit, skip flip",
+			zap.String("key", g.key), zap.String("value", v))
 		return nil
 	}
 	key := c.configKey(g.key)
@@ -537,8 +506,8 @@ func (c *confirmator) flip(ctx context.Context, g *gate) error {
 	// Make the flip visible in this process immediately instead of waiting for
 	// the periodic config refresher.
 	refreshLocalConfig()
-	mlog.Info(ctx, "version gate: gate flipped",
-		mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
+	log.Info("version gate: gate flipped",
+		zap.String("key", g.key), zap.String("value", g.switcher.TargetValue))
 	return nil
 }
 
