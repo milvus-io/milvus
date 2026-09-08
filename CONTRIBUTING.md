@@ -2,7 +2,7 @@
 
 Contributions to Milvus are welcome from everyone. We strive to make the contribution process simple and straightforward. Up-to-date information can be found at [milvus.io](https://milvus.io/).
 
-The following are a set of guidelines for contributing to Milvus. Following these guidelines makes contributing to this project easy and transparent. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+This guide describes contribution requirements and recommended practices. Requirements use "must" or "required"; recommendations use "should" or "recommended". The target branch's [Mergify configuration](.github/mergify.yml), CI configuration, and required GitHub checks define automated gates. If a documented requirement and configuration disagree, raise the discrepancy with maintainers rather than inventing an additional gate or silently ignoring the requirement.
 
 As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -21,8 +21,11 @@ As for everything else in the project, the contributions to Milvus are governed 
     - [C++ coding style](#c-coding-style)
   - [Run unit test with code coverage](#run-unit-test-with-code-coverage)
     - [Golang](#run-golang-unit-tests)
+    - [Using mockery](#using-mockery)
     - [C++](#run-c-unit-tests)
   - [Commits and PRs](#commits-and-prs)
+    - [Commit history](#commit-history)
+    - [PR title and description](#pr-title-and-description)
 
 ## What contributions can you make?
 
@@ -31,7 +34,6 @@ As for everything else in the project, the contributions to Milvus are governed 
 | Go developers                            | [milvus](https://github.com/milvus-io/milvus)                                                                           |                                                                                                     |
 | CPP developers                           | [milvus](https://github.com/milvus-io/milvus)                                                                                     |                                                                                                     |
 | Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md)       |
-|                                                                                             |
 | Tech writers and docs enthusiasts        | [milvus-docs](https://github.com/milvus-io/milvus-docs)                                                                                                                             | [Contributing to milvus docs](https://github.com/milvus-io/milvus-docs/blob/v2.0.0/CONTRIBUTING.md) |
 | Web developers                           | [milvus-insight](https://github.com/zilliztech/milvus-insight)                                                                                                                      |                                                                                                     |
 
@@ -66,10 +68,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 If you want to become a contributor of Milvus, submit your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
 
-All submissions will be reviewed as quickly as possible.
-There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
-If everything is perfect, the reviewer will label `/lgtm`, and the approver will label `/approve`.
-Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automatically by our @sre-ci-robot
+Reviewers assess correctness and maintainability; approvers also assess the overall design and merge readiness. The `/lgtm` and `/approve` commands correspond to the `lgtm` and `approved` labels. Merging also depends on DCO, applicable CI checks, branch protection, and resolution of blocking labels and review requests. See the [code review guide](CODE_REVIEW.md) for details.
 
 ### GitHub workflow
 
@@ -83,7 +82,7 @@ In your local repo:
 
 1. [Configure](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/configuring-a-remote-repository-for-a-fork) your local repo by adding the remote official repo as upstream. 
 2.  Then you can create a branch, make changes and [commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork).
-3.  Lastly, fetch upstream (and resolve merge conflicts if necessary), rebase and push the changes to origin. You can submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) to get your code reviewed.
+3.  Fetch upstream, update your branch and resolve merge conflicts as needed, then push the changes to origin. You can submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) to get your code reviewed. Updating your branch does not require squashing your commits; see [Commits and PRs](#commits-and-prs).
 4.  Once getting approved, your code can be merged to `master`, yay!
 
 Here is the process illustrated in details:
@@ -144,16 +143,18 @@ Update the design document when review changes the approach, so the merged docum
 
 ### General guidelines
 
-Before submitting your pull requests for review, make sure that your changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and run [unit tests](CONTRIBUTING.md#run-unit-test-with-code-coverage) to check your code coverage rate.
+Before submitting your pull requests for review, check the [coding style](#coding-style) and run validation appropriate to the change. See [DEVELOPMENT.md](DEVELOPMENT.md) for environment setup and [unit tests](#run-unit-test-with-code-coverage) for test commands.
 
 - Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
-- Bug fixes also require unit tests, because the presence of bugs usually indicates insufficient test coverage.
+- Bug fixes require regression coverage that exercises the failure. Use unit tests where practical, or explain why integration, E2E, or other reproducible validation is appropriate.
+- For behavioral changes, validate relevant failure paths as well as successful requests. Describe what was tested and any remaining validation gaps in the PR; do not claim benefits beyond the evidence.
+- Documentation-only changes do not require runtime tests; check their accuracy, examples, and links.
 - Keep API compatibility in mind when you change code in Milvus. Reviewers of your pull request will comment on any API compatibility issues.
 - When you contribute a new feature to Milvus, the maintenance burden is (by default) transferred to the Milvus team. This means that the benefit of the contribution must be compared against the cost of maintaining the feature.
 
 ### Developer Certificate of Origin (DCO)
 
-All contributions to this project must be accompanied by acknowledgment of, and agreement to, the [Developer Certificate of Origin](https://developercertificate.org/). Acknowledgment of and agreement to the Developer Certificate of Origin _must_ be included in the comment section of each contribution and _must_ take the form of `Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without this acknowledgment will be required to add it before being accepted. If contributors are unable or unwilling to agree to the Developer Certificate of Origin, their contribution will not be included.
+Every commit must include a `Signed-off-by: Full Name <email address>` trailer in its commit message to acknowledge the [Developer Certificate of Origin](https://developercertificate.org/). A sign-off in a PR description or review comment does not replace commit sign-offs. Contributions without DCO compliance cannot be accepted.
 
 Contributors sign-off that they adhere to DCO by adding the following Signed-off-by line to commit messages:
 
@@ -176,7 +177,7 @@ We highly recommend you refer to and comply to the following style guides when y
 
 ### Golang coding style
 
-- Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
+- Coding style: refer to the [Effective Go Style Guide](https://golang.org/doc/effective_go).
 
 We also use `golangci-lint` to perform code check. Run the following command before submitting your pull request and make sure there is no issue reported:
 
@@ -193,12 +194,7 @@ $ make fmt
 ### C++ coding style
 
 The C++ coding style used in Milvus generally follows [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
-We made the following changes based on the guide:
-
-- 4 spaces for indentation
-- Adopt .cpp file extension instead of .cc extension
-- 120-character line length
-- Camel-Cased file names
+Use the applicable [.clang-format](.clang-format) configuration for formatting. The root configuration uses 4-space indentation and an 80-column limit. Use `.cpp` for implementation files and follow the naming conventions of the surrounding module.
 
 Install clang-format
 
@@ -214,7 +210,7 @@ $ make cppcheck
 
 ## Run unit test with code coverage
 
-Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
+Run the relevant tests before submitting your PR and cover the behavior you change, including important failure paths. Coverage targets are configured in [codecov.yml](codecov.yml); applicable CI gates are defined in the target branch's configuration. A coverage percentage alone does not demonstrate correctness.
 
 ### Run golang unit tests
 
@@ -224,43 +220,30 @@ You can run all the Golang unit tests using make.
 $ make test-go
 ```
 
-You can also run unit tests in package level.
+You can also run unit tests at package level after preparing the build dependencies and environment. Direct Go test commands must include `-tags dynamic,test` and `-gcflags="all=-N -l"` for the build configuration and monkey-patching tests. Use `-count=1` to avoid cached results.
 
 ```shell
 # run unit tests in datanode package
-$ go test ./internal/datanode -tags dynamic,test -gcflags="all=-N -l" -cover
-ok  	github.com/milvus-io/milvus/internal/datanode 3.874s	coverage: 88.2% of statements
+$ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 -cover ./internal/datanode
 ```
 
-You can run a sub unit test.
-
-In this case, we are only concerned about the tests with name "TestDataNode" and
-sub tests with name "Test_getSystemInfoMetrics". When running sub tests, the coverage is not concerned.
+To run a specific subtest, match both the parent and subtest names. This example selects `Test_getSystemInfoMetrics` under `TestDataNode`. A focused run is useful during development; it does not replace broader regression coverage when the change requires it.
 
 ```shell
-$ go test ./internal/datanode -tags dynamic,test -gcflags="all=-N -l" -run TestDataNode/Test_getSystemInfoMetrics
-ok  	github.com/milvus-io/milvus/internal/datanode 0.019s
+$ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/datanode -run '^TestDataNode$/^Test_getSystemInfoMetrics$'
 ```
 
 ### Using mockery
 
 It is recommended to use [Mockery](https://github.com/vektra/mockery) to generate mock implementations for unit test dependencies.
 
-If your PR changes any interface definition, you shall run following commands to update all mockery implemented type before submitting it:
+When an interface changes, regenerate its affected mocks using the appropriate `generate-mockery-<module>` target in the [Makefile](Makefile). For example:
 
 ```shell
-make generate-mockery
+make generate-mockery-proxy
 ```
 
-If your PR adds any new interface and related mockery types, please add a new entry under proper [Makefile](Makefile) `generate-mockery-xxx` command.
-
-```Makefile
-generate-mockery-xxx: getdeps
-    # ...
-    # other mockery generation commands
-    # use mockery under $(INSTALL_PATH) to unify mockery binary version
-    $(INSTALL_PATH)/mockery --name=NewInterface ...
-```
+For new mocks, follow the module's existing approach: update its `.mockery.yaml` when it uses configuration-based generation, or extend its Makefile target when it uses CLI arguments. Use the repository-managed Mockery version. The aggregate `make generate-mockery` target does not include every module-specific target; check the Makefile for the affected module. Do not hand-edit generated mocks or protobuf files.
 
 ### Run C++ unit tests
 
@@ -278,4 +261,21 @@ $ make codecov-cpp
 
 ## Commits and PRs
 
-- Commit message and PR description style: refer to [good commit messages](https://chris.beams.io/posts/git-commit)
+### Commit history
+
+PRs may contain multiple logically organized commits. Contributors are **not required to squash a PR into a single commit** before review or merge. Each commit must include a [DCO sign-off](#developer-certificate-of-origin-dco).
+
+Commit messages should clearly explain the change; include a body when the rationale is not evident from the subject. Capitalization and trailing punctuation are writing preferences, not merge requirements. See [good commit messages](https://chris.beams.io/posts/git-commit) for recommendations.
+
+### PR title and description
+
+PR titles must use `{type}: {description}`. Supported prefixes are `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, and `build(deps):`. Automation also uses the `[automated]` prefix. These prefixes apply to PR titles, not to every individual commit subject.
+
+The PR description must be non-empty. Explain the problem, the resulting behavior, and the validation performed, including material limitations. Complete the target repository's PR template when one is provided.
+
+- Bug fixes (`fix:` / `kind/bug`) and features (`feat:` / `kind/feature`) must link a related issue, for example `issue: #123`.
+- Enhancements labeled `size/L`, `size/XL`, or `size/XXL` must also link a related issue. Documentation and test PRs do not require an issue solely because of their type.
+- Features must provide an in-repository [design document](#design-documents).
+- PRs targeting `2.x` release branches or `3.0` must link the corresponding master PR, for example `pr: #123`, unless the `kind/branch-feature` exception applies. The current rules also exempt `[automated]` PRs from related-issue, related-PR, and design-document checks.
+
+The detailed label conditions and exceptions are maintained in [.github/mergify.yml](.github/mergify.yml). Reviewers should verify the target branch's rules rather than applying a blanket issue-link requirement to every PR.
