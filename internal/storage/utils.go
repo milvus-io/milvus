@@ -1130,7 +1130,7 @@ func validateElementNullableMerge(fid FieldID, existing, incoming FieldData) err
 	case *ArrayFieldData:
 		existing, ok := existing.(*ArrayFieldData)
 		if ok && existing.ElementNullable != incoming.ElementNullable {
-			return merr.WrapErrStorageMsg(
+			return merr.WrapErrServiceInternalMsg(
 				"cannot merge Array field %d with inconsistent element_nullable: existing=%t, incoming=%t",
 				fid,
 				existing.ElementNullable,
@@ -1140,7 +1140,7 @@ func validateElementNullableMerge(fid FieldID, existing, incoming FieldData) err
 	case *VectorArrayFieldData:
 		existing, ok := existing.(*VectorArrayFieldData)
 		if ok && existing.ElementNullable != incoming.ElementNullable {
-			return merr.WrapErrStorageMsg(
+			return merr.WrapErrServiceInternalMsg(
 				"cannot merge ArrayOfVector field %d with inconsistent element_nullable: existing=%t, incoming=%t",
 				fid,
 				existing.ElementNullable,

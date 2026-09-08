@@ -99,7 +99,7 @@ func validateElementNullableVectorArrayValidity(elementValidData []bool, physica
 
 func getArrayOfVectorElementByteWidth(elementType schemapb.DataType, dim int) (int, error) {
 	if dim <= 0 {
-		return 0, merr.WrapErrStorageMsg("invalid dimension %d for ArrayOfVector", dim)
+		return 0, merr.WrapErrServiceInternalMsg("invalid dimension %d for ArrayOfVector", dim)
 	}
 
 	switch elementType {
@@ -112,7 +112,7 @@ func getArrayOfVectorElementByteWidth(elementType schemapb.DataType, dim int) (i
 	case schemapb.DataType_Int8Vector:
 		return dim, nil
 	default:
-		return 0, merr.WrapErrStorageMsg("unsupported element type for ArrayOfVector: %s", elementType.String())
+		return 0, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector: %s", elementType.String())
 	}
 }
 

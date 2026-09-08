@@ -3591,7 +3591,7 @@ func TestMergeFieldDataRejectsElementNullableMismatch(t *testing.T) {
 
 		require.NoError(t, MergeFieldData(data, 100, existing))
 		err := MergeFieldData(data, 100, incoming)
-		require.ErrorIs(t, err, merr.ErrStorage)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.ErrorContains(t, err, "inconsistent element_nullable")
 		merged := data.Data[100].(*ArrayFieldData)
 		require.True(t, merged.ElementNullable)
@@ -3619,7 +3619,7 @@ func TestMergeFieldDataRejectsElementNullableMismatch(t *testing.T) {
 		}}
 
 		err := MergeInsertData(buffer, first, second)
-		require.ErrorIs(t, err, merr.ErrStorage)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.ErrorContains(t, err, "inconsistent element_nullable")
 		require.Empty(t, buffer.Data)
 	})

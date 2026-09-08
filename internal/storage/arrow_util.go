@@ -272,17 +272,17 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		switch vb := valueBuilder.(type) {
 		case *array.FixedSizeBinaryBuilder:
 			if field.GetElementNullable() {
-				return 0, merr.WrapErrStorageMsg("element-nullable ArrayOfVector requires Binary child storage")
+				return 0, merr.WrapErrServiceInternalMsg("element-nullable ArrayOfVector requires Binary child storage")
 			}
 			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
 			if !ok {
-				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
 			byteWidth := uint64(vb.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
 			vb.Reserve(int(end - start))
 			for i := start; i < end; i++ {
 				if fixedArray.IsNull(int(i)) {
-					return 0, merr.WrapErrStorageMsg(
+					return 0, merr.WrapErrDataIntegrityMsg(
 						"non-element-nullable ArrayOfVector contains null child at logical element %d",
 						i-start,
 					)
@@ -294,10 +294,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		case *array.BinaryBuilder:
 			binaryArray, ok := valuesArray.(*array.Binary)
 			if !ok {
-				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
 			if !field.GetElementNullable() {
-				return 0, merr.WrapErrStorageMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child storage")
+				return 0, merr.WrapErrServiceInternalMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child storage")
 			}
 			byteWidth := appendDefault.arrayOfVectorByteWidth
 			if byteWidth <= 0 {
@@ -316,7 +316,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 				}
 				val := binaryArray.Value(idx)
 				if len(val) != byteWidth {
-					return 0, merr.WrapErrStorageMsg(
+					return 0, merr.WrapErrDataIntegrityMsg(
 						"ArrayOfVector child at logical element %d has byte width %d, expected %d",
 						i-start,
 						len(val),

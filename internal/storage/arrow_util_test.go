@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
@@ -446,6 +447,7 @@ func TestAppendValueAtRejectsNullFixedSizeBinaryChild(t *testing.T) {
 		appendValueDefault{},
 	)
 	require.ErrorContains(t, err, "contains null child")
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.Zero(t, size)
 }
 
