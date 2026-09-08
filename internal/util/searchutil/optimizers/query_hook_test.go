@@ -148,8 +148,10 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	suite.Run("knowhere_search_defaults", func() {
 		params := paramtable.Get()
 		searchKey := params.KnowhereConfig.IndexParam.KeyPrefix + "TEST_INDEX.search.default_param"
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 		params.Save(params.KnowhereConfig.Enable.Key, "true")
 		params.Save(searchKey, "0.5")
+		defer params.Reset(params.AutoIndexConfig.Enable.Key)
 		defer params.Reset(params.KnowhereConfig.Enable.Key)
 		defer params.Remove(searchKey)
 
@@ -177,6 +179,18 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			suite.JSONEq(`{"default_param":0.5,"request_param":16}`, suite.getQueryInfo(req).GetSearchParams())
 			suite.False(req.GetReq().GetIsTopkReduce())
 		}
+
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
+		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
+			params[common.SearchParamKey] = `{"default_param":0.8,"hook_param":32}`
+		}).Return(nil)
+		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				SerializedExprPlan: bs,
+			},
+		}, mockHook, 2, false, func(int64) int64 { return 512 }, "TEST_INDEX")
+		suite.NoError(err)
+		suite.JSONEq(`{"default_param":0.8,"hook_param":32}`, suite.getQueryInfo(req).GetSearchParams())
 	})
 
 	suite.Run("other_plannode", func() {

@@ -104,6 +104,11 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			finalTopk := params[common.TopKKey].(int64)
 			req.Req.IsTopkReduce = req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 			queryInfo.Topk = finalTopk
+			if useKnowhereDefaults {
+				if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
+					return nil, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err.Error())
+				}
+			}
 			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 			// Pass global refine decision to C++ via proto after hook validation
 			if globalRefineVal, ok := params[common.GlobalRefineKey]; ok && globalRefineVal.(bool) {
@@ -121,12 +126,12 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			}
 		}
 
-		if useKnowhereDefaults {
-			merged, err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, queryInfo.GetSearchParams())
-			if err != nil {
+		if !useQueryHook && useKnowhereDefaults {
+			params := map[string]any{common.SearchParamKey: queryInfo.GetSearchParams()}
+			if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err.Error())
 			}
-			queryInfo.SearchParams = merged
+			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		}
 
 		serializedExprPlan, err := proto.Marshal(&plan)
