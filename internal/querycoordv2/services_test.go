@@ -1330,12 +1330,72 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 		suite.assertSegments(collection, resp.GetInfos())
 	}
 
+	collection := suite.collections[0]
+	const growingSegmentID int64 = 999999
+	const catchingUpSegmentID int64 = 999998
+	suite.dist.ChannelDistManager.Update(10001, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collection,
+			ChannelName:  "growing-channel",
+		},
+		View: &meta.LeaderView{
+			ID:           10001,
+			CollectionID: collection,
+			Channel:      "growing-channel",
+			GrowingSegments: map[int64]*meta.Segment{
+				growingSegmentID: {},
+			},
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	suite.dist.ChannelDistManager.Update(10002, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collection,
+			ChannelName:  "catching-up-channel",
+		},
+		View: &meta.LeaderView{
+			ID:           10002,
+			CollectionID: collection,
+			Channel:      "catching-up-channel",
+			GrowingSegments: map[int64]*meta.Segment{
+				catchingUpSegmentID: {},
+			},
+			Status: &querypb.LeaderViewStatus{
+				Serviceable:             true,
+				CatchingUpStreamingData: true,
+			},
+		},
+	})
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, growingSegmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            growingSegmentID,
+			CollectionID:  collection,
+			PartitionID:   42,
+			InsertChannel: "growing-channel",
+			NumOfRows:     100,
+			State:         commonpb.SegmentState_Growing,
+		},
+	}, nil).Once()
+	resp, err := server.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{CollectionID: collection})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	growingInfo, ok := lo.Find(resp.GetInfos(), func(info *querypb.SegmentInfo) bool {
+		return info.GetSegmentID() == growingSegmentID
+	})
+	suite.True(ok)
+	suite.Equal(commonpb.SegmentState_Growing, growingInfo.GetSegmentState())
+	suite.Equal(int64(42), growingInfo.GetPartitionID())
+	suite.Equal([]int64{10001}, growingInfo.GetNodeIds())
+	suite.False(lo.ContainsBy(resp.GetInfos(), func(info *querypb.SegmentInfo) bool {
+		return info.GetSegmentID() == catchingUpSegmentID
+	}))
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	req := &querypb.GetSegmentInfoRequest{
 		CollectionID: suite.collections[0],
 	}
-	resp, err := server.GetLoadSegmentInfo(ctx, req)
+	resp, err = server.GetLoadSegmentInfo(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }

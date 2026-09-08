@@ -2164,6 +2164,50 @@ func Test_GetSegmentsInfo(t *testing.T) {
 	})
 }
 
+func Test_GetPersistentSegmentInfoWithStates(t *testing.T) {
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(1), nil)
+	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	mockMixCoord.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *datapb.GetSegmentsByStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error) {
+		require.Equal(t, int64(1), request.GetCollectionID())
+		require.Equal(t, int64(-1), request.GetPartitionID())
+		require.ElementsMatch(t, []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped}, request.GetStates())
+		return &datapb.GetSegmentsByStatesResponse{
+			Status:   merr.Success(),
+			Segments: []int64{10},
+		}, nil
+	})
+	mockMixCoord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+		require.True(t, request.GetIncludeUnHealthy())
+		return &datapb.GetSegmentInfoResponse{
+			Status: merr.Success(),
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:             10,
+					CollectionID:   1,
+					PartitionID:    2,
+					InsertChannel:  "ch-1",
+					State:          commonpb.SegmentState_Dropped,
+					CompactionFrom: []int64{7, 8},
+				},
+			},
+		}, nil
+	})
+
+	proxy := &Proxy{mixCoord: mockMixCoord, metaCache: mockCache}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	resp, err := proxy.GetPersistentSegmentInfo(context.Background(), &milvuspb.GetPersistentSegmentInfoRequest{
+		DbName:         "db",
+		CollectionName: "collection",
+		States:         []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Len(t, resp.GetInfos(), 1)
+	require.Equal(t, "ch-1", resp.GetInfos()[0].GetInsertChannel())
+	require.Equal(t, []int64{7, 8}, resp.GetInfos()[0].GetCompactionFrom())
+}
+
 func TestProxy_AddFileResource(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		proxy := &Proxy{}

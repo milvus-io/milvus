@@ -1249,21 +1249,10 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		}, nil
 	}
 	var segmentIDs []UniqueID
-	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
-	if err != nil {
-		return &datapb.GetSegmentsByStatesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	for _, channel := range channels {
-		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
-		if channelSegmentsView == nil {
-			continue
-		}
-		segmentIDs = append(segmentIDs, channelSegmentsView.FlushedSegmentIDs...)
-		segmentIDs = append(segmentIDs, channelSegmentsView.GrowingSegmentIDs...)
-		segmentIDs = append(segmentIDs, channelSegmentsView.L0SegmentIDs...)
-		segmentIDs = append(segmentIDs, channelSegmentsView.ImportingSegmentIDs...)
+	if partitionID < 0 {
+		segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(ctx, collectionID)
+	} else {
+		segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(ctx, collectionID, partitionID)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 
@@ -1272,7 +1261,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		statesDict[state] = true
 	}
 	for _, id := range segmentIDs {
-		segment := s.meta.GetHealthySegment(ctx, id)
+		segment := s.meta.GetSegment(ctx, id)
 		if segment != nil && statesDict[segment.GetState()] {
 			ret = append(ret, id)
 		}
@@ -1445,7 +1434,14 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	var info *compactionInfo
+	if req.GetCollectionId() != 0 {
+		tasksByTrigger := s.meta.GetCompactionTaskMeta().GetCompactionTasksByCollection(req.GetCollectionId())
+		tasks := lo.Flatten(lo.Values(tasksByTrigger))
+		info = summaryCompactionState(0, tasks)
+	} else {
+		info = s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	}
 	resp.State = info.state
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
