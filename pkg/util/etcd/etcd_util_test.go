@@ -92,11 +92,17 @@ initial-cluster-state: new
 	require.NoError(t, cfgFile.Close())
 
 	err = InitEtcdServer(true, cfgFile.Name(), dataDir, "stdout", "info")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer StopEtcdServer()
+	select {
+	case <-etcdServer.Server.ReadyNotify():
+	default:
+		t.Fatal("InitEtcdServer returned before embedded etcd was ready")
+	}
 
 	etcdCli, err := GetEtcdClient(true, false, []string{}, "", "", "", "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer etcdCli.Close()
 
 	key := path.Join("test", "test")
 	_, err = etcdCli.Put(context.TODO(), key, "value")
