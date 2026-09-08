@@ -168,6 +168,16 @@ No new metrics or logs are added. Invalid configurations use the existing
 analyzer-validation response, and `RunAnalyzer` with detailed tokens exposes
 the corrected offsets for troubleshooting.
 
+## Open Decisions
+
+- Decide whether mappings containing U+0000 are rejected or the Rust/C string
+  boundary is made length-aware. The current C-string transport cannot carry a
+  NUL safely.
+- Define a transformed-output and correction-record limit, including the error
+  returned when chained mappings exceed it.
+
+Both decisions block Design Review approval.
+
 ## Alternatives
 
 - Applying normalization in a token filter was rejected because tokenization
