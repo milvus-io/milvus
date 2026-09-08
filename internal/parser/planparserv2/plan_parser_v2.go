@@ -242,6 +242,9 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 	if err := fillExpressionValueWithBudgetAndSchema(expr, valueMap, membershipBudget, schema); err != nil {
 		return nil, err
 	}
+	if visitorArgs != nil && visitorArgs.OnParsedExpr != nil {
+		visitorArgs.OnParsedExpr(expr)
+	}
 
 	expr = rewriter.RewriteExpr(expr)
 	if err := validateElementFilterPlacement(expr); err != nil {

@@ -61,6 +61,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
 		assert.NoError(t, err)
 		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.False(t, isSimple)
 	})
 
@@ -69,6 +70,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
 		assert.NoError(t, err)
 		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.False(t, isSimple)
 	})
 
@@ -77,6 +79,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
 		assert.NoError(t, err)
 		isSimple, _, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.True(t, isSimple)
 		assert.Equal(t, int64(3), rowNum)
 	})
@@ -89,6 +92,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		termExpr.TermExpr.ColumnInfo.DataType = -1
 
 		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.False(t, isSimple)
 	})
 
@@ -97,6 +101,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr, nil)
 		assert.NoError(t, err)
 		isSimple, _, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.True(t, isSimple)
 		assert.Equal(t, int64(1), rowNum)
 	})
@@ -109,6 +114,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		unaryRangeExpr.UnaryRangeExpr.ColumnInfo.DataType = -1
 
 		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
+		assert.Equal(t, isSimple, isSimpleDeletePlan(plan), "the shape check must agree with the extraction")
 		assert.False(t, isSimple)
 	})
 }
