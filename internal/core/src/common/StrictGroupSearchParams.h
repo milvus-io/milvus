@@ -35,13 +35,13 @@ ParseStrictGroupAcceptanceThreshold(knowhere::Json& params) {
         return kDefaultStrictGroupAcceptanceThreshold;
     }
     if (!it->is_number()) {
-        ThrowInfo(ConfigInvalid,
+        ThrowInfo(InvalidParameter,
                   "{} must be a finite number in [0, 1]",
                   kStrictGroupAcceptanceThreshold);
     }
     const auto threshold = it->get<double>();
     if (!std::isfinite(threshold) || threshold < 0 || threshold > 1) {
-        ThrowInfo(ConfigInvalid,
+        ThrowInfo(InvalidParameter,
                   "{} must be a finite number in [0, 1]",
                   kStrictGroupAcceptanceThreshold);
     }

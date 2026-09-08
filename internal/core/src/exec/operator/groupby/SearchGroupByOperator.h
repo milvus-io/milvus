@@ -21,6 +21,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
@@ -436,6 +437,23 @@ class GroupByResultCollector {
     void
     Add(int64_t offset, float distance, GroupKey group) {
         results_.emplace_back(offset, distance, std::move(group));
+        if (accepted_offsets_) {
+            accepted_offsets_->insert(offset);
+        }
+    }
+
+    void
+    EnableOffsetDeduplication() {
+        accepted_offsets_.emplace();
+        accepted_offsets_->reserve(results_.size());
+        for (const auto& result : results_) {
+            accepted_offsets_->insert(std::get<0>(result));
+        }
+    }
+
+    bool
+    IsAcceptedOffset(int64_t offset) const {
+        return accepted_offsets_ && accepted_offsets_->count(offset) != 0;
     }
 
     size_t
@@ -479,6 +497,7 @@ class GroupByResultCollector {
 
  private:
     std::vector<Result> results_;
+    std::optional<std::unordered_set<int64_t>> accepted_offsets_;
 };
 
 }  // namespace exec
