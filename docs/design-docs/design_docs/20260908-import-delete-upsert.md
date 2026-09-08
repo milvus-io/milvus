@@ -43,7 +43,8 @@ stuff into a single RPC.
   corresponding data.
 - **File-based upsert**: given files of complete rows, overwrite the whole row when the
   primary key exists, insert when it does not.
-- **Delete-write atomicity**: an upsert's delete and write take effect in the same commit.
+- **Delete-write commit atomicity**: an upsert's delete and write are committed at the
+  same fence — neither lands without the other; visibility follows §4.1.
 - **Observable progress**: reuse the import job's state and progress queries.
 
 ## 2. Design
@@ -235,11 +236,13 @@ QueryCoord (TargetObserver periodic sync)
   ├─ fetch metadata the way fillSubChannelRequest does
   └─ genSyncAction attaches the optional field → syncToDelegator
 
-QueryNode (SyncDistribution handling — synchronous; failures are logged
-           only and never fail the sync)
+QueryNode (SyncDistribution handling — L0 delivery is best-effort: it is
+           logged only, never fails the sync, and never gates target
+           promotion)
   ├─ LoadL0 → RegisterL0 (dedup by segment ID; count only on success)
   │                              → covers "segments loaded afterwards"
-  └─ Forward Delete: PinOnlineSegments, then forward to existing segments
+  └─ Forward Delete — runs asynchronously off the sync RPC:
+     PinOnlineSegments, then forward to existing segments
      per l0ForwardPolicy
            local filter: read the delete records, go through
                          forwardStreamingByBF
