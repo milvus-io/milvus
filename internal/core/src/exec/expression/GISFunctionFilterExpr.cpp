@@ -740,7 +740,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size = ChunkSize(field_id_, i) - data_pos;
             size = std::min(size, real_batch_size - processed_rows);
 
             if (size > 0) {
