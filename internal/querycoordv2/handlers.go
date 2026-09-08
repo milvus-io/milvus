@@ -47,7 +47,25 @@ import (
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.GetByCollection(s.ctx, collectionID) {
+	return s.anyReplicaAvailable(s.meta.GetByCollection(s.ctx, collectionID))
+}
+
+// checkAnyReplicaAvailableInResourceGroup is checkAnyReplicaAvailable
+// restricted to the collection's replicas that live in rgName: the answer a
+// ShowLoadCollections scoped to a resource group gives, where the caller asks
+// whether THAT group can serve, not whether any group can.
+func (s *Server) checkAnyReplicaAvailableInResourceGroup(collectionID int64, rgName string) bool {
+	replicas := lo.Filter(s.meta.GetByCollection(s.ctx, collectionID), func(replica *meta.Replica, _ int) bool {
+		return replica.GetResourceGroup() == rgName
+	})
+	return s.anyReplicaAvailable(replicas)
+}
+
+// anyReplicaAvailable is the rule behind both: a replica is available when
+// every one of its read-only nodes is still known to the node manager, and
+// the answer is yes as soon as one replica is.
+func (s *Server) anyReplicaAvailable(replicas []*meta.Replica) bool {
+	for _, replica := range replicas {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {

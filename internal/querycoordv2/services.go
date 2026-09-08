@@ -143,7 +143,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 
 		// A request that names a resource group asks for the progress of the
 		// replicas living there, not the collection-wide figure; -1 says the
-		// group holds no replica of this collection.
+		// group holds no replica of this collection. Whether the service is
+		// available follows the same scope: the caller asks whether THAT
+		// group can serve, and a group that cannot must not be reported as
+		// serving because some other group can.
+		queryServiceAvailable := s.checkAnyReplicaAvailable(collectionID)
 		if rgName := req.GetResourceGroup(); rgName != "" {
 			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
 			if err != nil {
@@ -154,11 +158,12 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 				}, nil
 			}
 			percentage = scoped
+			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(collectionID, rgName)
 		}
 
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
-		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, queryServiceAvailable)
 		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
 			Data: loadFields,
