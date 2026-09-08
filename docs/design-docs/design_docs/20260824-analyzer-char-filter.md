@@ -162,7 +162,8 @@ through source corrections monotonically.
   those offsets and does not validate or repair tokenizer output.
 - Mapping output size grows with replacement expansion. Inline mappings add no
   file access or other external I/O; existing input and configuration transport
-  limits are unchanged.
+  limits are unchanged. This version assumes inline mappings and normal
+  transformed inputs remain small and adds no transformed-output limit.
 
 No new metrics or logs are added. Invalid configurations use the existing
 analyzer-validation response, and `RunAnalyzer` with detailed tokens exposes
@@ -173,10 +174,8 @@ the corrected offsets for troubleshooting.
 - Decide whether mappings containing U+0000 are rejected or the Rust/C string
   boundary is made length-aware. The current C-string transport cannot carry a
   NUL safely.
-- Define a transformed-output and correction-record limit, including the error
-  returned when chained mappings exceed it.
 
-Both decisions block Design Review approval.
+This decision blocks Design Review approval.
 
 ## Alternatives
 
