@@ -907,6 +907,9 @@ TEST(SearchOnGrowingBitsetLifetime,
     const auto& vector_data = FindFieldData(dataset, vector_field);
     auto valid_count = CountValidRows(vector_data, total_count);
     ASSERT_GT(valid_count, 0);
+    ASSERT_LT(valid_count, total_count);
+    const auto& row_validity = GetFieldDataRowValidData(vector_data);
+    ASSERT_EQ(row_validity.size(), total_count);
 
     auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
     auto reserved_offset = segment->PreInsert(total_count);
@@ -946,10 +949,7 @@ TEST(SearchOnGrowingBitsetLifetime,
         search_result,
         logical_bitset_bytes,
         additional_filter,
-        [&](int64_t offset) {
-            return vector_data.valid_data_size() == 0 ||
-                   vector_data.valid_data(offset);
-        },
+        [&](int64_t offset) { return row_validity.Get(offset); },
         recreated_results);
 
     auto combined_filter =

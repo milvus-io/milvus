@@ -28,6 +28,7 @@
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "index/ScalarIndexSort.h"
 #include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -109,6 +110,9 @@ TEST(StrictGroupEligibilityTest, RequiresSingleFieldStrictSingleQuery) {
     info.strict_group_size_ = true;
     info.group_by_field_ids_ = {FieldId(101)};
     EXPECT_TRUE(query::CanUseStrictGroupFilteredIterator(info, 1));
+    auto disabled = info;
+    disabled.strict_group_acceptance_threshold_ = 0;
+    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(disabled, 1));
     EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 2));
     info.group_by_field_ids_.push_back(FieldId(102));
     EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 1));
@@ -405,16 +409,18 @@ TEST(StrictGroupPhase2ExecutorTest, EasyQuotaDoesNotRecreate) {
 namespace {
 
 void
-CheckProbeScenario(const std::vector<int64_t>& labels,
-                   size_t candidate_count,
-                   int64_t topk,
-                   int64_t group_size,
-                   int expected_recreates,
-                   size_t expected_rows,
-                   std::optional<ErrorCode> recreate_error = std::nullopt,
-                   milvus::OpContext* op_ctx = nullptr,
-                   folly::CancellationSource* cancel_on_recreate = nullptr,
-                   std::optional<double> threshold = std::nullopt) {
+CheckProbeScenario(
+    const std::vector<int64_t>& labels,
+    size_t candidate_count,
+    int64_t topk,
+    int64_t group_size,
+    int expected_recreates,
+    size_t expected_rows,
+    std::optional<ErrorCode> recreate_error = std::nullopt,
+    milvus::OpContext* op_ctx = nullptr,
+    folly::CancellationSource* cancel_on_recreate = nullptr,
+    std::optional<double> threshold = std::nullopt,
+    std::optional<std::vector<int64_t>> recreated_offsets = std::nullopt) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -455,9 +461,18 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
                 EXPECT_TRUE(invalid.test(i)) << i;
             }
             EXPECT_FALSE(invalid.test(labels.size() - 1));
+            auto fresh_candidates = candidates;
+            if (recreated_offsets) {
+                fresh_candidates.clear();
+                for (auto offset : *recreated_offsets) {
+                    fresh_candidates.emplace_back(offset,
+                                                  static_cast<float>(offset));
+                }
+            }
             batch.vector_iterators_ =
                 std::vector<std::shared_ptr<VectorIterator>>{
-                    MakeSequenceVectorIterator(candidates, invalid, true)};
+                    MakeSequenceVectorIterator(
+                        fresh_candidates, invalid, true)};
         });
     SearchInfo info;
     info.topk_ = topk;
@@ -508,7 +523,7 @@ TEST(StrictGroupPhase2ExecutorTest, ProbeBoundaryAndOnlyOneDecision) {
             labels[i] = 1;
         }
         CheckProbeScenario(
-            labels, labels.size(), 1, 20, accepted <= 10 ? 1 : 0, 20);
+            labels, labels.size(), 1, 20, accepted < 10 ? 1 : 0, 20);
     }
 }
 
@@ -548,7 +563,12 @@ TEST(StrictGroupAcceptanceThresholdTest, RejectInvalidValues) {
              -std::numeric_limits<double>::infinity(),
              std::numeric_limits<double>::quiet_NaN()}) {
         knowhere::Json params = {{kStrictGroupAcceptanceThreshold, value}};
-        EXPECT_THROW(ParseStrictGroupAcceptanceThreshold(params), SegcoreError);
+        try {
+            ParseStrictGroupAcceptanceThreshold(params);
+            FAIL() << "invalid parameter accepted";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+        }
     }
 }
 
@@ -565,7 +585,7 @@ TEST(StrictGroupPhase2ExecutorTest, ConfigurableAcceptanceThreshold) {
                                labels.size(),
                                1,
                                150,
-                               accepted / 100.0 <= threshold ? 1 : 0,
+                               accepted / 100.0 < threshold ? 1 : 0,
                                150,
                                std::nullopt,
                                nullptr,
@@ -610,14 +630,14 @@ TEST(StrictGroupPhase2ExecutorTest, ProbeExhaustionDoesNotRecreate) {
     CheckProbeScenario(labels, 50, 1, 3, 0, 1);
 }
 
-TEST(StrictGroupPhase2ExecutorTest, PreparationFailureKeepsOriginalIterator) {
+TEST(StrictGroupPhase2ExecutorTest, PreparationExceptionsPropagate) {
     std::vector<int64_t> labels(104, 99);
     labels[0] = labels[102] = labels[103] = 1;
-    CheckProbeScenario(
-        labels, labels.size(), 1, 3, 1, 3, ErrorCode::Unsupported);
-    CheckProbeScenario(
-        labels, labels.size(), 1, 3, 1, 3, ErrorCode::FileReadFailed);
-    for (auto code : {ErrorCode::FollyCancel,
+    for (auto code : {ErrorCode::Unsupported,
+                      ErrorCode::FileReadFailed,
+                      ErrorCode::KnowhereError,
+                      ErrorCode::MemAllocateFailed,
+                      ErrorCode::FollyCancel,
                       ErrorCode::FollyOtherException,
                       ErrorCode::UnexpectedError,
                       ErrorCode::DataFormatBroken}) {
@@ -637,6 +657,127 @@ TEST(StrictGroupPhase2ExecutorTest, PreparationFailureKeepsOriginalIterator) {
                                     &op_ctx,
                                     &source),
                  SegcoreError);
+}
+
+TEST(StrictGroupPhase2ExecutorTest, ExhaustedRecreatedIteratorResumesOriginal) {
+    std::vector<int64_t> labels(106, 99);
+    labels[0] = labels[102] = labels[103] = labels[104] = labels[105] = 1;
+    // The fresh iterator may return nothing, or return 103 before the original
+    // reaches 102,103,104. Duplicate 103 must not consume the final quota.
+    for (auto fresh : {std::vector<int64_t>{},
+                       std::vector<int64_t>{103},
+                       std::vector<int64_t>{103, 103}}) {
+        CheckProbeScenario(labels,
+                           labels.size(),
+                           1,
+                           4,
+                           1,
+                           4,
+                           std::nullopt,
+                           nullptr,
+                           nullptr,
+                           0.1,
+                           fresh);
+    }
+}
+
+TEST(GroupMembershipTest, RawScansHonorCancellation) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto field = schema->AddDebugField("group", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    constexpr size_t rows = 4096;
+    auto data = segcore::DataGen(schema, rows);
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, data);
+    auto growing = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(rows);
+    growing->Insert(
+        offset, rows, data.row_ids_.data(), data.timestamps_.data(), data.raw_);
+    folly::CancellationSource source;
+    milvus::OpContext ctx(source.getToken());
+    source.requestCancellation();
+    for (const auto* segment :
+         {dynamic_cast<const segcore::SegmentInternalInterface*>(sealed.get()),
+          dynamic_cast<const segcore::SegmentInternalInterface*>(
+              growing.get())}) {
+        ASSERT_NE(segment, nullptr);
+        try {
+            BuildGroupMembership<int64_t>(
+                &ctx, *segment, field, rows, {int64_t(1)}, nullptr);
+            FAIL() << "cancelled membership scan completed";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+    }
+}
+
+TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
+    // Cancel when the accessor reaches chunk 1, after chunk 0 was consumed.
+    // No timing or thread scheduling dependency: the next periodic check must
+    // throw before chunk 2 is pinned.
+    class CancellingSegment : public segcore::ChunkedSegmentSealedImpl {
+     public:
+        CancellingSegment(SchemaPtr schema, folly::CancellationSource& source)
+            : ChunkedSegmentSealedImpl(schema,
+                                       empty_index_meta,
+                                       segcore::SegcoreConfig::default_config(),
+                                       991),
+              source_(source),
+              values_(2048, 1) {
+        }
+        bool
+        HasFieldData(FieldId) const override {
+            return true;
+        }
+        int64_t
+        num_chunk_data(FieldId) const override {
+            return 4;
+        }
+        int64_t
+        size_per_chunk() const override {
+            return 2048;
+        }
+        int64_t
+        chunk_size(FieldId, int64_t) const override {
+            return 2048;
+        }
+        int64_t
+        num_rows_until_chunk(FieldId, int64_t id) const override {
+            return id * 2048;
+        }
+        mutable int pins = 0;
+
+     protected:
+        PinWrapper<SpanBase>
+        chunk_data_impl(milvus::OpContext*,
+                        FieldId,
+                        int64_t chunk) const override {
+            ++pins;
+            if (chunk == 1) {
+                source_.requestCancellation();
+            }
+            return PinWrapper<SpanBase>(
+                SpanBase(values_.data(), 2048, sizeof(int64_t)));
+        }
+
+     private:
+        folly::CancellationSource& source_;
+        std::vector<int64_t> values_;
+    };
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("group", DataType::INT64);
+    schema->set_primary_field_id(field);
+    folly::CancellationSource source;
+    milvus::OpContext ctx(source.getToken());
+    CancellingSegment segment(schema, source);
+    try {
+        BuildGroupMembership<int64_t>(
+            &ctx, segment, field, 8192, {int64_t(1)}, nullptr);
+        FAIL() << "membership continued after cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(segment.pins, 2);
 }
 
 TEST(StrictGroupPhase2ExecutorTest, SharedBaseFilterIsLazyAndReleased) {

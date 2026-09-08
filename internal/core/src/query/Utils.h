@@ -30,7 +30,8 @@
 namespace milvus::query {
 inline bool
 CanUseStrictGroupFilteredIterator(const SearchInfo& info, int64_t nq) {
-    return info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+    return info.strict_group_acceptance_threshold_ > 0 &&
+           info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
            nq == 1 && !info.element_level() &&
            info.group_by_field_ids_.size() == 1;
 }

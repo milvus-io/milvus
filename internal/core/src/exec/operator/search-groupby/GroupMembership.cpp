@@ -23,6 +23,7 @@
 #include "index/ScalarIndex.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/Utils.h"
 
 namespace milvus::exec {
 namespace {
@@ -106,6 +107,10 @@ ScanRawField(milvus::OpContext* op_ctx,
              FieldId field_id,
              size_t row_count,
              Visitor&& visitor) {
+    segcore::CheckCancellation(op_ctx,
+                               segment.get_segment_id(),
+                               field_id.get(),
+                               "strict group membership");
     if (!segment.HasFieldData(field_id)) {
         return false;
     }
@@ -119,6 +124,12 @@ ScanRawField(milvus::OpContext* op_ctx,
                          ? growing->get_insert_record().get_valid_data(field_id)
                          : nullptr;
         for (size_t offset = 0; offset < row_count; ++offset) {
+            if ((offset & 1023) == 0) {
+                segcore::CheckCancellation(op_ctx,
+                                           segment.get_segment_id(),
+                                           field_id.get(),
+                                           "strict group membership");
+            }
             if (valid && !valid->is_valid(offset)) {
                 visitor(offset, GroupKey<T>(std::nullopt));
                 continue;
@@ -160,6 +171,12 @@ ScanRawField(milvus::OpContext* op_ctx,
                                             chunk_pos,
                                             segcore::PinnedIndexView{});
     for (size_t offset = 0; offset < row_count; ++offset) {
+        if ((offset & 1023) == 0) {
+            segcore::CheckCancellation(op_ctx,
+                                       segment.get_segment_id(),
+                                       field_id.get(),
+                                       "strict group membership");
+        }
         auto value = accessor();
         if (value.has_value()) {
             visitor(offset, GroupKey<T>(segcore::get_from_variant<T>(value)));

@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <limits>
+#include <unordered_set>
 
 #include "common/Tracer.h"
 #include "common/Consts.h"
@@ -133,6 +134,23 @@ class GroupByResultCollector {
     void
     Add(int64_t offset, float distance, GroupKey group) {
         results_.emplace_back(offset, distance, std::move(group));
+        if (accepted_offsets_) {
+            accepted_offsets_->insert(offset);
+        }
+    }
+
+    void
+    EnableOffsetDeduplication() {
+        accepted_offsets_.emplace();
+        accepted_offsets_->reserve(results_.size());
+        for (const auto& result : results_) {
+            accepted_offsets_->insert(std::get<0>(result));
+        }
+    }
+
+    bool
+    IsAcceptedOffset(int64_t offset) const {
+        return accepted_offsets_ && accepted_offsets_->count(offset) != 0;
     }
 
     size_t
@@ -174,6 +192,7 @@ class GroupByResultCollector {
 
  private:
     std::vector<Result> results_;
+    std::optional<std::unordered_set<int64_t>> accepted_offsets_;
 };
 
 namespace {
@@ -187,8 +206,23 @@ enum class StrictGroupPhase2FallbackReason {
     MembershipUnavailable,
     ProbeAcceptanceHigh,
     RecreateUnavailable,
-    PreparationFailed,
+    RecreatedExhausted,
 };
+
+enum class StrictGroupDecision { NotEvaluated, AcceptanceHigh, AcceptanceLow };
+
+const char*
+DecisionName(StrictGroupDecision decision) {
+    switch (decision) {
+        case StrictGroupDecision::NotEvaluated:
+            return "not_evaluated";
+        case StrictGroupDecision::AcceptanceHigh:
+            return "acceptance_high";
+        case StrictGroupDecision::AcceptanceLow:
+            return "acceptance_low";
+    }
+    return "unknown";
+}
 
 struct StrictGroupPhase2Stats {
     bool attempted = false;
@@ -199,7 +233,7 @@ struct StrictGroupPhase2Stats {
     size_t probe_accepted = 0;
     size_t probe_group_hits = 0;
     size_t original_remaining_candidates = 0;
-    const char* decision = "not_evaluated";
+    StrictGroupDecision decision = StrictGroupDecision::NotEvaluated;
     size_t batch_count = 0;
     uint64_t membership_build_us = 0;
     uint64_t bitmap_build_us = 0;
@@ -235,8 +269,8 @@ FallbackReasonName(StrictGroupPhase2FallbackReason reason) {
             return "probe_acceptance_high";
         case StrictGroupPhase2FallbackReason::RecreateUnavailable:
             return "recreate_unavailable";
-        case StrictGroupPhase2FallbackReason::PreparationFailed:
-            return "preparation_failed";
+        case StrictGroupPhase2FallbackReason::RecreatedExhausted:
+            return "recreated_exhausted";
     }
     return "unknown";
 }
@@ -285,7 +319,7 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
         stats.probe_accepted,
         stats.probe_group_hits,
         stats.original_remaining_candidates,
-        stats.decision,
+        DecisionName(stats.decision),
         stats.batch_count,
         stats.membership_build_us / 1000.0,
         stats.bitmap_build_us / 1000.0));
@@ -313,6 +347,9 @@ ConsumeGroupByIteratorUntil(
             "still tells hasNext, terminate groupBy operation");
         auto offset = offset_dis_pair->first;
         auto distance = offset_dis_pair->second;
+        if (collector.IsAcceptedOffset(offset)) {
+            continue;
+        }
         auto group = data_getter->Get(offset);
         if (locked_group_hits != nullptr && group_map.Contains(group)) {
             ++*locked_group_hits;
@@ -399,10 +436,10 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         finish();
         return true;
     };
-    // Equality triggers recreation; never re-evaluate this decision later.
-    if (static_cast<double>(stats.probe_accepted) / stats.probe_candidates >
+    // Equality keeps the original iterator; never re-evaluate this decision later.
+    if (static_cast<double>(stats.probe_accepted) / stats.probe_candidates >=
         context->acceptance_threshold) {
-        stats.decision = "acceptance_high";
+        stats.decision = StrictGroupDecision::AcceptanceHigh;
         stats.fallback_reason =
             StrictGroupPhase2FallbackReason::ProbeAcceptanceHigh;
         return continue_original();
@@ -417,7 +454,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     AssertInfo(!unfinished_groups.empty(),
                "strict group phase2 has no unfinished group");
 
-    stats.decision = "acceptance_low";
+    stats.decision = StrictGroupDecision::AcceptanceLow;
 
     auto prepare = [&]() -> std::optional<std::unique_ptr<SearchResult>> {
         auto membership_start = std::chrono::steady_clock::now();
@@ -451,32 +488,9 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     std::optional<std::unique_ptr<SearchResult>> recreated;
     try {
         recreated = prepare();
-    } catch (const SegcoreError& error) {
-        // Fail closed for cancellation, timeouts, data corruption and invariant
-        // violations. Only optional resource/backend preparation can fall back.
-        if (context->op_ctx != nullptr &&
-            context->op_ctx->cancellation_token.isCancellationRequested()) {
-            throw;
-        }
-        switch (error.get_error_code()) {
-            case ErrorCode::Unsupported:
-            case ErrorCode::NotImplemented:
-            case ErrorCode::FileOpenFailed:
-            case ErrorCode::FileReadFailed:
-            case ErrorCode::S3Error:
-            case ErrorCode::MemAllocateFailed:
-            case ErrorCode::InsufficientResource:
-            case ErrorCode::KnowhereError:
-                stats.fallback_reason =
-                    StrictGroupPhase2FallbackReason::PreparationFailed;
-                LOG_WARN(
-                    "strict group iterator preparation failed; continuing "
-                    "original iterator: {}",
-                    error.what());
-                break;
-            default:
-                throw;
-        }
+    } catch (const std::exception& error) {
+        LOG_WARN("strict group iterator preparation failed: {}", error.what());
+        throw;
     }
     if (!recreated.has_value()) {
         if (stats.fallback_reason == StrictGroupPhase2FallbackReason::None) {
@@ -491,6 +505,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     AssertInfo(batch_result.vector_iterators_->size() <= 1,
                "strict group expected at most one iterator, got {}",
                batch_result.vector_iterators_->size());
+    collector.EnableOffsetDeduplication();
     stats.used = true;
     stats.batch_count = 1;
     if (!batch_result.vector_iterators_->empty()) {
@@ -505,6 +520,11 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         batch_result.search_storage_cost_.scanned_remote_bytes;
     context->search_result->search_storage_cost_.scanned_total_bytes +=
         batch_result.search_storage_cost_.scanned_total_bytes;
+    if (!group_map.IsGroupResEnough()) {
+        stats.fallback_reason =
+            StrictGroupPhase2FallbackReason::RecreatedExhausted;
+        return continue_original();
+    }
     finish();
     return true;
 }
