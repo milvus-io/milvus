@@ -1081,6 +1081,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseNgramIndex() const override;
 
+    // Records that the NGRAM index served this LIKE, from the two places its
+    // first phase runs: a single LIKE and the batched LIKE conjunction.
+    void
+    RecordNgramUse();
+
     // Execute ngram Phase1 only (index query), ANDs result into candidates
     // Requires: CanUseNgramIndex() == true
     // Requires: candidates must be non-empty (caller initializes with all-true,

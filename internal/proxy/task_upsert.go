@@ -241,6 +241,9 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
 	qt.SetActualChannelsMvcc(channelReadTs)
+	// The user issued an upsert, not a query: this retrieval reads the rows
+	// the upsert replaces and must not move the query feature counters.
+	qt.MarkInternal()
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
@@ -1891,6 +1894,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
 		it.req.PartialUpdate = true
 	}
+	recordUpsertFeatures(it.req)
 
 	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema.CollectionSchema, it.req.Namespace, it.req.GetPartitionName())
 	if err != nil {

@@ -378,12 +378,14 @@ type commonConfig struct {
 	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
-	AuthorizationEnabled  ParamItem `refreshable:"false"`
-	AdminAuthEnabled      ParamItem `refreshable:"true"`
-	SuperUsers            ParamItem `refreshable:"true"`
-	DefaultRootPassword   ParamItem `refreshable:"false"`
-	RootShouldBindRole    ParamItem `refreshable:"true"`
-	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	AuthorizationEnabled        ParamItem `refreshable:"false"`
+	AdminAuthEnabled            ParamItem `refreshable:"true"`
+	SuperUsers                  ParamItem `refreshable:"true"`
+	DefaultRootPassword         ParamItem `refreshable:"false"`
+	RootShouldBindRole          ParamItem `refreshable:"true"`
+	EnablePublicPrivilege       ParamItem `refreshable:"false"`
+	FeatureUsageEnabled         ParamItem `refreshable:"false"`
+	FeatureUsageCountersEnabled ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -1151,6 +1153,29 @@ Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
 		// is off, so an anonymous request cannot persist a disabling value.
 	}
 	p.AdminAuthEnabled.Init(base.mgr)
+
+	p.FeatureUsageEnabled = ParamItem{
+		Key:          "common.security.featureUsageEnabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc: `Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+management port. The endpoint requires HTTP Basic Auth as root. See
+docs/design-docs/design_docs/20260902-feature-usage-reporting.md.`,
+		Export: true,
+	}
+	p.FeatureUsageEnabled.Init(base.mgr)
+
+	p.FeatureUsageCountersEnabled = ParamItem{
+		Key:          "common.featureUsage.countersEnabled",
+		Version:      "3.0.1",
+		DefaultValue: "true",
+		Doc: `Whether the components count feature usage on their request paths (Proxy, QueryNode)
+and at task creation (DataCoord). One branch and one atomic add per counted feature.
+It is read once at component start; the report endpoint is gated separately by
+common.security.featureUsageEnabled.`,
+		Export: true,
+	}
+	p.FeatureUsageCountersEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",

@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 
+#include "common/FeatureBits.h"
 #include "common/Types.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/SegmentInterface.h"
@@ -89,7 +90,8 @@ class ExprCacheHelper {
                  const std::string& expr_signature,
                  int64_t active_count,
                  ComputeFn&& compute,
-                 bool enable_cache_write = true) {
+                 bool enable_cache_write = true,
+                 FeatureRecorder* recorder = nullptr) {
         bool cache_eligible =
             segment != nullptr && ExprResCacheManager::IsEnabled();
         if (cache_eligible &&
@@ -105,6 +107,7 @@ class ExprCacheHelper {
             ExprResCacheManager::Value got;
             got.active_count = active_count;
             if (ExprResCacheManager::Instance().Get(key, got)) {
+                MarkFeature(recorder, FeatureBit::ExprCacheHit);
                 return {got.result, got.valid_result};
             }
         }

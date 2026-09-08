@@ -58,6 +58,13 @@ class PhyNullExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    // A nested (JSON path) index cannot answer IS NULL on the column, and the
+    // expression drops it on purpose; that is not a declined index.
+    bool
+    ReportsIndexDecline() const override {
+        return false;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());

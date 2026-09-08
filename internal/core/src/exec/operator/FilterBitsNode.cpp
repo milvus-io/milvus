@@ -158,6 +158,9 @@ PhyFilterBitsNode::GetOutput() {
         if (ExprResCacheManager::Instance().Get(key, cached) &&
             cached.result != nullptr &&
             cached.result->size() == need_process_rows_) {
+            MarkFeature(
+                query_context_->get_plan_options().feature_recorder.get(),
+                FeatureBit::ExprCacheHit);
             num_processed_rows_ = need_process_rows_;
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(

@@ -398,6 +398,10 @@ struct SearchResult {
     StorageCost search_storage_cost_;
 
     bool element_level_{false};
+    // Execution features seen while producing this result, moved into the
+    // request's FeatureRecorder by the operator that owns the query context.
+    bool used_interim_index_{false};
+    bool strict_group_phase2_used_{false};
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;

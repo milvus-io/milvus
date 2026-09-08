@@ -162,6 +162,12 @@ type SearchInfo struct {
 	collectionID    int64
 	orderByFields   []OrderByField
 	iterativeFilter bool
+	// isRangeSearch is reported so the caller can count the feature; the parse
+	// happens here and nothing else reconstructs it.
+	isRangeSearch bool
+	// requestedLimit is the limit the client asked for, before an iterator
+	// clamps it or the offset is added, reported for the limit distribution.
+	requestedLimit int64
 }
 
 const (
@@ -507,6 +513,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
+	requestedLimit := topK
+
 	isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
 	isIterator := (isIteratorStr == "True") || (isIteratorStr == "true")
 
@@ -668,6 +676,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		collectionID:    collectionId,
 		orderByFields:   orderByFields,
 		iterativeFilter: isIterativeFilter,
+		isRangeSearch:   isRangeSearch,
+		requestedLimit:  requestedLimit,
 	}, nil
 }
 

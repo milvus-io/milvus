@@ -131,6 +131,26 @@ GetTopK(CSearchPlan plan) {
     return res;
 }
 
+uint64_t
+GetSearchPlanFeatureBits(CSearchPlan c_plan) {
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
+    if (plan == nullptr || plan->plan_node_ == nullptr) {
+        return 0;
+    }
+    const auto& recorder = plan->plan_node_->plan_options_.feature_recorder;
+    return recorder ? recorder->Bits() : 0;
+}
+
+uint64_t
+GetRetrievePlanFeatureBits(CRetrievePlan c_plan) {
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
+    if (plan == nullptr || plan->plan_node_ == nullptr) {
+        return 0;
+    }
+    const auto& recorder = plan->plan_node_->plan_options_.feature_recorder;
+    return recorder ? recorder->Bits() : 0;
+}
+
 int64_t
 GetGroupSize(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);

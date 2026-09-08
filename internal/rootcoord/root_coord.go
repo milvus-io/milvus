@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -3483,6 +3484,32 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return c.quotaCenter.getQuotaMetrics(), nil
+}
+
+// GetFeatureUsage computes the collection-derived groups of the feature usage
+// report from the in-memory metadata (see internal/featureusage). Every call
+// recomputes from scratch; nothing is cached or persisted.
+func (c *Core) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	in := c.collectFeatureUsageInput(ctx)
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.RootCoordRole,
+		NodeId:        paramtable.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       featureusage.ComputeCollectionEntries(in),
+	}, nil
+}
+
+// collectFeatureUsageInput gathers the metadata the report is computed from,
+// in one snapshot of the MetaTable cache. It touches no KV: RBAC objects are
+// deliberately not counted, because listing roles, grants and privilege
+// groups reads the catalog and the counts are not needed yet.
+func (c *Core) collectFeatureUsageInput(ctx context.Context) featureusage.CollectionInput {
+	return c.meta.FeatureUsageSnapshot(ctx)
 }
 
 func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {

@@ -52,6 +52,13 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    // Raw data is the designed path whenever it exists; an index on the field
+    // is only a fallback value source.
+    bool
+    ReportsIndexDecline() const override {
+        return false;
+    }
+
     std::string
     ToString() const override;
 

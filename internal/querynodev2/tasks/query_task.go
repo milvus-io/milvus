@@ -174,6 +174,7 @@ func (t *QueryTask) Execute() error {
 		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
 		ElementLevel:       reducedResult.GetElementLevel(),
 		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
+		FeatureBits:        retrievePlan.FeatureBits() | segments.ColdReadFeatureBit(reducedResult.GetScannedRemoteBytes()),
 	}
 	return nil
 }

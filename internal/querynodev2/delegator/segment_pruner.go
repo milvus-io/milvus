@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -140,6 +141,7 @@ func PruneSegments(ctx context.Context,
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
+		featureusage.Hit(featureusage.FeatureSegmentPrune)
 		realFilteredSegments := 0
 		totalSegNum := 0
 		minSegmentCount := math.MaxInt

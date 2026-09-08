@@ -152,6 +152,8 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                       op_context,
                       search_result,
                       is_sparse);
+        // A growing segment's only vector index is the interim index.
+        search_result.used_interim_index_ = true;
     }
 }
 

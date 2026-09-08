@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
@@ -73,10 +74,30 @@ type SearchTask struct {
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
 
-	tr                     *timerecord.TimeRecorder
-	collectionName         string
-	schema                 *schemaInfo
-	needRequery            bool
+	tr             *timerecord.TimeRecorder
+	collectionName string
+	schema         *schemaInfo
+	needRequery    bool
+	// features accumulates this request's counters during PreExecute and is
+	// flushed once when it returns. A hybrid search parses every sub-request,
+	// and Proxy.Search can run the whole task again for the un-optimized retry,
+	// the recall-evaluation ground truth and a retry.Handle re-entry; marking
+	// into a set and flushing once is what keeps "how many requests used X"
+	// equal to the number of user requests rather than the number of task runs.
+	features featureusage.FeatureSet
+	// units is the per-subrequest counterpart of features: the search
+	// parameter distributions and the retrieval kind count once per ANN
+	// subrequest. Flushed with features.
+	units featureusage.Tally
+	// collectFeatures is decided once, at the top of PreExecute: counting is on
+	// for the process and this is the first task built for the user request.
+	// When it is false, featureSink returns nil and every collect hook returns
+	// on its first line, so a request that will not be counted pays for no
+	// parameter scan, no expression walk and no JSON decode.
+	collectFeatures bool
+	// countFeatures is set only on the first task built for a user request, so
+	// the repeat runs above add nothing.
+	countFeatures          bool
 	partitionKeyMode       bool
 	partitionKeyIsolation  bool
 	largeTopKEnabled       bool
@@ -135,6 +156,32 @@ type SearchTask struct {
 // taken from the caller; the host node and its dependencies are derived from
 // the taskmodel.TaskNode contract and paramtable, so the root package does not
 // need to reach into the task's private fields.
+// SetCountFeatures marks the first task built for a user request. Retries,
+// the un-optimized fallback and the recall-evaluation ground-truth run build
+// further tasks for the same request and leave it false, so one user request
+// moves each feature counter at most once.
+func (t *SearchTask) SetCountFeatures(v bool) {
+	t.countFeatures = v
+}
+
+// featureSink is where this task's feature hooks mark, or nil when the task
+// does not count. A pointer to the task's own set rather than a fresh one, so
+// counting adds no allocation.
+func (t *SearchTask) featureSink() *featureusage.FeatureSet {
+	if !t.collectFeatures {
+		return nil
+	}
+	return &t.features
+}
+
+// unitSink is featureSink for the per-subrequest counters.
+func (t *SearchTask) unitSink() *featureusage.Tally {
+	if !t.collectFeatures {
+		return nil
+	}
+	return &t.units
+}
+
 func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *scheduler.TaskScheduler, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, tr *timerecord.TimeRecorder) *SearchTask {
 	return &SearchTask{
 		baseTask: baseTask{
@@ -223,6 +270,20 @@ func (t *SearchTask) CanSkipAllocTimestamp() bool {
 }
 
 func (t *SearchTask) PreExecute(ctx context.Context) error {
+	// Flushed however PreExecute ends: a request the Proxy rejects still asked
+	// for the feature, which is what the counters record, and the parse that
+	// marks a feature can be the very step that fails. countFeatures is what
+	// keeps a repeat run of the same user request from counting again.
+	t.collectFeatures = t.countFeatures && featureusage.Enabled()
+	if t.collectFeatures {
+		defer t.features.HitAll()
+		defer t.units.HitAll()
+	}
+	collectSearchRequestFeatures(t.request, t.featureSink())
+	// The request-level key scan, once. On the hybrid path this list is the
+	// rank_params, where group_size, strict_group_size and rank_group_scorer
+	// live; on the plain path it is the search params themselves.
+	collectSearchParamKeyFeatures(t.request.GetSearchParams(), t.featureSink())
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
 
@@ -289,6 +350,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, t.featureSink())
 	if err != nil {
 		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
@@ -565,6 +627,11 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Only the legacy branch carries a rank_params strategy; function_chains and
+	// function_score return earlier in selectHybridRerankMeta.
+	if len(t.request.GetFunctionChains()) == 0 && t.request.GetFunctionScore() == nil {
+		collectLegacyRankStrategy(t.request.GetSearchParams(), t.featureSink())
+	}
 
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
@@ -613,6 +680,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
+	// families collects the retrieval families of the subrequests; the
+	// combination is marked once the loop has seen them all.
+	families := 0
 	for index, subReq := range t.request.GetSubReqs() {
 		l2Chains, querynodeFunctionChains, err := splitFunctionChainsByStage(subReq.GetFunctionChains())
 		if err != nil {
@@ -642,6 +712,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		families |= collectSubSearchUnits(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType, subReq.GetNq(), t.unitSink())
 		if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType); err != nil {
 			return err
 		}
@@ -780,6 +851,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 	}
+	collectHybridShape(len(t.request.GetSubReqs()), families, t.featureSink())
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
 	if err := t.validateHybridArrayOfVectorGroupBy(); err != nil {
@@ -1142,6 +1214,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	collectSubSearchUnits(t.schema.CollectionSchema, t.FieldId, placeholderType, t.request.GetNq(), t.unitSink())
 	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
 		return err
 	}
@@ -1275,6 +1348,15 @@ func (t *SearchTask) tryGeneratePlan(
 	if err != nil {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
+	collectSearchInfoFeatures(searchInfo.isIterator, searchInfo.isRangeSearch,
+		searchInfo.planInfo.GetGroupByFieldId(), searchInfo.planInfo.GetSearchIteratorV2Info() != nil, t.featureSink())
+	collectSearchParamUnits(searchInfo.planInfo.GetSearchParams(), searchInfo.requestedLimit, t.unitSink())
+	// Only the sub-request's own keys here; PreExecute already scanned the
+	// request-level list. On the plain path params is that same list, so this
+	// would be a second scan of it for nothing.
+	if t.IsAdvanced {
+		collectSearchParamKeyFeatures(params, t.featureSink())
+	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
@@ -1313,6 +1395,8 @@ func (t *SearchTask) tryGeneratePlan(
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, WrapPlanCreationError(planErr, "failed to create query plan")
 	}
+	collectPlanExprFeatures(plan, exprTemplateValues, t.featureSink())
+	collectExecFeatureBits(plan, t.collectFeatures)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	mlog.Debug(t.ctx, "create query plan",
 		mlog.Int("dsl_bytes", len(dsl)),
@@ -1493,7 +1577,9 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	isTopkReduce := false
 	isRecallEvaluation := false
 	storageCost := segcore.StorageCost{}
+	var execBits uint64
 	for _, r := range toReduceResults {
+		execBits |= r.GetFeatureBits()
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
 		}
@@ -1508,6 +1594,7 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 		storageCost.ScannedTotalBytes += r.GetScannedTotalBytes()
 	}
 
+	recordExecFeatures(t.collectFeatures, execBits, storageCost.ScannedRemoteBytes)
 	t.isTopkReduce = isTopkReduce
 	t.isRecallEvaluation = isRecallEvaluation
 
