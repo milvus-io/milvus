@@ -490,7 +490,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, merr.WrapErrParameterInvalidMsg("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrDataIntegrityMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -621,7 +621,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrDataIntegrityMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {

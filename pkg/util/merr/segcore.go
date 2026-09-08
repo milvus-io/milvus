@@ -56,7 +56,11 @@ type segcoreClass struct {
 	retriable bool
 	// permanent marks system failures that are known to reproduce identically on
 	// every attempt and every node: corrupted data, a misconfigured bucket, a
-	// missing object, an index build that the same input always fails. It is
+	// missing object. A code only qualifies when every one of its C++
+	// construction sites is deterministic — a code that a broad "operation
+	// failed" branch also produces (2004, 2044) does not, because the same code
+	// then carries transient storage and per-node disk failures that a
+	// re-dispatch would clear. It is
 	// distinct from simply leaving every flag unset, which also covers the
 	// unclassified fallback (2000/2001/2002) that callers must keep retrying
 	// because the underlying condition is unknown.
@@ -143,7 +147,11 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	// mistake them for "unclassified" and flip them to retriable. They map to the
 	// same non-retriable ErrSegcore as the fallback; the raw code is kept in
 	// segcoreCode.
-	2004: {sentinel: ErrSegcore, permanent: true}, // IndexBuildError: build failed (bad data / permanent)
+	// IndexBuildError. NOT permanent: VectorDiskIndex maps every non-success
+	// knowhere status to this code, and knowhere's disk_file_error also covers
+	// an index upload that failed against object storage and a node whose local
+	// disk filled up. Both succeed when the task is re-dispatched elsewhere.
+	2004: {sentinel: ErrSegcore},
 	2016: {sentinel: ErrSegcore, permanent: true}, // BucketInvalid: misconfigured bucket (same on every replica)
 	2017: {sentinel: ErrSegcore, permanent: true}, // ObjectNotExist: object missing in shared storage (reroute won't help)
 
