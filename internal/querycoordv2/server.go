@@ -983,7 +983,7 @@ func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collec
 	}
 	leaked := make(map[string]int)
 	rgOf := func(nodeID int64) string {
-		return s.meta.ResourceManager.GetResourceGroupByNodeID(nodeID)
+		return s.meta.GetResourceGroupByNodeID(nodeID)
 	}
 	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
 		if !validNodes.Contain(seg.Node) {
