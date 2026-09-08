@@ -905,7 +905,16 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 			mlog.Int64s("stalledReplicaIDs", stalled),
 			mlog.Int64s("keptReplicaIDs", kept),
 			mlog.Int32("loadPercentage", task.LastProgress))
-		if err := ob.meta.RemoveReplicas(ctx, task.CollectionID, stalled...); err != nil {
+		// The replica list was read above without the collection lock, and
+		// the group was decided from that reading. TransferReplica keeps a
+		// replica's ID and rewrites its group under the lock, so a transfer
+		// landing between the read and this point would leave one of the
+		// stalled IDs naming a replica that now belongs to another group.
+		// The removal re-checks the group under the same lock and takes
+		// only the replicas still in it; what follows works from the list
+		// it actually removed.
+		removed, err := ob.meta.RemoveReplicasInResourceGroup(ctx, task.CollectionID, task.ResourceGroup, stalled...)
+		if err != nil {
 			// Leave the task in place so the next tick retries the teardown;
 			// dropping it here would leak the stalled replicas forever.
 			mlog.Warn(ctx, "failed to remove replicas of timed out resource group",
@@ -915,17 +924,27 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 				mlog.Err(err))
 			return
 		}
-		// The proxies cache the collection's shard leaders and learn of a
-		// change only through distribution events, which RemoveReplicas
-		// does not produce: it touches the catalog and the in-memory
-		// indexes alone. Until the checker releases the deleted replicas'
-		// channels, a search scoped to this group, or an unscoped one
-		// balanced onto those leaders, would reach a replica that no
-		// longer exists, fail on the query node, and be retried only
-		// then. Every job that removes replicas invalidates the cache
-		// right after (job_update, job_load, job_release); so does this.
-		ob.invalidateShardLeaderCache(ctx, task.CollectionID)
-		invalidated = true
+		if len(removed) != len(stalled) {
+			mlog.Info(ctx, "some replicas left the timed out resource group before they were released, keeping them",
+				mlog.FieldCollectionID(task.CollectionID),
+				mlog.String("resourceGroup", task.ResourceGroup),
+				mlog.Int64s("stalledReplicaIDs", stalled),
+				mlog.Int64s("removedReplicaIDs", removed))
+		}
+		if len(removed) > 0 {
+			// The proxies cache the collection's shard leaders and learn of
+			// a change only through distribution events, which the removal
+			// does not produce: it touches the catalog and the in-memory
+			// indexes alone. Until the checker releases the deleted
+			// replicas' channels, a search scoped to this group, or an
+			// unscoped one balanced onto those leaders, would reach a
+			// replica that no longer exists, fail on the query node, and be
+			// retried only then. Every job that removes replicas
+			// invalidates the cache right after (job_update, job_load,
+			// job_release); so does this.
+			ob.invalidateShardLeaderCache(ctx, task.CollectionID)
+			invalidated = true
+		}
 	}
 
 	remaining := ob.meta.GetByCollection(ctx, task.CollectionID)
