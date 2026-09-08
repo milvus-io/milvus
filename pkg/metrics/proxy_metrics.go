@@ -453,8 +453,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "query_traffic_routing_decision_count",
-			Help:      "counter of query traffic routing decisions by selected rule name",
+			Name:      "query_traffic_routing_decision_total",
+			Help:      "Total number of query traffic routing decisions by selected rule name",
 		}, []string{ruleNameLabelName})
 
 	// ProxyQueryTrafficRoutingConfigValid is a state gauge reporting whether
@@ -468,7 +468,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "query_traffic_routing_config_valid",
-			Help:      "whether the current query traffic routing rules config parses and compiles (1 valid, 0 invalid)",
+			Help:      "Whether the current query traffic routing rules config parses and compiles (1 valid, 0 invalid)",
 		})
 
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(

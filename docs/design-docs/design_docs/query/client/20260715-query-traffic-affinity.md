@@ -412,7 +412,7 @@ and downstream request distribution:
 Metric:
 
 ```text
-milvus_proxy_query_traffic_routing_decision_count{rule_name}
+milvus_proxy_query_traffic_routing_decision_total{rule_name}
 ```
 
 `rule_name` is the matched rule name. Special cases use reserved `__` values:
