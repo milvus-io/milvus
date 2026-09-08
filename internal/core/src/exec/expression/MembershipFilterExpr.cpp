@@ -86,6 +86,17 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::Eval(EvalCtx& context,
             }
             break;
         }
+        case DataType::UUID: {
+            if constexpr (ProbePolicy::kSupportsUuid) {
+                result = ExecVisitorImpl<UUID>(context);
+            } else {
+                ThrowInfo(ExprInvalid,
+                          "{} does not support field data type: {}",
+                          ProbePolicy::kKindName,
+                          data_type);
+            }
+            break;
+        }
         default:
             ThrowInfo(ExprInvalid,
                       "{} does not support field data type: {}",
