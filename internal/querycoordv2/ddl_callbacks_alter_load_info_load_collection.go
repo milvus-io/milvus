@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -57,8 +58,25 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
-	// only check node number when the collection is not loaded
-	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, currentLoadConfig.Collection == nil)
+	// Node numbers are checked for a first load, and not for a config update
+	// on a loaded collection, which is master's rule and stays the stock
+	// binary's. With a form installed, a request that names resource groups
+	// on a loaded collection is not a config update: it is a scoped expansion
+	// into those groups (see completePlacementForOutOfScopeResourceGroups),
+	// which places replicas exactly as a first load does, so it is admitted
+	// against the same bounds. Without the check, a group with no node - or
+	// with fewer streaming nodes than replicas asked - would receive replicas
+	// that never get a delegator: the scoped task's clock would pause on an
+	// unknown progress forever and the group would report 0 indefinitely.
+	// LoadPartitions has always passed true here for the same reason.
+	//
+	// Whether the request is scoped is the decision getLoadReplicaConfigForRequest
+	// took, not a second reading of the request: under a cluster-level force
+	// override the groups the request named are discarded and the load states
+	// the whole placement, which is a config update like any other.
+	checkNodeNum := currentLoadConfig.Collection == nil ||
+		(extension.FormInstalled() && len(scopedResourceGroups) > 0)
+	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
 	if err != nil {
 		return err
 	}
