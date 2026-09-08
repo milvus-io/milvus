@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -239,4 +240,91 @@ func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK in
 
 func TestOptimizeSearchParam(t *testing.T) {
 	suite.Run(t, new(QueryHookSuite))
+}
+
+func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
+	paramtable.Init()
+	cfg := paramtable.Get()
+	vKey := cfg.QueryNodeCfg.StrictGroupAcceptanceThreshold.Key
+	tKey := cfg.QueryNodeCfg.StrictGroupProbeCandidates.Key
+	defer cfg.Reset(vKey)
+	defer cfg.Reset(tKey)
+	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
+	makeRequest := func(strict bool, raw string) *querypb.SearchRequest {
+		p := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
+			QueryInfo: &planpb.QueryInfo{Topk: 10, GroupByFieldId: 101,
+				GroupSize: 3, StrictGroupSize: strict, SearchParams: raw},
+		}}}
+		bs, err := proto.Marshal(p)
+		suite.Require().NoError(err)
+		return &querypb.SearchRequest{Req: &internalpb.SearchRequest{SerializedExprPlan: bs}}
+	}
+	readParams := func(req *querypb.SearchRequest) map[string]json.RawMessage {
+		p := &planpb.PlanNode{}
+		suite.Require().NoError(proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), p))
+		var values map[string]json.RawMessage
+		suite.Require().NoError(json.Unmarshal([]byte(p.GetVectorAnns().GetQueryInfo().GetSearchParams()), &values))
+		return values
+	}
+	raw := `{"large":9007199254740993,"text":"0.5","strict_group_acceptance_threshold":"bad","strict_group_probe_candidates":-1}`
+	// Exercise no hook, AutoIndex disabled, a hook dropping all caller keys,
+	// and a hook injecting conflicting/invalid values.
+	for _, enabled := range []string{"false", "true"} {
+		cfg.Save(cfg.AutoIndexConfig.Enable.Key, enabled)
+		for _, hookOutput := range []string{"none", `{"large":9007199254740993,"text":"0.5"}`, raw} {
+			var hook QueryHook
+			if hookOutput != "none" {
+				h := mock_optimizers.NewMockQueryHook(suite.T())
+				if enabled == "true" {
+					h.EXPECT().Run(mock.Anything).Run(func(p map[string]any) {
+						p[common.SearchParamKey] = hookOutput
+					}).Return(nil)
+				}
+				hook = h
+			}
+			cfg.Save(vKey, "0.5")
+			cfg.Save(tKey, "17")
+			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1)
+			suite.Require().NoError(err)
+			values := readParams(req)
+			suite.Equal("0.5", string(values[common.StrictGroupAcceptanceThresholdKey]))
+			suite.Equal("17", string(values[common.StrictGroupProbeCandidatesKey]))
+			suite.Equal("9007199254740993", string(values["large"]))
+			suite.Equal(`"0.5"`, string(values["text"]))
+			// Updating config affects a later request, not the serialized snapshot.
+			cfg.Save(vKey, "0")
+			cfg.Save(tKey, "1")
+			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
+			suite.Require().NoError(err)
+			suite.Equal("0", string(readParams(next)[common.StrictGroupAcceptanceThresholdKey]))
+			suite.Equal("1", string(readParams(next)[common.StrictGroupProbeCandidatesKey]))
+			suite.Equal("17", string(readParams(req)[common.StrictGroupProbeCandidatesKey]))
+		}
+	}
+	cfg.Reset(vKey)
+	cfg.Reset(tKey)
+	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
+	suite.Require().NoError(err)
+	suite.Equal("0.1", string(readParams(defaultReq)[common.StrictGroupAcceptanceThresholdKey]))
+	suite.Equal("100", string(readParams(defaultReq)[common.StrictGroupProbeCandidatesKey]))
+	// Caller-controlled values are removed even on non-strict queries.
+	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1)
+	suite.Require().NoError(err)
+	suite.NotContains(readParams(plain), common.StrictGroupAcceptanceThresholdKey)
+	suite.NotContains(readParams(plain), common.StrictGroupProbeCandidatesKey)
+	for key, badValues := range map[string][]string{
+		vKey: {"-0.1", "1.1", "NaN", "+Inf", "bad"},
+		tKey: {"0", "-1", "1.5", "9223372036854775808", "bad"},
+	} {
+		for _, value := range badValues {
+			cfg.Save(key, value)
+			_, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
+			suite.ErrorIs(err, merr.ErrServiceUnavailable)
+			cfg.Reset(key)
+		}
+	}
+	for _, raw := range []string{"invalid", "[]", "1"} {
+		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
+		suite.Error(err)
+	}
 }

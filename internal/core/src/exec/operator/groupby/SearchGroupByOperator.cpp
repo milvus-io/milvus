@@ -22,7 +22,6 @@
 #include "common/Consts.h"
 #include "common/JsonUtils.h"
 #include "exec/operator/groupby/GroupMembership.h"
-#include "common/StrictGroupSearchParams.h"
 #include "fmt/format.h"
 #include "monitor/Monitor.h"
 #include "query/Utils.h"
@@ -83,6 +82,7 @@ struct StrictGroupPhase2Context {
     SearchResult* search_result;
     bool eligible;
     double acceptance_threshold;
+    int64_t probe_candidates;
 };
 
 const char*
@@ -252,7 +252,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         group_map,
         collector,
         [&] { return group_map.IsGroupResEnough(); },
-        kStrictGroupProbeCandidates,
+        context->probe_candidates,
         &stats.probe_accepted,
         &stats.probe_group_hits);
     stats.phase1_candidates += stats.probe_candidates;
@@ -409,7 +409,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
         group_by_field_id,
         search_result,
         query::CanUseStrictGroupFilteredIterator(search_info, iterators.size()),
-        search_info.strict_group_acceptance_threshold_};
+        search_info.strict_group_acceptance_threshold_,
+        search_info.strict_group_probe_candidates_};
     switch (data_type) {
         case DataType::INT8: {
             auto dataGetter =

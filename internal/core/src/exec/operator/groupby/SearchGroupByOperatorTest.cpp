@@ -22,7 +22,7 @@
 #include "common/PrometheusClient.h"
 #include "exec/operator/groupby/GroupMembership.h"
 #include "exec/operator/groupby/SearchGroupByOperator.h"
-#include "common/StrictGroupSearchParams.h"
+#include "common/Consts.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "exec/operator/Utils.h"
@@ -388,7 +388,8 @@ CheckProbeScenario(
     milvus::OpContext* op_ctx = nullptr,
     folly::CancellationSource* cancel_on_recreate = nullptr,
     std::optional<double> threshold = std::nullopt,
-    std::optional<std::vector<int64_t>> recreated_offsets = std::nullopt) {
+    std::optional<std::vector<int64_t>> recreated_offsets = std::nullopt,
+    int64_t probe_budget = 100) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -424,8 +425,8 @@ CheckProbeScenario(
                                    "injected preparation failure");
             }
             // Locking consumes at least topk candidates, followed by a full
-            // 100-candidate probe. This prefix must not be returned again.
-            for (int64_t i = 0; i < topk + 100; ++i) {
+            // configured probe. This prefix must not be returned again.
+            for (int64_t i = 0; i < topk + probe_budget; ++i) {
                 EXPECT_TRUE(invalid.test(i)) << i;
             }
             EXPECT_FALSE(invalid.test(labels.size() - 1));
@@ -449,11 +450,8 @@ CheckProbeScenario(
     info.group_by_field_id_ = field;
     info.metric_type_ = knowhere::metric::L2;
     info.search_params_ = knowhere::Json::object();
-    if (threshold.has_value()) {
-        info.search_params_[kStrictGroupAcceptanceThreshold] = *threshold;
-    }
-    info.strict_group_acceptance_threshold_ =
-        ParseStrictGroupAcceptanceThreshold(info.search_params_);
+    info.strict_group_acceptance_threshold_ = threshold.value_or(0.1);
+    info.strict_group_probe_candidates_ = probe_budget;
     std::vector<GroupByValueType> groups;
     std::vector<int64_t> offsets;
     std::vector<float> distances;
@@ -505,37 +503,49 @@ TEST(StrictGroupPhase2ExecutorTest, FullGroupHitsAreNotAcceptedProbeRows) {
     CheckProbeScenario(labels, labels.size(), 2, 3, 1, 6);
 }
 
-TEST(StrictGroupAcceptanceThresholdTest, ParseAndConsume) {
-    knowhere::Json params = {{"nprobe", 128}};
-    EXPECT_DOUBLE_EQ(ParseStrictGroupAcceptanceThreshold(params), 0.1);
-    EXPECT_EQ(params["nprobe"], 128);
-    for (double value : {0.0, 0.01, 0.1, 0.5, 1.0}) {
-        params[kStrictGroupAcceptanceThreshold] = value;
-        EXPECT_DOUBLE_EQ(ParseStrictGroupAcceptanceThreshold(params), value);
-        EXPECT_FALSE(params.contains(kStrictGroupAcceptanceThreshold));
-        EXPECT_EQ(params["nprobe"], 128);
+TEST(StrictGroupPhase2ExecutorTest, ConfigurableProbeBudget) {
+    for (int64_t budget : {1, 17, 100, 250}) {
+        std::vector<int64_t> labels(budget + 4, 99);
+        labels[0] = labels[budget + 1] = labels[budget + 2] =
+            labels[budget + 3] = 1;
+        auto before =
+            milvus::monitor::internal_core_strict_group_phase2_probe_candidates
+                .Collect()
+                .histogram.sample_sum;
+        CheckProbeScenario(labels,
+                           labels.size(),
+                           1,
+                           3,
+                           1,
+                           3,
+                           std::nullopt,
+                           nullptr,
+                           nullptr,
+                           0.1,
+                           std::nullopt,
+                           budget);
+        auto after =
+            milvus::monitor::internal_core_strict_group_phase2_probe_candidates
+                .Collect()
+                .histogram.sample_sum;
+        EXPECT_EQ(after - before, budget);
     }
-}
-
-TEST(StrictGroupAcceptanceThresholdTest, RejectInvalidValues) {
-    for (const auto& value : std::vector<knowhere::Json>{
-             nullptr,
-             true,
-             "0.1",
-             knowhere::Json::array(),
-             knowhere::Json::object(),
-             -0.01,
-             1.01,
-             std::numeric_limits<double>::infinity(),
-             -std::numeric_limits<double>::infinity(),
-             std::numeric_limits<double>::quiet_NaN()}) {
-        knowhere::Json params = {{kStrictGroupAcceptanceThreshold, value}};
-        try {
-            ParseStrictGroupAcceptanceThreshold(params);
-            FAIL() << "invalid parameter accepted";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
-        }
+    // With T=10, accepting one row is exactly 10%, not 1%.
+    std::vector<int64_t> labels(14, 99);
+    labels[0] = labels[1] = labels[11] = labels[12] = labels[13] = 1;
+    for (double threshold : {0.1, 0.2}) {
+        CheckProbeScenario(labels,
+                           labels.size(),
+                           1,
+                           3,
+                           threshold == 0.1 ? 0 : 1,
+                           3,
+                           std::nullopt,
+                           nullptr,
+                           nullptr,
+                           threshold,
+                           std::nullopt,
+                           10);
     }
 }
 
