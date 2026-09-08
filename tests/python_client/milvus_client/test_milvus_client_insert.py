@@ -714,18 +714,19 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_over_resource_limit(self):
         """
-        target: test insert over RPC limitation 64MB (67108864)
-        method: insert excessive data
-        expected: raise exception
+        target: test insert over the 128 MiB RPC receive limit
+        method: insert data whose vector payload alone exceeds the RPC receive limit
+        expected: reject the insert with a message-size error
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 150000
+        nb = 300000
 
         # 1. Create collection
         self.create_collection(client, collection_name, default_dim, auto_id=False)
 
-        # 2. Generate row data (150000 rows, which exceeds 64MB RPC limit)
+        # 2. 3.0 leaves maxInsertSize disabled; the float32 vectors alone exceed 128 MiB.
+        assert nb * default_dim * np.dtype(np.float32).itemsize > 128 * 1024 * 1024
         rng = np.random.default_rng(seed=19530)
         rows = [
             {
@@ -738,8 +739,13 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
 
         # 3. Verify error on insert
-        error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
-        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+        self.insert(
+            client,
+            collection_name,
+            data=rows,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: "message larger than max"},
+        )
 
         self.drop_collection(client, collection_name)
 
