@@ -130,9 +130,11 @@ TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
 
 // A binlog whose first four bytes are not the magic number is not the format this
 // reader parses, and no attempt will change the bytes. It must surface as
-// DataFormatBroken so the index scheduler stops re-dispatching the task; the
-// value used here is 0x50415231 ("PAR1"), which is what a v2 parquet object
-// behind v1 meta actually produces in production.
+// DataFormatBroken so the index scheduler stops re-dispatching the task.
+// BinlogReader::Read copies the four header bytes verbatim with no byte-order
+// conversion, so a parquet object ("P" "A" "R" "1" = 50 41 52 31) reads back on a
+// little-endian host as 0x31524150 = 827474256 -- the exact value seen in
+// production when a v2 parquet object sits behind v1 meta.
 TEST_F(StorageTest, ReadMediumTypeRejectsForeignMagicNumber) {
     auto make_reader = [](int32_t magic) {
         std::shared_ptr<uint8_t[]> buf(new uint8_t[sizeof(int32_t)]);
@@ -142,7 +144,7 @@ TEST_F(StorageTest, ReadMediumTypeRejectsForeignMagicNumber) {
     };
 
     try {
-        milvus::storage::ReadMediumType(make_reader(0x50415231));
+        milvus::storage::ReadMediumType(make_reader(0x31524150));
         FAIL() << "expected ReadMediumType to reject a foreign magic number";
     } catch (const milvus::SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::DataFormatBroken);

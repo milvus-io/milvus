@@ -108,30 +108,48 @@ AppendJsonElementToBson(simdjson::dom::element elem,
 
 }  // namespace
 
+// Classification lives here rather than at the call sites: every simdjson access
+// below -- the parse, the array iteration, and the element accessors inside
+// AppendJsonElementToBson -- throws simdjson_error, and a caller that forgets to
+// guard would let it escape to the cgo boundary and be flattened into the generic
+// UnexpectedError. Mirrors UnescapeJsonString, which classifies in-function too.
 std::vector<uint8_t>
 BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
-    simdjson::dom::parser parser;
-    simdjson::dom::element root = parser.parse(json_array);
-    if (root.type() != simdjson::dom::element_type::ARRAY) {
-        ThrowInfo(ErrorCode::JsonKeyInvalid,
-                  "input is not a JSON array: {}",
-                  json_array);
-    }
+    try {
+        simdjson::dom::parser parser;
+        simdjson::dom::element root = parser.parse(json_array);
+        if (root.type() != simdjson::dom::element_type::ARRAY) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "input is not a JSON array: {}",
+                      json_array);
+        }
 
-    bson_t arr;
-    bson_init(&arr);
-    uint32_t i = 0;
-    char buf[16];
-    const char* idx_key = nullptr;
-    for (simdjson::dom::element elem : root.get_array()) {
-        size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
-        AppendJsonElementToBson(elem, &arr, idx_key, static_cast<int>(klen));
-        i++;
+        bson_t arr;
+        bson_init(&arr);
+        uint32_t i = 0;
+        char buf[16];
+        const char* idx_key = nullptr;
+        for (simdjson::dom::element elem : root.get_array()) {
+            size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
+            AppendJsonElementToBson(
+                elem, &arr, idx_key, static_cast<int>(klen));
+            i++;
+        }
+        std::vector<uint8_t> out(bson_get_data(&arr),
+                                 bson_get_data(&arr) + arr.len);
+        bson_destroy(&arr);
+        return out;
+    } catch (const SegcoreError&) {
+        // Already classified above; SegcoreError derives from std::runtime_error
+        // and would otherwise be swallowed by the simdjson handler's sibling.
+        throw;
+    } catch (const simdjson::simdjson_error& e) {
+        ThrowInfo(JsonParseErrorCode(e.error()),
+                  "Failed to build bson array from json string: {}, {}",
+                  json_array,
+                  e.what());
     }
-    std::vector<uint8_t> out(bson_get_data(&arr),
-                             bson_get_data(&arr) + arr.len);
-    bson_destroy(&arr);
-    return out;
+    return {};
 }
 
 void
@@ -203,29 +221,11 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(std::move(s));
         }
         case JSONType::ARRAY: {
-            try {
-                DomScalar s;
-                s.type = JSONType::ARRAY;
-                s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
-                return DomNode(std::move(s));
-            } catch (const SegcoreError&) {
-                // Already classified inside BuildBsonArrayBytesFromJsonString;
-                // SegcoreError derives from std::runtime_error, so without this
-                // the generic handler below would rewrap it and lose the code.
-                throw;
-            } catch (const simdjson::simdjson_error& e) {
-                ThrowInfo(
-                    JsonParseErrorCode(e.error()),
-                    "Failed to build bson array (simdjson) from string: {}, {}",
-                    value,
-                    e.what());
-            } catch (const std::exception& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (generic) from string: {}, {}",
-                    value,
-                    e.what());
-            }
+            // BuildBsonArrayBytesFromJsonString classifies its own failures.
+            DomScalar s;
+            s.type = JSONType::ARRAY;
+            s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
+            return DomNode(std::move(s));
         }
         case JSONType::OBJECT: {
             AssertInfo(value == "{}",

@@ -669,23 +669,10 @@ JsonKeyStats::BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id) {
             BsonBuilder::AppendToDom(root, path_vec, value, key.type_);
         } else {
             if (key.type_ == JSONType::ARRAY) {
-                // Without this guard a simdjson_error escapes the whole cgo
-                // call and is flattened into the generic UnexpectedError by
-                // index_c.cpp, which makes a malformed document look like a
-                // retriable internal fault. The sibling call site in
-                // bson_builder.cpp already guards the same function.
-                std::vector<uint8_t> bson_bytes;
-                try {
-                    bson_bytes = BuildBsonArrayBytesFromJsonString(value);
-                } catch (const SegcoreError&) {
-                    throw;
-                } catch (const simdjson::simdjson_error& e) {
-                    ThrowInfo(JsonParseErrorCode(e.error()),
-                              "Failed to build bson array from json value: {}, "
-                              "{}",
-                              value,
-                              e.what());
-                }
+                // BuildBsonArrayBytesFromJsonString classifies a malformed
+                // document itself, so a simdjson_error can no longer escape to
+                // index_c.cpp and be flattened into UnexpectedError.
+                auto bson_bytes = BuildBsonArrayBytesFromJsonString(value);
                 parquet_writer_->AppendValue(
                     key.ToColumnName(),
                     std::string(
