@@ -17,7 +17,9 @@ pytestmark = [
     pytest.mark.spark_backfill_v2,
     pytest.mark.spark_backfill_core,
 ]
+SOURCE_FIELDS = ("base_int", "base_float", "text", "vector")
 TARGET_FIELDS = ("bf_score", "bf_label", "bf_vector")
+VISIBLE_FIELDS = (*SOURCE_FIELDS, *TARGET_FIELDS)
 
 
 def _source_by_pk(case):
@@ -67,8 +69,16 @@ def _commit_and_wait(case, job_result, result_uri, parquet_rows, mode, *, drop_s
     if drop_snapshot:
         case.drop_snapshots_and_refresh()
 
-    expected = build_ground_truth(_source_by_pk(case), _parquet_by_pk(parquet_rows), TARGET_FIELDS, mode)
-    wait_for_visible_rows(case.client, case.collection_name, expected, TARGET_FIELDS)
+    source = _source_by_pk(case)
+    targets = build_ground_truth(source, _parquet_by_pk(parquet_rows), TARGET_FIELDS, mode)
+    expected = {
+        primary_key: {
+            **{field: row[field] for field in SOURCE_FIELDS},
+            **targets[primary_key],
+        }
+        for primary_key, row in source.items()
+    }
+    wait_for_visible_rows(case.client, case.collection_name, expected, VISIBLE_FIELDS)
     case.write_local_evidence(job_result, "segments-after-visibility.json", _segment_evidence(case))
 
 
