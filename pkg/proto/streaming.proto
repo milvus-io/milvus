@@ -913,6 +913,13 @@ message WALCheckpoint {
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
+    // Term of the publisher that last advanced this checkpoint. A publisher of
+    // an older term must never advance it past a newer takeover: WAL
+    // truncation follows the checkpoint, and the records it would remove are
+    // covered only by chunks the successor's manifest does not name. Combined
+    // with the compare-and-swap commit of SaveRecoverySnapshot, this fences
+    // checkpoint advancement across concurrent publishers.
+    int64 term = 7;
 }
 
 message PChannelRecoveryControlMeta {

@@ -134,3 +134,41 @@ func TestRestoreInheritsSkipsBurnedIntermediateTerm(t *testing.T) {
 	require.Len(t, sections.Inserts, 1)
 	assert.Equal(t, uint64(100), sections.Inserts[0].GetSourceTimetick())
 }
+
+// TestRestorePublishesManifestBeforeFirstChunk covers a term that inherits
+// nothing: recovery has no content to publish, so the manifest is written by
+// the first chunk write instead. Without it the successor's takeover -- which
+// lists the manifest prefix to decide which terms to probe -- would not see
+// this term at all, and its chunk would be unreachable.
+func TestRestorePublishesManifestBeforeFirstChunk(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+
+	// Term 1 recovers a completely empty store: nothing to inherit, so
+	// recovery itself publishes no manifest.
+	store1 := NewStore(cm, "by-dev-rootcoord-dml_0_40451v0", 1)
+	manager1 := newTestManager(t, store1, 1<<30)
+	require.NoError(t, manager1.Restore(ctx))
+	_, found, err := store1.ReadManifest(ctx)
+	require.NoError(t, err)
+	require.False(t, found, "an empty store leaves this term without a manifest")
+
+	// Its first chunk write publishes the manifest first.
+	var unused bool
+	flushObserved(t, manager1, "v1", 100, &unused)
+	_, found, err = store1.ReadManifest(ctx)
+	require.NoError(t, err)
+	require.True(t, found, "the first chunk of a term must be preceded by its manifest")
+
+	// So the successor finds term 1 by listing the manifest prefix, probes it,
+	// and inherits the chunk.
+	store2 := NewStore(cm, "by-dev-rootcoord-dml_0_40451v0", 2)
+	manager2 := newTestManager(t, store2, 1<<30)
+	require.NoError(t, manager2.Restore(ctx))
+	require.Len(t, manager2.manifest.GetChunks(), 1)
+	assert.Equal(t, int64(1), manager2.manifest.GetChunks()[0].GetTerm())
+	sections, err := manager2.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
+	require.NoError(t, err)
+	require.Len(t, sections.Inserts, 1)
+	assert.Equal(t, uint64(100), sections.Inserts[0].GetSourceTimetick())
+}

@@ -49,6 +49,9 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		mlog.Uint64("timetick", r.checkpoint.TimeTick),
 		mlog.Int64("magic", r.checkpoint.Magic),
 	)
+	if err := r.fenceConsumeCheckpoint(ctx, channelInfo.Term); err != nil {
+		return errors.Wrap(err, "failed to fence the consume checkpoint")
+	}
 
 	fVChannel := conc.Go(func() (struct{}, error) {
 		var err error
@@ -115,6 +118,50 @@ func (r *recoveryStorageImpl) recoverSummary(ctx context.Context, channelInfo ty
 		return errors.Wrap(err, "failed to restore the wal summary")
 	}
 	r.summaryManager = summaryManager
+	return nil
+}
+
+// fenceConsumeCheckpoint claims the consume checkpoint for this term, writing
+// its term and leaving the position alone. Every later advancement carries the
+// term, so a superseded publisher's own advancement is refused by the
+// compare-and-swap in SaveRecoverySnapshot.
+//
+// It must run BEFORE anything reads the summary store. The claim and the
+// store's forward probe divide the superseded publisher's writes between two
+// mechanisms that each cover one side, and only this order leaves no gap:
+// whatever it wrote before the claim was necessarily written before the probe,
+// so the probe adopts it; whatever it writes after cannot advance the
+// checkpoint, so those records stay above it in the WAL and replay recovers
+// them.
+//
+// Claiming after the probe leaves exactly that gap. A chunk written in between
+// is in neither the probe result nor blocked by the CAS, so the superseded
+// publisher can still advance the checkpoint past it and truncate the WAL to
+// there -- and once this term publishes a manifest that does not name that
+// chunk, those records exist nowhere a recovery will look.
+//
+// A lost CAS means this term is itself superseded: the open fails, and the
+// retry re-reads whatever the newer publisher left.
+func (r *recoveryStorageImpl) fenceConsumeCheckpoint(ctx context.Context, term int64) error {
+	if r.checkpoint == nil || r.checkpoint.MessageID == nil {
+		// Unreachable: the checkpoint is loaded or initialized above.
+		return nil
+	}
+	if r.checkpoint.Term == term {
+		// Already claimed by this term: a reopen with no ownership change.
+		return nil
+	}
+	stamped := r.checkpoint.Clone()
+	stamped.Term = term
+	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: stamped.IntoProto(),
+	}); err != nil {
+		return err
+	}
+	// Every snapshot the background persist builds clones this, so the term
+	// rides along with each later advancement.
+	r.checkpoint = stamped
+	r.Logger().Info(ctx, "consume checkpoint claimed", mlog.Int64("term", term))
 	return nil
 }
 
@@ -195,6 +242,9 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		MessageId:     untilMessage.LastConfirmedMessageID().IntoProto(),
 		TimeTick:      untilMessage.TimeTick(),
 		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
+		// Claimed by this term from the start, so the fence below is a no-op
+		// on the channel that creates its own checkpoint.
+		Term: channelInfo.Term,
 	}
 	// Save the vchannels and the initial checkpoint into the catalog in one
 	// compound operation.

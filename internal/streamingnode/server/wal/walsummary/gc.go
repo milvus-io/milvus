@@ -18,11 +18,17 @@ package walsummary
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
+
+// orphanSweepBudget caps how many objects one sweep deletes, so a store that
+// accumulated a backlog drains over several rounds instead of holding the
+// background task for a whole walk.
+const orphanSweepBudget = 1000
 
 // GCOnce releases the oldest retained chunks while the retained set is above
 // either retention bound -- total bytes, or number of chunks. Both are soft
@@ -30,12 +36,8 @@ import (
 // set crosses back under a bound in object-sized steps rather than landing on
 // it exactly.
 //
-// TODO(term-orphan-gc): the manifest is the only index into the chunk set, so
-// objects a superseded term wrote after this term's takeover probe are
-// unreachable here — they sit in no manifest and no pending_gc. They are
-// inert (this term never reads generations it did not inherit), but they leak
-// storage until a future term-scoped orphan sweep lists chunks/* under the
-// pchannel prefix and drops objects not referenced by any manifest.
+// Release is also what collects the objects a superseded term left behind: see
+// sweepRetiredTerms.
 //
 // The manifest is the only index into the chunk set, so release is a manifest
 // edit: the chunk moves from `chunks` to `pending_gc`, the manifest is
@@ -67,6 +69,18 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 
 	released := m.computeRetention()
 	if len(released) == 0 {
+		return nil
+	}
+	// Collect the retired terms BEFORE the manifest edit below: that edit is
+	// what disarms this trigger, so an interruption anywhere above it leaves
+	// the next round to recompute the same release set and repeat the sweep.
+	finished, err := m.sweepRetiredTerms(ctx, released)
+	if err != nil {
+		return err
+	}
+	if !finished {
+		// The budget ran out. Leave the release for a later round so the
+		// trigger stays armed until the retired terms are fully collected.
 		return nil
 	}
 	// Move the released chunks into pending_gc and publish. The edit is made
@@ -200,4 +214,89 @@ func sortChunkEntries(chunks []*streamingpb.PChannelSummaryChunkIndexEntry) {
 	sort.Slice(chunks, func(i, j int) bool {
 		return chunks[i].GetGeneration() < chunks[j].GetGeneration()
 	})
+}
+
+// sweepRetiredTerms collects what a superseded term left behind, at the moment
+// retention retires the last chunk any manifest still holds for it.
+//
+// An object is unreachable once a manifest with content exists at a HIGHER
+// term, because recovery adopts the highest such manifest and probes forward
+// only on that term. This release makes that true for every term below the
+// floor it leaves behind: whatever those terms wrote is either released here or
+// was never referenced at all -- a chunk a fenced owner wrote after its
+// successor's probe, or one whose manifest write failed.
+//
+// The trigger is what makes the sweep safe against a superseded owner that is
+// still running. Reaching it costs a further MaxRetainedChunks objects or
+// RetentionMaxBytes of writes, which is orders of magnitude past the etcd
+// session TTL that bounds such an owner's lifetime -- by the time a term is
+// retired here, nothing is writing under it any more. Sweeping at takeover
+// instead cannot be made to work: a delete punches a hole in the generation run
+// that forward probing stops at, so an object the superseded owner writes after
+// the sweep would fall behind that hole and never be found again.
+//
+// Deletion precedes every bookkeeping step, so an interrupted sweep only leaves
+// work for the next round and each delete is a no-op the second time. Nothing
+// is recorded about where it stopped: the deletions are the progress.
+func (m *Manager) sweepRetiredTerms(ctx context.Context, released []*streamingpb.PChannelSummaryChunkRef) (bool, error) {
+	releasing := make(map[ChunkRef]struct{}, len(released))
+	for _, ref := range released {
+		releasing[ChunkRef{Generation: ref.GetGeneration(), Term: ref.GetTerm()}] = struct{}{}
+	}
+
+	m.mu.Lock()
+	chunks := m.manifest.GetChunks()
+	referenced := make(map[ChunkRef]struct{}, len(chunks)+len(m.manifest.GetPendingGc()))
+	floorBefore, floorAfter := int64(math.MaxInt64), int64(math.MaxInt64)
+	for _, chunk := range chunks {
+		ref := ChunkRef{Generation: chunk.GetGeneration(), Term: chunk.GetTerm()}
+		referenced[ref] = struct{}{}
+		if chunk.GetTerm() < floorBefore {
+			floorBefore = chunk.GetTerm()
+		}
+		if _, gone := releasing[ref]; !gone && chunk.GetTerm() < floorAfter {
+			floorAfter = chunk.GetTerm()
+		}
+	}
+	// A chunk already released but not yet deleted is still referenced: the
+	// normal gc path owns it, and sweeping it here would only race that path.
+	for _, ref := range m.manifest.GetPendingGc() {
+		referenced[ChunkRef{Generation: ref.GetGeneration(), Term: ref.GetTerm()}] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	if floorBefore == math.MaxInt64 {
+		return true, nil
+	}
+	if floorAfter == math.MaxInt64 {
+		// The release empties the retained set. This term's manifest is still
+		// the highest one, so everything below its own term is unreachable.
+		floorAfter = m.cfg.Term
+	}
+	if floorAfter <= floorBefore {
+		// No term lost its last chunk in this release.
+		return true, nil
+	}
+
+	deleted, finished, err := m.cfg.Store.SweepUnreferencedChunksBelowTerm(ctx, floorAfter, referenced, orphanSweepBudget)
+	if err != nil {
+		return false, err
+	}
+	if logger := m.cfg.Logger; logger != nil && deleted > 0 {
+		logger.Info(ctx, "swept summary objects of retired terms",
+			mlog.String("pchannel", m.cfg.PChannel),
+			mlog.Int64("belowTerm", floorAfter),
+			mlog.Int("chunks", deleted),
+			mlog.Bool("finished", finished))
+	}
+	if !finished {
+		return false, nil
+	}
+	// Only once the chunks are gone: a manifest is what makes an older term
+	// reachable at all, so dropping it first would strand anything the sweep
+	// had not reached yet.
+	if err := m.cfg.Store.DeleteManifestsBelowTerm(ctx, floorAfter); err != nil {
+		return false, err
+	}
+	return true, nil
 }

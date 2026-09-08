@@ -83,10 +83,12 @@ func (m *Manager) Restore(ctx context.Context) error {
 		// to GC.
 		//
 		// Listing manifests is sufficient BECAUSE a term writes its manifest
-		// before its first chunk (see the design doc): a term that holds chunks
-		// always has a manifest object, so a term absent from this list holds
-		// nothing to inherit. The current term's own probe above still covers
-		// the crash-after-chunk-before-manifest window for THIS term.
+		// before its first chunk: a term that holds chunks always has a manifest
+		// object, so a term absent from this list holds nothing to inherit. The
+		// publish below covers a term that inherits something;
+		// publishManifestIfAbsent covers one that inherits nothing and only
+		// later writes. The current term's own probe above still covers the
+		// crash-after-chunk-before-manifest window for THIS term.
 		//
 		// One list of the manifest prefix answers which terms to look at. A
 		// downward probe over every term would be unbounded in the number of
@@ -122,6 +124,7 @@ func (m *Manager) Restore(ctx context.Context) error {
 	m.mu.Lock()
 	m.manifest = manifest
 	m.manifestVersion++
+	m.manifestPublished = needsPublish
 	if latest, ok := manifestNewest(manifest); ok {
 		m.nextGeneration = latest.GetGeneration() + 1
 		m.latestCoveredTimeTick = latest.GetEndTimetick()

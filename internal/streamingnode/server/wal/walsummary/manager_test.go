@@ -335,13 +335,22 @@ type failInjectingChunkManager struct {
 	storage.ChunkManager
 	failManifest atomic.Bool
 	failChunk    atomic.Bool
+	// manifestWritesToPass lets that many manifest writes through while
+	// failManifest is set. A term publishes its manifest before its first
+	// chunk, so a test that wants the chunk's AMENDMENT to fail has to let
+	// that first publish succeed.
+	manifestWritesToPass atomic.Int32
 }
 
 func (c *failInjectingChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	if c.failManifest.Load() && strings.Contains(filePath, "/manifest/") {
-		return errors.New("injected manifest write failure")
-	}
-	if c.failChunk.Load() && !strings.Contains(filePath, "/manifest/") {
+	if strings.Contains(filePath, "/manifest/") {
+		if c.failManifest.Load() {
+			if c.manifestWritesToPass.Load() <= 0 {
+				return errors.New("injected manifest write failure")
+			}
+			c.manifestWritesToPass.Add(-1)
+		}
+	} else if c.failChunk.Load() {
 		return errors.New("injected chunk write failure")
 	}
 	return c.ChunkManager.Write(ctx, filePath, content)
@@ -361,6 +370,9 @@ func TestFlushPublishFailureRetriesSameGeneration(t *testing.T) {
 	require.NoError(t, manager.Restore(ctx))
 	finalized := false
 
+	// The term has no manifest yet, so its first chunk write publishes one
+	// first; let that through and fail the amendment that records the chunk.
+	cm.manifestWritesToPass.Store(1)
 	cm.failManifest.Store(true)
 	observeKeyedInsert(t, manager, "v1", 100, &finalized)
 	// Chunk write succeeds, manifest publish fails.
@@ -1093,4 +1105,65 @@ func TestStagedRecordSizeChargesTheRecordNotTheMessage(t *testing.T) {
 	// it falls back to the message size.
 	keylessMsg := newTestDeleteMessage(t, vchannel, 101, 10, 1)
 	assert.Equal(t, uint64(keylessMsg.EstimateSize()), stagedRecordSize(keylessMsg, &stagedRecord{}))
+}
+
+// TestGCSweepsRetiredTermObjects covers the collection of what a superseded
+// term left behind. Retention retiring the last chunk any manifest holds for
+// term 1 is what proves nothing can reach term 1 any more, so the same round
+// drops the chunk term 1 wrote after term 2's takeover probe, and term 1's
+// manifest with it.
+func TestGCSweepsRetiredTermObjects(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	pchannel := "by-dev-rootcoord-dml_0_40451v0"
+
+	// Term 1 persists one chunk and publishes its manifest.
+	store1 := NewStore(cm, pchannel, 1)
+	manager1 := newTestManager(t, store1, 1<<30)
+	require.NoError(t, manager1.Restore(ctx))
+	var unused bool
+	flushObserved(t, manager1, "v1", 100, &unused)
+
+	// Term 2 takes over and seals the inheritance.
+	store2 := NewStore(cm, pchannel, 2)
+	manager2 := NewManager(ManagerConfig{
+		PChannel:          pchannel,
+		Term:              2,
+		Store:             store2,
+		RetentionMaxBytes: 1 << 30,
+		MaxRetainedChunks: 1,
+	})
+	require.NoError(t, manager2.Restore(ctx))
+	require.Len(t, manager2.Manifest().GetChunks(), 1)
+
+	// Term 1, unaware it is fenced, writes one more chunk AFTER that probe. It
+	// lands at the same generation term 2 will claim, under its own term, so
+	// the two objects coexist and no manifest names term 1's.
+	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}))
+	require.NoError(t, err)
+	orphanKey := store1.ChunkKey(1)
+	exists, err := cm.Exist(ctx, orphanKey)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	// Term 2 writes its own chunk. With a one-chunk budget the next gc retires
+	// term 1's last chunk, which is what makes term 1 unreachable.
+	flushObserved(t, manager2, "v1", 300, &unused)
+	require.Len(t, manager2.Manifest().GetChunks(), 2)
+	require.NoError(t, manager2.GCOnce(ctx))
+
+	chunks := manager2.Manifest().GetChunks()
+	require.Len(t, chunks, 1)
+	assert.Equal(t, int64(2), chunks[0].GetTerm())
+
+	exists, err = cm.Exist(ctx, orphanKey)
+	require.NoError(t, err)
+	assert.False(t, exists, "the orphan of the retired term is collected")
+
+	_, found, err := store1.ReadManifest(ctx)
+	require.NoError(t, err)
+	assert.False(t, found, "the retired term's manifest goes with it")
+	_, found, err = store2.ReadManifest(ctx)
+	require.NoError(t, err)
+	assert.True(t, found, "this term's own manifest stays")
 }

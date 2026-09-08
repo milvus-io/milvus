@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SaveRecoverySnapshot saves a WAL recovery snapshot in one compound
@@ -36,11 +37,14 @@ import (
 // buildSegmentAssignmentKey, getRemovalAndSaveForVChannel,
 // buildSalvageCheckpointPath, buildConsumeCheckpointKey) and applied via
 // txn.Commit: atomically in a single guarded txn when the whole op set fits
-// the store's txn op limit, otherwise via the ordered chunked fallback. Either way the consume checkpoint is staged
-// with CommitSave, so it is the last write to become visible; a crash before
-// it lands leaves the whole snapshot invisible and the next retry
-// re-persists everything (every part is an idempotent put on a deterministic
-// key).
+// the store's txn op limit, otherwise via the ordered chunked fallback. Either
+// way the consume checkpoint is the last write to become visible -- staged with
+// CommitSaveIfValue when it already exists, created by a version CAS after the
+// component commit on first creation -- so a crash before it lands leaves the
+// whole snapshot invisible and the next retry re-persists everything (every
+// part is an idempotent put on a deterministic key).
+//
+// Advancement is fenced by term: see the compare-and-swap below.
 func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *metastore.WALRecoverySnapshot) error {
 	if snapshot == nil {
 		return nil
@@ -102,14 +106,80 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	}
 	// The consume checkpoint is the commit point of the snapshot: staging it
 	// with CommitSave makes it the last write to become visible, after every
-	// other part of the snapshot has landed.
+	// other part of the snapshot has landed. Its advancement is additionally
+	// guarded by a value compare-and-swap (CommitSaveIfValue): the checkpoint
+	// may only advance when the recorded term is not newer than the
+	// publisher's own term, so an older-term publisher that survived a
+	// takeover can never advance it past the successor's inherited manifest
+	// coverage (which would let WAL truncation outrun that coverage and lose
+	// un-materialized transform records).
+	//
+	// The guard is a plain value CAS, not a term comparison inside the txn:
+	// etcd cannot compare fields of a serialized proto. The term pre-check
+	// below is a fast-fail (a strictly older publisher is refused without
+	// touching the store); the CAS is the authoritative fence under
+	// concurrency (a publisher that read a stale value loses the commit).
+	checkpointKey := buildConsumeCheckpointKey(pChannelName)
+	checkpointValue := ""
+	checkpointFirstCreation := false
 	if snapshot.ConsumeCheckpoint != nil {
-		key := buildConsumeCheckpointKey(pChannelName)
 		data, err := proto.Marshal(snapshot.ConsumeCheckpoint)
 		if err != nil {
 			return errors.Wrapf(err, "marshal consume checkpoint at pchannel %s failed", pChannelName)
 		}
-		b.CommitSave(key, string(data))
+		checkpointValue = string(data)
+		current, err := c.metaKV.Load(ctx, checkpointKey)
+		if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+			return err
+		}
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// No checkpoint yet (first persistence of the pchannel, or a
+			// recreated one): create it after the component commit with a
+			// version CAS on the absent key, so two concurrent first
+			// publishers cannot both succeed.
+			checkpointFirstCreation = true
+		} else {
+			// Fast-fail on a strictly older publisher before the commit txn.
+			currentCP := &streamingpb.WALCheckpoint{}
+			if uerr := proto.Unmarshal([]byte(current), currentCP); uerr == nil &&
+				currentCP.GetTerm() > snapshot.ConsumeCheckpoint.GetTerm() {
+				return merr.WrapErrServiceInternalMsg(
+					"consume checkpoint of pchannel %s is fenced: recorded term %d is newer than publisher term %d",
+					pChannelName, currentCP.GetTerm(), snapshot.ConsumeCheckpoint.GetTerm(),
+				)
+			}
+			b.CommitSaveIfValue(checkpointKey, current, checkpointValue)
+		}
 	}
-	return txn.Commit(ctx, c.metaKV, b)
+	if err := txn.Commit(ctx, c.metaKV, b); err != nil {
+		return err
+	}
+	// The guarded commit reports success even when the guard fails (etcd txn
+	// returns Succeeded=false without an error), so the checkpoint write is
+	// verified after the commit: a stale publisher that lost the CAS must be
+	// told the write did not land, or it would keep advancing components
+	// against a checkpoint it no longer owns.
+	if snapshot.ConsumeCheckpoint != nil {
+		if checkpointFirstCreation {
+			ok, err := c.metaKV.CompareVersionAndSwap(ctx, checkpointKey, 0, checkpointValue)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return merr.WrapErrIoKeyNotFound("consume checkpoint of pchannel %s was created concurrently", pChannelName)
+			}
+			return nil
+		}
+		after, err := c.metaKV.Load(ctx, checkpointKey)
+		if err != nil {
+			return err
+		}
+		if after != checkpointValue {
+			return merr.WrapErrServiceInternalMsg(
+				"consume checkpoint of pchannel %s advanced concurrently: CAS on term %d lost",
+				pChannelName, snapshot.ConsumeCheckpoint.GetTerm(),
+			)
+		}
+	}
+	return nil
 }
