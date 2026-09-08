@@ -46,8 +46,8 @@ impl Tokenizer for CharFilterTokenizer {
     type TokenStream<'a> = CharFilterTokenStream<'a>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
-        let filtered = self.apply_char_filters(text);
-        self.filtered = filtered;
+        self.filtered = FilteredText::with_offset_mode("", self.offset_mode);
+        self.filtered = self.apply_char_filters(text);
 
         let filtered = &self.filtered;
         let tail = self.inner.token_stream(&filtered.text);

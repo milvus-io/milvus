@@ -215,18 +215,7 @@ impl FilteredText {
             return self;
         }
 
-        let correction_capacity = self.correction_count() + replacements.len();
-        let mut output = FilteredText {
-            text: String::with_capacity(self.text.len()),
-            corrections: match &self.corrections {
-                OffsetCorrections::SourceSpan(_) => {
-                    OffsetCorrections::SourceSpan(Vec::with_capacity(correction_capacity))
-                }
-                OffsetCorrections::Boundary(_) => {
-                    OffsetCorrections::Boundary(Vec::with_capacity(correction_capacity * 2))
-                }
-            },
-        };
+        let mut output = self.empty_output(self.correction_count() + replacements.len());
 
         let mut cursor = 0;
         let mut correction_index = 0;
@@ -238,6 +227,61 @@ impl FilteredText {
         self.push_original_segment(cursor, self.text.len(), &mut correction_index, &mut output);
 
         output
+    }
+
+    pub(crate) fn replace_matches<'a, F>(self, mut match_at: F) -> Self
+    where
+        F: FnMut(&str) -> Option<(usize, &'a str)>,
+    {
+        let mut output = None;
+        let mut cursor = 0;
+        let mut copied_until = 0;
+        let mut correction_index = 0;
+
+        while cursor < self.text.len() {
+            if let Some((matched_len, replacement)) = match_at(&self.text[cursor..]) {
+                debug_assert!(matched_len > 0);
+                debug_assert!(self.text.is_char_boundary(cursor + matched_len));
+                let output = output
+                    .get_or_insert_with(|| self.empty_output(self.correction_count() + 1));
+                self.push_original_segment(
+                    copied_until,
+                    cursor,
+                    &mut correction_index,
+                    output,
+                );
+                self.push_replacement(cursor, cursor + matched_len, replacement, output);
+                cursor += matched_len;
+                copied_until = cursor;
+            } else {
+                cursor += self.text[cursor..].chars().next().unwrap().len_utf8();
+            }
+        }
+
+        let Some(mut output) = output else {
+            return self;
+        };
+        self.push_original_segment(
+            copied_until,
+            self.text.len(),
+            &mut correction_index,
+            &mut output,
+        );
+        output
+    }
+
+    fn empty_output(&self, correction_capacity: usize) -> Self {
+        FilteredText {
+            text: String::with_capacity(self.text.len()),
+            corrections: match &self.corrections {
+                OffsetCorrections::SourceSpan(_) => {
+                    OffsetCorrections::SourceSpan(Vec::with_capacity(correction_capacity))
+                }
+                OffsetCorrections::Boundary(_) => {
+                    OffsetCorrections::Boundary(Vec::with_capacity(correction_capacity * 2))
+                }
+            },
+        }
     }
 
     fn correction_count(&self) -> usize {

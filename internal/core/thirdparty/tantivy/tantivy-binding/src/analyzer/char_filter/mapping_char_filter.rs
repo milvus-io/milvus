@@ -74,27 +74,16 @@ impl MappingCharFilter {
 
 impl CharFilter for MappingCharFilter {
     fn apply(&self, input: FilteredText) -> FilteredText {
-        let mut replacements = Vec::new();
-        let mut cursor = 0;
-
-        while cursor < input.text.len() {
-            let next = input.text[cursor..].chars().next().unwrap();
-            if let Some((source, target)) = self
+        input.replace_matches(|text| {
+            let next = text.chars().next().unwrap();
+            self
                 .mappings
                 .get(&next)
                 .into_iter()
                 .flatten()
-                .find(|(source, _)| input.text[cursor..].starts_with(source))
-            {
-                replacements.push((cursor, cursor + source.len(), target.as_str()));
-                cursor += source.len();
-                continue;
-            }
-
-            cursor += next.len_utf8();
-        }
-
-        input.replace_ranges(replacements)
+                .find(|(source, _)| text.starts_with(source))
+                .map(|(source, target)| (source.len(), target.as_str()))
+        })
     }
 
     fn box_clone(&self) -> BoxCharFilter {
