@@ -481,6 +481,10 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
+    // Bind the request-scoped sealed read snapshot (nullptr for growing /
+    // non-pinned paths) to this expression. Runs for the whole compiled tree
+    // because CompileExpression is recursive over inputs.
+    result->SetSnapshot(context->get_read_snapshot().get());
     return result;
 }
 

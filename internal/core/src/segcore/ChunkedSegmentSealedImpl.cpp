@@ -1024,6 +1024,87 @@ ChunkedSegmentSealedImpl::CaptureRuntimeResourceState() const {
     return state->runtime;
 }
 
+// State-only read view: every access derives purely from the captured
+// PublishedSegmentState. No segment pointer is held — the immutable state
+// carries the field columns, readiness bitsets, and row count that the exec
+// hot loop needs. Each method replicates the exact semantics of the segment
+// method it shadows, including the per-method readiness-bit handling:
+//   - chunk_size / num_chunk_data return 0 when field data is not ready;
+//   - get_chunk_by_offset / num_rows_until_chunk do NOT gate on readiness
+//     (an index-only field has a clear ready bit but may still be resolved).
+class ChunkedSegmentSealedImpl::SealedReadSnapshot
+    : public SegmentReadSnapshot {
+ public:
+    explicit SealedReadSnapshot(
+        std::shared_ptr<const PublishedSegmentState> state)
+        : state_(std::move(state)) {
+        AssertInfo(state_ != nullptr && state_->runtime != nullptr,
+                   "sealed read snapshot must hold a published state with a "
+                   "non-null runtime");
+    }
+
+    int64_t
+    chunk_size(FieldId field_id, int64_t chunk_id) const override {
+        if (!FieldDataReady(field_id)) {
+            return 0;
+        }
+        auto* column = Column(field_id);
+        return column ? column->chunk_row_nums(chunk_id)
+                      : state_->runtime->row_count;
+    }
+
+    int64_t
+    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+        auto* column = Column(field_id);
+        AssertInfo(column != nullptr,
+                   "field {} must exist when getting rows until chunk",
+                   field_id.get());
+        return column->GetNumRowsUntilChunk(chunk_id);
+    }
+
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+        auto* column = Column(field_id);
+        AssertInfo(column != nullptr,
+                   "field {} must exist when getting chunk by offset",
+                   field_id.get());
+        return column->GetChunkIDByOffset(offset);
+    }
+
+    int64_t
+    num_chunk_data(FieldId field_id) const override {
+        if (!FieldDataReady(field_id)) {
+            return 0;
+        }
+        auto* column = Column(field_id);
+        return column ? column->num_chunks() : 1;
+    }
+
+    int64_t
+    get_row_count() const override {
+        return state_->runtime->row_count;
+    }
+
+ private:
+    bool
+    FieldDataReady(FieldId field_id) const {
+        return get_bit(state_->field_data_ready_bitset, field_id);
+    }
+
+    const ChunkedColumnInterface*
+    Column(FieldId field_id) const {
+        auto it = state_->runtime->fields.find(field_id);
+        return it == state_->runtime->fields.end() ? nullptr : it->second.get();
+    }
+
+    std::shared_ptr<const PublishedSegmentState> state_;
+};
+
+std::shared_ptr<const SegmentReadSnapshot>
+ChunkedSegmentSealedImpl::CaptureReadSnapshot() const {
+    return std::make_shared<SealedReadSnapshot>(CapturePublishedState());
+}
+
 std::shared_ptr<const ChunkedSegmentSealedImpl::RuntimeResourceState>
 ChunkedSegmentSealedImpl::BuildRuntimeResourceState() {
     auto runtime = std::make_shared<RuntimeResourceState>();
