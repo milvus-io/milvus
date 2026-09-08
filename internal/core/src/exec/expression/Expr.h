@@ -263,6 +263,13 @@ class SegmentExpr : public Expr {
         if (segment_->HasFieldData(field_id_)) {
             if (segment_->is_chunked()) {
                 num_data_chunk_ = segment_->num_chunk_data(field_id_);
+                // Cache per-chunk row counts once at construction to avoid
+                // taking the segment read lock for every chunk on every batch
+                // (each chunk_size() call acquires folly SharedMutex).
+                chunk_sizes_.resize(num_data_chunk_);
+                for (int64_t i = 0; i < num_data_chunk_; i++) {
+                    chunk_sizes_[i] = segment_->chunk_size(field_id_, i);
+                }
             } else {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
@@ -281,7 +288,7 @@ class SegmentExpr : public Expr {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
             // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size = chunk_sizes_[i] - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -895,7 +902,7 @@ class SegmentExpr : public Expr {
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
 
             // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size = chunk_sizes_[i] - data_pos;
             size = std::min(size, batch_size_ - processed_size);
 
             if (size == 0)
@@ -1067,7 +1074,7 @@ class SegmentExpr : public Expr {
         int64_t processed_size = 0;
 
         for (size_t chunk_id = 0; chunk_id < num_data_chunk_; chunk_id++) {
-            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_size = chunk_sizes_[chunk_id];
             int64_t chunk_offset = 0;
 
             while (chunk_offset < chunk_size) {
@@ -1379,7 +1386,7 @@ class SegmentExpr : public Expr {
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
             int64_t size = 0;
             if (segment_->is_chunked()) {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
+                size = chunk_sizes_[i] - data_pos;
             } else {
                 size = (i == (num_data_chunk_ - 1))
                            ? (segment_->type() == SegmentType::Growing
@@ -1728,6 +1735,9 @@ class SegmentExpr : public Expr {
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
     int64_t num_index_chunk_{0};
+    // Cached per-chunk row counts for chunked segments, filled once in
+    // InitSegmentExpr() to avoid repeated segment read-lock acquisition.
+    std::vector<int64_t> chunk_sizes_{};
     // State indicate position that expr computing at
     // because expr maybe called for every batch.
     int64_t current_data_chunk_{0};

@@ -769,10 +769,9 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
         for (int64_t chunk_id = 0;
              chunk_id < num_data_chunk_ && processed_rows < active_count_;
              ++chunk_id) {
-            const auto chunk_size =
-                segment_->is_chunked()
-                    ? segment_->chunk_size(field_id_, chunk_id)
-                    : size_per_chunk_;
+            const auto chunk_size = segment_->is_chunked()
+                                        ? chunk_sizes_[chunk_id]
+                                        : size_per_chunk_;
             const auto size =
                 std::min(chunk_size, active_count_ - processed_rows);
             segment_->ApplyFieldValidData(op_ctx_,
@@ -1184,7 +1183,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
              i < num_data_chunk_ && valid_processed_size < active_count_;
              ++i) {
             int64_t size = segment_->is_chunked()
-                               ? segment_->chunk_size(field_id_, i)
+                               ? chunk_sizes_[i]
                                : (i == num_data_chunk_ - 1
                                       ? active_count_ - valid_processed_size
                                       : size_per_chunk_);
