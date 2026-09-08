@@ -972,8 +972,9 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 // querynodes that are NOT part of any current replica of the collection, grouped by the resource
 // group of the holding querynode. Unlike GetLeakedResourcesByCollection, it preserves the per-RG
 // attribution so compliance reporting can mark exactly the resource groups that hold leaked
-// resources. A leaked node whose resource group cannot be resolved (e.g. it already left the
-// session) is attributed to the empty resource group, which callers treat as global.
+// resources. Attribution uses the authoritative ResourceManager node->RG mapping (not the session
+// label, which most deployments never set); a leaked node not in any resource group is attributed
+// to the empty resource group, which callers treat as global.
 func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64) map[string]int {
 	replicas := s.meta.GetByCollection(ctx, collectionID)
 	validNodes := typeutil.NewUniqueSet()
@@ -982,10 +983,7 @@ func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collec
 	}
 	leaked := make(map[string]int)
 	rgOf := func(nodeID int64) string {
-		if node := s.nodeMgr.Get(nodeID); node != nil {
-			return node.ResourceGroupName()
-		}
-		return ""
+		return s.meta.ResourceManager.GetResourceGroupByNodeID(nodeID)
 	}
 	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
 		if !validNodes.Contain(seg.Node) {
