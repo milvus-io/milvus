@@ -1,19 +1,56 @@
 import sys
 import time
 
+import grpc
 from pymilvus import DataType, MilvusClient
+from pymilvus.client.call_context import _api_level_md
+from pymilvus.client.prepare import Prepare
+from pymilvus.client.types import SegmentInfo
+from pymilvus.client.utils import check_status
+from pymilvus.decorators import IGNORE_RETRY_CODES
+from pymilvus.exceptions import ErrorCode, MilvusException
+from pymilvus.grpc_gen import common_pb2
 
 sys.path.append("..")
 from base.client_base import Base
 from check.func_check import ResponseChecker
 from common import common_func as cf
 from common import common_type as ct
+from common.compaction_utils import get_compaction_state_info, wait_for_compaction_completed
 from utils.api_request import api_request
 from utils.util_log import test_log as log
 from utils.wrapper import trace
 
 TIMEOUT = 120
 INDEX_NAME = ""
+INITIAL_RPC_RETRY_BACKOFF = 0.01
+MAX_RPC_RETRY_BACKOFF = 3
+RPC_RETRY_BACKOFF_MULTIPLIER = 3
+
+
+def list_persistent_segments_once(client, collection_name, timeout):
+    """Issue exactly one persistent-segment RPC with the supplied budget."""
+    handler = client._get_connection()
+    request = Prepare.get_persistent_segment_info_request(collection_name)
+    response = handler._stub.GetPersistentSegmentInfo(
+        request,
+        timeout=timeout,
+        metadata=_api_level_md(client._generate_call_context()),
+    )
+    check_status(response.status)
+    return [
+        SegmentInfo(
+            info.segmentID,
+            info.collectionID,
+            collection_name,
+            info.num_rows,
+            info.is_sorted,
+            info.state,
+            info.level,
+            info.storage_version,
+        )
+        for info in response.infos
+    ]
 
 
 class TestMilvusClientV2Base(Base):
@@ -624,6 +661,103 @@ class TestMilvusClientV2Base(Base):
         ).run()
         return res, check_result
 
+    def wait_for_compaction_eligible_segments(
+        self,
+        client,
+        collection_name,
+        minimum_segment_count,
+        timeout=30,
+        poll_interval=2,
+    ):
+        deadline = time.monotonic() + timeout
+        previous_snapshot = None
+        stable_observations = 0
+        latest_segments = []
+        retry_backoff = INITIAL_RPC_RETRY_BACKOFF
+
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            try:
+                latest_segments = list_persistent_segments_once(client, collection_name, timeout=remaining)
+            except grpc.RpcError as error:
+                if error.code() in IGNORE_RETRY_CODES:
+                    raise
+                handler = client._get_connection()
+                if error.code() == grpc.StatusCode.UNAVAILABLE and hasattr(handler, "reconnect"):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    handler.reconnect(timeout=remaining)
+                    if time.monotonic() >= deadline:
+                        break
+                previous_snapshot = None
+                stable_observations = 0
+                remaining = deadline - time.monotonic()
+                if remaining <= retry_backoff:
+                    break
+                time.sleep(retry_backoff)
+                retry_backoff = min(
+                    retry_backoff * RPC_RETRY_BACKOFF_MULTIPLIER,
+                    MAX_RPC_RETRY_BACKOFF,
+                )
+                continue
+            except MilvusException as error:
+                is_segment_not_found = (error.code == 600 or error.compatible_code == common_pb2.SegmentNotFound) and (
+                    "segment not found" in error.message.lower()
+                )
+                is_rate_limit = error.code == ErrorCode.RATE_LIMIT or error.compatible_code == common_pb2.RateLimit
+                if not (is_segment_not_found or is_rate_limit):
+                    raise
+                previous_snapshot = None
+                stable_observations = 0
+                remaining = deadline - time.monotonic()
+                delay = poll_interval if is_segment_not_found else retry_backoff
+                if remaining <= delay:
+                    break
+                time.sleep(delay)
+                if is_rate_limit:
+                    retry_backoff = min(
+                        retry_backoff * RPC_RETRY_BACKOFF_MULTIPLIER,
+                        MAX_RPC_RETRY_BACKOFF,
+                    )
+                continue
+            if time.monotonic() >= deadline:
+                break
+            retry_backoff = INITIAL_RPC_RETRY_BACKOFF
+            snapshot = tuple(
+                sorted(
+                    (
+                        segment.segment_id,
+                        segment.num_rows,
+                        segment.state_name,
+                        segment.level_name,
+                        segment.is_sorted,
+                    )
+                    for segment in latest_segments
+                )
+            )
+            all_segments_eligible = len(snapshot) >= minimum_segment_count and all(
+                segment.state_name == "Flushed" and segment.level_name == "L1" and segment.is_sorted
+                for segment in latest_segments
+            )
+            if all_segments_eligible and snapshot == previous_snapshot:
+                stable_observations += 1
+                if stable_observations >= 2:
+                    return latest_segments
+            else:
+                stable_observations = 1 if all_segments_eligible else 0
+            previous_snapshot = snapshot
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(poll_interval, remaining))
+
+        raise AssertionError(
+            f"Segments for {collection_name} did not become stable compaction candidates "
+            f"(Flushed, L1, sorted) within {timeout} seconds; "
+            f"last snapshot: {previous_snapshot}"
+        )
+
     @trace()
     def load_partitions(
         self, client, collection_name, partition_names, timeout=None, check_task=None, check_items=None, **kwargs
@@ -868,13 +1002,22 @@ class TestMilvusClientV2Base(Base):
 
     def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        start_time = time.time()
-        while start_time + timeout > time.time():
-            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
-            if res == "Completed":
-                return True
-            time.sleep(2)
-        return False
+        handler = client._get_connection()
+        context = client._generate_call_context(**kwargs)
+
+        def get_state(compaction_id, rpc_timeout):
+            return get_compaction_state_info(
+                handler,
+                compaction_id,
+                timeout=rpc_timeout,
+                context=context,
+            )
+
+        return wait_for_compaction_completed(
+            get_state=get_state,
+            compact_id=compact_id,
+            timeout=timeout,
+        )
 
     def wait_for_schema_version_consistency(self, client, collection_name, timeout=None):
         """Wait until every eligible sealed segment catches up with the latest collection

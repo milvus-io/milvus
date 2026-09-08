@@ -1,4 +1,5 @@
 import sys
+import time
 
 from numpy import NaN
 from pymilvus import Collection
@@ -6,6 +7,7 @@ from pymilvus import Collection
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from common.common_func import param_info
+from common.compaction_utils import get_compaction_state_info, wait_for_compaction_completed
 from pymilvus.orm.types import CONSISTENCY_STRONG
 from utils.api_request import api_request
 from utils.wrapper import trace
@@ -490,9 +492,51 @@ class ApiCollectionWrapper:
 
     def wait_for_compaction_completed(self, timeout=None, **kwargs):
         timeout = TIMEOUT * 3 if timeout is None else timeout
-        res = self.collection.wait_for_compaction_completed(timeout, **kwargs)
-        # log.debug(res)
+        is_clustering = kwargs.pop("is_clustering", False)
+        handler, context = self.collection._get_connection(**kwargs)
+        compact_id = self.collection.clustering_compaction_id if is_clustering else self.collection.compaction_id
+
+        def get_state(compaction_id, rpc_timeout):
+            return get_compaction_state_info(
+                handler,
+                compaction_id,
+                timeout=rpc_timeout,
+                context=context,
+            )
+
+        res = wait_for_compaction_completed(get_state=get_state, compact_id=compact_id, timeout=timeout)
+        assert res is True, f"compaction did not complete within {timeout} seconds: {res}"
         return res
+
+    def get_detailed_compaction_state(self, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        is_clustering = kwargs.pop("is_clustering", False)
+        handler, context = self.collection._get_connection(**kwargs)
+        compact_id = self.collection.clustering_compaction_id if is_clustering else self.collection.compaction_id
+        return get_compaction_state_info(
+            handler,
+            compact_id,
+            timeout=timeout,
+            context=context,
+        )
+
+    def wait_for_compaction_executing(self, timeout=30, poll_interval=0.1, **kwargs):
+        deadline = time.monotonic() + timeout
+        state_history = []
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            state = self.get_detailed_compaction_state(timeout=remaining, **kwargs)
+            state_history.append(state)
+            if state.failed_plan_no or state.timeout_plan_no:
+                raise AssertionError(f"compaction failed before overlap could be established: {state_history}")
+            if state.state == "Executing":
+                return state
+            if state.state == "Completed":
+                raise AssertionError(f"compaction completed before overlap could be established: {state_history}")
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(poll_interval, remaining))
+        raise AssertionError(f"compaction did not enter Executing within {timeout:g} seconds: {state_history}")
 
     @trace()
     def get_replicas(self, timeout=None, check_task=None, check_items=None, **kwargs):
