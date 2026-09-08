@@ -647,7 +647,10 @@ storage's background tick still does for the summary.
 3. write manifest/{T_now}
       = inherit M + fold in every chunk discovered in step 2
       + carry pending_gc and the DDL tombstones forward
-4. only now may this owner write a chunk
+4. only now may this owner write a chunk. A term that inherited nothing publishes no
+   manifest at step 3 and publishes it before its first chunk instead, so the invariant
+   step 2 depends on -- a term that holds chunks always has a manifest object -- holds
+   either way
 5. read every chunk in M.chunks, plus the DDL tombstones as a per-vchannel floor,
    rebuild each vchannel's record set and hand it to that vchannel's window
 7. resume WAL consumption from the consume checkpoint — unchanged
@@ -708,7 +711,7 @@ segment recovery replays.**
 
 | Failure | On-disk state | Next startup |
 | --- | --- | --- |
-| Crash between chunk write and manifest write | a chunk beyond `chunks` | probing discovers it and folds it into the new manifest |
+| Crash between chunk write and manifest write | a chunk beyond `chunks` | probing discovers it and folds it into the new manifest. A term publishes its manifest before its FIRST chunk (`publishManifestIfAbsent`), so the term is always in the manifest listing the successor probes from — without that, the very first chunk of a term that inherited nothing would be invisible. |
 | Crash while writing the manifest | single PUT — old or new, never partial | both states are self-consistent |
 | Crash after the manifest, before the consume checkpoint is saved | chunk and manifest both ahead of the checkpoint | replay re-applies the messages; the records land in the staging buffer again and are written to a NEW generation. The old chunk is still named by the manifest -- that write succeeded -- so it is not an orphan but a reachable duplicate, reclaimed by retention in the normal course. Duplicate keys are idempotent on replay: the record set keeps the first sighting. |
 | Object storage unavailable during persist | nothing written | the checkpoint persist fails and retries. WAL append keeps working; only the checkpoint stalls. |
@@ -718,7 +721,7 @@ segment recovery replays.**
 | A chunk `chunks` still names fails to decode | — | **WAL open fails.** See below. |
 | A chunk found by probing fails to decode | an unreadable object above the manifest | dropped and the probe stops. Its writes are still in the WAL — the persist that wrote it had to write the manifest next, and failing that fails the whole checkpoint persist — so replay recovers them. |
 | Manifest object fails its checksum | — | **WAL open fails.** |
-| A newer term's manifest exists | — | harmless for the store: the keys are term-scoped, so a stale owner writes beside the successor rather than over it, and recovery reads the successor's manifest. The consume checkpoint is a separate matter and is **not** fenced — see Split-brain fencing. |
+| A newer term's manifest exists | — | harmless: the keys are term-scoped, so a stale owner writes beside the successor rather than over it, and recovery reads the successor's manifest. The stale owner cannot advance the consume checkpoint either — the successor claimed it with its own term at takeover. See Split-brain fencing. |
 
 **Corruption of state the manifest still retains fails the WAL open.** The WAL is
 truncated on the consume checkpoint, which is saved only after that chunk is
@@ -794,19 +797,31 @@ That object is outside the probe, which ran under term 2, with no term 2 chunk i
 A chunk whose manifest write *succeeded* and whose checkpoint save then failed is not in
 this set: the manifest names it, so recovery reads it.
 
-**Retention does not reclaim an orphan.** GC deletes by exact key, and its only input is
-`pending_gc`, whose entries are the `{generation, term}` pairs that the same manifest
+**Ordinary release cannot reach an orphan.** GC deletes by exact key, and its only input
+is `pending_gc`, whose entries are the `{generation, term}` pairs that the same manifest
 write moved out of `chunks`. An orphan's pair was never in any manifest, so it can never
 enter `pending_gc`, and retention passing that generation deletes
-`chunks/<generation>_<the term the manifest recorded>` — a different object. On the normal
-path an orphan is a permanent leak; the disabled-idempotency drop path, the one place a
-prefix delete is used, is what clears it. Closing it generally needs a term-scoped sweep
-that lists `chunks/*` under the pchannel prefix and drops what no manifest references (the
-`TODO(term-orphan-gc)` in `gc.go`).
+`chunks/<generation>_<the term the manifest recorded>` — a different object.
 
-The leak is bounded by ungraceful ownership transitions rather than by write volume, and
-an orphan is inert: recovery probes only the term of the manifest it adopts, so an object
-under an older term is never listed. Nothing makes the leak visible today.
+**They are collected at the term boundary instead.** When a release retires the last chunk
+any manifest still holds for one or more older terms — the minimum term over `chunks` rises
+from `floorBefore` to `floorAfter` — everything below `floorAfter` becomes collectable:
+either it was just released, or it was never referenced at all. The same GC round walks the
+chunk prefix once and deletes what the manifest does not name below that term, and the
+manifest objects of those terms with it. It is bounded per round, and the deletions are the
+progress record, so an interrupted sweep only leaves work for the next one.
+
+**The trigger is what makes it safe.** Sweeping at takeover cannot be made to work: a
+delete punches a hole in the generation run that forward probing stops at, so an object a
+superseded owner writes after the sweep falls behind that hole and is never found again.
+Reaching a term boundary instead costs a further `maxRetainedChunks` objects or
+`maxRetainedBytes` of writes — orders of magnitude past the etcd session TTL that bounds a
+superseded owner's lifetime — so by the time a term is retired, nothing is writing under it.
+
+The one case left is a pchannel whose retention never rolls: nothing is collected there.
+That is self-limiting rather than unbounded, because producing an orphan requires a
+superseded owner to write a chunk and rolling retention requires chunks to be written. A
+pchannel quiet enough never to collect is also quiet enough not to accumulate.
 
 ## Split-brain fencing
 
@@ -819,35 +834,30 @@ fencing -- it publishes no marker of its own:
   other. The manifest decides which one is real; the other is an orphan.
 - A new owner's manifest is written under its own term before it writes anything, so a
   stale owner's later chunks can never be mistaken for the current sequence.
-- **The consume checkpoint is NOT fenced.** Its persistence is not a
-  compare-and-swap today (see the TODO on `recoveryStorageImpl.backgroundTask`),
-  so a stale owner still running can in principle advance it. The gap is
-  pre-existing, but the store does not merely inherit it: one extra persist cycle
-  by a stale owner now does three unfenced things in a row. It writes a chunk
-  under its old term -- an orphan, because the successor's probe has already run
-  -- then saves a checkpoint past that chunk's range, then truncates the WAL to
-  it. Those records now exist only in an object no recovery will read, and the
-  WAL segment that held them is gone: in-window retries are answered as fresh
-  writes with no error anywhere. That is the outcome *Corruption of state the
-  manifest still retains fails the WAL open* refuses to accept, arriving silently
-  through another door.
+- **The consume checkpoint is fenced by term.** `WALCheckpoint` records the term of the
+  publisher that last advanced it, and `SaveRecoverySnapshot` commits an advancement only
+  while the recorded term is not newer than the publisher's own (a value compare-and-swap,
+  since etcd cannot compare a field inside a serialized proto; the term is additionally
+  pre-checked to fail a superseded publisher fast, and the commit is verified by a read
+  back, because a guarded etcd txn reports success even when its guard fails).
 
-  The window is narrow. The balancer removes from the old owner before assigning,
-  so a normal rebalance cannot produce it; it needs the old node's etcd session to
-  expire while its process is alive and still persisting. Truncation is
-  `min(flusher checkpoint, consume checkpoint)`, so only records the stale node's
-  own flusher already flushed can be cut. Append fencing does not help -- the
-  persist path never appends.
+  **The claim happens before the store is read.** At takeover the new term writes its term
+  onto the checkpoint, leaving the position alone, BEFORE its forward probe. This is what
+  divides a superseded publisher's writes between two mechanisms with no gap between them:
+  whatever it wrote before the claim was necessarily written before the probe, so the probe
+  adopts it; whatever it writes after cannot advance the checkpoint, so those records stay
+  above it in the WAL and replay recovers them.
 
-  **The follow-up is more than a CAS.** A compare-and-swap at save time only
-  rejects a term below the one already recorded on the checkpoint, and nothing
-  writes the new term there until the new owner's first persist -- until then the
-  stale owner's CAS passes. What closes it is the discipline this section already
-  applies to the manifest: **the new term claims the checkpoint, writing its term
-  and leaving the position alone, BEFORE the forward probe.** Stamping after the
-  probe is not enough, because a chunk the fenced owner writes in between is
-  neither in the probe result nor blocked by the CAS. Until that lands, nothing
-  here should be read as assuming the fence exists.
+  Claiming later leaves exactly that gap, and it is not a small one. A chunk written
+  between the probe and the claim is in neither the probe result nor blocked by the
+  compare-and-swap, so the superseded publisher can still advance the checkpoint past it
+  and truncate the WAL to there. Once this term publishes a manifest that does not name
+  that chunk, those idempotency records exist nowhere a recovery will look, and an
+  in-window client retry is answered as a fresh write — duplicate rows, no error anywhere.
+  Ordering the claim before the probe is therefore load-bearing, not defensive.
+
+  A lost claim means this term is itself superseded: the open fails, and the retry reads
+  whatever the newer publisher left.
 
 Chunk writes are additionally arbitrated at the object, but only **within** one term.
 There is no cross-term arbitration to do: the key carries the writing term
