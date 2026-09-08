@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -1484,4 +1485,102 @@ func TestReplicaManagerSpawnWithReplicaConfigCompoundUpdate(t *testing.T) {
 		assert.Nil(t, mgr.Get(ctx, 2))
 		assert.Empty(t, mgr.GetByCollection(ctx, 10))
 	})
+}
+
+// The collection observer's timed-out release reads the replica list, decides
+// which replicas stalled in the group, and removes them. TransferReplica
+// keeps a replica's ID and rewrites its group, and RemoveReplicas deletes by
+// ID, so a transfer landing between the read and the removal deleted a
+// replica that now belonged to another group. The removal re-checks the group
+// under the collection lock and removes only the replicas still in it.
+func TestRemoveReplicasInResourceGroupKeepsAReplicaTransferredSinceTheRead(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	var released []int64
+	catalog.On("ReleaseReplica", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			for _, id := range args[2:] {
+				released = append(released, id.(int64))
+			}
+		}).Return(nil).Once()
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+
+	const collID = int64(7100)
+	replicas, err := mgr.Spawn(ctx, collID, map[string]int{"rg1": 3}, nil, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+	read := lo.Map(replicas, func(r *Replica, _ int) int64 { return r.GetID() })
+
+	// The read is done; before the removal, one of the replicas is moved.
+	require.NoError(t, mgr.TransferReplica(ctx, collID, "rg1", "rg2", 1))
+	transferred := lo.Filter(mgr.GetByCollection(ctx, collID), func(r *Replica, _ int) bool {
+		return r.GetResourceGroup() == "rg2"
+	})
+	require.Len(t, transferred, 1)
+	stillInGroup := lo.Without(read, transferred[0].GetID())
+
+	removed, err := mgr.RemoveReplicasInResourceGroup(ctx, collID, "rg1", read...)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, stillInGroup, removed, "only the replicas still in the group are removed")
+	assert.ElementsMatch(t, stillInGroup, released, "and only those reach the catalog")
+
+	remaining := mgr.GetByCollection(ctx, collID)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, transferred[0].GetID(), remaining[0].GetID(), "the transferred replica is kept")
+	assert.Equal(t, "rg2", remaining[0].GetResourceGroup())
+	assert.NotNil(t, mgr.Get(ctx, transferred[0].GetID()))
+	for _, id := range stillInGroup {
+		assert.Nil(t, mgr.Get(ctx, id))
+	}
+}
+
+// Nothing left in the group means nothing to remove and no catalog write; a
+// collection that is not loaded answers the same.
+func TestRemoveReplicasInResourceGroupWithNothingLeftInTheGroupTouchesNoCatalog(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+
+	const collID = int64(7200)
+	replicas, err := mgr.Spawn(ctx, collID, map[string]int{"rg1": 2}, nil, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+	read := lo.Map(replicas, func(r *Replica, _ int) int64 { return r.GetID() })
+	require.NoError(t, mgr.TransferReplica(ctx, collID, "rg1", "rg2", 2))
+
+	removed, err := mgr.RemoveReplicasInResourceGroup(ctx, collID, "rg1", read...)
+	require.NoError(t, err)
+	assert.Empty(t, removed)
+	assert.Len(t, mgr.GetByCollection(ctx, collID), 2)
+
+	removed, err = mgr.RemoveReplicasInResourceGroup(ctx, 7201, "rg1", 1, 2)
+	require.NoError(t, err)
+	assert.Empty(t, removed, "a collection that is not loaded has nothing to remove")
+}
+
+// A catalog that refuses the deletion removes nothing, in memory or on the
+// wire, and the error reaches the caller.
+func TestRemoveReplicasInResourceGroupReturnsTheCatalogError(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("ReleaseReplica", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("etcd unavailable")).Once()
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+
+	const collID = int64(7300)
+	replicas, err := mgr.Spawn(ctx, collID, map[string]int{"rg1": 2}, nil, commonpb.LoadPriority_LOW)
+	require.NoError(t, err)
+	read := lo.Map(replicas, func(r *Replica, _ int) int64 { return r.GetID() })
+
+	removed, err := mgr.RemoveReplicasInResourceGroup(ctx, collID, "rg1", read...)
+	require.Error(t, err)
+	assert.Empty(t, removed)
+	assert.Len(t, mgr.GetByCollection(ctx, collID), 2, "a refused deletion leaves the replicas in place")
 }
