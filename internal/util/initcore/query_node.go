@@ -38,6 +38,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -93,6 +94,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
 	SyncTakeForOutputResultCountLimit(paramtable.Get())
+	SyncAsyncGrowingIndexBuild(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -136,6 +138,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	mlog.Info(ctx, "set up knowhere build pool size", mlog.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
+
+	cGrowingBuildPoolRatio := C.float(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildPoolRatio(cGrowingBuildPoolRatio)
 
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.SetDefaultExprEvalBatchSize(cExprBatchSize)
@@ -286,4 +291,38 @@ func SyncTakeForOutputResultCountLimit(params *paramtable.ComponentParam) {
 
 func getTakeForOutputResultCountLimit() int64 {
 	return int64(C.SegcoreGetTakeForOutputResultCountLimit())
+}
+
+// SyncAsyncGrowingIndexBuild pushes the async growing-index first-build switch
+// into segcore and registers a hot-update watcher. SegmentGrowingImpl copies
+// SegcoreConfig at segment creation, so a runtime change only affects growing
+// segments created afterwards.
+func SyncAsyncGrowingIndexBuild(ctx context.Context, params *paramtable.ComponentParam) {
+	v := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
+	C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(v))
+	finalizeBudgetMs := params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.GetAsInt64()
+	C.SegcoreSetAsyncGrowingIndexFinalizeBudgetMs(C.int64_t(finalizeBudgetMs))
+	catchupDeadlineMs := params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.GetAsInt64()
+	C.SegcoreSetAsyncGrowingIndexCatchupDeadlineMs(C.int64_t(catchupDeadlineMs))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncBuild.Key,
+		config.NewHandler("qn.segcore.asyncGrowingBuild", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
+			C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(nv))
+			mlog.Info(ctx, "asyncGrowingBuild updated, affects growing segments created afterwards",
+				mlog.Bool("value", nv))
+		}))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.Key,
+		config.NewHandler("qn.segcore.asyncGrowingFinalizeBudgetMs", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.GetAsInt64()
+			C.SegcoreSetAsyncGrowingIndexFinalizeBudgetMs(C.int64_t(nv))
+			mlog.Info(ctx, "asyncGrowingFinalizeBudgetMs updated, affects growing segments created afterwards",
+				mlog.Int64("value", nv))
+		}))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.Key,
+		config.NewHandler("qn.segcore.asyncGrowingCatchupDeadlineMs", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.GetAsInt64()
+			C.SegcoreSetAsyncGrowingIndexCatchupDeadlineMs(C.int64_t(nv))
+			mlog.Info(ctx, "asyncGrowingCatchupDeadlineMs updated, affects growing segments created afterwards",
+				mlog.Int64("value", nv))
+		}))
 }

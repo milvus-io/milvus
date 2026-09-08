@@ -74,6 +74,30 @@ using namespace milvus;
 
 namespace {
 
+// Pins the legacy synchronous growing-index build for tests whose subject is
+// unrelated to build timing but whose fixtures assert index state right after
+// a threshold-crossing Insert (sync flips on a background thread when
+// asyncGrowingBuild is enabled). Async semantics are covered by
+// GrowingIndexAsyncBuildTest.
+class ScopedSyncGrowingBuild {
+ public:
+    explicit ScopedSyncGrowingBuild(SegcoreConfig& config)
+        : config_(config),
+          previous_(config.get_enable_async_growing_index_build()) {
+        config_.set_enable_async_growing_index_build(false);
+    }
+    ~ScopedSyncGrowingBuild() {
+        config_.set_enable_async_growing_index_build(previous_);
+    }
+    ScopedSyncGrowingBuild(const ScopedSyncGrowingBuild&) = delete;
+    ScopedSyncGrowingBuild&
+    operator=(const ScopedSyncGrowingBuild&) = delete;
+
+ private:
+    SegcoreConfig& config_;
+    bool previous_;
+};
+
 void
 AddStorageV3SystemFields(const SchemaPtr& schema) {
     schema->AddField(
@@ -2172,6 +2196,10 @@ TEST(Growing, ConcurrentInsertResourceTracking) {
 }
 
 TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
+    // Subject: offset-mapping monotonicity across inserts. Requires the sync
+    // build: once the (tiny-threshold) index syncs and owns raw data, later
+    // inserts stop appending to the raw mapping by design.
+    ScopedSyncGrowingBuild sync_build(SegcoreConfig::default_config());
     auto schema = std::make_shared<Schema>();
     constexpr int64_t dim = 8;
     auto vec = schema->AddDebugField(
@@ -2279,6 +2307,9 @@ TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
 // SearchOnGrowing returns, reference releasable from another thread) lives in
 // SearchOnSealedIndexBitsetLifetimeTest.cpp.
 TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
+    // Subject: chunk reclamation vs live storage references. Requires the
+    // sync build so "the index syncs inside this Insert" holds.
+    ScopedSyncGrowingBuild sync_build(SegcoreConfig::default_config());
     auto schema = std::make_shared<Schema>();
     constexpr int64_t dim = 8;
     auto vec = schema->AddDebugField(
