@@ -18,6 +18,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Collection.h"
+#include "segcore/SchemaCache.h"
 
 namespace milvus::segcore {
 
@@ -50,6 +51,20 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
     collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
+Collection::Collection(int64_t collection_id,
+                       const void* schema_proto,
+                       const int64_t length)
+    : collection_id_(collection_id) {
+    Assert(schema_proto != nullptr);
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_proto, length);
+    AssertInfo(suc, "parse schema proto failed");
+
+    schema_ =
+        GetGlobalSchemaCache().GetOrCreate(collection_id_, collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
+}
+
 void
 Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
     Assert(index_proto != nullptr);
@@ -68,22 +83,24 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
 }
 
 void
-Collection::parse_schema(const void* schema_proto_blob,
-                         const int64_t length,
-                         const uint64_t version) {
+Collection::parse_schema(const void* schema_proto_blob, const int64_t length) {
     Assert(schema_proto_blob != nullptr);
-
-    if (version <= get_schema_version()) {
-        return;
-    }
 
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_proto_blob, length);
 
     AssertInfo(suc, "parse schema proto failed");
+    if (collection_schema.version() <= get_schema_version()) {
+        return;
+    }
 
-    auto new_schema = Schema::ParseFrom(collection_schema);
-    new_schema->set_schema_version(version);
+    SchemaPtr new_schema;
+    if (collection_id_ > 0) {
+        new_schema = GetGlobalSchemaCache().GetOrCreate(collection_id_,
+                                                        collection_schema);
+    } else {
+        new_schema = Schema::ParseFrom(collection_schema);
+    }
     set_schema(new_schema);
 }
 

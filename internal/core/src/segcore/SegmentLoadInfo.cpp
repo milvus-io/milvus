@@ -184,8 +184,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
 
     // Text match index mmap config is based on the scalar field mmap
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto [field_has_setting, field_mmap_enabled] =
-        schema_->MmapEnabled(field_id);
+    auto [field_has_setting, field_mmap_enabled] = MmapEnabled(field_id);
     bool enable_mmap = field_has_setting
                            ? field_mmap_enabled
                            : mmap_config.GetScalarFieldEnableMmap();
@@ -195,8 +194,8 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         text_index_stats.current_scalar_index_version());
 
     // Text match index warmup policy based on scalar field's warmup
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
-        field_id, /*is_vector=*/false, /*is_index=*/false);
+    auto [field_has_warmup, field_warmup_policy] =
+        WarmupPolicy(field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
@@ -234,8 +233,8 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
     info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
 
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
-        field_id, /*is_vector=*/false, /*is_index=*/false);
+    auto [field_has_warmup, field_warmup_policy] =
+        WarmupPolicy(field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
@@ -556,7 +555,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // (we want to keep field data alongside index, OR index can't serve raw).
             bool should_eager_load =
                 field_id < START_USER_FIELDID ||
-                (new_info.schema_->ShouldLoadField(fid) &&
+                (new_info.ShouldLoadField(fid) &&
                  (prefer_field_data || !index_has_raw_data));
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
