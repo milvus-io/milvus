@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -849,12 +848,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		}).Build()
 		defer mocker2.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResourceGroups: []string{"rg1", "rg2"},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).Return(map[int64]error{}).Build()
 		defer mockerSvc.UnPatch()
 
@@ -870,10 +863,10 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		var resp LoadConfigComplianceResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
-		assert.Len(t, resp.ResourceGroups, 2)
+		assert.Len(t, *resp.ResourceGroups, 2)
 
 		byRG := map[string]ResourceGroupComplianceState{}
-		for _, rg := range resp.ResourceGroups {
+		for _, rg := range *resp.ResourceGroups {
 			byRG[rg.ResourceGroup] = rg
 		}
 		assert.Equal(t, LoadConfigComplianceStateNotReady, byRG["rg1"].State)
@@ -916,13 +909,12 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		}).Build()
 		defer mocker2.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
-		// Collection 100 fails the replica count check (and is skipped); collection 200 fails serviceability.
+		// Collection 100 fails the replica count check and must be skipped entirely (no downstream
+		// serviceability/leak checks); collection 200 fails serviceability. Recording the calls proves
+		// the skip: 100 never reaches CheckReplicasServiceable.
+		var svcChecked []int64
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).To(func(_ *querycoordv2.Server, ctx context.Context, collectionID int64) map[int64]error {
+			svcChecked = append(svcChecked, collectionID)
 			if collectionID == 200 {
 				return map[int64]error{3: fmt.Errorf("replica 3 (rg=rg2) channel c1 not serviceable")}
 			}
@@ -930,7 +922,12 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		}).Build()
 		defer mockerSvc.UnPatch()
 
-		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollectionPerRG).Return(map[string]int{}).Build()
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollectionPerRG).To(func(_ *querycoordv2.Server, ctx context.Context, collectionID int64) map[string]int {
+			if collectionID == 100 {
+				t.Errorf("leak check ran for collection 100 despite replica count mismatch")
+			}
+			return map[string]int{}
+		}).Build()
 		defer mocker3.UnPatch()
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
@@ -938,15 +935,17 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 
 		coord.HandleReplicaLoadConfigCompliance(w, req)
 
+		assert.Equal(t, []int64{200}, svcChecked)
+
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp LoadConfigComplianceResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
 		// Both collections were still checked (no fast-fail): rg1 failed the replica count
 		// check and rg2 failed serviceability, so both are reported as not ready.
-		assert.Len(t, resp.ResourceGroups, 2)
+		assert.Len(t, *resp.ResourceGroups, 2)
 		byRG := map[string]ResourceGroupComplianceState{}
-		for _, rg := range resp.ResourceGroups {
+		for _, rg := range *resp.ResourceGroups {
 			byRG[rg.ResourceGroup] = rg
 		}
 		assert.Equal(t, LoadConfigComplianceStateNotReady, byRG["rg1"].State)
@@ -982,11 +981,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).
 			Return(map[int64]error{1: fmt.Errorf("replica 1 (rg=rg1) channel c1 not serviceable")}).Build()
 		defer mockerSvc.UnPatch()
@@ -1003,10 +997,10 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		var resp LoadConfigComplianceResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
-		assert.Len(t, resp.ResourceGroups, 1)
-		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.ResourceGroups[0].State)
-		assert.Contains(t, resp.ResourceGroups[0].Reason, "not serviceable")
-		assert.NotContains(t, resp.ResourceGroups[0].Reason, "not query visible")
+		assert.Len(t, *resp.ResourceGroups, 1)
+		assert.Equal(t, LoadConfigComplianceStateNotReady, (*resp.ResourceGroups)[0].State)
+		assert.Contains(t, (*resp.ResourceGroups)[0].Reason, "not serviceable")
+		assert.NotContains(t, (*resp.ResourceGroups)[0].Reason, "not query visible")
 	})
 
 	t.Run("per-resource-group mode all compliant returns Ready per RG", func(t *testing.T) {
@@ -1033,12 +1027,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResourceGroups: []string{"rg1", "rg2"},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).Return(map[int64]error{}).Build()
 		defer mockerSvc.UnPatch()
 
@@ -1054,8 +1042,8 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		var resp LoadConfigComplianceResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateReady, resp.State)
-		assert.Len(t, resp.ResourceGroups, 2)
-		for _, rg := range resp.ResourceGroups {
+		assert.Len(t, *resp.ResourceGroups, 2)
+		for _, rg := range *resp.ResourceGroups {
 			assert.Equal(t, LoadConfigComplianceStateReady, rg.State)
 			assert.Empty(t, rg.Reason)
 		}
@@ -1083,11 +1071,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		// Collection 100 has no replicas at all.
 		mockerRep := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return([]*meta.Replica{}).Build()
 		defer mockerRep.UnPatch()
-
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
 
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).Return(map[int64]error{}).Build()
 		defer mockerSvc.UnPatch()
@@ -1134,12 +1117,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mockerRep := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mockerRep.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResourceGroups: []string{"rg1", "rg2", "rgX"},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).Return(map[int64]error{}).Build()
 		defer mockerSvc.UnPatch()
 
@@ -1156,7 +1133,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
 		byRG := map[string]ResourceGroupComplianceState{}
-		for _, rg := range resp.ResourceGroups {
+		for _, rg := range *resp.ResourceGroups {
 			byRG[rg.ResourceGroup] = rg
 		}
 		// rg1 is balanced: one replica present, one expected.
@@ -1193,12 +1170,6 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mockerRep := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mockerRep.UnPatch()
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResourceGroups: []string{"rg1", "rg2"},
-		}, nil).Build()
-		defer mockerRG.UnPatch()
-
 		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).
 			Return(map[int64]error{2: fmt.Errorf("replica 2 (rg=rg2) channel c1 not serviceable")}).Build()
 		defer mockerSvc.UnPatch()
@@ -1216,7 +1187,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
 		byRG := map[string]ResourceGroupComplianceState{}
-		for _, rg := range resp.ResourceGroups {
+		for _, rg := range *resp.ResourceGroups {
 			byRG[rg.ResourceGroup] = rg
 		}
 		assert.Equal(t, LoadConfigComplianceStateReady, byRG["rg1"].State)
@@ -1236,23 +1207,67 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "invalid output")
 	})
 
-	t.Run("per-resource-group mode WAL not ready reports every RG NotReady", func(t *testing.T) {
-		// WAL placement is cluster-wide: when it is not ready, every known resource group must be
-		// reported NotReady with the WAL reason, so an "absent resourceGroups array" can never be
-		// misread as "nothing to worry about".
-		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
-		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+	t.Run("per-resource-group mode empty replica RG produces no blank entry", func(t *testing.T) {
+		// A replica whose ResourceGroup is empty cannot be attributed to a named group: the violation
+		// must surface as the global reason and flip the overall state, without emitting an entry like
+		// {"resourceGroup":"","state":"NotReady"} that callers cannot act on.
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
-		defer registerTestBalancer(t, fmt.Errorf("streaming WAL not migrated yet"))()
+		defer registerTestBalancer(t, nil)()
+
+		rg1Replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: ""}, typeutil.NewUniqueSet())
+		mutableReplica := rg1Replica.CopyForWrite()
+		mutableReplica.SetQueryInvisible(true)
+		rg1Replica = mutableReplica.IntoReplica()
+		replicas := []*meta.Replica{rg1Replica}
 
 		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 
-		mockerRG := mockey.Mock((*querycoordv2.Server).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResourceGroups: []string{"rg1", "rg2"},
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
 		}, nil).Build()
-		defer mockerRG.UnPatch()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker2.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckReplicasServiceable).Return(map[int64]error{}).Build()
+		defer mockerSvc.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollectionPerRG).Return(map[string]int{}).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "not query visible")
+		// No blank resource-group entry: the violation went to the global reason instead.
+		assert.Empty(t, resp.ResourceGroups)
+	})
+
+	t.Run("per-resource-group mode WAL not ready marks primary RG NotReady", func(t *testing.T) {
+		// WAL placement is the primary resource group's obligation: when it is not ready, only that
+		// group is reported NotReady with the WAL reason; other groups (here rg2, configured but
+		// hosting no violation) stay Ready and are still listed since they are expected groups.
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+		paramtable.Get().Save(Params.StreamingCfg.PrimaryResourceGroup.Key, "rg1")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer paramtable.Get().Reset(Params.StreamingCfg.PrimaryResourceGroup.Key)
+		defer registerTestBalancer(t, fmt.Errorf("streaming WAL not migrated yet"))()
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance?output=per_resource_group", nil)
 		w := httptest.NewRecorder()
@@ -1264,10 +1279,16 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
 		assert.Contains(t, resp.Reason, "WAL placement")
-		assert.Len(t, resp.ResourceGroups, 2)
-		for _, rg := range resp.ResourceGroups {
-			assert.Equal(t, LoadConfigComplianceStateNotReady, rg.State)
-			assert.Contains(t, rg.Reason, "WAL placement")
+		assert.Len(t, *resp.ResourceGroups, 2)
+		for _, rg := range *resp.ResourceGroups {
+			if rg.ResourceGroup == "rg1" {
+				assert.Equal(t, LoadConfigComplianceStateNotReady, rg.State)
+				assert.Contains(t, rg.Reason, "WAL placement")
+			} else {
+				assert.Equal(t, "rg2", rg.ResourceGroup)
+				assert.Equal(t, LoadConfigComplianceStateReady, rg.State)
+				assert.Empty(t, rg.Reason)
+			}
 		}
 	})
 }
