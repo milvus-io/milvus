@@ -451,6 +451,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 		now := time.Now()
 		mvccTimeTick := tsoutil.ComposeTSByTime(now, 0)
@@ -596,6 +597,7 @@ func TestBalancer_PrimaryResourceGroupChangeTriggersBalance(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 		rgHints <- resourceGroupHint
 		return map[int64]*types.StreamingNodeStatus{
