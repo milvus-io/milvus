@@ -497,12 +497,21 @@ impl FilteredText {
         debug_assert!(corrections.last().map_or(true, |correction| {
             correction.filtered_start <= filtered_start
         }));
-        corrections.push(SpanOffsetCorrection::new(
+        let correction = SpanOffsetCorrection::new(
             filtered_start,
             filtered_len,
             original_start,
             original_end,
-        ));
+        );
+        if filtered_len == 0 {
+            if let Some(last) = corrections.last_mut().filter(|last| {
+                last.filtered_start == filtered_start && last.filtered_len == 0
+            }) {
+                *last = correction;
+                return;
+            }
+        }
+        corrections.push(correction);
     }
 
     fn correct_boundary_offset_at(
