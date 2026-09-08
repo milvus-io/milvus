@@ -28,6 +28,7 @@
 #include "xxhash.h"
 
 #include "common/BloomFilterEnvelope.h"
+#include "common/Types.h"
 
 namespace milvus {
 namespace exec {
