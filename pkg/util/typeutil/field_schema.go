@@ -54,6 +54,22 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 	return err == nil && enable
 }
 
+// IsMatchEnabled checks type parameters without allocating a FieldSchemaHelper.
+// Like NewKvPairs, the last value wins when a key appears more than once.
+func IsMatchEnabled(field *schemapb.FieldSchema) bool {
+	if !IsStringType(field.GetDataType()) {
+		return false
+	}
+	params := field.GetTypeParams()
+	for i := len(params) - 1; i >= 0; i-- {
+		if params[i].GetKey() == "enable_match" {
+			enabled, err := strconv.ParseBool(params[i].GetValue())
+			return err == nil && enabled
+		}
+	}
+	return false
+}
+
 func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {
 	return IsJSONType(h.schema.GetDataType())
 }

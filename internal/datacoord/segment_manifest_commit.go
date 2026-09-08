@@ -390,7 +390,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		metricMutation.commit()
 		// Memory is installed only after the catalog write has succeeded while the
 		// same segMu critical section still excludes competing full-record writers.
-		m.segments.SetSegment(commit.SegmentID, updated)
+		m.setSegmentAndNotifyStats(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
 			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.install())
 		}

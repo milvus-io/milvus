@@ -1052,6 +1052,9 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
+  statsInspector:
+    discoveryMode: poll # Stats task discovery: poll (legacy), shadow (read-only events), or event. Takes effect on restart.
+    reconcileInterval: 600 # Seconds between stats reconciliation requests. Active scans are not restarted. Takes effect on restart.
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write; values must be positive, otherwise the default is used

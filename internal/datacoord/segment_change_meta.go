@@ -865,7 +865,7 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	// Apply metric mutation and memory status after a successful meta update.
 	updatePack.metricMutation.commit()
 	for id, s := range updatePack.segments {
-		m.segments.SetSegment(id, s)
+		m.setSegmentAndNotifyStats(id, s)
 	}
 	for _, action := range groupActions {
 		m.applySegmentChangeGroupActionMemoryLocked(action)

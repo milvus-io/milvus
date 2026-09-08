@@ -54,7 +54,13 @@ type statsInspector struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	loopWg sync.WaitGroup
+	loopWg           sync.WaitGroup
+	lifecycleMu      sync.Mutex // Serialize Start/Stop, including WaitGroup.Add vs Wait.
+	startOnce        sync.Once
+	submitMu         sync.Mutex
+	discovery        *statsReconcileQueue
+	discoveryOptions statsDiscoveryOptions
+	discoveryUnwatch []func()
 
 	mt *meta
 
@@ -74,7 +80,7 @@ func newStatsInspector(ctx context.Context,
 	ievm IndexEngineVersionManager,
 ) *statsInspector {
 	ctx, cancel := context.WithCancel(ctx)
-	return &statsInspector{
+	si := &statsInspector{
 		ctx:                 ctx,
 		cancel:              cancel,
 		loopWg:              sync.WaitGroup{},
@@ -85,14 +91,38 @@ func newStatsInspector(ctx context.Context,
 		compactionInspector: compactionInspector,
 		ievm:                ievm,
 	}
+	si.discoveryOptions = getStatsDiscoveryOptions()
+	if si.discoveryOptions.mode != "poll" {
+		si.discovery = newStatsReconcileQueue(si.discoveryOptions.maxPending, si.discoveryOptions.maxCollections)
+		mt.statsDiscovery.Store(si.discovery)
+		mt.statsTaskMeta.statsDiscovery.Store(si.discovery)
+	}
+	return si
 }
 
 func (si *statsInspector) Start() {
-	si.warnDeprecatedThrottleConfigs()
-	si.reloadFromMeta()
-	si.loopWg.Add(2)
-	go si.triggerStatsTaskLoop()
-	go si.cleanupStatsTasksLoop()
+	si.lifecycleMu.Lock()
+	defer si.lifecycleMu.Unlock()
+	if si.ctx.Err() != nil {
+		return
+	}
+	si.startOnce.Do(func() {
+		si.warnDeprecatedThrottleConfigs()
+		if si.discovery != nil {
+			si.watchStatsDiscoveryConfig()
+		}
+		si.reloadFromMeta()
+		si.loopWg.Add(1)
+		go si.cleanupStatsTasksLoop()
+		if si.discoveryOptions.mode != "event" {
+			si.loopWg.Add(1)
+			go si.triggerStatsTaskLoop()
+		}
+		if si.discovery != nil {
+			si.loopWg.Add(1)
+			go si.statsDiscoveryLoop()
+		}
+	})
 }
 
 // warnDeprecatedThrottleConfigs tells operators whose config still carries the
@@ -127,8 +157,22 @@ func jsonShreddingDisabledByDeprecatedConfig() bool {
 }
 
 func (si *statsInspector) Stop() {
+	si.lifecycleMu.Lock()
+	defer si.lifecycleMu.Unlock()
 	si.cancel()
+	if si.discovery != nil {
+		si.mt.statsDiscovery.CompareAndSwap(si.discovery, nil)
+		si.mt.statsTaskMeta.statsDiscovery.CompareAndSwap(si.discovery, nil)
+		si.discovery.close()
+	}
+	for _, unwatch := range si.discoveryUnwatch {
+		unwatch()
+	}
+	si.discoveryUnwatch = nil
 	si.loopWg.Wait()
+	if si.discovery != nil && si.mt.statsDiscovery.Load() == nil {
+		si.discovery.updateMetrics()
+	}
 }
 
 func (si *statsInspector) reloadFromMeta() {
@@ -251,9 +295,8 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 // new stats task. The pending queue is shared by every task type, so the count is
 // scoped to stats work: an index or compaction backlog must not starve text-index
 // and JSON-shredding submission. Stats tasks waiting on a retry backoff are
-// counted, because they still occupy queue depth. Discovery re-runs on every
-// TaskCheckInterval tick, so a segment skipped here is picked up again once the
-// stats queue drains.
+// counted, because they still occupy queue depth. Poll mode checks again on its
+// next tick; event mode retains refused keys in the bounded retry queue.
 func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
 	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats)
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
@@ -278,9 +321,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
-			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if !h.EnableMatch() {
+			if !typeutil.IsMatchEnabled(field) {
 				continue
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
@@ -296,9 +337,8 @@ func (si *statsInspector) triggerTextStatsTask() {
 				return false
 			}
 			// A segment whose task is already in meta must not be re-submitted;
-			// filtering it out here keeps the per-tick work proportional to the
-			// segments that still need a task instead of to all of them.
-			// Note this runs under meta.segMu.RLock, so keep it to a map read.
+			// filtering it out here avoids duplicate submissions. This legacy
+			// selector still traverses the collection's segments.
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_TextIndexJob)
 		}))
 
@@ -342,8 +382,7 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+			if typeutil.IsJSONType(field.GetDataType()) && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
@@ -452,9 +491,24 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	subJobType indexpb.StatsSubJob, canRecycle bool,
 	resources []*internalpb.FileResourceInfo,
 ) error {
+	_, err := si.submitStatsTask(originSegmentID, targetSegmentID, subJobType, canRecycle, resources)
+	return err
+}
+
+// Keep the public error-only contract, but never treat a refused admission as a
+// completed event. Serializing submission also covers direct interface callers.
+func (si *statsInspector) submitStatsTask(originSegmentID, targetSegmentID int64,
+	subJobType indexpb.StatsSubJob, canRecycle bool,
+	resources []*internalpb.FileResourceInfo,
+) (statsSubmitResult, error) {
+	si.submitMu.Lock()
+	defer si.submitMu.Unlock()
+	if err := si.ctx.Err(); err != nil {
+		return statsDeferred, err
+	}
 	originSegment := si.mt.GetHealthySegment(si.ctx, originSegmentID)
 	if originSegment == nil {
-		return merr.WrapErrSegmentNotFound(originSegmentID)
+		return statsNotNeeded, merr.WrapErrSegmentNotFound(originSegmentID)
 	}
 	if si.isExternalCollection(originSegment.GetCollectionID()) {
 		if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob && !canBuildExternalJSONKeyIndex(originSegment) {
@@ -462,7 +516,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 				"skip submit external json stats task without v3 manifest",
 				mlog.FieldCollectionID(originSegment.GetCollectionID()),
 				mlog.FieldSegmentID(originSegmentID))
-			return nil
+			return statsNotNeeded, nil
 		}
 		if subJobType != indexpb.StatsSubJob_TextIndexJob &&
 			subJobType != indexpb.StatsSubJob_JsonKeyIndexJob {
@@ -471,7 +525,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 				mlog.FieldCollectionID(originSegment.GetCollectionID()),
 				mlog.FieldSegmentID(originSegmentID),
 				mlog.String("subJobType", subJobType.String()))
-			return nil
+			return statsNotNeeded, nil
 		}
 	}
 	if si.mt.statsTaskMeta.HasStatsTask(originSegmentID, subJobType) {
@@ -479,16 +533,16 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			mlog.FieldCollectionID(originSegment.GetCollectionID()),
 			mlog.FieldSegmentID(originSegmentID),
 			mlog.String("subJobType", subJobType.String()))
-		return nil
+		return statsExisting, nil
 	}
 	// The trigger loops check admission before getting here; this guard covers
 	// callers that reach the StatsInspector interface directly.
 	if !si.canSubmitStatsTask(subJobType) {
-		return nil
+		return statsDeferred, nil
 	}
-	taskID, err := si.allocator.AllocID(context.Background())
+	taskID, err := si.allocator.AllocID(si.ctx)
 	if err != nil {
-		return err
+		return statsDeferred, err
 	}
 	originSegmentSize := originSegment.getSegmentSize()
 	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
@@ -516,9 +570,9 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			mlog.RatedInfo(si.ctx, rate.Limit(10), "stats task already exists", mlog.FieldTaskID(taskID),
 				mlog.FieldCollectionID(originSegment.GetCollectionID()),
 				mlog.FieldSegmentID(originSegment.GetID()))
-			return nil
+			return statsExisting, nil
 		}
-		return err
+		return statsDeferred, err
 	}
 	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.handler, si.allocator, si.ievm))
 	mlog.Info(si.ctx,
@@ -527,7 +581,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		mlog.FieldCollectionID(originSegment.GetCollectionID()),
 		mlog.Int64("originSegmentID", originSegmentID),
 		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("taskSlot", taskSlot))
-	return nil
+	return statsSubmitted, nil
 }
 
 func (si *statsInspector) GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {

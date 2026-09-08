@@ -471,6 +471,8 @@ var (
 
 // RegisterDataCoord registers DataCoord metrics
 func RegisterDataCoord(registry *prometheus.Registry) {
+	registry.MustRegister(StatsDiscoveryPending, StatsDiscoveryOldestAge, StatsDiscoveryOverflow,
+		StatsDiscoveryChecks, StatsDiscoveryScannedSegments, StatsDiscoveryScanDuration, StatsDiscoveryDelay)
 	registry.MustRegister(DataCoordNumDataNodes)
 	registry.MustRegister(DataCoordNumSegments)
 	registry.MustRegister(DataCoordNumCollections)
