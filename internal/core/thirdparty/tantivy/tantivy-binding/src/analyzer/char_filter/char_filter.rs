@@ -412,13 +412,22 @@ impl FilteredText {
             ) => {
                 let (original_start, original_end) = self.correct_offsets(start, end);
                 output.text.push_str(replacement);
-                Self::push_span_correction(
-                    output_corrections,
-                    output_start,
-                    replacement.len(),
-                    original_start,
-                    original_end,
-                );
+                let source = &self.text[start..end];
+                let preserves_single_char_offsets = !source.is_empty()
+                    && source.chars().nth(1).is_none()
+                    && !replacement.is_empty()
+                    && replacement.chars().nth(1).is_none()
+                    && original_start == output_start
+                    && original_end == output.text.len();
+                if !preserves_single_char_offsets {
+                    Self::push_span_correction(
+                        output_corrections,
+                        output_start,
+                        replacement.len(),
+                        original_start,
+                        original_end,
+                    );
+                }
             }
             (
                 OffsetCorrections::Boundary(corrections),
