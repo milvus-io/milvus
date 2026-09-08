@@ -386,21 +386,27 @@ impl FilteredText {
                     return;
                 }
 
-                let source_boundaries = self.char_boundaries(start, end);
-                let replacement_boundaries = char_boundaries(replacement);
-                let source_char_count = source_boundaries.len().saturating_sub(1);
-                let replacement_char_count = replacement_boundaries.len().saturating_sub(1);
+                let source_char_count = self.text[start..end].chars().count();
+                let replacement_char_count = replacement.chars().count();
+                let mut source_boundaries = self.text[start..end]
+                    .char_indices()
+                    .map(|(offset, _)| start + offset)
+                    .chain(std::iter::once(end));
+                let mut source_boundary_index = 0;
+                let mut source_boundary = source_boundaries.next().unwrap();
                 let mut source_correction_index = corrections
-                    .partition_point(|correction| {
-                        correction.filtered_offset <= source_boundaries[0]
-                    })
+                    .partition_point(|correction| correction.filtered_offset <= source_boundary)
                     .checked_sub(1);
                 let mut next_correction_index =
                     source_correction_index.map_or(0, |index| index + 1);
 
                 output.text.push_str(replacement);
-                for (boundary_index, boundary) in replacement_boundaries.iter().enumerate() {
-                    let source_boundary_index = if boundary_index == replacement_char_count {
+                let replacement_boundaries = replacement
+                    .char_indices()
+                    .map(|(offset, _)| offset)
+                    .chain(std::iter::once(replacement.len()));
+                for (boundary_index, boundary) in replacement_boundaries.enumerate() {
+                    let wanted_source_boundary = if boundary_index == replacement_char_count {
                         source_char_count
                     } else if source_char_count == 0 {
                         0
@@ -411,7 +417,10 @@ impl FilteredText {
                     } else {
                         boundary_index.min(source_char_count)
                     };
-                    let source_boundary = source_boundaries[source_boundary_index];
+                    while source_boundary_index < wanted_source_boundary {
+                        source_boundary = source_boundaries.next().unwrap();
+                        source_boundary_index += 1;
+                    }
                     while next_correction_index < corrections.len()
                         && corrections[next_correction_index].filtered_offset <= source_boundary
                     {
@@ -484,26 +493,6 @@ impl FilteredText {
             });
         }
     }
-
-    fn char_boundaries(&self, start: usize, end: usize) -> Vec<usize> {
-        let mut boundaries = Vec::new();
-        boundaries.push(start);
-        for (offset, _) in self.text[start..end].char_indices().skip(1) {
-            boundaries.push(start + offset);
-        }
-        boundaries.push(end);
-        boundaries
-    }
-}
-
-fn char_boundaries(text: &str) -> Vec<usize> {
-    let mut boundaries = Vec::new();
-    boundaries.push(0);
-    for (offset, _) in text.char_indices().skip(1) {
-        boundaries.push(offset);
-    }
-    boundaries.push(text.len());
-    boundaries
 }
 
 fn signed_delta(value: usize, base: usize) -> isize {

@@ -1,4 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap};
+use std::sync::Arc;
 
 use serde_json as json;
 
@@ -13,7 +14,7 @@ use crate::error::{Result, TantivyBindingError};
 /// existing offset corrections.
 #[derive(Clone)]
 pub(crate) struct MappingCharFilter {
-    mappings: HashMap<char, Vec<(String, String)>>,
+    mappings: Arc<HashMap<char, Vec<(String, String)>>>,
 }
 
 impl MappingCharFilter {
@@ -65,7 +66,9 @@ impl MappingCharFilter {
             rules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
         }
 
-        Ok(MappingCharFilter { mappings })
+        Ok(MappingCharFilter {
+            mappings: Arc::new(mappings),
+        })
     }
 }
 
