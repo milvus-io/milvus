@@ -93,10 +93,6 @@ DECLARE_PROMETHEUS_HISTOGRAM(
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_original_remaining_candidates);
 DECLARE_PROMETHEUS_HISTOGRAM(
-    internal_core_strict_group_phase2_estimated_groups);
-DECLARE_PROMETHEUS_HISTOGRAM(
-    internal_core_strict_group_phase2_estimated_remaining_candidates);
-DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_membership_build_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_bitmap_build_latency);

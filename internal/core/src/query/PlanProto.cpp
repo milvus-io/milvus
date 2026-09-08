@@ -97,6 +97,8 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
+    search_info.strict_group_acceptance_threshold_ =
+        ParseStrictGroupAcceptanceThreshold(search_info.search_params_);
     search_info.materialized_view_involved =
         query_info_proto.materialized_view_involved();
     // currently, iterative filter does not support range search

@@ -15,12 +15,11 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
-#include <boost/math/distributions/binomial.hpp>
 #include <unordered_set>
 #include "monitor/Monitor.h"
 #include "exec/operator/Utils.h"
 #include "index/VectorMemIndex.h"
-#include "exec/operator/search-groupby/StrictGroupWorkEstimate.h"
+#include "common/StrictGroupSearchParams.h"
 
 #include <unordered_map>
 
@@ -414,7 +413,8 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
                    size_t expected_rows,
                    std::optional<ErrorCode> recreate_error = std::nullopt,
                    milvus::OpContext* op_ctx = nullptr,
-                   folly::CancellationSource* cancel_on_recreate = nullptr) {
+                   folly::CancellationSource* cancel_on_recreate = nullptr,
+                   std::optional<double> threshold = std::nullopt) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -465,6 +465,12 @@ CheckProbeScenario(const std::vector<int64_t>& labels,
     info.strict_group_size_ = true;
     info.group_by_field_ids_ = {field};
     info.metric_type_ = knowhere::metric::L2;
+    info.search_params_ = knowhere::Json::object();
+    if (threshold.has_value()) {
+        info.search_params_[kStrictGroupAcceptanceThreshold] = *threshold;
+    }
+    info.strict_group_acceptance_threshold_ =
+        ParseStrictGroupAcceptanceThreshold(info.search_params_);
     std::vector<CompositeGroupKey> groups;
     std::vector<int64_t> offsets;
     std::vector<float> distances;
@@ -497,13 +503,12 @@ TEST(StrictGroupPhase2ExecutorTest, ProbeBoundaryAndOnlyOneDecision) {
         for (int i = 1; i <= accepted; ++i) {
             labels[i] = 1;
         }
-        // The second 100-candidate window has zero useful hits. A successful
-        // first window must not be re-evaluated. Nine accepted rows also stay
-        // on the original iterator because the estimated remaining work is low.
+        // Do not re-evaluate even if the next window has no useful hits.
         for (size_t i = 201; i < labels.size(); ++i) {
             labels[i] = 1;
         }
-        CheckProbeScenario(labels, labels.size(), 1, 20, 0, 20);
+        CheckProbeScenario(
+            labels, labels.size(), 1, 20, accepted <= 10 ? 1 : 0, 20);
     }
 }
 
@@ -513,129 +518,81 @@ TEST(StrictGroupPhase2ExecutorTest, FullGroupHitsAreNotAcceptedProbeRows) {
     for (size_t i = 2; i < 102; ++i) {
         labels[i] = 0;
     }
-    // All 100 probe candidates hit a locked group, but only two can be used.
-    // A=2 enters cost estimation; H=100 estimates G near 2 and only four more
-    // candidates, so no membership scan or recreation is needed.
-    auto before =
-        milvus::monitor::internal_core_strict_group_phase2_estimated_groups
-            .Collect()
-            .histogram;
-    CheckProbeScenario(labels, labels.size(), 2, 3, 0, 6);
-    auto after =
-        milvus::monitor::internal_core_strict_group_phase2_estimated_groups
-            .Collect()
-            .histogram;
-    EXPECT_EQ(after.sample_count - before.sample_count, 1);
-    EXPECT_NEAR(after.sample_sum - before.sample_sum,
-                2 / kStrictGroupSelectivityLower95[100],
-                1e-9);
+    // All 100 candidates hit locked groups, but only two fill a quota.
+    // Acceptance is 2%, so recreate regardless of group-hit rate.
+    CheckProbeScenario(labels, labels.size(), 2, 3, 1, 6);
 }
 
-TEST(StrictGroupWorkEstimateTest, SelectivityTable) {
-    EXPECT_EQ(kStrictGroupSelectivityLower95[0], 0);
-    EXPECT_NEAR(kStrictGroupSelectivityLower95[1],
-                -std::expm1(std::log(0.95) / 100),
-                1e-15);
-    EXPECT_NEAR(
-        kStrictGroupSelectivityLower95[100], std::pow(0.05, 0.01), 1e-15);
-    for (size_t h = 1; h <= kStrictGroupProbeCandidates; ++h) {
-        SCOPED_TRACE(h);
-        const auto p = kStrictGroupSelectivityLower95[h];
-        EXPECT_GT(p, kStrictGroupSelectivityLower95[h - 1]);
-        EXPECT_LT(p, static_cast<double>(h) / kStrictGroupProbeCandidates);
-        const boost::math::binomial_distribution<double> dist(
-            kStrictGroupProbeCandidates, p);
-        EXPECT_NEAR(boost::math::cdf(boost::math::complement(dist, h - 1)),
-                    0.05,
-                    1e-12);
+TEST(StrictGroupAcceptanceThresholdTest, ParseAndConsume) {
+    knowhere::Json params = {{"nprobe", 128}};
+    EXPECT_DOUBLE_EQ(ParseStrictGroupAcceptanceThreshold(params), 0.1);
+    EXPECT_EQ(params["nprobe"], 128);
+    for (double value : {0.0, 0.01, 0.1, 0.5, 1.0}) {
+        params[kStrictGroupAcceptanceThreshold] = value;
+        EXPECT_DOUBLE_EQ(ParseStrictGroupAcceptanceThreshold(params), value);
+        EXPECT_FALSE(params.contains(kStrictGroupAcceptanceThreshold));
+        EXPECT_EQ(params["nprobe"], 128);
     }
 }
 
-TEST(StrictGroupWorkEstimateTest, StrictThresholdAndSparseSample) {
-    EXPECT_FALSE(StrictGroupWorkExceedsLimit(9999));
-    EXPECT_FALSE(StrictGroupWorkExceedsLimit(10000));
-    EXPECT_TRUE(StrictGroupWorkExceedsLimit(10001));
-    std::vector<size_t> quotas(10, 2);
-    quotas[0] = 1;
-    const double work = EstimateStrictGroupRemainingCandidates(
-        10 / kStrictGroupSelectivityLower95[1], quotas);
-    EXPECT_NEAR(work, 88200.94719924426, 0.01);
-    EXPECT_TRUE(StrictGroupWorkExceedsLimit(work));
-    EXPECT_FALSE(
-        StrictGroupWorkExceedsLimit(EstimateStrictGroupRemainingCandidates(
-            1 / kStrictGroupSelectivityLower95[1], {1})));
+TEST(StrictGroupAcceptanceThresholdTest, RejectInvalidValues) {
+    for (const auto& value : std::vector<knowhere::Json>{
+             nullptr,
+             true,
+             "0.1",
+             knowhere::Json::array(),
+             knowhere::Json::object(),
+             -0.01,
+             1.01,
+             std::numeric_limits<double>::infinity(),
+             -std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::quiet_NaN()}) {
+        knowhere::Json params = {{kStrictGroupAcceptanceThreshold, value}};
+        EXPECT_THROW(ParseStrictGroupAcceptanceThreshold(params), SegcoreError);
+    }
 }
 
-TEST(StrictGroupWorkEstimateTest, AnalyticExpectations) {
-    EXPECT_DOUBLE_EQ(EstimateStrictGroupRemainingCandidates(100, {}), 0);
-    EXPECT_DOUBLE_EQ(EstimateStrictGroupRemainingCandidates(100, {0, 3}), 300);
-    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {1, 1, 1}),
-                100 * (1.0 + 0.5 + 1.0 / 3),
-                1e-9);
-    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {1, 2}), 225, 1e-5);
-    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(100, {2, 2}), 275, 1e-5);
-    EXPECT_NEAR(EstimateStrictGroupRemainingCandidates(
-                    10000, std::vector<size_t>(50, 2)),
-                64959.45364644328,
-                0.01);
+TEST(StrictGroupPhase2ExecutorTest, ConfigurableAcceptanceThreshold) {
+    for (double threshold : {0.0, 0.01, 0.1, 0.5, 1.0}) {
+        for (int accepted : {0, 1, 2, 9, 10, 11, 49, 50, 51, 100}) {
+            SCOPED_TRACE(threshold);
+            SCOPED_TRACE(accepted);
+            std::vector<int64_t> labels(400, 2);
+            labels[0] = 1;
+            std::fill(labels.begin() + 1, labels.begin() + 1 + accepted, 1);
+            std::fill(labels.begin() + 201, labels.end(), 1);
+            CheckProbeScenario(labels,
+                               labels.size(),
+                               1,
+                               150,
+                               accepted / 100.0 <= threshold ? 1 : 0,
+                               150,
+                               std::nullopt,
+                               nullptr,
+                               nullptr,
+                               threshold);
+        }
+    }
 }
 
-TEST(StrictGroupPhase2ExecutorTest, EstimatedWorkThreshold) {
-    for (int quota : {6, 7, 8}) {
-        SCOPED_TRACE(quota);
+TEST(StrictGroupPhase2ExecutorTest, RemainingQuotaDoesNotAffectDecision) {
+    for (int quota : {3, 6, 7, 8, 100}) {
         std::vector<int64_t> labels(300, 2);
         labels[0] = labels[1] = 1;
         std::fill(labels.begin() + 101, labels.end(), 1);
-        auto before_groups =
-            milvus::monitor::internal_core_strict_group_phase2_estimated_groups
-                .Collect()
-                .histogram;
-        auto before_work =
-            milvus::monitor::
-                internal_core_strict_group_phase2_estimated_remaining_candidates
-                    .Collect()
-                    .histogram;
-        auto before_hits =
-            milvus::monitor::internal_core_strict_group_phase2_probe_group_hits
-                .Collect()
-                .histogram;
-        // A=H=1, conservative G near 1950. Remaining work crosses 10000
-        // between five and six missing rows.
-        CheckProbeScenario(
-            labels, labels.size(), 1, quota, quota == 8 ? 1 : 0, quota);
-        auto after_groups =
-            milvus::monitor::internal_core_strict_group_phase2_estimated_groups
-                .Collect()
-                .histogram;
-        auto after_work =
-            milvus::monitor::
-                internal_core_strict_group_phase2_estimated_remaining_candidates
-                    .Collect()
-                    .histogram;
-        auto after_hits =
-            milvus::monitor::internal_core_strict_group_phase2_probe_group_hits
-                .Collect()
-                .histogram;
-        EXPECT_EQ(after_groups.sample_count - before_groups.sample_count, 1);
-        EXPECT_NEAR(after_groups.sample_sum - before_groups.sample_sum,
-                    1 / kStrictGroupSelectivityLower95[1],
-                    1e-7);
-        EXPECT_EQ(after_work.sample_count - before_work.sample_count, 1);
-        EXPECT_NEAR(after_work.sample_sum - before_work.sample_sum,
-                    (quota - 2) / kStrictGroupSelectivityLower95[1],
-                    1e-7);
-        EXPECT_DOUBLE_EQ(after_hits.sample_sum - before_hits.sample_sum, 1);
+        // A=1 triggers recreation even when only one row remains.
+        CheckProbeScenario(labels, labels.size(), 1, quota, 1, quota);
     }
 }
 
-TEST(StrictGroupPhase2ExecutorTest, NonzeroAcceptanceHighWork) {
+TEST(StrictGroupPhase2ExecutorTest, NonzeroLowAcceptance) {
     std::vector<int64_t> labels(250, 99);
     for (int i = 0; i < 50; ++i) {
         labels[i] = i;
         labels[150 + 2 * i] = labels[151 + 2 * i] = i;
     }
     labels[50] = 0;
-    // A=H=1: the conservative estimate still requires recreation.
+    // A=1 out of 100 triggers recreation.
     CheckProbeScenario(labels, labels.size(), 50, 3, 1, 150);
 }
 
@@ -760,9 +717,9 @@ TEST(StrictGroupPhase2ExecutorTest, FilledAtProbeBoundaryDoesNotRecreate) {
 TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
     auto& config = storage::MmapManager::GetInstance().GetMmapConfig();
     const bool previous = config.GetEnableGrowingMmap();
-    config.SetEnableGrowingMmap(true);
+    config.growing_enable_mmap = true;
     auto restore = std::shared_ptr<void>(
-        nullptr, [&](void*) { config.SetEnableGrowingMmap(previous); });
+        nullptr, [&](void*) { config.growing_enable_mmap = previous; });
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::VARCHAR);

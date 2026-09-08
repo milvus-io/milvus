@@ -22,7 +22,7 @@
 #include "common/Consts.h"
 #include "common/JsonUtils.h"
 #include "exec/operator/search-groupby/GroupMembership.h"
-#include "exec/operator/search-groupby/StrictGroupWorkEstimate.h"
+#include "common/StrictGroupSearchParams.h"
 #include "fmt/format.h"
 #include "monitor/Monitor.h"
 #include "query/Utils.h"
@@ -188,7 +188,6 @@ enum class StrictGroupPhase2FallbackReason {
     ProbeAcceptanceHigh,
     RecreateUnavailable,
     PreparationFailed,
-    EstimatedWorkLow,
 };
 
 struct StrictGroupPhase2Stats {
@@ -200,8 +199,6 @@ struct StrictGroupPhase2Stats {
     size_t probe_accepted = 0;
     size_t probe_group_hits = 0;
     size_t original_remaining_candidates = 0;
-    double estimated_groups = -1;
-    double estimated_remaining_candidates = -1;
     const char* decision = "not_evaluated";
     size_t batch_count = 0;
     uint64_t membership_build_us = 0;
@@ -216,6 +213,7 @@ struct StrictGroupPhase2Context {
     FieldId group_by_field_id;
     SearchResult* search_result;
     bool eligible;
+    double acceptance_threshold;
 };
 
 const char*
@@ -239,8 +237,6 @@ FallbackReasonName(StrictGroupPhase2FallbackReason reason) {
             return "recreate_unavailable";
         case StrictGroupPhase2FallbackReason::PreparationFailed:
             return "preparation_failed";
-        case StrictGroupPhase2FallbackReason::EstimatedWorkLow:
-            return "estimated_work_low";
     }
     return "unknown";
 }
@@ -265,13 +261,6 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
     milvus::monitor::
         internal_core_strict_group_phase2_original_remaining_candidates.Observe(
             stats.original_remaining_candidates);
-    if (stats.estimated_groups >= 0) {
-        milvus::monitor::internal_core_strict_group_phase2_estimated_groups
-            .Observe(stats.estimated_groups);
-        milvus::monitor::
-            internal_core_strict_group_phase2_estimated_remaining_candidates
-                .Observe(stats.estimated_remaining_candidates);
-    }
     milvus::monitor::internal_core_strict_group_phase2_membership_build_latency
         .Observe(stats.membership_build_us / 1000.0);
     milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
@@ -284,8 +273,7 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
     tracer::AddEvent(fmt::format(
         "strict_group_phase2: used={}, fallback={}, phase1_candidates={}, "
         "phase2_candidates={}, probe_candidates={}, probe_accepted={}, "
-        "probe_group_hits={}, estimated_groups={}, "
-        "estimated_remaining_candidates={}, "
+        "probe_group_hits={}, "
         "original_remaining_candidates={}, decision={}, batches={}, "
         "membership_ms={:.3f}, "
         "bitmap_ms={:.3f}",
@@ -296,8 +284,6 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
         stats.probe_candidates,
         stats.probe_accepted,
         stats.probe_group_hits,
-        stats.estimated_groups,
-        stats.estimated_remaining_candidates,
         stats.original_remaining_candidates,
         stats.decision,
         stats.batch_count,
@@ -388,7 +374,6 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     }
 
     // Probe once, using consumer candidates rather than backend graph visits.
-    constexpr size_t kMinAcceptancePercent = 10;
     stats.probe_candidates = ConsumeGroupByIteratorUntil(
         iterator,
         data_getter,
@@ -414,9 +399,9 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         finish();
         return true;
     };
-    // Exactly 10/100 stays on the original iterator. Do not re-evaluate later.
-    if (stats.probe_accepted * 100 >=
-        stats.probe_candidates * kMinAcceptancePercent) {
+    // Equality triggers recreation; never re-evaluate this decision later.
+    if (static_cast<double>(stats.probe_accepted) / stats.probe_candidates >
+        context->acceptance_threshold) {
         stats.decision = "acceptance_high";
         stats.fallback_reason =
             StrictGroupPhase2FallbackReason::ProbeAcceptanceHigh;
@@ -424,35 +409,15 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     }
 
     std::vector<std::optional<T>> unfinished_groups;
-    std::vector<size_t> remaining_quotas;
     for (const auto& group : group_map.GetGroupOrder()) {
         if (!group_map.IsGroupFull(group)) {
             unfinished_groups.emplace_back(group);
-            remaining_quotas.emplace_back(
-                group_map.GetRemainingGroupSize(group));
         }
     }
     AssertInfo(!unfinished_groups.empty(),
                "strict group phase2 has no unfinished group");
 
-    stats.decision = "zero_acceptance";
-    if (stats.probe_accepted > 0) {
-        // Accepted rows are a subset of locked-group hits, so H cannot be zero.
-        stats.estimated_groups =
-            static_cast<double>(group_map.GetGroupCount()) /
-            kStrictGroupSelectivityLower95[stats.probe_group_hits];
-        stats.estimated_remaining_candidates =
-            EstimateStrictGroupRemainingCandidates(stats.estimated_groups,
-                                                   remaining_quotas);
-        if (!StrictGroupWorkExceedsLimit(
-                stats.estimated_remaining_candidates)) {
-            stats.decision = "estimated_work_low";
-            stats.fallback_reason =
-                StrictGroupPhase2FallbackReason::EstimatedWorkLow;
-            return continue_original();
-        }
-        stats.decision = "estimated_work_high";
-    }
+    stats.decision = "acceptance_low";
 
     auto prepare = [&]() -> std::optional<std::unique_ptr<SearchResult>> {
         auto membership_start = std::chrono::steady_clock::now();
@@ -564,8 +529,12 @@ TrySingleFieldStrictGroup(
                                    std::nullopt,
                                    std::nullopt,
                                    false);
-    StrictGroupPhase2Context context{
-        op_ctx, segment, info.group_by_field_ids_.front(), result, true};
+    StrictGroupPhase2Context context{op_ctx,
+                                     segment,
+                                     info.group_by_field_ids_.front(),
+                                     result,
+                                     true,
+                                     info.strict_group_acceptance_threshold_};
     prefix.push_back(0);
     for (const auto& iterator : iterators) {
         GroupByMap<T> map(info.topk_, info.group_size_, true);

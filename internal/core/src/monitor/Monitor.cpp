@@ -218,11 +218,6 @@ std::map<std::string, std::string> strictGroup_probe_group_hits_Labels{
 std::map<std::string, std::string>
     strictGroup_original_remaining_candidates_Labels{
         {"type", "original_remaining_candidates"}};
-std::map<std::string, std::string> strictGroup_estimated_groups_Labels{
-    {"type", "estimated_groups"}};
-std::map<std::string, std::string>
-    strictGroup_estimated_remaining_candidates_Labels{
-        {"type", "estimated_remaining_candidates"}};
 std::map<std::string, std::string> strictGroupMembershipBuildLatencyLabels{
     {"type", "membership_build_latency"}};
 std::map<std::string, std::string> strictGroupBitmapBuildLatencyLabels{
@@ -322,16 +317,6 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_strict_group_phase2_original_remaining_candidates,
     internal_core_strict_group_phase2_count,
     strictGroup_original_remaining_candidates_Labels,
-    strictGroupCountBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_estimated_groups,
-    internal_core_strict_group_phase2_count,
-    strictGroup_estimated_groups_Labels,
-    strictGroupCountBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_estimated_remaining_candidates,
-    internal_core_strict_group_phase2_count,
-    strictGroup_estimated_remaining_candidates_Labels,
     strictGroupCountBuckets)
 DEFINE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_membership_build_latency,
