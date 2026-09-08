@@ -861,8 +861,11 @@ fencing -- it publishes no marker of its own:
   in-window client retry is answered as a fresh write — duplicate rows, no error anywhere.
   Ordering the claim before the probe is therefore load-bearing, not defensive.
 
-  A lost claim means this term is itself superseded: the open fails, and the retry reads
-  whatever the newer publisher left.
+  A lost claim means this term is itself superseded, but it is not reported as such: the
+  shared metastore write wrapper retries any error a guarded commit returns, so the call
+  stalls until its context expires and the open fails on the timeout instead. The fence
+  holds either way — the superseded publisher never advances the checkpoint — so this costs
+  diagnosability, not safety. See Known Limitations.
 
 Chunk writes are additionally arbitrated at the object, but only **within** one term.
 There is no cross-term arbitration to do: the key carries the writing term
@@ -1229,6 +1232,15 @@ message id, timetick and last-confirmed position unchanged.
   the whole vchannel's window (see [DDL that empties a
   collection](#ddl-that-empties-a-collection)), so unrelated keys of the same vchannel
   lose their dedup opportunity with it.
+- **A lost checkpoint claim is not distinguishable from a timeout.** The compare-and-swap
+  refuses a superseded publisher correctly, but `ReliableWriteMetaKv` retries every error a
+  guarded commit returns, including the predicate mismatch itself, until the context
+  expires. So a superseded publisher stalls and then reports a timeout rather than learning
+  it lost the term, and its background persist spins on the metastore until its context is
+  cancelled. Nothing advances and nothing is corrupted; what is missing is the signal.
+  Fixing it means making a predicate mismatch distinguishable from a transient failure at
+  the kv layer — TiKV already marks it internally (`errPredicateNotMet`, unexported) and
+  etcd reports it as a generic transaction failure — which is outside this PR.
 - **Collecting a superseded term's leftovers needs retention to roll.** The objects a
   superseded owner wrote after its successor's probe are collected when retention retires
   the last chunk of their term, so a pchannel whose retention never rolls never collects
