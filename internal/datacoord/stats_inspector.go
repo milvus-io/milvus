@@ -279,8 +279,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if !h.EnableMatch() {
+			if !typeutil.IsMatchEnabled(field) {
 				continue
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
