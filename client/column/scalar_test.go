@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
@@ -61,8 +62,24 @@ func (s *ScalarSuite) TestColumnUUID() {
 	s.Equal(data[0], strData[0])
 	s.Equal(data[1], strData[1])
 
-	// Round-trip through FieldDataColumn
-	result, err := FieldDataColumn(fd, 0, -1)
+	// Round-trip through FieldDataColumn using server-side BytesData encoding
+	readFd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: name,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{
+							mustUUIDBytes(s.T(), data[0]),
+							mustUUIDBytes(s.T(), data[1]),
+						},
+					},
+				},
+			},
+		},
+	}
+	result, err := FieldDataColumn(readFd, 0, -1)
 	s.NoError(err)
 	parsed, ok := result.(*ColumnUUID)
 	if s.True(ok) {

@@ -21,11 +21,21 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 )
+
+func mustUUIDBytes(t *testing.T, s string) []byte {
+	t.Helper()
+	u, err := uuid.Parse(s)
+	assert.NoError(t, err)
+	b := make([]byte, 16)
+	copy(b, u[:])
+	return b
+}
 
 func TestIDColumns(t *testing.T) {
 	dataLen := rand.Intn(100) + 1
@@ -137,11 +147,11 @@ func TestFieldDataColumn_UUID(t *testing.T) {
 		FieldName: "uuid_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: []string{
-							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-							"550e8400-e29b-41d4-a716-446655440000",
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{
+							mustUUIDBytes(t, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+							mustUUIDBytes(t, "550e8400-e29b-41d4-a716-446655440000"),
 						},
 					},
 				},
@@ -169,11 +179,11 @@ func TestFieldDataColumn_UUID_Nullable(t *testing.T) {
 		FieldName: "uuid_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: []string{
-							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-							"",
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{
+							mustUUIDBytes(t, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+							make([]byte, 16),
 						},
 					},
 				},
@@ -195,11 +205,11 @@ func TestFieldDataColumn_UUID_Slice(t *testing.T) {
 		FieldName: "uuid_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: []string{
-							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-							"550e8400-e29b-41d4-a716-446655440000",
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{
+							mustUUIDBytes(t, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+							mustUUIDBytes(t, "550e8400-e29b-41d4-a716-446655440000"),
 						},
 					},
 				},
