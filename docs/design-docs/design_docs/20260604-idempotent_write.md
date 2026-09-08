@@ -570,6 +570,11 @@ queueing it for deletion are **the same manifest write**: recovery stops dependi
 object at the exact moment GC gains the term it needs to name it. There is no window in
 which a chunk is in neither list, and GC never re-decides what is releasable.
 
+Collecting a retired term's leftovers (see Orphans) adds no third position either. It is
+triggered by the retention boundary crossing a term, and its progress record is the
+deletions themselves: an interrupted sweep is redone by the next round, which sees fewer
+objects.
+
 ## Normal operation
 
 ### Write path
@@ -888,7 +893,9 @@ checkpoint persist path, and a persist failure fails the checkpoint. Consequence
   keeps working; only the checkpoint stops moving.
 - An idle pchannel writes no chunk at all — there is nothing staged, so the persist is a
   no-op for the summary and the checkpoint advances on its own.
-- etcd is not on this path at all: the store keeps nothing there.
+- The summary store keeps nothing in etcd, but the checkpoint save on this path is now a
+  compare-and-swap (see Split-brain fencing), so it costs a read before the commit and a
+  read back after it. Both are on the same key the save already wrote.
 
 The coupling described here is Woodpecker's. On Pulsar `walImpl.Truncate` returns
 immediately — `backlogClearHelper` is non-nil for every read-write channel — and retention
@@ -1017,9 +1024,32 @@ reintroducing exactly what the queue was meant to avoid.
 
 Keeping both sides in one object removes the coordination problem instead of solving it.
 
+### A superseded term's leftovers are collected at the term boundary
+
+**Chosen:** the retention release that retires the last chunk of a term also drops what
+that term left unreferenced. Reaching that point costs a further `maxRetainedChunks`
+objects or `maxRetainedBytes` of writes, orders of magnitude past the etcd session TTL
+that bounds a superseded owner's lifetime, so nothing is still writing under those terms
+when they are swept.
+
+**Rejected — sweeping at takeover.** It is the obvious trigger, since that is when the
+objects are produced, but it cannot be made correct while the superseded owner may still
+be running. A targeted forward probe is the cheap form (the orphan generations are exactly
+the ones this term claims, so they can be found without a listing) and it breaks on its own
+deletions: removing an object punches a hole in the generation run that "probe until the
+first miss" stops at, and an object written after the sweep falls behind that hole and is
+never seen again. A full listing tolerates holes but still cannot see a write that lands
+after it, so a one-shot sweep at open would need a schedule to catch late writes — and any
+such schedule is a bet on how long a superseded owner lives. The term boundary removes the
+question instead of estimating it.
+
 ### A term writes its manifest before its first chunk
 
-**Chosen:** manifest first, hard-failing if it cannot be written.
+**Chosen:** manifest first, hard-failing if it cannot be written. Recovery publishes the
+inherited manifest for a term that inherits something; a term that inherits nothing
+publishes before its first chunk instead (`publishManifestIfAbsent`), because a successor
+lists the manifest prefix to decide which terms to probe and would otherwise not see this
+term at all.
 
 **Rejected — writing chunks first and reconstructing the term mapping at recovery.**
 Recovery would have to probe every term in a range against every generation, and the
@@ -1069,6 +1099,26 @@ an optional field if a case ever needs it.
 the same generation and overwrite each other. Conditional writes do not help: the
 current owner cannot distinguish its own retry from a fenced owner's write.
 
+### The new term claims the consume checkpoint before it probes
+
+**Chosen:** the takeover writes its term onto the checkpoint, leaving the position alone,
+before reading the summary store. Every write of a superseded publisher is then covered by
+one of two mechanisms with no gap between them: what it wrote before the claim was
+necessarily written before the probe, so the probe adopts it; what it writes after cannot
+advance the checkpoint, so those records stay above it in the WAL and replay recovers them.
+
+**Rejected — a compare-and-swap alone.** It only refuses a term older than the one
+recorded, and nothing records the new term until it claims, so a superseded publisher's
+own advancement passes until then.
+
+**Rejected — claiming after the probe (or after the manifest publish).** A chunk written
+in between is in neither the probe result nor blocked by the compare-and-swap, so the
+superseded publisher can still advance the checkpoint past it and truncate the WAL to
+there. Once this term publishes a manifest that does not name that chunk, those
+idempotency records exist nowhere a recovery will look, and an in-window retry is answered
+as a fresh write. The order is load-bearing, not defensive, which is why
+`TestFenceConsumeCheckpointPrecedesSummaryRecovery` pins it.
+
 ## Compatibility, Deprecation, and Migration Plan
 
 **Compatibility.** The feature is off by default and adds no cost when off: no summary
@@ -1106,9 +1156,13 @@ and frame damage rejection, section misalignment and out-of-bounds section refs,
 absent-idempotency-section case, single-section ranged read, oldest-first release under
 the byte budget and the zero-budget off switch, DDL invalidation of chunked, sealed and
 staged records together with its survival across a restart and its own expiry, manifest
-inheritance, forward probing including the probe-from-generation-zero case, term
-arbitration on a concurrent same-generation write, `pending_gc` transitions, and GC
-idempotency across each crash point.
+inheritance, forward probing including the probe-from-generation-zero case, an identical
+rewrite of a chunk staying idempotent across a proto re-encode while a foreign-term object
+at the same key is corruption, the manifest published before a term's first chunk,
+collection of a retired term's chunks and manifest at the retention boundary, the
+checkpoint claim stamping the term without moving the position and being ordered before
+the summary is read, `pending_gc` transitions, and GC idempotency across each crash
+point.
 
 **StreamingNode integration** — `wal_idempotency_test.go` opens a real WAL through the
 real opener and interceptor chain, appends, hits a duplicate, closes and reopens the WAL,
@@ -1175,6 +1229,12 @@ message id, timetick and last-confirmed position unchanged.
   the whole vchannel's window (see [DDL that empties a
   collection](#ddl-that-empties-a-collection)), so unrelated keys of the same vchannel
   lose their dedup opportunity with it.
+- **Collecting a superseded term's leftovers needs retention to roll.** The objects a
+  superseded owner wrote after its successor's probe are collected when retention retires
+  the last chunk of their term, so a pchannel whose retention never rolls never collects
+  them. This is self-limiting rather than unbounded — producing such an object requires a
+  superseded owner to write a chunk, and rolling retention requires chunks to be written —
+  and nothing counts them, so the collection is not observable today.
 - **Partial fan-out retries.** A retry after an attempt that reached only some shards is
   deduplicated on the landed shards and appended fresh on the missing ones — the intended
   outcome. The proxy cannot distinguish it from the pathological case where one shard's
