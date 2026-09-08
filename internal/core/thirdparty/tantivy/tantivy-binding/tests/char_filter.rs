@@ -142,6 +142,32 @@ fn test_mapping_char_filter_rejects_invalid_unicode_escape() {
 }
 
 #[test]
+fn test_mapping_char_filter_rejects_nul() {
+    let configs = [
+        r#"{
+            "char_filter": [{"type": "mapping", "mappings": ["a=>\u0000"]}],
+            "tokenizer": "standard"
+        }"#,
+        r#"{
+            "char_filter": [{"type": "mapping", "mappings": ["a=>\\u0000"]}],
+            "tokenizer": "standard"
+        }"#,
+    ];
+
+    for params in configs {
+        let error = create_analyzer(params, "")
+            .err()
+            .expect("NUL mapping should be rejected")
+            .to_string();
+        assert_eq!(
+            error,
+            "InvalidArgument: mapping char_filter does not support U+0000"
+        );
+        assert!(!error.contains('\0'));
+    }
+}
+
+#[test]
 fn test_mapping_char_filter_uses_last_raw_separator() {
     let params = r#"{
         "char_filter": [

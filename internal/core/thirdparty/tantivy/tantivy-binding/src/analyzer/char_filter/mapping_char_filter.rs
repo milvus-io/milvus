@@ -103,6 +103,10 @@ impl CharFilter for MappingCharFilter {
 }
 
 fn parse_mapping(mapping: &str) -> Result<(String, String)> {
+    if mapping.contains('\0') {
+        return Err(nul_not_supported());
+    }
+
     let separator = mapping.rfind("=>").ok_or_else(|| {
         TantivyBindingError::InvalidArgument(format!(
             "invalid mapping char_filter mapping: {}",
@@ -115,6 +119,9 @@ fn parse_mapping(mapping: &str) -> Result<(String, String)> {
 
     let source = unescape_mapping_side(source)?;
     let target = unescape_mapping_side(target)?;
+    if source.contains('\0') || target.contains('\0') {
+        return Err(nul_not_supported());
+    }
     if source.is_empty() {
         return Err(TantivyBindingError::InvalidArgument(
             "mapping char_filter source must not be empty".to_string(),
@@ -122,6 +129,10 @@ fn parse_mapping(mapping: &str) -> Result<(String, String)> {
     }
 
     Ok((source, target))
+}
+
+fn nul_not_supported() -> TantivyBindingError {
+    TantivyBindingError::InvalidArgument("mapping char_filter does not support U+0000".to_string())
 }
 
 fn unescape_mapping_side(input: &str) -> Result<String> {

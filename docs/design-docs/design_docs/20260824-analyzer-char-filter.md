@@ -47,10 +47,11 @@ Mapping rules trim syntax whitespace on both sides of `=>`, matching
 Elasticsearch. Whitespace that is part of a source or target must use an escape
 such as `\u0020`. The parser supports `\\`, `\n`, `\t`, `\r`, `\b`, `\f`, and
 `\uXXXX`; valid UTF-16 surrogate-pair escapes are combined into one Unicode
-scalar before processing UTF-8 text. When a rule contains multiple raw `=>`
-sequences, the last one is the separator. A literal arrow inside either side
-must be escaped as `\=\>`, so it contains no raw separator. Duplicate sources
-are rejected after trimming and unescaping.
+scalar before processing UTF-8 text. U+0000 is rejected because the existing
+Rust/C analyzer boundary uses NUL-terminated strings. When a rule contains
+multiple raw `=>` sequences, the last one is the separator. A literal arrow
+inside either side must be escaped as `\=\>`, so it contains no raw separator.
+Duplicate sources are rejected after trimming and unescaping.
 
 ## Public Interface And Validation
 
@@ -160,6 +161,9 @@ through source corrections monotonically.
 - Every tokenizer, including the gRPC tokenizer, owns the contract of returning
   ordered UTF-8 byte offsets for its input. The character-filter wrapper trusts
   those offsets and does not validate or repair tokenizer output.
+- Mapping sources and targets cannot contain U+0000. Supporting NUL would
+  require length-aware input, token, and error representations across the
+  Rust/C/Go boundary.
 - Mapping output size grows with replacement expansion. Inline mappings add no
   file access or other external I/O; existing input and configuration transport
   limits are unchanged. This version assumes inline mappings and normal
@@ -168,14 +172,6 @@ through source corrections monotonically.
 No new metrics or logs are added. Invalid configurations use the existing
 analyzer-validation response, and `RunAnalyzer` with detailed tokens exposes
 the corrected offsets for troubleshooting.
-
-## Open Decisions
-
-- Decide whether mappings containing U+0000 are rejected or the Rust/C string
-  boundary is made length-aware. The current C-string transport cannot carry a
-  NUL safely.
-
-This decision blocks Design Review approval.
 
 ## Alternatives
 
