@@ -17,11 +17,15 @@
 package paramtable
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -177,6 +181,72 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
 		assert.NoError(t, params.Save(maxRate.Key, invalid))
 		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
+func TestLoadAdmissionAsyncMemoryDefault(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	assert.EqualValues(t, 2*1024*1024*1024, pt.CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
+}
+
+func TestResolveLoadAdmissionLimits(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	cpuSlots := int64(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum())
+	for _, enabled := range []bool{false, true} {
+		for _, memory := range []string{"", "0", "67108864", "2147483648"} {
+			for _, slots := range []string{"", "0", "7", fmt.Sprint(cpuSlots)} {
+				t.Run(fmt.Sprintf("enabled=%v/memory=%s/slots=%s", enabled, memory, slots), func(t *testing.T) {
+					expected := func(item *ParamItem, value string, asyncDefault int64) int64 {
+						if value != "" {
+							require.NoError(t, pt.Save(item.Key, value))
+							return getAsInt64(value)
+						}
+						require.NoError(t, pt.Reset(item.Key))
+						if enabled {
+							return asyncDefault
+						}
+						return 0
+					}
+					wantMemory := expected(&pt.CommonCfg.LoadTransientBudgetBytes, memory, 2*1024*1024*1024)
+					wantSlots := expected(&pt.CommonCfg.LoadAdmissionSlots, slots, cpuSlots)
+					gotMemory, gotSlots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+					assert.Equal(t, wantMemory, gotMemory)
+					assert.Equal(t, wantSlots, gotSlots)
+				})
+			}
+		}
+	}
+}
+
+func TestResolveLoadAdmissionLimitsPreservesConfiguredSources(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	file := filepath.Join(dir, "load-admission.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("common:\n  loadTransientBudgetBytes: 0\n  loadAdmissionSlots: 9\n"), 0o600))
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(file)})))
+	for _, enabled := range []bool{false, true} {
+		memory, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		assert.Zero(t, memory, "file-sourced explicit zero must not select the async default")
+		assert.EqualValues(t, 9, slots)
+	}
+	require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "1234"))
+	memory, _ := pt.CommonCfg.ResolveLoadAdmissionLimits(false)
+	assert.EqualValues(t, 1234, memory)
+	require.NoError(t, pt.Reset(pt.CommonCfg.LoadTransientBudgetBytes.Key))
+	memory, _ = pt.CommonCfg.ResolveLoadAdmissionLimits(true)
+	assert.Zero(t, memory, "reset must reveal the file's explicit zero")
+
+	t.Setenv("MILVUS_CONF_COMMON_LOADTRANSIENTBUDGETBYTES", "4096")
+	t.Setenv("MILVUS_CONF_COMMON_LOADADMISSIONSLOTS", "0")
+	envPt := &ComponentParam{}
+	envPt.Init(NewBaseTable(SkipRemote(true), Files(nil)))
+	for _, enabled := range []bool{false, true} {
+		memory, slots := envPt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		assert.EqualValues(t, 4096, memory)
+		assert.Zero(t, slots, "environment-sourced explicit zero must remain unlimited")
 	}
 }
 

@@ -179,14 +179,23 @@ func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
 	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
-func TestRegisterStorageV2AsyncLoadEnabledWatcherCatchesUp(t *testing.T) {
+func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
 	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
 	assert.NoError(t, pt.Save(item.Key, "true"))
 
 	var applied atomic.Bool
-	registerStorageV2AsyncLoadEnabledWatcher(t.Context(), pt, "test", applied.Store)
+	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) {
+		applied.Store(enabled)
+		if enabled {
+			assert.EqualValues(t, 2*1024*1024*1024, budgetBytes)
+			assert.Positive(t, slots)
+		} else {
+			assert.Zero(t, budgetBytes)
+			assert.Zero(t, slots)
+		}
+	})
 	assert.True(t, applied.Load())
 
 	assert.NoError(t, pt.Save(item.Key, "false"))

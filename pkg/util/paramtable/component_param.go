@@ -41,8 +41,10 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize           = 16
-	DefaultLoadTransientBudgetBytes = 0
+	DefaultIndexSliceSize = 16
+	// Load admission defaults apply only when async loading is enabled and the
+	// corresponding parameter is absent. Explicit values, including 0, win.
+	DefaultLoadTransientBudgetBytes = 2 * 1024 * 1024 * 1024
 	DefaultLoadAdmissionSlotsPerCPU = 2
 	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
 	// default for the Storage V3 async read-window threshold.
@@ -389,6 +391,20 @@ type commonConfig struct {
 	GroupByMaxGroups ParamItem `refreshable:"false"`
 }
 
+// ResolveLoadAdmissionLimits returns QueryNode's effective byte and slot limits.
+// The declared defaults apply only to async loading. Use the lookup's missing
+// status, not its numeric value, so explicit values (including 0) always win.
+func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetBytes, slots int64) {
+	resolve := func(item *ParamItem) int64 {
+		value, err := item.get()
+		if err != nil && !asyncEnabled {
+			return 0
+		}
+		return getAsInt64(value)
+	}
+	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
+}
+
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
@@ -585,19 +601,21 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.LoadTransientBudgetBytes = ParamItem{
 		Key:          "common.loadTransientBudgetBytes",
 		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultLoadTransientBudgetBytes),
-		Doc: `Process-wide transient memory budget in bytes shared by scalar ` +
+		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
+		Doc: `QueryNode transient memory budget in bytes shared by scalar ` +
 			`index V3 entry streaming and storage v2/v3 field-data loading. It gates ` +
 			`in-flight transient data across concurrent load tasks. Lower ` +
 			`values reduce peak transient memory at the cost of load throughput. ` +
 			`Oversized requests are still allowed to proceed exclusively to ` +
-			`guarantee progress. Set to 0 to disable the limit.`,
+			`guarantee progress. When unset, defaults to 2 GiB with ` +
+			`queryNode.segcore.storageV2.enableAsyncLoad enabled, otherwise 0. ` +
+			`Explicit values apply regardless of that switch; 0 disables the limit.`,
 		Export: false,
 		Formatter: func(v string) string {
 			if getAsInt64(v) < 0 {
-				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using unlimited",
+				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using default",
 					mlog.String("configured", v))
-				return strconv.Itoa(DefaultLoadTransientBudgetBytes)
+				return strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10)
 			}
 			return v
 		},
@@ -608,13 +626,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.loadAdmissionSlots",
 		Version:      "3.0.1",
 		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
-		Doc: `Process-wide limit on admitted, unfinished load work shared by scalar ` +
+		Doc: `QueryNode limit on admitted, unfinished load work shared by scalar ` +
 			`index V3 entry streaming and storage v2/v3 field-data loading. Each ` +
 			`window, batch, or stream slice reserves one slot together with its ` +
 			`transient bytes until its temporary data is released after consumption ` +
-			`or finalization. Defaults to twice the CPU count reported by Milvus ` +
-			`at initialization. Reader opens are controlled separately. Set to 0 to ` +
-			`disable the slot limit.`,
+			`or finalization. When unset, defaults to twice the CPU count reported ` +
+			`by Milvus at initialization with queryNode.segcore.storageV2.enableAsyncLoad ` +
+			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
+			`0 disables the slot limit. Reader opens are controlled separately.`,
 		Export: false,
 		Formatter: func(v string) string {
 			if getAsInt64(v) < 0 {
@@ -5539,9 +5558,8 @@ user-task-polling:
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
 
-	// TODO: Complete async loading support for data and indexes, including a
-	// non-zero default for common.loadTransientBudgetBytes to bound in-flight
-	// read buffers, before supporting enableAsyncLoad=true.
+	// TODO: Complete async loading support for data and indexes and validate
+	// the default admission limits before supporting enableAsyncLoad=true.
 	p.StorageV2EnableAsyncLoad = ParamItem{
 		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
 		Version:      "3.0.1",

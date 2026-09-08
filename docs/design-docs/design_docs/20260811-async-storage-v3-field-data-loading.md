@@ -502,13 +502,19 @@ if measurements show that a window-level limit is insufficient.
 
 The async feature can technically run with both capacities `0`, but enabling it
 is currently unsupported. Before supported enablement, async loading needs to
-be completed and a non-zero default transient byte budget selected. The new
-`common.loadAdmissionSlots` defaults to `2 * hardware.GetCPUNum()` at
-initialization. This uses Milvus's effective Go CPU count (`GOMAXPROCS`, including
-its container CPU configuration) rather than unconditionally using the host CPU
-count. Explicit `0` disables only the slot limit; negative values fall back to
-the CPU-derived default. The CPU count is a sizing heuristic for unfinished
-load work, not a count of threads currently executing it.
+be completed and the default admission limits validated. When async loading is
+enabled, absent admission parameters default to a 2 GiB transient byte budget
+and `2 * hardware.GetCPUNum()` slots. When async loading is disabled, absent
+parameters resolve to `0`, preserving the legacy unlimited admission behavior.
+Each explicitly configured value, including `0`, takes precedence independently
+of the switch. Negative values are normalized to the parameter's declared
+async-mode default.
+
+The slot default uses Milvus's effective Go CPU count at initialization
+(`GOMAXPROCS`, including its container CPU configuration). The CPU count is a
+sizing heuristic for unfinished load work, not a count of executing threads.
+The byte budget accounts for estimated temporary data, not RSS, and does not
+preallocate memory; the oversized-request exception still applies.
 
 ### Admission metrics
 
@@ -668,8 +674,8 @@ remote record batches are not considered consumed until the final
 |---|---:|---|---|
 | `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured during preparation/construction | internal experimental switch; enabling is currently unsupported |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
-| `common.loadTransientBudgetBytes` | `0` (unlimited) | refreshable | process-wide admitted transient bytes across load paths |
-| `common.loadAdmissionSlots` | `2 × CPUNUM` | refreshable; negative values fall back to the CPU-derived default | process-wide admitted, unfinished load windows, batches, and index stream slices |
+| `common.loadTransientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
+| `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, and index stream slices |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
 The async switch and both load admission parameters are intentionally not
@@ -678,7 +684,18 @@ The admission parameters remain available for explicit internal configuration
 and dynamic updates. Async loading support for data and indexes is incomplete; this document
 describes the implemented field-data stages, not complete async index support.
 Enabling the switch is currently unsupported. Complete async loading support
-and provide a non-zero default transient budget before supporting enablement.
+and validate these defaults before supporting enablement.
+
+QueryNode registers one serialized watcher for the switch and both admission
+parameters during initialization, with an immediate post-registration sync to
+catch concurrent startup updates. It resolves explicit configuration separately
+for each limit: an explicit `0` disables that dimension even with async enabled,
+and an explicit positive limit applies even with async disabled. Deleting an
+override restores the default for the current switch value (or reveals a
+lower-priority source on reset). Limits are installed before publishing an
+enabled switch; a disabled switch is published before relaxing the defaults.
+DataNode neither initializes nor watches these admission settings. This also
+prevents it from overwriting QueryNode's process-wide controller in standalone.
 
 Manifest batch loads capture the switch before reader preparation and carry
 that choice into translator construction. JSON key stats similarly use one
@@ -693,7 +710,10 @@ already exist:
 The read-window target is looked up when the async task runs, so an updated
 positive value affects subsequent loads performed by existing async
 translators. Both admission capacities are process-wide and apply immediately
-to subsequent admissions. Updating one does not disable the other.
+to subsequent admissions. Updating one does not disable the other. Toggling the
+async switch recomputes both defaults while preserving explicit limits. In
+particular, disabling async removes any implicit admission limits even though
+existing async translators retain their mode; it does not revoke held leases.
 
 Planned validation sequence after these prerequisites are met:
 
@@ -807,7 +827,7 @@ sealed-segment tests, and `make verifiers`.
 
 - Add the async scalar-index path described by issue #51245.
 - Add dedicated window/read/finalization latency metrics before broad rollout.
-- Choose a non-zero default transient budget and validate it with the read-window
+- Validate the 2 GiB transient budget and CPU-derived slots with the read-window
   default on object-storage and mmap workloads before supported enablement.
 - Decide whether native async storage support must become a hard requirement
   instead of allowing the synchronous `get_chunks_async()` fallback.

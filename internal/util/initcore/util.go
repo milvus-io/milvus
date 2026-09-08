@@ -277,32 +277,47 @@ func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConf
 	serializedSync()
 }
 
-// RegisterStorageV2AsyncLoadEnabledWatcher keeps the C++ async-load switch in
-// sync with paramtable and catches up any update that arrived during startup.
-func RegisterStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string) {
-	registerStorageV2AsyncLoadEnabledWatcher(ctx, pt, source, updateStorageV2AsyncLoadEnabled)
+func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) {
+	// Stop new translators from selecting async before relaxing its defaults;
+	// install the limits before allowing new translators to select async.
+	if !enabled {
+		updateStorageV2AsyncLoadEnabled(false)
+	}
+	UpdateLoadTransientBudgetBytes(budgetBytes)
+	UpdateLoadAdmissionSlots(slots)
+	if enabled {
+		updateStorageV2AsyncLoadEnabled(true)
+	}
 }
 
-// registerStorageV2AsyncLoadEnabledWatcher installs the watcher with an
-// injectable apply function for deterministic testing.
-func registerStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string, apply func(bool)) {
+// registerQueryNodeLoadConfig applies the initial rollout switch and admission
+// limits, then keeps all three keys synchronized. Only QueryNode owns this
+// process-wide configuration, including when colocated with DataNode.
+func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64)) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
 	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
-		pt.Watch(item.Key, config.NewHandler(item.Key+"."+source, func(evt *config.Event) {
-			if !evt.HasUpdated {
-				return
-			}
-			syncConfig()
-		}))
+		for _, key := range []string{
+			pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
+			pt.CommonCfg.LoadTransientBudgetBytes.Key,
+			pt.CommonCfg.LoadAdmissionSlots.Key,
+		} {
+			pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
+				if !evt.HasUpdated {
+					return
+				}
+				syncConfig()
+			}))
+		}
 	}, func() {
-		enabled := item.GetAsBool()
-		apply(enabled)
-		mlog.Info(ctx, "Storage V3 async-load rollout updated",
-			mlog.String("source", source),
-			mlog.Bool("enabled", enabled))
+		enabled := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
+		budgetBytes, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		apply(enabled, budgetBytes, slots)
+		mlog.Info(ctx, "QueryNode load configuration updated",
+			mlog.Bool("async_enabled", enabled),
+			mlog.Int64("transient_budget_bytes", budgetBytes),
+			mlog.Int64("admission_slots", slots))
 	})
 }
 
