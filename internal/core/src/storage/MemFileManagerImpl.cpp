@@ -245,23 +245,26 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     //     ignore offset, so `offset > 0 && max_rows == 0` would silently drop
     //     the requested offset and read everything. Reject it rather than
     //     honoring a request the readers cannot express.
-    // These are caller-supplied request parameters, so a bad value is an
-    // Input error (InvalidParameter), not an internal/System failure. Using
-    // AssertInfo here would be wrong: it classifies as UnexpectedError
-    // (System), which is non-retriable-System semantics for what is really a
-    // malformed request.
+    // num_rows / offset are not API-caller input: they are produced by the
+    // index-build code that assembles this config (a Milvus-internal caller,
+    // not the end user), so a bad value is a Milvus bug and is reported as
+    // UnexpectedError (System), the same class as the sibling
+    // data-type / element-type checks above. InvalidParameter would cross
+    // the cgo boundary as an InputError and pin the failure on the user's
+    // request, which is the classification this file must not make for a
+    // value the user never supplied.
     if (max_rows < 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] num_rows must be non-negative, got: {}",
                   max_rows);
     }
     if (offset < 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] offset must be non-negative, got: {}",
                   offset);
     }
     if (offset > 0 && max_rows == 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] offset ({}) requires a positive num_rows; "
                   "num_rows == 0 selects a full-column read and ignores "
                   "offset",
