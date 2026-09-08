@@ -140,8 +140,14 @@ func (r *recoveryStorageImpl) recoverSummary(ctx context.Context, channelInfo ty
 // there -- and once this term publishes a manifest that does not name that
 // chunk, those records exist nowhere a recovery will look.
 //
-// A lost CAS means this term is itself superseded: the open fails, and the
-// retry re-reads whatever the newer publisher left.
+// A lost CAS means this term is itself superseded. It does NOT surface as a
+// distinct error today: the shared metastore write wrapper retries any error
+// from a guarded commit, so the call stalls until the context expires and the
+// open then fails on the timeout rather than on "superseded". The fence itself
+// holds either way -- a superseded publisher cannot advance the checkpoint --
+// it just cannot tell that is why. Reporting it properly needs the predicate
+// mismatch to be distinguishable from a transient failure at the kv layer,
+// which is where TiKV already marks it (unexported) and etcd does not.
 func (r *recoveryStorageImpl) fenceConsumeCheckpoint(ctx context.Context, term int64) error {
 	if r.checkpoint == nil || r.checkpoint.MessageID == nil {
 		// Unreachable: the checkpoint is loaded or initialized above.
