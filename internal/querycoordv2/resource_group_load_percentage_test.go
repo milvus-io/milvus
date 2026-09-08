@@ -48,6 +48,7 @@ type rgLoadPercentageFixture struct {
 	targetMgr *meta.TargetManager
 	dist      *meta.DistributionManager
 	broker    *meta.MockBroker
+	nodeMgr   *session.NodeManager
 }
 
 func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
@@ -74,6 +75,7 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 		targetMgr: meta.NewTargetManager(broker, m),
 		dist:      meta.NewDistributionManager(nodeMgr),
 		broker:    broker,
+		nodeMgr:   nodeMgr,
 	}
 }
 
@@ -84,7 +86,7 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 // merr.CheckHealthy(s.State()), and a zero Server reports
 // StateCode_Initializing.
 func (f *rgLoadPercentageFixture) server() *Server {
-	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist}
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
 	s.status.Store(int32(commonpb.StateCode_Healthy))
 	return s
 }

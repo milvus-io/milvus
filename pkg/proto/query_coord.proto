@@ -221,6 +221,8 @@ message ShowCollectionsResponse {
     common.Status status = 1;
     repeated int64 collectionIDs = 2;
     repeated int64 inMemory_percentages = 3;
+    // Follows the request's scope: with resource_group set it says whether
+    // that group can serve, otherwise whether any replica of the collection can.
     repeated bool query_service_available = 4;
     repeated int64 refresh_progress = 5;
     repeated schema.LongArray load_fields = 6;
