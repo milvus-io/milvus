@@ -252,8 +252,10 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
 	makeRequest := func(strict bool, raw string) *querypb.SearchRequest {
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
-			QueryInfo: &planpb.QueryInfo{Topk: 10, GroupByFieldId: 101,
-				GroupSize: 3, StrictGroupSize: strict, SearchParams: raw},
+			QueryInfo: &planpb.QueryInfo{
+				Topk: 10, GroupByFieldId: 101,
+				GroupSize: 3, StrictGroupSize: strict, SearchParams: raw,
+			},
 		}}}
 		bs, err := proto.Marshal(p)
 		suite.Require().NoError(err)
