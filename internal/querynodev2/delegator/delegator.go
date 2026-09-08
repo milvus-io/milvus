@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
@@ -479,12 +480,17 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	// Execution features this delegator decides on, carried to the Proxy
+	// with the results like the segcore bits.
+	var delegatorBits uint64
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()
 			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
-				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+			if PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()}) {
+				delegatorBits |= execBit(featureusage.FeatureSegmentPrune)
+			}
 		}()
 	}
 
@@ -525,14 +531,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
-		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, bits, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
 		}
 		if !fallback {
+			// Only a two-stage search that ran both stages is one.
+			orFeatureBits(results, delegatorBits|execBit(featureusage.FeatureTwoStageSearch))
 			return results, nil
 		}
-		// fallback: continue with normal single-stage search below
+		// fallback: continue with normal single-stage search below; the filter
+		// stage still ran, so its execution features are kept.
+		delegatorBits |= bits
 		mlog.Debug(ctx, "Two-stage search requested fallback, continuing with normal search")
 	}
 
@@ -543,7 +553,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
 		return nil, err
 	}
-	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+	results, err := sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+	if err != nil {
+		return nil, err
+	}
+	orFeatureBits(results, delegatorBits)
+	return results, nil
+}
+
+// execBit is the execution feature bit of f; f is one of execBitFeatures.
+func execBit(f featureusage.Feature) uint64 {
+	bit, _ := featureusage.ExecBit(f)
+	return bit
 }
 
 // getVectorFieldDim returns the dimension of the vector field with the given field ID.
@@ -852,11 +873,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		growing = []SegmentEntry{}
 	}
 
+	var delegatorBits uint64
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()
 			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+			if PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()}) {
+				delegatorBits |= execBit(featureusage.FeatureSegmentPrune)
+			}
 		}()
 	}
 

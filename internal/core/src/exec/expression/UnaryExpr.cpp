@@ -2358,7 +2358,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                 }
                 return {std::move(res), std::move(valid_res)};
             },
-            enable_sub_expr_cache_write_);
+            enable_sub_expr_cache_write_,
+            feature_recorder_);
         cached_match_res_ = cached.result;
         cached_index_chunk_valid_res_ = cached.valid;
     }
@@ -2407,6 +2408,13 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
                field_id_.get());
 
     index->ExecutePhase1(literal, expr_->op_type_, candidates);
+    RecordNgramUse();
+}
+
+void
+PhyUnaryRangeFilterExpr::RecordNgramUse() {
+    MarkFeature(feature_recorder_, FeatureBit::FilterPathNgramIndex);
+    MarkFeature(feature_recorder_, FeatureBit::ScalarIndexNgram);
 }
 
 void
@@ -2587,6 +2595,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         auto total_count = static_cast<size_t>(index->Count());
         TargetBitmap candidates(total_count, true);
         index->ExecutePhase1(literal, expr_->op_type_, candidates);
+        RecordNgramUse();
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =

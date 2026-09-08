@@ -2108,6 +2108,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			mlog.String("originalState", originalState))
 		return resp, nil
 	}
+	recordImportFileTypes(in.GetFiles(), in.GetOptions())
 
 	resp.JobID = fmt.Sprint(jobID)
 	mlog.Info(context.TODO(), "import request broadcasted successfully", mlog.String("jobID", resp.JobID))

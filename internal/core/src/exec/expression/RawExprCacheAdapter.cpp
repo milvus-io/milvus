@@ -128,6 +128,10 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
     if (state_.lookup_state != LookupState::Hit) {
         return false;
     }
+    // Served from the cache: the wrapped expression's own evaluation is
+    // bypassed, so its cache-hit hook never runs. Recorded through its
+    // recorder (null when the request does not collect).
+    MarkFeature(input_->feature_recorder(), FeatureBit::ExprCacheHit);
 
     const auto abandon_hit = [this]() {
         state_.result.reset();

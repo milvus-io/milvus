@@ -152,6 +152,14 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    // ST_IsValid has no index form: DetermineExecPath sends it to raw data
+    // whatever index the field has, which is the designed path, not a
+    // declined index.
+    bool
+    ReportsIndexDecline() const override {
+        return expr_->op_ != proto::plan::GISFunctionFilterExpr_GISOp_STIsValid;
+    }
+
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;

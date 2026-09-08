@@ -23,6 +23,13 @@ type ParserVisitorArgs struct {
 	// hybrid sub-request and every scorer filter share one preflight budget and
 	// one validation cache. Nil means single-expression scope.
 	MembershipBudget *MembershipPreflightBudget
+	// OnParsedExpr, when set, sees every expression this parse produces --
+	// the main predicate and each scorer filter -- after template values are
+	// filled in and before the rewriter runs. The rewriter changes the
+	// operators (a one-value IN becomes ==, an OR of equalities becomes IN,
+	// "arr == []" becomes array_length), so a feature count taken from the
+	// final plan would describe the rewriter's choices, not the user's.
+	OnParsedExpr func(*planpb.Expr)
 }
 
 // int64OverflowError is a special error type used to handle the case where

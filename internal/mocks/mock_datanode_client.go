@@ -6,16 +6,11 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
-	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-
-	grpc "google.golang.org/grpc"
-
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
+	grpc "google.golang.org/grpc"
 
 	workerpb "github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )

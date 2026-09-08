@@ -1061,14 +1061,14 @@ func TestAttributeStorageCostZeroNQAndEmptyResults(t *testing.T) {
 		},
 	}
 
-	task.attributeStorageCost(nil)
+	task.attributeStorageCost(nil, 0)
 	assert.Equal(t, int64(7), task.result.ScannedRemoteBytes)
 	assert.Equal(t, int64(11), task.result.ScannedTotalBytes)
 	assert.Equal(t, int64(13), task.others[0].result.ScannedRemoteBytes)
 	assert.Equal(t, int64(17), task.others[0].result.ScannedTotalBytes)
 
 	task.originNqs = []int64{1, 3}
-	task.attributeStorageCost(nil)
+	task.attributeStorageCost(nil, 0)
 	assert.Zero(t, task.result.ScannedRemoteBytes)
 	assert.Zero(t, task.result.ScannedTotalBytes)
 	assert.Zero(t, task.others[0].result.ScannedRemoteBytes)
@@ -1817,12 +1817,14 @@ func TestExecuteMergedSubTasks_MixedTopK(t *testing.T) {
 		reduced.DF.Release()
 		nqOffset += int(nq)
 	}
-	receiver.attributeStorageCost(ts.searchResults)
+	receiver.attributeStorageCost(ts.searchResults, 0b101)
 
 	for i, wantTopK := range subTaskTopks {
 		sub := receiver.subTaskAt(i)
 		res := sub.SearchResult()
 		require.NotNil(t, res, "sub %d: result must be populated", i)
+		// The shared plan's feature bits reach every merged request whole.
+		assert.Equal(t, uint64(0b101), res.GetFeatureBits()&0b111, "sub %d feature bits", i)
 
 		assert.Equal(t, subTaskNqs[i], res.NumQueries, "sub %d NumQueries", i)
 		assert.Equal(t, wantTopK, res.TopK, "sub %d outer TopK", i)
@@ -2213,7 +2215,7 @@ func TestExecuteGoReduceHonorsEnableResultZeroCopy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, lateMaterializeOutputFields(ctx, ts.searchResults, ts.searchReq.Plan(), reduced.Sources, searchResultData))
 	require.NoError(t, task.encodeAndAssignReducedResult(0, searchResultData, "IP", tr, 0))
-	task.attributeStorageCost(ts.searchResults)
+	task.attributeStorageCost(ts.searchResults, 0)
 
 	res := task.SearchResult()
 	require.NotNil(t, res)

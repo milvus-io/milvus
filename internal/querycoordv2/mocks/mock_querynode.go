@@ -379,6 +379,65 @@ func (_c *MockQueryNodeServer_GetDataDistribution_Call) RunAndReturn(run func(co
 	return _c
 }
 
+// GetFeatureUsage provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) GetFeatureUsage(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFeatureUsage")
+	}
+
+	var r0 *internalpb.GetFeatureUsageResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) *internalpb.GetFeatureUsageResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetFeatureUsageResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetFeatureUsageRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_GetFeatureUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFeatureUsage'
+type MockQueryNodeServer_GetFeatureUsage_Call struct {
+	*mock.Call
+}
+
+// GetFeatureUsage is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetFeatureUsageRequest
+func (_e *MockQueryNodeServer_Expecter) GetFeatureUsage(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetFeatureUsage_Call {
+	return &MockQueryNodeServer_GetFeatureUsage_Call{Call: _e.mock.On("GetFeatureUsage", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_GetFeatureUsage_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest)) *MockQueryNodeServer_GetFeatureUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetFeatureUsageRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_GetFeatureUsage_Call) Return(_a0 *internalpb.GetFeatureUsageResponse, _a1 error) *MockQueryNodeServer_GetFeatureUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_GetFeatureUsage_Call) RunAndReturn(run func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)) *MockQueryNodeServer_GetFeatureUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHighlight provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) GetHighlight(_a0 context.Context, _a1 *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {
 	ret := _m.Called(_a0, _a1)
