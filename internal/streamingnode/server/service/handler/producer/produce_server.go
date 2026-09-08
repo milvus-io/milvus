@@ -101,15 +101,15 @@ func (p *ProduceServer) sendLoop() (err error) {
 		}
 		p.logger.Info(context.TODO(), "send arm of stream closed")
 	}()
-	available := p.wal.Available()
+	unavailable := p.wal.Unavailable()
 	var appendWGDoneChan <-chan struct{}
 
 	for {
 		select {
-		case <-available:
+		case <-unavailable:
 			// If the wal is not available any more, we should stop sending message, and close the server.
 			// appendWGDoneChan make a graceful shutdown for those case.
-			available = nil
+			unavailable = nil
 			appendWGDoneChan = p.getWaitAppendChan()
 		case <-appendWGDoneChan:
 			// All pending append request has been finished, we can close the streaming server now.
@@ -217,6 +217,16 @@ func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
 	if !msg.MessageType().Valid() {
 		return status.NewInvalidArgument("unsupported message type")
+	}
+	// Chunk markers are produced below this layer, by the WAL adaptor, and are
+	// stripped again on reassembly -- a message arriving here can never
+	// legitimately carry them. Reject instead of appending: a foreign record
+	// carrying `_ci`/`_ct` is read back as a corrupted chunk run, which fails
+	// the scanner and takes the whole pchannel down. Turning a bad input into a
+	// channel-wide outage is not an acceptable trade, so the check belongs at
+	// ingress.
+	if message.IsChunkedPayload(msg) {
+		return status.NewInvalidArgument("message properties must not carry the reserved WAL chunk markers")
 	}
 	return nil
 }

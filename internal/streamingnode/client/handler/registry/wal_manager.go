@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -13,6 +14,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+var _ producer.Producer = localWAL{}
 
 var (
 	registry                   = syncutil.NewFuture[WALManager]()
@@ -67,6 +70,13 @@ type localWAL struct {
 
 func (l localWAL) isLocal() localTrait {
 	return localTrait{}
+}
+
+// Available preserves the client Producer contract for the local fast path.
+// The legacy method name is misleading: like Unavailable, the returned channel
+// closes when the underlying WAL becomes unavailable.
+func (l localWAL) Available() <-chan struct{} {
+	return l.Unavailable()
 }
 
 // Append writes a record to the log.

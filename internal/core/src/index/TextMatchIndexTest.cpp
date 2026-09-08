@@ -78,6 +78,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+TEST(TextMatch, WriterMemoryBudgets) {
+    EXPECT_EQ(milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
+
 SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
@@ -157,7 +165,7 @@ BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    index->BuildIndexFromFieldData({field_data}, false);
+    index->BuildIndexFromFieldData({field_data}, false, 0);
     return index;
 }
 
@@ -172,6 +180,19 @@ AssertTextMatchUploadReturnsRelativePaths(
         ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
             << file.file_name;
         ASSERT_GT(file.file_size, 0);
+    }
+}
+
+void
+ExpectOnlyTextMatchHit(index::TextMatchIndex& index,
+                       const std::string& term,
+                       int64_t expected,
+                       int64_t row_count) {
+    auto result = index.MatchQuery(term, 1);
+    ASSERT_EQ(result.size(), static_cast<size_t>(row_count)) << term;
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(static_cast<bool>(result[i]), i == expected)
+            << term << " unexpected at offset " << i;
     }
 }
 
@@ -489,7 +510,7 @@ TEST(TextMatch, V2LoadFinalizesValidityBitmap) {
         DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
     field_data->FillFieldData(
         texts.data(), valid_bytes.data(), texts.size(), 0);
-    builder->BuildIndexFromFieldData({field_data}, true);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
     auto stats = builder->Upload({});
 
     std::vector<std::string> files;
@@ -537,7 +558,7 @@ TEST(TextMatch, V2LoadSlicedNullOffsets) {
         DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
     field_data->FillFieldData(
         texts.data(), valid_bytes.data(), texts.size(), 0);
-    builder->BuildIndexFromFieldData({field_data}, true);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
     auto stats = [&]() {
         FileSliceSizeGuard slice_size_guard(kSliceSize);
         return builder->Upload({});
@@ -596,7 +617,7 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
         DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
     field_data->FillFieldData(
         texts.data(), valid_bytes.data(), texts.size(), 0);
-    builder->BuildIndexFromFieldData({field_data}, true);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
     auto stats = builder->Upload({});
 
     std::vector<std::string> files;
@@ -710,7 +731,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */, 0);
     index->Commit();
     index->Reload();
 
@@ -773,6 +794,101 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     }
 }
 
+// Regression test: a growing segment loads each batch at the offset PreInsert
+// reserved. BuildIndexFromFieldData has to place that batch's doc ids there,
+// the same doc-id space AddTextsGrowing writes into -- starting at 0 would
+// stack the loaded batch on top of doc ids the index already owns.
+TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
+    using Index = index::TextMatchIndex;
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_offset_begin",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    // Rows [0, 3) arrive through the insert path, which is already
+    // offset-addressed.
+    const std::vector<std::string> inserted = {"alpha", "beta", "gamma"};
+    index->AddTextsGrowing(
+        inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
+
+    // Rows [3, 6) arrive through the load path, at the offset it reserved;
+    // row 4 is null, so its null bitmap entry must use the same doc-id space.
+    const std::vector<std::string> loaded = {"delta", "", "epsilon"};
+    const std::vector<uint8_t> loaded_valid = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, loaded.size());
+    field_data->FillFieldData(
+        loaded.data(), loaded_valid.data(), loaded.size(), 0);
+    index->BuildIndexFromFieldData({field_data}, true, /*offset_begin=*/3);
+    index->Commit();
+    index->Reload();
+
+    auto nulls = index->IsNull();
+    auto not_nulls = index->IsNotNull();
+    ASSERT_EQ(nulls.size(), 6);
+    ASSERT_EQ(not_nulls.size(), 6);
+    for (int64_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(static_cast<bool>(nulls[i]), i == 4);
+        EXPECT_EQ(static_cast<bool>(not_nulls[i]), i != 4);
+    }
+
+    ExpectOnlyTextMatchHit(*index, "alpha", 0, 6);
+    ExpectOnlyTextMatchHit(*index, "gamma", 2, 6);
+    ExpectOnlyTextMatchHit(*index, "delta", 3, 6);
+    ExpectOnlyTextMatchHit(*index, "epsilon", 5, 6);
+}
+
+// The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
+// index honouring offset_begin, this covers load_field_data_common actually
+// handing it the offset PreInsert reserved. Insert fills rows [0, 2), a load
+// fills [2, 4); on a build that indexes from 0 the loaded rows land on top of
+// the inserted ones and the term queries below hit the wrong offsets.
+TEST(TextMatch, GrowingLoadBuildsTextIndexAtReservedOffset) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_impl, nullptr);
+    const auto pk_field = FieldId(100);
+    const auto str_field = FieldId(101);
+
+    constexpr int64_t inserted_rows = 2;
+    auto data = DataGen(schema, inserted_rows);
+    auto* str_col = data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col->at(0) = "football basketball";
+    str_col->at(1) = "swimming tennis";
+    ASSERT_EQ(seg->PreInsert(inserted_rows), 0);
+    seg->Insert(0,
+                inserted_rows,
+                data.row_ids_.data(),
+                data.timestamps_.data(),
+                data.raw_);
+
+    const std::vector<std::string> loaded = {"cricket rugby", "hockey curling"};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
+    field_data->FillFieldData(loaded.data(), loaded.size());
+    auto reserved = seg->PreInsert(loaded.size());
+    ASSERT_EQ(reserved, inserted_rows);
+    seg_impl->load_field_data_common(
+        str_field, reserved, {field_data}, pk_field, loaded.size());
+
+    auto pinned = seg_impl->GetTextIndex(nullptr, str_field);
+    auto* index = pinned.get();
+
+    ExpectOnlyTextMatchHit(*index, "football", 0, 4);
+    ExpectOnlyTextMatchHit(*index, "tennis", 1, 4);
+    ExpectOnlyTextMatchHit(*index, "cricket", 2, 4);
+    ExpectOnlyTextMatchHit(*index, "curling", 3, 4);
+}
+
 TEST(TextMatch, BuildIndexFromTextFieldData) {
     auto ctx = CreateTextMatchTestFileManagerContext(
         1002, proto::schema::DataType::Text);
@@ -785,7 +901,7 @@ TEST(TextMatch, BuildIndexFromTextFieldData) {
         storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false, 0));
 }
 
 TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
@@ -1040,7 +1156,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true);
+    index->BuildIndexFromFieldData(field_datas, true, 0);
     index->Commit();
     index->Reload();
 

@@ -61,13 +61,14 @@ func TestGetBasicConfig(t *testing.T) {
 	assert.NotNil(t, basicConfig["security.protocol"])
 }
 
-func TestGetProducerConfigUsesConfiguredMessageMaxBytes(t *testing.T) {
-	config := &paramtable.Get().KafkaCfg
-	oldValue := config.ProducerMessageMaxBytes.SwapTempValue("4096")
-	defer config.ProducerMessageMaxBytes.SwapTempValue(oldValue)
+func TestGetProducerConfigClampsConfiguredMessageMaxBytes(t *testing.T) {
+	params := paramtable.Get()
+	config := &params.KafkaCfg
+	assert.NoError(t, params.Save(config.ProducerMessageMaxBytes.Key, "4096"))
+	t.Cleanup(func() { assert.NoError(t, params.Reset(config.ProducerMessageMaxBytes.Key)) })
 
 	producerConfig := (&builderImpl{}).getProducerConfig()
 	value, err := producerConfig.Get("message.max.bytes", nil)
 	assert.NoError(t, err)
-	assert.Equal(t, 4096, value)
+	assert.Equal(t, 256*1024, value)
 }

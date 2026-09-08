@@ -56,7 +56,7 @@ func TestPartitionManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	f := syncutil.NewFuture[wal.WAL]()
@@ -141,8 +141,22 @@ func TestPartitionManager(t *testing.T) {
 		},
 	}
 
-	result, _ = m.AssignSegment(req)
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
 	result.Ack()
+
+	// Each existing segment accepts the allocation that crosses its soft
+	// assignment target, then rejects later allocations.
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	result.Ack()
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	result.Ack()
+
 	_, err = m.AssignSegment(req)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 

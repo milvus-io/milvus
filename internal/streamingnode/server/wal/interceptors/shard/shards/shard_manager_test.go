@@ -41,7 +41,7 @@ func TestShardManager(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -311,7 +311,7 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 	}
 	appendCh := make(chan *message.CreateSegmentMessageHeader, 1)
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -389,7 +389,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -747,7 +747,7 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 	t.Helper()
 	channel := types.PChannelInfo{Name: "test_alter_channel", Term: 1}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{

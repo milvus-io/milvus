@@ -269,9 +269,7 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	// proxy, instead of fanning out a GenericValue kBytesVal that segcore's plan
 	// parser cannot evaluate.
 	if IsBytes(value) {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"a bytes template value can only be used as the membership filter argument " +
-				"of membership_match")
+		return nil, bytesTemplateValueError()
 	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
@@ -309,6 +307,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	// the value's own type are what identify the mismatch anyway.
 	return nil, merr.WrapErrQueryPlanMsg(
 		"cannot cast value to %s: incompatible source type", dataType.String())
+}
+
+func bytesTemplateValueError() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"a bytes template value can only be used as the membership filter argument " +
+			"of membership_match")
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
@@ -462,6 +466,11 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*planpb.Expr, error) {
 	leftColumnInfo := toColumnInfo(left)
 	rightColumnInfo := toColumnInfo(right)
+
+	if (left.expr.GetIsTemplate() && left.expr.GetValueExpr() == nil) ||
+		(right.expr.GetIsTemplate() && right.expr.GetValueExpr() == nil) {
+		return nil, merr.WrapErrQueryPlanMsg("template variables in composite expressions cannot be compared with fields")
+	}
 
 	if left.expr.GetIsTemplate() {
 		return &planpb.Expr{

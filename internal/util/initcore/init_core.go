@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -228,6 +229,14 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
+// SetArrowFSChunkManagerEnabled selects the segcore remote chunk manager
+// backend for this process: milvus-storage Arrow FileSystem vs the legacy
+// AWS-SDK based implementations. Must run during component init, before any
+// remote chunk manager is created (segment load, index build/load).
+func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
+	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
+}
+
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
@@ -308,6 +317,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
@@ -777,6 +787,21 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -844,6 +869,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
+
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
 
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))

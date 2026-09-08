@@ -2,14 +2,17 @@ package shards
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -74,18 +77,7 @@ func TestSegmentAllocManager(t *testing.T) {
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
-			BinarySize: 120,
-		},
-	})
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrTooLargeInsert)
-	assert.Nil(t, result)
-
-	result, err = m.AllocRows(&AssignSegmentRequest{
-		TimeTick: 120,
-		ModifiedMetrics: stats.ModifiedMetrics{
-			Rows:       100,
-			BinarySize: 50,
+			BinarySize: 30,
 		},
 	})
 	assert.NoError(t, err)
@@ -99,17 +91,6 @@ func TestSegmentAllocManager(t *testing.T) {
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
-			BinarySize: 70,
-		},
-	})
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotEnoughSpace)
-	assert.Nil(t, result)
-
-	result, err = m.AllocRows(&AssignSegmentRequest{
-		TimeTick: 120,
-		ModifiedMetrics: stats.ModifiedMetrics{
-			Rows:       100,
 			BinarySize: 50,
 		},
 		TxnSession: &mockedSession{},
@@ -118,6 +99,33 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, m.TxnSem(), int32(1))
 	assert.Equal(t, m.AckSem(), int32(2))
+
+	result, err = m.AllocRows(&AssignSegmentRequest{
+		TimeTick: 120,
+		ModifiedMetrics: stats.ModifiedMetrics{
+			Rows:       100,
+			BinarySize: 30,
+		},
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, m.TxnSem(), int32(1))
+	assert.Equal(t, m.AckSem(), int32(3))
+	stat := resource.Resource().SegmentStatsManager().GetStatsOfSegment(3)
+	assert.Equal(t, stats.ModifiedMetrics{Rows: 300, BinarySize: 110}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
+
+	result, err = m.AllocRows(&AssignSegmentRequest{
+		TimeTick: 120,
+		ModifiedMetrics: stats.ModifiedMetrics{
+			Rows:       1,
+			BinarySize: 1,
+		},
+	})
+	assert.ErrorIs(t, err, ErrNotEnoughSpace)
+	assert.Nil(t, result)
+	assert.Equal(t, m.TxnSem(), int32(1))
+	assert.Equal(t, m.AckSem(), int32(3))
 
 	assert.Panics(t, func() {
 		m.GetFlushedStat()
@@ -140,6 +148,57 @@ func TestSegmentAllocManager(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrNotGrowing)
+}
+
+func TestSegmentAllocManagerAcceptsOversizedFirstAllocation(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{
+		Name: "test_channel_oversized",
+		Term: 1,
+	}
+
+	sealObserved := make(chan int32, 1)
+	var m *segmentAllocManager
+	o := mock_utils.NewMockSealOperator(t)
+	o.EXPECT().Channel().Return(channel)
+	o.EXPECT().AsyncFlushSegment(mock.Anything).Run(func(utils.SealSegmentSignal) {
+		sealObserved <- m.AckSem()
+	}).Return().Once()
+	resource.Resource().SegmentStatsManager().RegisterSealOperator(o, nil, nil)
+
+	m = newTestSegmentAllocManager(channel, &message.CreateSegmentMessageHeader{
+		CollectionId:   1,
+		PartitionId:    2,
+		SegmentId:      3,
+		MaxSegmentSize: 100,
+		StorageVersion: 2,
+	}, 110)
+
+	result, err := m.AllocRows(&AssignSegmentRequest{
+		TimeTick: 120,
+		ModifiedMetrics: stats.ModifiedMetrics{
+			Rows:       100,
+			BinarySize: 120,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, int64(3), result.SegmentID)
+	assert.Equal(t, int32(1), m.AckSem())
+	stat := resource.Resource().SegmentStatsManager().GetStatsOfSegment(3)
+	assert.Equal(t, stats.ModifiedMetrics{Rows: 100, BinarySize: 120}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
+
+	select {
+	case ackSem := <-sealObserved:
+		assert.Equal(t, int32(1), ackSem, "capacity seal must wait for the oversized insert acknowledgement")
+	case <-time.After(10 * time.Second):
+		t.Fatal("capacity seal was not triggered")
+	}
+
+	result.Ack()
+	assert.Zero(t, m.AckSem())
 }
 
 type mockedSession struct{}

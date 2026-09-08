@@ -1148,7 +1148,8 @@ SegmentGrowingImpl::load_field_data_common(
     auto field_meta = (*schema)[field_id];
 
     if (insert_record_.is_valid_data_exist(field_id)) {
-        insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
+        insert_record_.get_valid_data(field_id)->set_data_raw(reserved_offset,
+                                                              field_data);
     }
     // Keep the load path aligned with Insert: once a vector interim index owns
     // raw data, append the loaded batch to the index without rebuilding raw
@@ -1172,7 +1173,7 @@ SegmentGrowingImpl::load_field_data_common(
     try_remove_chunks(field_id, *schema);
 
     if (field_id == primary_field_id) {
-        insert_record_.insert_pks(field_data);
+        insert_record_.insert_pks(reserved_offset, field_data);
     }
 
     // update average row data size
@@ -1190,8 +1191,8 @@ SegmentGrowingImpl::load_field_data_common(
         } else {
             auto pinned = GetTextIndex(nullptr, field_id);
             auto index = pinned.get();
-            index->BuildIndexFromFieldData(field_data,
-                                           field_meta.is_nullable());
+            index->BuildIndexFromFieldData(
+                field_data, field_meta.is_nullable(), reserved_offset);
             index->Commit();
             // Reload reader so that the index can be read immediately
             index->Reload();
@@ -3469,6 +3470,15 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
         // Offset-addressed write: idempotent when `filled` is 0 for a
         // non-mapping column being refilled, unlike the appending overload,
         // which would double the validity length on a Reopen retry.
+        //
+        // This is one of the two rewrites ThreadSafeValidData's contract
+        // permits (see the borrow discussion on the class in
+        // ConcurrentVector.h). It is safe only because Reopen holds sch_mutex_
+        // unique and publishes schema_ last, so no reader can name this field
+        // yet, let alone hold a get_chunk_data() borrow into it. Anything that
+        // changes when Reopen publishes -- or that lets a reader reach a
+        // not-yet-published field -- invalidates that argument and this call
+        // with it.
         insert_record_.get_valid_data(field_id)->set_data_raw(
             filled, missing, data.get(), field_meta);
     }

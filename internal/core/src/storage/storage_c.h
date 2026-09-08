@@ -34,6 +34,13 @@ InitLocalChunkManagerSingleton(const char* path);
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
+// Select the remote ChunkManager backend for this process: when enabled,
+// CreateChunkManager routes remote IO through the milvus-storage
+// ArrowFileSystem instead of the legacy AWS-SDK based chunk managers.
+// Must be set before any remote chunk manager is created (component init).
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable);
+
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config);
 

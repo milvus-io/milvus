@@ -277,7 +277,7 @@ be too expensive to fan out. Two limits bound that independently.
 | Limit | Default | Bounds |
 | --- | --- | --- |
 | `proxy.maxMembershipFilterSize` | 64 MiB | One MBF1 or MRB1 body. The fixed 32-byte header is allowed on top. For Roaring, decoded-memory admission usually becomes the tighter bound before the full wire budget is usable. |
-| `proxy.maxMembershipFilterPlanSize` | 128 MiB | The aggregate serialized size of every membership-filter-bearing plan in one Search, HybridSearch, Query, or complex Delete. |
+| `proxy.maxMembershipFilterPlanSize` | 128 MiB | The request-wide membership budget. It independently bounds both the aggregate serialized size of membership-filter-bearing plans and the aggregate estimated decoded size of all MRB1 occurrences in one Search, HybridSearch, Query, or complex Delete. |
 | MRB1 high-container admission | 262,144 | Separately allocated Roaring32 children per expression, enforced by SDK, Proxy, and QueryNode. |
 | MRB1 estimated decoded admission | 64 MiB | `body + 128 bytes/high container + 64 bytes/low container`, enforced by SDK, Proxy, and QueryNode. |
 
@@ -290,13 +290,15 @@ in the serialized plan and fanned out to every QueryNode — so a request carryi
 one of each must not be allowed to spend twice what either alone may. The legacy
 Bloom-specific keys remain fallbacks for deployments that already set them.
 
-After template materialization, Proxy applies the exact `proto.Size` gate before
+Before materialization, Proxy applies the same request-wide configured value to
+the aggregate estimated decoded size of all MRB1 occurrences. After template
+materialization, it independently applies the exact `proto.Size` gate before
 `proto.Marshal`; this catches repeated embedded copies, protobuf overhead, and
 HybridSearch accumulation. Each Roaring template is structurally validated and
-must independently satisfy the 64 MiB decoded estimate. Materialized scorer
-filters may carry membership expressions and their blobs count against the same
-per-request budget, so a blob embedded in a scorer filter is charged exactly as
-one embedded in the main predicate.
+must independently satisfy the fixed 64 MiB decoded estimate. Materialized
+scorer filters may carry membership expressions and their serialized and decoded
+costs count against the same request-wide budget, so a blob embedded in a scorer
+filter is charged exactly as one embedded in the main predicate.
 
 Sizing by bytes rather than member count is the point. Unlike an SBBF body,
 whose size follows `(n, fpr)` alone, a Roaring body's size is driven by the
@@ -553,7 +555,9 @@ the 64 MiB decoded estimate; the tightest bound is distribution-sensitive.
 - Proxy validation is linear in supplied bytes, allocation-free on success, and
   never materializes a bitmap or rebuilds a raw list.
 - Each materialized Roaring expression is validated independently at Proxy and
-  QueryNode and must satisfy the per-filter decoded estimate.
+  QueryNode and must satisfy the fixed per-filter decoded estimate. Proxy also
+  charges every occurrence to the request-wide decoded total controlled by
+  `proxy.maxMembershipFilterPlanSize`.
 - QueryNode parses each logical expression once and shares its immutable decoded
   bitmap across the corresponding per-segment physical expressions.
 - The raw path performs one probe per active valid row.
@@ -745,8 +749,8 @@ Existing collections, segments, and indexes require no rewrite.
 - Materialize `RoaringFilterExpr` at oneof field 23 and verify proto round-trip.
 - Reject malformed MRB1 at Proxy.
 - Repeat one template across multiple AST leaves and verify each materialized
-  expression remains valid while the serialized plan-size gate counts every
-  embedded copy.
+  expression remains valid while the request-wide gate counts every embedded
+  copy independently in both the serialized and estimated-decoded totals.
 - Prove a Roaring plan is not classified as `BloomFilterExpr`.
 
 ### QueryNode logical and physical execution tests

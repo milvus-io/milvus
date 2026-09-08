@@ -29,6 +29,7 @@
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
@@ -112,6 +113,11 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     }
 }
 
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable) {
+    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
+}
+
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config) {
     try {
@@ -131,6 +137,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =

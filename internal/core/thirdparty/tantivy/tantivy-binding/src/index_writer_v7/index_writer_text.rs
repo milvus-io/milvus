@@ -51,10 +51,10 @@ impl IndexWriterWrapperImpl {
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         if !enable_background_merge {
-            // Sealed text index builds end with an explicit merge-all in
-            // finish(); disable background policy merges for them. Growing
-            // segments keep the default policy, otherwise the segment count
-            // grows unbounded across periodic commits.
+            // Sealed text index builds preserve memory-budget-flushed segments
+            // to avoid merge write amplification. Growing segments keep the
+            // default policy, otherwise the segment count grows unbounded
+            // across periodic commits.
             index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
         }
 
@@ -64,7 +64,6 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field: None,
             enable_user_specified_doc_id: true,
-            enable_background_merge,
         })
     }
 }
