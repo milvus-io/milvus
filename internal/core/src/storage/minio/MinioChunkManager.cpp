@@ -53,6 +53,9 @@
 #include "google/cloud/storage/oauth2/compute_engine_credentials.h"
 #include "google/cloud/version.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
@@ -334,14 +337,34 @@ void
 MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
+    if (!storage_config.useIAM) {
+        // Preserve the existing access-key validation before building a provider.
+        BuildAccessKeyClient(storage_config, config);
+    }
+
+    // Storage may have installed the process-wide GCP HTTP factory first.
+    // Register both IAM and HMAC identities before PreCheck, even if our
+    // InitAPI was ignored. Building an access-key client alone is insufficient.
+    milvus_storage::ArrowFileSystemConfig gcp_config;
+    gcp_config.use_iam = storage_config.useIAM;
+    gcp_config.access_key_id = storage_config.access_key_id;
+    gcp_config.access_key_value = storage_config.access_key_value;
+    auto provider = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+    if (!provider.ok()) {
+        throw milvus_storage::ToSegcoreError(provider.status());
+    }
+    milvus_storage::GcpCredentialRegistry::Instance().Register(
+        {milvus_storage::NormalizeGcpEndpoint(storage_config.address,
+                                              storage_config.useSSL),
+         storage_config.bucket_name},
+        std::move(provider).ValueOrDie());
+
     if (storage_config.useIAM) {
         // Using S3 client instead of google client because of compatible protocol
         client_ = std::make_shared<Aws::S3::S3Client>(
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
-    } else {
-        BuildAccessKeyClient(storage_config, config);
     }
 }
 
