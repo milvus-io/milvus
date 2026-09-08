@@ -137,6 +137,7 @@ type IMetaTable interface {
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
+	CountAliases(ctx context.Context) int
 
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
 	InitCredential(ctx context.Context) error
@@ -1745,6 +1746,22 @@ func (mt *MetaTable) listAliasesByID(collID UniqueID) []string {
 		return true
 	})
 	return ret
+}
+
+// CountAliases returns how many aliases the instance has, in one pass over the
+// alias index under a single read lock. Summing ListAliasesByID over every
+// collection would instead walk every alias once per collection and take the
+// lock once per collection, which on an instance with thousands of each is
+// millions of iterations and thousands of lock acquisitions for one total.
+func (mt *MetaTable) CountAliases(ctx context.Context) int {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	total := 0
+	for _, db := range mt.aliases.listDB() {
+		total += len(mt.aliases.listCollections(db))
+	}
+	return total
 }
 
 func (mt *MetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []string {

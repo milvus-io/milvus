@@ -82,7 +82,15 @@ type queryTask struct {
 	preferredNodes     map[string]int64
 	fastSkip           bool
 
-	reQuery              bool
+	reQuery bool
+	// internalTask marks a queryTask the Proxy synthesizes for itself: the
+	// requery that fetches vectors after a search, the retrieval an upsert does
+	// to read the rows it replaces, and the retrieval a search-by-primary-key
+	// turns into. The feature usage counters describe what users ask for, so
+	// they are skipped for these; counting them would report one user request
+	// as two, and would move counters the user never set (the synthesized
+	// request pins its own consistency level and output fields).
+	internalTask         bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
@@ -525,6 +533,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, wrapPlanCreationError(err, "failed to create query plan")
 	}
+	recordPlanExprFeatures(plan, exprTemplateValues)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
 
@@ -545,11 +554,17 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 			return wrapPlanCreationError(err, "failed to create query plan")
 		}
+		if !t.internalTask {
+			recordPlanExprFeatures(t.plan, t.request.GetExprTemplateValues())
+		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
 	// parse output fields names
 	originalOuputFields := t.request.GetOutputFields()
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
+	if !t.internalTask {
+		recordOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema)
+	}
 	if err != nil {
 		return err
 	}
@@ -732,6 +747,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !t.internalTask {
+		recordQueryIteratorFeature(queryParams.isIterator)
+		recordQueryParamKeyFeatures(t.request.GetQueryParams())
+	}
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
 		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
 			"alias or database may have changed")
@@ -907,6 +926,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		mlog.Uint64("mvcc_ts", t.GetMvccTimestamp()),
 		mlog.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
 		mlog.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
+	if !t.internalTask {
+		recordCommonRequestFeatures(t.request)
+	}
 	return nil
 }
 

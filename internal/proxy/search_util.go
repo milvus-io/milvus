@@ -161,6 +161,9 @@ type SearchInfo struct {
 	collectionID    int64
 	orderByFields   []OrderByField
 	iterativeFilter bool
+	// isRangeSearch is reported so the caller can count the feature; the parse
+	// happens here and nothing else reconstructs it.
+	isRangeSearch bool
 }
 
 const (
@@ -667,6 +670,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		collectionID:    collectionId,
 		orderByFields:   orderByFields,
 		iterativeFilter: isIterativeFilter,
+		isRangeSearch:   isRangeSearch,
 	}, nil
 }
 

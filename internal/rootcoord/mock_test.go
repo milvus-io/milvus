@@ -79,6 +79,7 @@ type mockMetaTable struct {
 	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
 	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
 	ListAliasesByIDFunc              func(ctx context.Context, collID UniqueID) []string
+	CountAliasesFunc                 func(ctx context.Context) int
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
@@ -179,6 +180,13 @@ func (m mockMetaTable) ListAliases(ctx context.Context, dbName, collectionName s
 
 func (m mockMetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []string {
 	return m.ListAliasesByIDFunc(ctx, collID)
+}
+
+func (m mockMetaTable) CountAliases(ctx context.Context) int {
+	if m.CountAliasesFunc == nil {
+		return 0
+	}
+	return m.CountAliasesFunc(ctx)
 }
 
 func (m mockMetaTable) AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {

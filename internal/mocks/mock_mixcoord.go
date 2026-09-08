@@ -4684,6 +4684,65 @@ func (_c *MixCoord_GetExportSnapshotState_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetFeatureUsage provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetFeatureUsage(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFeatureUsage")
+	}
+
+	var r0 *internalpb.FeatureUsageReport
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) *internalpb.FeatureUsageReport); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FeatureUsageReport)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetFeatureUsageRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetFeatureUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFeatureUsage'
+type MixCoord_GetFeatureUsage_Call struct {
+	*mock.Call
+}
+
+// GetFeatureUsage is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetFeatureUsageRequest
+func (_e *MixCoord_Expecter) GetFeatureUsage(_a0 interface{}, _a1 interface{}) *MixCoord_GetFeatureUsage_Call {
+	return &MixCoord_GetFeatureUsage_Call{Call: _e.mock.On("GetFeatureUsage", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest)) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetFeatureUsageRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) Return(_a0 *internalpb.FeatureUsageReport, _a1 error) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) RunAndReturn(run func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error)) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFileResources provides a mock function with given fields: ctx, resourceIDs
 func (_m *MixCoord) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
 	_va := make([]interface{}, len(resourceIDs))
