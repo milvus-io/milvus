@@ -69,8 +69,8 @@ const (
 	chunkObjectDir    = "chunks"
 	manifestObjectDir = "manifest"
 
-	// walsummaryObjectDir is the object storage directory of the summary store,
-	// mirrored by the etcd DirectorySummaryStore constant of the metastore.
+	// walsummaryObjectDir is the object storage directory of the summary store.
+	// The store keeps nothing in etcd, so this is its only root.
 	walsummaryObjectDir = "walsummary"
 )
 
@@ -131,10 +131,10 @@ func (s *Store) ManifestKeyOfTerm(term int64) string {
 	return buildManifestKey(s.chunkManager, s.pchannel, term)
 }
 
-// WriteChunk writes one chunk object. It never overwrites a differing chunk of
-// the same generation: a same-generation object with identical content is a
-// retry (idempotent no-op), a same-generation object with different content is
-// corruption, and a newer term's object fences this owner.
+// WriteChunk writes one chunk object. It never overwrites a differing chunk at
+// the same key: an object with identical content is a retry (idempotent
+// no-op), and one with different content is corruption. The key is term-scoped,
+// so a concurrent owner of another term writes a different object entirely.
 func (s *Store) WriteChunk(
 	ctx context.Context,
 	generation uint64,
@@ -365,15 +365,9 @@ func (s *Store) ProbeChunkForwardOfTerm(ctx context.Context, term int64, fromGen
 		return nil, errors.Wrapf(err, "failed to list summary chunks under %s", prefix)
 	}
 	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, len(keys))
-	termSuffix := "_" + fmt.Sprintf("%020d", term)
 	for _, key := range keys {
-		base := strings.TrimPrefix(key, prefix)
-		if !strings.HasSuffix(base, termSuffix) {
-			continue
-		}
-		middle := strings.TrimSuffix(base, termSuffix)
-		generation, err := strconv.ParseUint(middle, 10, 64)
-		if err != nil || generation < fromGeneration {
+		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(key, prefix))
+		if !ok || keyTerm != term || generation < fromGeneration {
 			continue
 		}
 		payload, err := s.chunkManager.Read(ctx, key)
@@ -390,6 +384,94 @@ func (s *Store) ProbeChunkForwardOfTerm(ctx context.Context, term int64, fromGen
 		return entries[i].GetGeneration() < entries[j].GetGeneration()
 	})
 	return entries, nil
+}
+
+// ChunkRef identifies one chunk object.
+type ChunkRef struct {
+	Generation uint64
+	Term       int64
+}
+
+// SweepUnreferencedChunksBelowTerm deletes chunk objects of terms strictly
+// below belowTerm that referenced does not name, up to budget objects.
+//
+// It reports how many it deleted and whether it reached the end of the prefix.
+// A caller that used its whole budget has not finished and should call again;
+// there is no cursor, because the deletions are the progress: the next walk
+// simply sees fewer objects.
+//
+// The walk streams rather than materializing the key list, so the memory cost
+// is the caller's referenced set and nothing else.
+func (s *Store) SweepUnreferencedChunksBelowTerm(
+	ctx context.Context,
+	belowTerm int64,
+	referenced map[ChunkRef]struct{},
+	budget int,
+) (deleted int, finished bool, err error) {
+	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
+	finished = true
+	var walkErr error
+	if err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
+		generation, term, ok := parseChunkKey(strings.TrimPrefix(info.FilePath, prefix))
+		if !ok || term >= belowTerm {
+			return true
+		}
+		if _, ok := referenced[ChunkRef{Generation: generation, Term: term}]; ok {
+			return true
+		}
+		if err := s.chunkManager.Remove(ctx, info.FilePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			walkErr = errors.Wrapf(err, "failed to delete orphan summary chunk %s", info.FilePath)
+			finished = false
+			return false
+		}
+		deleted++
+		if deleted >= budget {
+			finished = false
+			return false
+		}
+		return true
+	}); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return deleted, false, errors.Wrapf(err, "failed to walk summary chunks under %s", prefix)
+	}
+	return deleted, finished, walkErr
+}
+
+// DeleteManifestsBelowTerm deletes the manifest objects of terms strictly below
+// belowTerm. Recovery adopts the highest term with content, so once a manifest
+// at or above belowTerm holds the whole retained set, no recovery can reach an
+// older one.
+func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64) error {
+	terms, err := s.ListManifestTerms(ctx, belowTerm-1)
+	if err != nil {
+		return err
+	}
+	for _, term := range terms {
+		key := buildManifestKey(s.chunkManager, s.pchannel, term)
+		if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return errors.Wrapf(err, "failed to delete superseded summary manifest %s", key)
+		}
+	}
+	return nil
+}
+
+// parseChunkKey splits a chunk object's name (the key without the prefix) into
+// its generation and term. It reports false for anything this build did not
+// write, which is ignored rather than failing the caller: an unrelated object
+// under the prefix must not break recovery or gc.
+func parseChunkKey(base string) (generation uint64, term int64, ok bool) {
+	sep := strings.IndexByte(base, '_')
+	if sep < 0 {
+		return 0, 0, false
+	}
+	generation, err := strconv.ParseUint(base[:sep], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	term, err = strconv.ParseInt(base[sep+1:], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return generation, term, true
 }
 
 // RemoveAllObjects deletes every object of the pchannel's summary store. It is

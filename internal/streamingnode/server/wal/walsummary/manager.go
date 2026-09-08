@@ -77,6 +77,12 @@ type Manager struct {
 	// manifestVersion moved in between (CAS).
 	manifest        *streamingpb.PChannelSummaryManifest
 	manifestVersion uint64
+	// manifestPublished records whether THIS term has a manifest object in the
+	// store. Recovery reaches a previous term's chunks by listing the manifest
+	// prefix, so a term that holds chunks without a manifest is invisible to
+	// its successor; writeOnce publishes before the first chunk to keep the
+	// listing sufficient.
+	manifestPublished bool
 
 	// publishMu serializes manifest publication. It is NOT m.mu: the object
 	// write must not hold the manager lock, but it also must not race another
@@ -534,6 +540,14 @@ func (m *Manager) writeOnce(ctx context.Context) (bool, error) {
 		}
 		sections[vchannel] = cs
 	}
+	// A term is reachable to its successor only through its manifest object:
+	// the takeover lists the manifest prefix and probes forward on the term it
+	// adopts, so a chunk written by a term that has none is found by nobody.
+	// Recovery publishes only what it inherited, so a term that inherited
+	// nothing arrives here without one.
+	if err := m.publishManifestIfAbsent(ctx); err != nil {
+		return false, err
+	}
 	footer, objectSize, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections)
 	if err != nil {
 		return false, err
@@ -563,6 +577,23 @@ func (m *Manager) writeOnce(ctx context.Context) (bool, error) {
 	finished := len(m.pendingSealed) == 0
 	m.mu.Unlock()
 	return finished, nil
+}
+
+// publishManifestIfAbsent publishes this term's manifest when it has none yet,
+// so the invariant recovery relies on -- a term that holds chunks always has a
+// manifest object -- holds before the first chunk of the term is written.
+//
+// It publishes what recovery inherited, which is what the manifest would carry
+// anyway; the following chunk record amends it. Only a term that inherited
+// nothing pays the extra write, and only once.
+func (m *Manager) publishManifestIfAbsent(ctx context.Context) error {
+	m.mu.Lock()
+	published := m.manifestPublished
+	m.mu.Unlock()
+	if published {
+		return nil
+	}
+	return m.publishManifest(ctx, func(*streamingpb.PChannelSummaryManifest) {})
 }
 
 // publishManifest edits the manifest, writes the edited clone to object storage
@@ -601,6 +632,7 @@ func (m *Manager) publishManifest(ctx context.Context, edit func(*streamingpb.PC
 	m.mu.Lock()
 	m.manifest = next
 	m.manifestVersion++
+	m.manifestPublished = true
 	// Only now are they durable. A vchannel invalidated again while this
 	// write was in flight keeps the newer timetick.
 	for vchannel, timetick := range folded {
