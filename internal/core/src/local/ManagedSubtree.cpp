@@ -68,50 +68,58 @@ ManagedSubtree::AcquireWriter() {
 
 bool
 ManagedSubtree::BeginRemovalLocked() noexcept {
-    if (state_ != State::Closing || writers_ != 0 || removal_in_progress_) {
+    if (state_ != State::Closing || writers_ != 0) {
         return false;
     }
-    removal_in_progress_ = true;
+    state_ = State::Removing;
     return true;
 }
 
-bool
-ManagedSubtree::RequestRemoval() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (state_ == State::Removed) {
-        return false;
+std::shared_ptr<ManagedSubtree::RemovalAttempt>
+ManagedSubtree::RequestRemoval(bool retry_failed) {
+    std::shared_ptr<RemovalAttempt> attempt;
+    bool remove = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (state_ == State::Failed && retry_failed) {
+            // Allocate before changing state: failure leaves the old attempt
+            // available. Existing waiters keep that attempt's result.
+            removal_attempt_ = std::make_shared<RemovalAttempt>();
+            state_ = State::Closing;
+        } else if (state_ == State::Open) {
+            state_ = State::Closing;
+        }
+        attempt = removal_attempt_;
+        remove = BeginRemovalLocked();
     }
-    state_ = State::Closing;
-    return BeginRemovalLocked();
+    if (remove) {
+        PerformRemoval();
+    }
+    return attempt;
 }
 
 void
 ManagedSubtree::RemoveWhenIdle() noexcept {
     try {
-        if (RequestRemoval()) {
-            PerformRemoval();
-        }
+        static_cast<void>(RequestRemoval(false));
     } catch (...) {
-        // RequestRemoval only mutates in-memory state. Keep this method
-        // noexcept even if a future implementation changes that detail.
+        // Keep owner destructors noexcept even if locking fails. Filesystem
+        // failures are retained by PerformRemoval for explicit recovery.
     }
 }
 
 void
 ManagedSubtree::RemoveAndWait() {
-    if (RequestRemoval()) {
-        PerformRemoval();
-    }
+    const auto attempt = RequestRemoval(true);
 
-    std::optional<ErrorCode> cleanup_error_code;
+    std::exception_ptr cleanup_error;
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this]() { return state_ == State::Removed; });
-        cleanup_error_code = cleanup_error_code_;
+        cv_.wait(lock, [&attempt]() { return attempt->complete; });
+        cleanup_error = attempt->error;
     }
-    if (cleanup_error_code.has_value()) {
-        ThrowInfo(*cleanup_error_code,
-                  "failed to remove managed local subtree");
+    if (cleanup_error) {
+        std::rethrow_exception(cleanup_error);
     }
 }
 
@@ -133,42 +141,18 @@ ManagedSubtree::ReleaseWriter() noexcept {
 
 void
 ManagedSubtree::PerformRemoval() noexcept {
+    std::exception_ptr cleanup_error;
     try {
         parent_.RemoveAll(path_);
-    } catch (const SegcoreError& error) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            cleanup_error_code_ = error.get_error_code();
-            removal_in_progress_ = false;
-            state_ = State::Removed;
-        }
-        cv_.notify_all();
-        return;
-    } catch (const std::exception&) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            cleanup_error_code_ = ErrorCode::UnexpectedError;
-            removal_in_progress_ = false;
-            state_ = State::Removed;
-        }
-        cv_.notify_all();
-        return;
     } catch (...) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            cleanup_error_code_ = ErrorCode::UnexpectedError;
-            removal_in_progress_ = false;
-            state_ = State::Removed;
-        }
-        cv_.notify_all();
-        return;
+        cleanup_error = std::current_exception();
     }
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        cleanup_error_code_.reset();
-        removal_in_progress_ = false;
-        state_ = State::Removed;
+        removal_attempt_->error = cleanup_error;
+        removal_attempt_->complete = true;
+        state_ = cleanup_error ? State::Failed : State::Removed;
     }
     cv_.notify_all();
 }

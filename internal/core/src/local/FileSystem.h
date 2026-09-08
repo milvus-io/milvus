@@ -49,6 +49,10 @@ struct MapOptions {
     bool populate{false};
 };
 
+// Rooted paths for trusted node-local artifacts, not an OS security sandbox.
+// Operations check current symlink targets before using native paths. Owners
+// must prevent concurrent replacement of path components or symlink targets and
+// avoid symlink aliases between independently owned artifact directories.
 class FileSystem final {
  public:
     // FileSystem is a copyable capability for one immutable rooted subtree.
@@ -56,9 +60,13 @@ class FileSystem final {
     static FileSystem
     Open(std::filesystem::path absolute_root);
 
+    // Derive a lexical scope; this does not create or pin a physical directory.
     FileSystem
     Subtree(const Path& path) const;
 
+    // Create an independent lifecycle owner, not a lookup by directory path.
+    // Create once per directory and share the returned object with all writers
+    // and cleanup callers. Independently managed directories must not overlap.
     std::shared_ptr<ManagedSubtree>
     ManageSubtree(const Path& path) const;
 
@@ -68,6 +76,10 @@ class FileSystem final {
     uint64_t
     FileSize(const Path& path) const;
 
+    // Return sorted regular-file entry paths relative to this handle's scope.
+    // File symlinks retain their entry names and must resolve within the scope;
+    // directory-symlink entries are not traversed. Iteration errors are
+    // FileReadFailed; boundary-check failures retain FileOpenFailed.
     std::vector<Path>
     List(const Path& directory, bool recursive) const;
 
@@ -89,6 +101,8 @@ class FileSystem final {
     io::MappedRegion
     OpenMappedRegion(const Path& path, const MapOptions& options) const;
 
+    // Validate the current target and return a native path for compatibility.
+    // The check cannot protect subsequent native I/O from path replacement.
     std::filesystem::path
     ResolveNativePath(const Path& path) const;
 

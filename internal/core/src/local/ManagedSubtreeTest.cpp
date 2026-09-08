@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <filesystem>
@@ -129,10 +130,114 @@ TEST_F(ManagedSubtreeTest, RemoveAndWaitPropagatesCleanupFailure) {
         FAIL() << "expected subtree cleanup to report the symlink escape";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FileOpenFailed);
+        EXPECT_NE(std::string(error.what()).find("artifact"),
+                  std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("escapes"), std::string::npos);
     }
 
     EXPECT_TRUE(fs::exists(outside));
     EXPECT_THROW(directory->AcquireWriter(), SegcoreError);
+}
+
+TEST_F(ManagedSubtreeTest, ExplicitlyRetriesFailedDeferredCleanup) {
+    const auto directory = files_->ManageSubtree(Path("artifact"));
+    const auto outside = OutsidePath();
+    fs::create_directories(outside);
+    fs::create_directory_symlink(outside, root_ / "artifact");
+    std::optional<ManagedSubtree::WriteLease> writer(
+        directory->AcquireWriter());
+
+    directory->RemoveWhenIdle();
+    writer.reset();  // The final writer encounters the cleanup failure.
+    EXPECT_THROW(directory->AcquireWriter(), SegcoreError);
+    EXPECT_TRUE(fs::exists(outside));
+
+    fs::remove(root_ / "artifact");
+    fs::create_directories(root_ / "artifact/work");
+    directory->RemoveWhenIdle();  // noexcept cleanup does not retry failures.
+    EXPECT_TRUE(fs::exists(root_ / "artifact/work"));
+
+    EXPECT_NO_THROW(directory->RemoveAndWait());
+    EXPECT_FALSE(fs::exists(root_ / "artifact"));
+    EXPECT_TRUE(fs::exists(outside));
+    EXPECT_THROW(directory->AcquireWriter(), SegcoreError);
+    EXPECT_NO_THROW(directory->RemoveAndWait());
+}
+
+TEST_F(ManagedSubtreeTest, SharedOwnerReportsCleanupFailureToAllWaiters) {
+    const auto directory = files_->ManageSubtree(Path("artifact"));
+    const auto outside = OutsidePath();
+    fs::create_directories(outside);
+    fs::create_directory_symlink(outside, root_ / "artifact");
+    std::optional<ManagedSubtree::WriteLease> writer(
+        directory->AcquireWriter());
+
+    auto remove = [directory]() { directory->RemoveAndWait(); };
+    auto first = std::async(std::launch::async, remove);
+    auto second = std::async(std::launch::async, remove);
+    EXPECT_EQ(first.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(second.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    writer.reset();
+
+    for (auto* waiter : {&first, &second}) {
+        try {
+            waiter->get();
+            FAIL() << "expected cleanup failure for each waiter";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FileOpenFailed);
+            EXPECT_NE(std::string(error.what()).find("artifact"),
+                      std::string::npos);
+        }
+    }
+    fs::remove(root_ / "artifact");
+    fs::create_directories(root_ / "artifact/work");
+    EXPECT_NO_THROW(directory->RemoveAndWait());
+    EXPECT_FALSE(fs::exists(root_ / "artifact"));
+}
+
+TEST_F(ManagedSubtreeTest, RetriesAfterDirectoryRemovalPermissionFailure) {
+    if (geteuid() == 0) {
+        GTEST_SKIP() << "root bypasses directory permissions";
+    }
+    const auto directory = files_->ManageSubtree(Path("artifact"));
+    directory->Files().CreateDirectories(Path("work/remaining"));
+    const auto blocked = root_ / "artifact/work";
+    fs::permissions(blocked, fs::perms::none);
+    struct RestorePermissions {
+        fs::path path;
+        ~RestorePermissions() {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    } restore{blocked};
+
+    // The target directory passes path validation; remove_all itself fails.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        try {
+            directory->RemoveAndWait();
+            FAIL() << "expected directory removal to report permission denial";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FileWriteFailed);
+            EXPECT_NE(std::string(error.what()).find("remove subtree"),
+                      std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("artifact"),
+                      std::string::npos);
+        }
+        EXPECT_THROW(directory->AcquireWriter(), SegcoreError);
+    }
+
+    fs::permissions(blocked, fs::perms::owner_all);
+    EXPECT_TRUE(fs::exists(blocked / "remaining"));
+    EXPECT_NO_THROW(directory->RemoveAndWait());
+    EXPECT_FALSE(fs::exists(root_ / "artifact"));
+
+    // A completed owner must never delete a later generation at the same path.
+    fs::create_directories(root_ / "artifact/new-generation");
+    directory->RemoveWhenIdle();
+    EXPECT_NO_THROW(directory->RemoveAndWait());
+    EXPECT_TRUE(fs::exists(root_ / "artifact/new-generation"));
 }
 
 }  // namespace

@@ -305,7 +305,8 @@ FileSystem::FileSize(const Path& path) const {
 
 std::vector<Path>
 FileSystem::List(const Path& directory, bool recursive) const {
-    auto native_directory = CheckedNativePath(directory);
+    const auto native_directory = CheckedNativePath(directory);
+    const auto scoped_root = ScopedRoot();
     std::error_code error;
     if (!fs::is_directory(native_directory, error)) {
         if (error) {
@@ -331,38 +332,46 @@ FileSystem::List(const Path& directory, bool recursive) const {
             }
             return;
         }
-        auto relative = fs::relative(entry.path(), ScopedRoot(), status_error);
+        Path relative(
+            entry.path().lexically_relative(scoped_root).generic_string());
+        // Preserve the entry's name rather than replacing symlinks with their
+        // targets. Only symlink entries need another filesystem boundary check.
+        const bool is_symlink = entry.is_symlink(status_error);
         if (status_error) {
             ThrowFileSystemError(ErrorCode::FileReadFailed,
-                                 "resolve relative path for",
+                                 "inspect directory entry",
                                  entry.path(),
                                  status_error);
         }
-        files.emplace_back(relative.generic_string());
+        if (is_symlink) {
+            static_cast<void>(CheckedNativePath(relative));
+        }
+        files.push_back(std::move(relative));
     };
 
+    auto collect = [&](auto iterator) {
+        if (error) {
+            ThrowFileSystemError(ErrorCode::FileReadFailed,
+                                 "list directory",
+                                 native_directory,
+                                 error);
+        }
+        const decltype(iterator) end;
+        while (iterator != end) {
+            add_file(*iterator);
+            iterator.increment(error);
+            if (error) {
+                ThrowFileSystemError(ErrorCode::FileReadFailed,
+                                     "advance directory iterator for",
+                                     native_directory,
+                                     error);
+            }
+        }
+    };
     if (recursive) {
-        fs::recursive_directory_iterator iterator(native_directory, error);
-        if (error) {
-            ThrowFileSystemError(ErrorCode::FileReadFailed,
-                                 "list directory",
-                                 native_directory,
-                                 error);
-        }
-        for (const auto& entry : iterator) {
-            add_file(entry);
-        }
+        collect(fs::recursive_directory_iterator(native_directory, error));
     } else {
-        fs::directory_iterator iterator(native_directory, error);
-        if (error) {
-            ThrowFileSystemError(ErrorCode::FileReadFailed,
-                                 "list directory",
-                                 native_directory,
-                                 error);
-        }
-        for (const auto& entry : iterator) {
-            add_file(entry);
-        }
+        collect(fs::directory_iterator(native_directory, error));
     }
 
     std::sort(

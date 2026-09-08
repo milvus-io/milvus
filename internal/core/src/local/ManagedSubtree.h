@@ -18,15 +18,18 @@
 
 #include <condition_variable>
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <mutex>
-#include <optional>
 
-#include "common/EasyAssert.h"
 #include "local/FileSystem.h"
 
 namespace milvus::local {
 
+// One directory owner shared by every writer and cleanup caller. Coordination
+// applies only to this object, not other handles naming the same/overlapping
+// directory. The owner must prevent unleased writes, ancestor deletion, and
+// path reuse until cleanup succeeds (including any explicit retries).
 class ManagedSubtree final
     : public std::enable_shared_from_this<ManagedSubtree> {
  public:
@@ -63,17 +66,24 @@ class ManagedSubtree final
     ManagedSubtree&
     operator=(const ManagedSubtree&) = delete;
 
+    // Hold the lease through all writes, including native-library operations.
+    // Once removal is requested, writer acquisition is permanently rejected.
     WriteLease
     AcquireWriter();
 
     // Reject new writers and remove after the final active writer exits.
+    // May perform synchronous I/O. Does not retry a failed attempt; an owner
+    // that needs failure recovery must keep this object and use RemoveAndWait.
     void
     RemoveWhenIdle() noexcept;
 
-    // Request removal, wait for it to finish, and rethrow cleanup failures.
+    // Join the current attempt, or retry a previously failed removal once.
+    // Waiters rethrow their attempt's original exception even if a later retry
+    // has started. Must not be called while holding a writer lease on this owner.
     void
     RemoveAndWait();
 
+    // This handle does not acquire leases or initiate cleanup automatically.
     const FileSystem&
     Files() const noexcept {
         return subtree_;
@@ -85,20 +95,30 @@ class ManagedSubtree final
     enum class State {
         Open,
         Closing,
+        Removing,
+        Failed,
         Removed,
+    };
+
+    struct RemovalAttempt {
+        bool complete{false};
+        std::exception_ptr error;
     };
 
     ManagedSubtree(FileSystem parent, Path path);
 
-    bool
-    RequestRemoval();
+    // Capture an attempt under the lock; run any ready removal outside it.
+    std::shared_ptr<RemovalAttempt>
+    RequestRemoval(bool retry_failed);
 
+    // With mutex_ held, claim removal once all writer leases have exited.
     bool
     BeginRemovalLocked() noexcept;
 
     void
     ReleaseWriter() noexcept;
 
+    // Publish completion and retain the original exception for this attempt.
     void
     PerformRemoval() noexcept;
 
@@ -110,8 +130,10 @@ class ManagedSubtree final
     std::condition_variable cv_;
     State state_{State::Open};
     size_t writers_{0};
-    bool removal_in_progress_{false};
-    std::optional<ErrorCode> cleanup_error_code_;
+    // Preallocate the first attempt so destructor-driven cleanup needs no new
+    // attempt allocation. Access attempt fields only with mutex_ held.
+    std::shared_ptr<RemovalAttempt> removal_attempt_{
+        std::make_shared<RemovalAttempt>()};
 };
 
 }  // namespace milvus::local

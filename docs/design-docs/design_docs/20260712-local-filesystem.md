@@ -1,7 +1,7 @@
 # Rooted Local File System
 
 - **Created:** 2026-07-12
-- **Updated:** 2026-07-17
+- **Updated:** 2026-09-08
 - **Status:** Draft
 - **Component:** Local filesystem / Segcore / Index / Caching layer
 - **Related code:** `internal/core/src/local`,
@@ -36,7 +36,8 @@ milvus::cachinglayer
 ```
 
 `FileSystem` is a small, copyable value handle. `FileSystem::Open()` binds
-an absolute physical root once. All operations below that root use validated
+a canonical absolute root path once; it does not pin a directory inode.
+All operations below that root use validated
 relative `local::Path` values. `Subtree()` derives a narrower capability
 without introducing another configured service or global registry.
 
@@ -245,10 +246,30 @@ The resolved native path is:
     + index_files/10/index
 ```
 
-The holder of `local_chunk` cannot address `expr_cache` through the
-relative API.
+The holder of `local_chunk` cannot construct a relative path that traverses
+to `expr_cache`. Owners must also prevent symlink aliases between independently
+owned artifact directories; a lexical subtree prefix does not bind a directory
+inode or establish an OS security boundary.
 
-### 6.2 Native path compatibility
+### 6.2 Isolation contract
+
+This API operates on trusted node-local artifact directories. It prevents
+accidental absolute paths and parent traversal, and checks current symlink
+targets before native I/O. It is not a filesystem sandbox: canonicalization
+and the subsequent native operation are separate, so owners must prevent
+concurrent replacement of path components or symlink targets during an
+operation. The same requirement applies to roots and subtree ancestors.
+
+The configured root may resolve through a symlink at `Open()`. Below it,
+Milvus-owned layouts should use ordinary directories and avoid directory
+aliases. Existing file symlinks are supported when their targets stay within
+the handle's resolved scope. Native-library adapters must obey the same
+ownership and path-stability contract. `ResolveNativePath()` validates the
+current path only; it cannot protect future operations using the returned
+string. Protection against untrusted concurrent path replacement would require
+a separate directory-fd-based design, including deletion and rename semantics.
+
+### 6.3 Native path compatibility
 
 Knowhere, Tantivy, Arrow, and other third-party libraries sometimes require
 native paths. `ResolveNativePath()` is the explicit escape hatch. It accepts
@@ -256,6 +277,21 @@ only a validated relative `Path` and produces a path below the scoped root.
 
 Milvus-owned I/O should prefer opened handles. Native paths should remain at
 third-party boundaries.
+
+### 6.4 Directory enumeration
+
+`List(directory, recursive)` returns sorted regular-file entry paths relative
+to the handle's scope. File symlinks retain their entry names, not the names of
+their targets, and their targets must stay inside the scope. Directory symlinks
+are neither returned nor recursively traversed. Deleting a listed file symlink
+therefore deletes the link, not its target.
+
+Relative entry paths are computed lexically using a scope calculated once per
+listing. Ordinary entries do not each trigger canonicalization of their path
+and root; file symlinks receive a separate boundary check. Failures while
+constructing or advancing either iterator are converted to `FileReadFailed`.
+Boundary-check failures retain `FileOpenFailed`. Listings are not snapshots;
+callers needing consistency must coordinate concurrent mutations.
 
 ## 7. Opened File Handles
 
@@ -328,6 +364,20 @@ files.RemoveAll(path);
 Only directories with a real writer-versus-cleanup race use
 `ManagedSubtree`.
 
+`ManageSubtree(path)` creates a new lifecycle owner; it does not find or
+intern an owner by path. The composition/cache owner must call it once for a
+directory and distribute the same `shared_ptr<ManagedSubtree>` to every writer
+and cleanup caller. Independently managed directories must not be identical,
+aliases, or ancestor/descendant pairs. A parent owner must drain its child
+owners before removing their containing directory.
+
+`Files()` exposes ordinary filesystem operations and does not automatically
+acquire leases. All writers, including native-library operations, must retain
+a lease until writing finishes. Owners must prevent direct ancestor deletion
+and path reuse until managed cleanup succeeds, including any retries. The
+`ManagedSubtree` destructor itself does not request removal; cleanup remains
+an explicit owner responsibility.
+
 ```cpp
 auto directory = files.ManageSubtree(Path("index_files/10"));
 
@@ -335,7 +385,9 @@ auto directory = files.ManageSubtree(Path("index_files/10"));
     auto lease = directory->AcquireWriter();
     auto output = directory->Files().Open(
         Path("index"),
-        OpenOptions{.mode = OpenMode::ReadWrite, .create = true});
+        OpenOptions{.mode = OpenMode::ReadWrite,
+                    .create = true,
+                    .create_parent = true});
     // Materialize the artifact.
 }
 
@@ -347,20 +399,45 @@ The state machine is:
 ```text
 OPEN
   |-- AcquireWriter -------------> OPEN, writers + 1
-  |-- RemoveWhenIdle -----------> CLOSING
+  |-- removal requested ---------> CLOSING
 
 CLOSING
   |-- AcquireWriter -------------> rejected
-  |-- final writer released -----> remove subtree -> REMOVED
+  |-- no active writers ---------> REMOVING
+
+REMOVING
+  |-- removal succeeds ----------> REMOVED
+  |-- removal throws ------------> FAILED, original exception retained
+
+FAILED
+  |-- AcquireWriter -------------> rejected
+  |-- RemoveWhenIdle ------------> no-op
+  |-- RemoveAndWait -------------> REMOVING, new attempt
 
 REMOVED
   |-- AcquireWriter -------------> rejected
-  |-- RemoveWhenIdle ------------> no-op
+  |-- removal requested ---------> no-op
 ```
 
-`RemoveWhenIdle()` is destructor-safe and reports cleanup failures through
-the existing error/logging path. `RemoveAndWait()` waits and rethrows cleanup
-failure to callers that can handle it.
+`RemoveWhenIdle()` is `noexcept` and initiates only the first attempt. It can
+perform synchronous deletion on the caller or final writer's thread; it is
+not an asynchronous executor and does not automatically retry failures. An
+owner requiring recovery must retain the object and call `RemoveAndWait()`.
+
+`RemoveAndWait()` starts the first attempt, joins an outstanding attempt, or
+retries a previously failed attempt once. It waits for that attempt and
+rethrows the original exception, including its code and path/cause details.
+Each attempt has its own shared completion result: a later retry cannot
+overwrite the result observed by earlier waiters. Removal runs outside the
+lifecycle mutex; completion is published under that mutex before notifying
+waiters. Failure leaves the object closed to new writers and may leave a
+partially deleted directory, which the next explicit retry removes.
+
+The first attempt is allocated when the owner is constructed. Failure to
+allocate a retry leaves the previous failed attempt intact. Successful cleanup
+is terminal and subsequent requests do not delete a newly created directory at
+the same path. Callers must never wait for removal while holding one of the
+owner's writer leases, since removal cannot complete until those leases exit.
 
 ## 10. Composition and Lifetimes
 
@@ -421,7 +498,10 @@ Thread-safety contracts are explicit:
 - `FileHandle` is move-only and does not serialize operations on its fd;
 - receiving readers and writers define their own concurrency contracts;
 - `MappedRegion` and write leases are move-only;
-- `ManagedSubtree` serializes lifecycle transitions.
+- `ManagedSubtree` serializes lifecycle transitions for one shared owner;
+  path identity and overlapping directories are coordinated by its owner;
+- copied handles do not serialize filesystem mutations or protect against
+  concurrent symlink/path replacement.
 
 ## 12. Compatibility
 
@@ -462,6 +542,8 @@ identity of this design. `LocalChunkManager` remains for persistent
 - open multiple roots in one process;
 - verify subtree composition and sibling isolation;
 - create, list, rename, and remove files and directories;
+- preserve listed file-symlink entry names and reject out-of-scope targets;
+- preserve typed errors when recursive iteration encounters permission denial;
 - round-trip validated native paths;
 - prove cwd changes do not affect rooted operations.
 
@@ -482,6 +564,9 @@ identity of this design. `LocalChunkManager` remains for persistent
 - removal on final writer release;
 - repeated removal requests;
 - synchronous cleanup error propagation;
+- original cleanup exception context and explicit retry after failure;
+- multiple waiters on a shared owner observe their own attempt's result;
+- destructor-safe cleanup does not automatically retry failures;
 - independent managed subtrees under one root.
 
 ### 14.4 Integration and repository audit
@@ -529,9 +614,11 @@ capabilities.
 
 1. `FileSystem` is a normal value handle with no global getter or registry.
 2. Business code uses validated relative paths below injected roots.
-3. `Subtree()` narrows authority without changing physical path layout.
+3. `Subtree()` narrows lexical scope under the trusted-directory and
+   path-stability contract; it does not provide OS sandbox isolation.
 4. Ordinary filesystem operations do not hide lease or cache policy.
-5. `ManagedSubtree` is used only for real writer/cleanup coordination.
+5. `ManagedSubtree` is created once per owned directory and shared by all
+   writers/cleanup callers; independently managed scopes never overlap.
 6. Open files and mappings use move-only RAII ownership.
 7. Native paths are limited to compatibility boundaries.
 8. Cache policy remains in `milvus::cachinglayer`.

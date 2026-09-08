@@ -313,6 +313,78 @@ TEST_F(LocalFileSystemTest, ManagesDirectoriesFilesAndRenameWithinRoot) {
     EXPECT_FALSE(files_->Exists(Path("nested")));
 }
 
+TEST_F(LocalFileSystemTest, ListsSymlinkEntriesWithoutReplacingTheirPaths) {
+    const auto subtree = files_->Subtree(Path("scope"));
+    const auto output = subtree.Open(Path("shared/data"),
+                                     OpenOptions{.mode = OpenMode::ReadWrite,
+                                                 .create = true,
+                                                 .create_parent = true});
+    subtree.CreateDirectories(Path("cache/nested"));
+    fs::create_symlink("../shared/data", root_ / "scope/cache/link");
+    fs::create_symlink("../../shared/data", root_ / "scope/cache/nested/link");
+    fs::create_directory_symlink("../shared", root_ / "scope/cache/directory");
+
+    const auto direct = subtree.List(Path("cache"), false);
+    ASSERT_EQ(direct.size(), 1);
+    EXPECT_EQ(direct.front().String(), "cache/link");
+
+    const auto recursive = subtree.List(Path("cache"), true);
+    ASSERT_EQ(recursive.size(), 2);
+    EXPECT_EQ(recursive[0].String(), "cache/link");
+    EXPECT_EQ(recursive[1].String(), "cache/nested/link");
+    for (const auto& path : recursive) {
+        subtree.RemoveFile(path);
+    }
+    EXPECT_TRUE(fs::exists(root_ / "scope/shared/data"));
+    EXPECT_FALSE(fs::is_symlink(root_ / "scope/cache/link"));
+    EXPECT_FALSE(fs::is_symlink(root_ / "scope/cache/nested/link"));
+}
+
+TEST_F(LocalFileSystemTest, ListRejectsFileSymlinksOutsideItsScope) {
+    const auto output = files_->Open(Path("shared/data"),
+                                     OpenOptions{.mode = OpenMode::ReadWrite,
+                                                 .create = true,
+                                                 .create_parent = true});
+    const auto subtree = files_->Subtree(Path("scope"));
+    subtree.CreateDirectories(Path("cache"));
+    fs::create_symlink("../../shared/data", root_ / "scope/cache/link");
+
+    for (const bool recursive : {false, true}) {
+        try {
+            static_cast<void>(subtree.List(Path("cache"), recursive));
+            FAIL() << "expected the out-of-scope file symlink to be rejected";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FileOpenFailed);
+        }
+    }
+}
+
+TEST_F(LocalFileSystemTest, PreservesErrorsWhileDescendingIntoDirectories) {
+    if (geteuid() == 0) {
+        GTEST_SKIP() << "root bypasses directory permissions";
+    }
+    const auto blocked = root_ / "entries/blocked";
+    files_->CreateDirectories(Path("entries/blocked"));
+    fs::permissions(blocked, fs::perms::none);
+    // Restore permissions even if the expected exception type is wrong.
+    struct RestorePermissions {
+        fs::path path;
+        ~RestorePermissions() {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    } restore{blocked};
+
+    EXPECT_TRUE(files_->List(Path("entries"), false).empty());
+    try {
+        static_cast<void>(files_->List(Path("entries"), true));
+        FAIL() << "expected recursive iteration to report permission denial";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
+        EXPECT_NE(std::string(error.what()).find("entries"), std::string::npos);
+    }
+}
+
 TEST_F(LocalFileSystemTest, MapsUnalignedRangesAndOwnsTheMapping) {
     constexpr std::array<std::byte, 12> data = {
         std::byte{0},
