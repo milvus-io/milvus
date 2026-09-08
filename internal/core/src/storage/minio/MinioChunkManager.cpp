@@ -53,6 +53,9 @@
 #include "google/cloud/storage/oauth2/compute_engine_credentials.h"
 #include "google/cloud/version.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
@@ -335,6 +338,20 @@ MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
+        // Storage may have installed the process-wide GCP HTTP factory first.
+        // Register this bucket before PreCheck, even if our InitAPI was ignored.
+        milvus_storage::ArrowFileSystemConfig gcp_config;
+        gcp_config.use_iam = true;
+        auto provider = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+        if (!provider.ok()) {
+            throw milvus_storage::ToSegcoreError(provider.status());
+        }
+        milvus_storage::GcpCredentialRegistry::Instance().Register(
+            {milvus_storage::NormalizeGcpEndpoint(storage_config.address,
+                                                  storage_config.useSSL),
+             storage_config.bucket_name},
+            std::move(provider).ValueOrDie());
+
         // Using S3 client instead of google client because of compatible protocol
         client_ = std::make_shared<Aws::S3::S3Client>(
             config,
