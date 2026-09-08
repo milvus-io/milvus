@@ -257,37 +257,42 @@ func (s *SchemaSuite) TestStructArrayFieldRoundTrip() {
 
 func (s *SchemaSuite) TestStructArrayFieldReadProtoNormalizesNullable() {
 	for _, parentNullable := range []bool{false, true} {
-		s.Run(fmt.Sprintf("parent_nullable_%t", parentNullable), func() {
-			protoSchema := &schemapb.CollectionSchema{
-				StructArrayFields: []*schemapb.StructArrayFieldSchema{
-					{
-						Name:     "clips",
-						Nullable: parentNullable,
-						Fields: []*schemapb.FieldSchema{
-							{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, Nullable: true},
-							{Name: "embedding", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true},
+		for _, subNullable := range []bool{false, true} {
+			s.Run(fmt.Sprintf("parent_nullable_%t/sub_nullable_%t", parentNullable, subNullable), func() {
+				protoSchema := &schemapb.CollectionSchema{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
+						{
+							Name:     "clips",
+							Nullable: parentNullable,
+							Fields: []*schemapb.FieldSchema{
+								{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, Nullable: subNullable},
+								{Name: "embedding", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: subNullable},
+							},
 						},
 					},
-				},
-			}
+				}
 
-			got := NewSchema().ReadProto(protoSchema)
-			s.Require().Len(got.Fields, 1)
-			clips := got.Fields[0]
-			s.True(clips.Nullable)
-			s.Require().NotNil(clips.StructSchema)
-			for _, subField := range clips.StructSchema.Fields {
-				s.False(subField.Nullable)
-			}
-			s.NoError(got.Validate())
+				got := NewSchema().ReadProto(protoSchema)
+				s.Require().Len(got.Fields, 1)
+				clips := got.Fields[0]
+				s.Equal(parentNullable, clips.Nullable)
+				s.Require().NotNil(clips.StructSchema)
+				for _, subField := range clips.StructSchema.Fields {
+					s.False(subField.Nullable)
+				}
+				s.NoError(got.Validate())
 
-			roundTrip := got.ProtoMessage()
-			s.Require().Len(roundTrip.GetStructArrayFields(), 1)
-			s.True(roundTrip.GetStructArrayFields()[0].GetNullable())
-			for _, subField := range roundTrip.GetStructArrayFields()[0].GetFields() {
-				s.False(subField.GetNullable())
-			}
-		})
+				roundTrip := got.ProtoMessage()
+				s.Require().Len(roundTrip.GetStructArrayFields(), 1)
+				s.Equal(parentNullable, roundTrip.GetStructArrayFields()[0].GetNullable())
+				for _, subField := range roundTrip.GetStructArrayFields()[0].GetFields() {
+					s.False(subField.GetNullable())
+				}
+				for _, subField := range protoSchema.GetStructArrayFields()[0].GetFields() {
+					s.Equal(subNullable, subField.GetNullable(), "decoding must not mutate the input schema")
+				}
+			})
+		}
 	}
 }
 

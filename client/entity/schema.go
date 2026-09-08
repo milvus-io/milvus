@@ -224,13 +224,9 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 	structSchema := NewStructSchema()
 	typeParams := KvPairsMap(p.GetTypeParams())
-	nullable := p.GetNullable()
 	for _, sf := range p.GetFields() {
 		field := NewField().ReadProto(sf)
-		// The server propagates struct-level nullable to every stored sub-field. Keep
-		// that physical projection out of the user-facing schema and recover the
-		// parent flag for clients that lost it while retaining the sub-field flags.
-		nullable = nullable || field.Nullable
+		// Like PyMilvus, expose nullable only on the parent struct field.
 		field.Nullable = false
 		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
 		switch sf.GetDataType() {
@@ -252,7 +248,7 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		DataType:     FieldTypeArray,
 		ElementType:  FieldTypeStruct,
 		TypeParams:   typeParams,
-		Nullable:     nullable,
+		Nullable:     p.GetNullable(),
 		StructSchema: structSchema,
 	}
 }
