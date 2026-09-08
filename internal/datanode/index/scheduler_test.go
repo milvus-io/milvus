@@ -77,10 +77,9 @@ func TestGetStateFromError(t *testing.T) {
 			code int32
 			name string
 		}{
-			{2004, "IndexBuildError"},
 			{2016, "BucketInvalid"},
 			{2017, "ObjectNotExist"},
-			{2044, "StorageError"},
+			{2024, "DataFormatBroken"},
 		} {
 			assert.Equalf(t, indexpb.JobState_JobStateFailed,
 				getStateFromError(merr.SegcoreError(tc.code, tc.name)),
@@ -88,8 +87,27 @@ func TestGetStateFromError(t *testing.T) {
 		}
 		// wrapped the way indexcgowrapper reports it
 		assert.Equal(t, indexpb.JobState_JobStateFailed,
-			getStateFromError(errors.Wrap(merr.SegcoreError(2004, "disk file error"),
+			getStateFromError(errors.Wrap(merr.SegcoreError(2017, "object not exist"),
 				"failed to create index, C Runtime Exception")))
+	})
+
+	// 2004 and 2044 are raised by broad "operation failed" branches that also
+	// carry transient storage and per-node disk failures, so a re-dispatch to
+	// another worker can still succeed.
+	t.Run("broad failure codes keep retrying", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.SegcoreError(2004, "failed to build disk index, disk file error")))
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.SegcoreError(2044, "storage error")))
+	})
+
+	// A segment whose meta points at a binlog that is not there is Milvus state
+	// being inconsistent, not a malformed request: it stays a system error and is
+	// still terminal, because no retry can make the binlog appear.
+	t.Run("data integrity failures are terminal but stay system errors", func(t *testing.T) {
+		err := merr.WrapErrDataIntegrityMsg("field binlog not found for field %d", 116)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
+		assert.NotEqual(t, merr.InputError, merr.GetErrorType(err))
 	})
 
 	t.Run("input error survives wrapping", func(t *testing.T) {

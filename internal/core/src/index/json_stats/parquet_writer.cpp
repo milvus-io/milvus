@@ -158,18 +158,34 @@ JsonStatsParquetWriter::AddCurrentRow() {
     return all_row_count_;
 }
 
+namespace {
+
+// An arrow builder reports two failures that are not about the value being
+// appended: OutOfMemory when the pool is exhausted, and CapacityError when the
+// accumulated offsets overflow. The first is a property of the machine and must
+// stay retriable; everything else is decided by the document being indexed.
+ErrorCode
+AppendFailureErrorCode(const arrow::Status& status) {
+    if (status.IsOutOfMemory()) {
+        return ErrorCode::MemAllocateFailed;
+    }
+    return ErrorCode::JsonKeyInvalid;
+}
+
+}  // namespace
+
 void
 JsonStatsParquetWriter::AppendSharedRow(const uint8_t* data, size_t length) {
     auto builder = builders_.at(builders_.size() - 1);
     auto shared_builder =
         std::static_pointer_cast<arrow::BinaryBuilder>(builder);
 
-    if (length == 0) {
-        auto status = shared_builder->AppendNull();
-        AssertInfo(status.ok(), "failed to append null data");
-    } else {
-        auto status = shared_builder->Append(data, length);
-        AssertInfo(status.ok(), "failed to append binary data");
+    auto status = length == 0 ? shared_builder->AppendNull()
+                              : shared_builder->Append(data, length);
+    if (!status.ok()) {
+        ThrowInfo(AppendFailureErrorCode(status),
+                  "failed to append shared row data: {}",
+                  status.ToString());
     }
 }
 
@@ -188,7 +204,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
         // The value comes from the document being indexed, so the append fails
         // the same way on every attempt. AssertInfo would report it as the
         // generic UnexpectedError, which the build scheduler keeps retrying.
-        ThrowInfo(ErrorCode::JsonKeyInvalid,
+        ThrowInfo(AppendFailureErrorCode(ast),
                   "failed to append data to builder for key {}: {}",
                   key,
                   ast.ToString());
@@ -209,7 +225,7 @@ JsonStatsParquetWriter::AppendRow(
         auto& builder = it->second;
         auto status = AppendDataToBuilder(value, builder);
         if (!status.ok()) {
-            ThrowInfo(ErrorCode::JsonKeyInvalid,
+            ThrowInfo(AppendFailureErrorCode(status),
                       "failed to append data to builder for key {}: {}",
                       key,
                       status.ToString());
@@ -295,7 +311,9 @@ JsonStatsParquetWriter::AppendDataToBuilder(
     } catch (const SegcoreError&) {
         throw;
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::JsonKeyInvalid,
+        // Same rule as UnescapeJsonString: an unclassified exception here may be
+        // an allocation failure, which another attempt can clear.
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to append data to builder: {}",
                   e.what());
     }

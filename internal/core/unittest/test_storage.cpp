@@ -18,6 +18,7 @@
 #include <thread>
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
@@ -35,6 +36,9 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
+#include "storage/BinlogReader.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 #include "segcore/segment_c.h"
@@ -122,6 +126,31 @@ class StorageTest : public testing::Test {
 TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
     auto status = InitLocalChunkManagerSingleton("tmp");
     EXPECT_EQ(status.error_code, Success);
+}
+
+// A binlog whose first four bytes are not the magic number is not the format this
+// reader parses, and no attempt will change the bytes. It must surface as
+// DataFormatBroken so the index scheduler stops re-dispatching the task; the
+// value used here is 0x50415231 ("PAR1"), which is what a v2 parquet object
+// behind v1 meta actually produces in production.
+TEST_F(StorageTest, ReadMediumTypeRejectsForeignMagicNumber) {
+    auto make_reader = [](int32_t magic) {
+        std::shared_ptr<uint8_t[]> buf(new uint8_t[sizeof(int32_t)]);
+        std::memcpy(buf.get(), &magic, sizeof(int32_t));
+        return std::make_shared<milvus::storage::BinlogReader>(
+            buf, static_cast<int64_t>(sizeof(int32_t)));
+    };
+
+    try {
+        milvus::storage::ReadMediumType(make_reader(0x50415231));
+        FAIL() << "expected ReadMediumType to reject a foreign magic number";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::DataFormatBroken);
+    }
+
+    // The valid magic number still parses.
+    EXPECT_NO_THROW(milvus::storage::ReadMediumType(
+        make_reader(milvus::storage::MAGIC_NUM)));
 }
 
 TEST_F(StorageTest, S3ErrorClassification) {

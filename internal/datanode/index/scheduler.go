@@ -219,15 +219,18 @@ func getStateFromError(err error) indexpb.JobState {
 	if errors.Is(err, errCancel) {
 		return indexpb.JobState_JobStateRetry
 	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) ||
-		merr.IsSegcoreDataFormatBroken(err) {
-		// NoSuchKey, unsupported, or malformed persisted data cannot be fixed by retrying.
+		errors.Is(err, merr.ErrDataIntegrity) || merr.IsSegcoreDataFormatBroken(err) {
+		// NoSuchKey, unsupported, malformed persisted data, or meta that disagrees
+		// with the data it points at cannot be fixed by retrying. ErrDataIntegrity
+		// stays a system error on purpose: the request is well formed, it is Milvus
+		// state that is inconsistent, so the blame must not move to the caller.
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
 	} else if merr.IsPermanentSegcoreErr(err) {
-		// A segcore code the table marks permanent (index build failed on this
-		// input, corrupted data, missing object, misconfigured bucket): the same
-		// task reproduces it on every worker, so retrying only burns slots.
+		// A segcore code the table marks permanent (corrupted data, a missing
+		// object, a misconfigured bucket): every construction site of that code is
+		// deterministic, so the task reproduces it on every worker.
 		return indexpb.JobState_JobStateFailed
 	} else if merr.GetErrorType(err) == merr.InputError {
 		// The request or the source data is itself what fails the build, so the task

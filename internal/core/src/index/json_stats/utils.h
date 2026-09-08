@@ -61,19 +61,35 @@ JsonStringHasEscape(std::string_view s) {
     return std::memchr(s.data(), '\\', s.size()) != nullptr;
 }
 
-// A simdjson failure raised while indexing a document is a property of that
-// document, so the same task fails identically on every worker and must not be
-// retried. The allocation/IO codes are the exception: they describe the machine,
-// not the data, and can succeed on another attempt.
+// Only the simdjson codes that describe the document itself are terminal: those
+// reproduce on every worker, so retrying the task cannot help. Everything else --
+// allocation and IO failures, but also the codes simdjson raises for its own
+// internal state (UNEXPECTED_ERROR, PARSER_IN_USE, UNINITIALIZED,
+// UNSUPPORTED_ARCHITECTURE, ...) -- keeps the generic classification and stays
+// retriable. The list is an allowlist on purpose: a simdjson upgrade that adds a
+// code must not silently turn it into a user-input error.
 inline ErrorCode
 JsonParseErrorCode(simdjson::error_code code) {
     switch (code) {
-        case simdjson::MEMALLOC:
-        case simdjson::CAPACITY:
-        case simdjson::IO_ERROR:
-            return ErrorCode::UnexpectedError;
-        default:
+        case simdjson::TAPE_ERROR:
+        case simdjson::DEPTH_ERROR:
+        case simdjson::STRING_ERROR:
+        case simdjson::T_ATOM_ERROR:
+        case simdjson::F_ATOM_ERROR:
+        case simdjson::N_ATOM_ERROR:
+        case simdjson::NUMBER_ERROR:
+        case simdjson::UTF8_ERROR:
+        case simdjson::EMPTY:
+        case simdjson::UNESCAPED_CHARS:
+        case simdjson::UNCLOSED_STRING:
+        case simdjson::INCORRECT_TYPE:
+        case simdjson::NUMBER_OUT_OF_RANGE:
+        case simdjson::TRAILING_CONTENT:
+        case simdjson::INCOMPLETE_ARRAY_OR_OBJECT:
+        case simdjson::SCALAR_DOCUMENT_AS_VALUE:
             return ErrorCode::JsonKeyInvalid;
+        default:
+            return ErrorCode::UnexpectedError;
     }
 }
 

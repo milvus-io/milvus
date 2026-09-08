@@ -218,14 +218,14 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 // allowed to give up on. The generic 2000/2001/2002 fallbacks must stay out:
 // their cause is unknown, so callers keep the retrying default.
 func TestIsPermanentSegcoreErr(t *testing.T) {
-	for _, code := range []int32{2004, 2016, 2017, 2024, 2044} {
+	for _, code := range []int32{2016, 2017, 2024} {
 		assert.Truef(t, IsPermanentSegcoreErr(SegcoreError(code, "x")), "code %d must be permanent", code)
 		assert.Falsef(t, IsRetryableErr(SegcoreError(code, "x")), "code %d must not be retriable", code)
 	}
-	for _, code := range []int32{2000, 2001, 2002, 2003, 2025, 2033, 2045, 2099} {
+	for _, code := range []int32{2000, 2001, 2002, 2003, 2004, 2025, 2033, 2044, 2045, 2099} {
 		assert.Falsef(t, IsPermanentSegcoreErr(SegcoreError(code, "x")), "code %d must not be permanent", code)
 	}
-	assert.True(t, IsPermanentSegcoreErr(errors.Wrap(SegcoreError(2004, "build failed"), "failed to create index")))
+	assert.True(t, IsPermanentSegcoreErr(errors.Wrap(SegcoreError(2017, "object not exist"), "failed to create index")))
 	assert.False(t, IsPermanentSegcoreErr(errors.New("plain error")))
 	assert.False(t, IsPermanentSegcoreErr(nil))
 }
