@@ -175,8 +175,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			},
 		}, nil, 2, "TEST_INDEX")
 		suite.NoError(err)
-		suite.JSONEq(`{"default_param":0.5,"request_param":16}`, suite.getQueryInfo(req).GetSearchParams())
-		suite.False(req.GetReq().GetIsTopkReduce())
+		suite.verifyQueryInfo(req, 100, false, false, `{"default_param":0.5,"request_param":16}`)
 
 		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
@@ -188,7 +187,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			},
 		}, mockHook, 2, "TEST_INDEX")
 		suite.NoError(err)
-		suite.JSONEq(`{"default_param":0.8,"hook_param":32}`, suite.getQueryInfo(req).GetSearchParams())
+		suite.verifyQueryInfo(req, 100, false, false, `{"default_param":0.8,"hook_param":32}`)
 	})
 
 	suite.Run("other_plannode", func() {
