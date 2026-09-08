@@ -135,6 +135,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	}
 	defer m.mut.Unlock()
 
+	schema = materializeFieldEvictableSettings(schema)
 	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
 	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema), mlog.Err(err))
@@ -460,6 +461,7 @@ func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, 
 	if !shouldUpdate {
 		return collectionSchemaUpdatePlan{}, false, nil
 	}
+	schema = materializeFieldEvictableSettings(schema)
 	if err := c.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}

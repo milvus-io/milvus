@@ -348,8 +348,8 @@ func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) boo
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
-	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, runtimeConfigTypeParamKeys())
+	reqTypeParams := DeleteParams(req.TypeParams, runtimeConfigTypeParamKeys())
 	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}
@@ -370,24 +370,26 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 		return false
 	}
 
+	metaUserIndexParams := lo.Filter(fieldIndex.UserIndexParams, func(param *commonpb.KeyValuePair, _ int) bool {
+		return !indexparams.IsConfigableIndexParam(param.GetKey())
+	})
+	reqUserIndexParams := lo.Filter(req.GetUserIndexParams(), func(param *commonpb.KeyValuePair, _ int) bool {
+		return !indexparams.IsConfigableIndexParam(param.GetKey())
+	})
+
 	useAutoIndex := false
-	userIndexParamsWithoutConfigableKey := make([]*commonpb.KeyValuePair, 0)
-	for _, param := range fieldIndex.UserIndexParams {
-		if indexparams.IsConfigableIndexParam(param.Key) {
-			continue
-		}
+	for _, param := range metaUserIndexParams {
 		if param.Key == common.IndexTypeKey && param.Value == common.AutoIndexName {
 			useAutoIndex = true
 		}
-		userIndexParamsWithoutConfigableKey = append(userIndexParamsWithoutConfigableKey, param)
 	}
 
-	if len(userIndexParamsWithoutConfigableKey) != len(req.GetUserIndexParams()) {
+	if len(metaUserIndexParams) != len(reqUserIndexParams) {
 		return false
 	}
-	for _, param1 := range userIndexParamsWithoutConfigableKey {
+	for _, param1 := range metaUserIndexParams {
 		exist := false
-		for i, param2 := range req.GetUserIndexParams() {
+		for _, param2 := range reqUserIndexParams {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
 				exist = true
 				break
@@ -398,7 +400,7 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 				// warn! replace request metric type
 				mlog.Warn(context.TODO(), "user not specify autoindex metric type, autoindex config has changed, use old metric for compatibility",
 					mlog.String("old metric type", param1.Value), mlog.String("new metric type", param2.Value))
-				req.GetUserIndexParams()[i].Value = param1.Value
+				param2.Value = param1.Value
 				for j, param := range req.GetIndexParams() {
 					if param.Key == common.MetricTypeKey {
 						req.GetIndexParams()[j].Value = param1.Value

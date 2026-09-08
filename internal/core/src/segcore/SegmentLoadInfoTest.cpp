@@ -38,6 +38,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/index_coord.pb.h"
 #include "pb/segcore.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 
@@ -285,6 +286,43 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_EQ(load_index_info.index_store_path_version,
               proto::index::IndexStorePathVersion::
                   INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ConvertFieldIndexInfoResolvesLatestEvictableDefaultAtCreation) {
+    auto& config = SegcoreConfig::default_config();
+    const auto old_scalar_field =
+        config.get_evictable_default(/*is_vector=*/false, /*is_index=*/false);
+    const auto old_vector_field =
+        config.get_evictable_default(/*is_vector=*/true, /*is_index=*/false);
+    const auto old_scalar_index =
+        config.get_evictable_default(/*is_vector=*/false, /*is_index=*/true);
+    const auto old_vector_index =
+        config.get_evictable_default(/*is_vector=*/true, /*is_index=*/true);
+
+    auto* index_info = proto_.mutable_index_infos(0);
+    SegmentLoadInfo info(proto_, schema_);
+
+    config.set_evictable_defaults(true, true, true, false);
+    auto before_refresh = info.ConvertFieldIndexInfoToLoadIndexInfo(
+        index_info, proto_.segmentid());
+    EXPECT_FALSE(before_refresh.support_eviction);
+
+    config.set_evictable_defaults(true, true, true, true);
+    auto after_refresh = info.ConvertFieldIndexInfoToLoadIndexInfo(
+        index_info, proto_.segmentid());
+    EXPECT_TRUE(after_refresh.support_eviction);
+    EXPECT_FALSE(before_refresh.support_eviction);
+
+    auto* explicit_setting = index_info->add_index_params();
+    explicit_setting->set_key(EVICTABLE_KEY);
+    explicit_setting->set_value("false");
+    auto explicit_override = info.ConvertFieldIndexInfoToLoadIndexInfo(
+        index_info, proto_.segmentid());
+    EXPECT_FALSE(explicit_override.support_eviction);
+
+    config.set_evictable_defaults(
+        old_scalar_field, old_vector_field, old_scalar_index, old_vector_index);
 }
 
 TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {

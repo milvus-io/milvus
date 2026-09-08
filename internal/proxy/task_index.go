@@ -154,6 +154,21 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	runtimeIndexParams := make(map[string]string)
+	for key, value := range indexParamsMap {
+		if indexparams.IsConfigableIndexParam(key) {
+			runtimeIndexParams[key] = value
+		}
+	}
+	setAutoIndexUserParams := func(metricType string) {
+		cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
+		for key, value := range runtimeIndexParams {
+			cit.newExtraParams = append(cit.newExtraParams, &commonpb.KeyValuePair{
+				Key:   key,
+				Value: value,
+			})
+		}
+	}
 	// Whether the metric came from the USER (before any autoindex config merge)
 	// — a config-injected metric is not a user choice.
 	_, userMetricSpecified := indexParamsMap[common.MetricTypeKey]
@@ -318,28 +333,29 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				mlog.Info(ctx, "AutoIndex triggered", fields...)
 			}
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
+			staticParamCount := len(indexParamsMap) - len(runtimeIndexParams)
 
 			handle := func(numberParams int, autoIndexConfig map[string]string) error {
 				// empty case.
-				if len(indexParamsMap) == numberParams {
+				if staticParamCount == numberParams {
 					// though we already know there must be metric type, how to make this safer to avoid crash?
 					metricType := autoIndexConfig[common.MetricTypeKey]
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
+					setAutoIndexUserParams(metricType)
 					useAutoIndex(autoIndexConfig)
 					return nil
 				}
 
-				if len(indexParamsMap) > numberParams+1 {
+				if staticParamCount > numberParams+1 {
 					return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
 				}
 
-				if len(indexParamsMap) == numberParams+1 {
+				if staticParamCount == numberParams+1 {
 					if !metricTypeExist {
 						return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
 					}
 
 					// only metric type is passed.
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
+					setAutoIndexUserParams(metricType)
 					useAutoIndex(autoIndexConfig)
 					// make the users' metric type first class citizen.
 					indexParamsMap[common.MetricTypeKey] = metricType

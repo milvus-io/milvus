@@ -220,12 +220,7 @@ func (s *baseSegment) compactLoadInfoForRuntime() {
 		return
 	}
 	loadInfo := s.LoadInfo()
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, resourceEstimateFactor{
-		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
-		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, logicalResourceEstimateFactor())
 	if err != nil {
 		s.resourceUsageCache.Store(nil)
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
@@ -395,12 +390,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
-		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
-		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), s.LoadInfo(), logicalResourceEstimateFactor())
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
@@ -1032,13 +1022,15 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
+	evictableEnabled := isDataEvictableEnable(fieldSchema)
 	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
-			Field:        field,
-			EnableMMap:   mmapEnabled,
-			WarmupPolicy: fieldWarmupPolicy,
+			Field:           field,
+			EnableMMap:      mmapEnabled,
+			SupportEviction: evictableEnabled,
+			WarmupPolicy:    fieldWarmupPolicy,
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
@@ -1161,8 +1153,10 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	defer deleteLoadIndexInfo(loadIndexInfo)
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	// as Knowhere reports error if encounter an unknown param, we need to delete it
+	// Consume Milvus runtime-only properties through their dedicated load
+	// controls instead of forwarding them as index configuration.
 	delete(indexParams, common.MmapEnabledKey)
+	delete(indexParams, common.EvictableKey)
 
 	// some build params also exist in indexParams, which are useless during loading process
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
@@ -1181,6 +1175,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+	supportEviction := isIndexEvictableEnable(fieldSchema, indexInfo)
 	// Add warmup policy to index_params if not already present
 	// C++ will pass it to Knowhere for index loading
 	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
@@ -1216,6 +1211,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		NumRows:                   indexInfo.GetNumRows(),
 		CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
 		IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
+		SupportEviction:           supportEviction,
 	}
 
 	// 2.

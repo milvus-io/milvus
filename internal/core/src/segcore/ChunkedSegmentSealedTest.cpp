@@ -232,6 +232,18 @@ CreateColdVectorOutputSegment(const SchemaPtr& schema,
     return segment;
 }
 
+void
+UseCanonicalSystemFieldNames(
+    milvus::proto::schema::CollectionSchema& schema_proto) {
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            field.set_name("Timestamp");
+        } else if (field.fieldid() == RowFieldID.get()) {
+            field.set_name("RowID");
+        }
+    }
+}
+
 }  // namespace
 
 TEST(test_chunk_segment, TestSearchOnSealed) {
@@ -349,6 +361,148 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     for (int i = 0; i < total_row_count; i++) {
         ASSERT_TRUE(offsets.find(i) != offsets.end());
     }
+}
+
+TEST(test_chunk_segment, FullLoadPreservesNonEvictableFieldPolicy) {
+    auto schema = segcore::GenChunkedSegmentTestSchema(false);
+    auto schema_proto = schema->ToProto();
+    // The fixture uses the local alias "ts"; protobuf parsing requires the
+    // canonical system-field name.
+    UseCanonicalSystemFieldNames(schema_proto);
+    auto field_id = schema->get_field_id(FieldName("string1"));
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == field_id.get()) {
+            auto* param = field.add_type_params();
+            param->set_key(EVICTABLE_KEY);
+            param->set_value("false");
+        }
+    }
+    schema = Schema::ParseFrom(schema_proto);
+
+    auto dataset = segcore::DataGen(schema, 128);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+
+    auto segment_load_info = proto::segcore::SegmentLoadInfo();
+    segment_load_info.set_segmentid(kSegmentID);
+    segment_load_info.set_num_of_rows(128);
+    segment_load_info.set_storageversion(1);
+    segment_load_info.set_is_sorted(false);
+    const auto& field_info = load_info.field_infos.at(field_id.get());
+    auto* binlog = segment_load_info.add_binlog_paths();
+    binlog->set_fieldid(field_id.get());
+    for (size_t i = 0; i < field_info.insert_files.size(); ++i) {
+        auto* log = binlog->add_binlogs();
+        log->set_log_path(field_info.insert_files[i]);
+        log->set_entries_num(field_info.entries_nums[i]);
+        log->set_memory_size(field_info.memory_sizes[i]);
+    }
+
+    auto segment = segcore::CreateSealedSegment(schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetLoadInfo(std::move(segment_load_info));
+    milvus::OpContext op_ctx;
+    milvus::tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, &op_ctx);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto field = runtime->fields.find(field_id);
+    ASSERT_NE(field, runtime->fields.end());
+    auto column = std::dynamic_pointer_cast<ChunkedColumnBase>(field->second);
+    ASSERT_NE(column, nullptr);
+    EXPECT_FALSE(column->TestSupportEviction());
+}
+
+TEST(test_chunk_segment, ReopenLoadsNonEvictableFieldIntoStagedCache) {
+    constexpr int64_t row_count = 8;
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+
+    auto segment = segcore::CreateSealedSegment(old_schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::vector<int64_t> pk_values(row_count);
+    std::iota(pk_values.begin(), pk_values.end(), 0);
+    auto pk_data = std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    pk_data->FillFieldData(pk_values.data(), row_count);
+
+    std::vector<int64_t> payload_values(row_count);
+    std::iota(payload_values.begin(), payload_values.end(), 100);
+    auto payload_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    payload_data->FillFieldData(payload_values.data(), row_count);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto pk_load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, pk.get(), {pk_data}, cm);
+    auto payload = FieldId(pk.get() + 1);
+    auto payload_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                            kPartitionID,
+                                                            kSegmentID,
+                                                            payload.get(),
+                                                            {payload_data},
+                                                            cm);
+
+    proto::segcore::SegmentLoadInfo old_load_info;
+    old_load_info.set_segmentid(kSegmentID);
+    old_load_info.set_partitionid(kPartitionID);
+    old_load_info.set_collectionid(kCollectionID);
+    old_load_info.set_num_of_rows(row_count);
+    old_load_info.set_storageversion(1);
+    auto* pk_binlog = old_load_info.add_binlog_paths();
+    pk_binlog->set_fieldid(pk.get());
+    const auto& pk_info = pk_load_info.field_infos.at(pk.get());
+    for (size_t i = 0; i < pk_info.insert_files.size(); ++i) {
+        auto* log = pk_binlog->add_binlogs();
+        log->set_log_path(pk_info.insert_files[i]);
+        log->set_entries_num(pk_info.entries_nums[i]);
+        log->set_memory_size(pk_info.memory_sizes[i]);
+    }
+    sealed->SetLoadInfo(old_load_info);
+    milvus::OpContext op_ctx;
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(sealed->Load(trace_ctx, &op_ctx));
+
+    auto new_schema_proto = old_schema->ToProto();
+    new_schema_proto.mutable_fields(0)->set_is_primary_key(true);
+    auto* payload_field = new_schema_proto.add_fields();
+    payload_field->set_fieldid(payload.get());
+    payload_field->set_name("payload");
+    payload_field->set_data_type(proto::schema::DataType::Int64);
+    auto* evictable = payload_field->add_type_params();
+    evictable->set_key(EVICTABLE_KEY);
+    evictable->set_value("false");
+    auto new_schema = Schema::ParseFrom(new_schema_proto);
+    new_schema->set_schema_version(2);
+
+    auto new_load_info = old_load_info;
+    auto* payload_binlog = new_load_info.add_binlog_paths();
+    payload_binlog->set_fieldid(payload.get());
+    const auto& payload_info = payload_load_info.field_infos.at(payload.get());
+    for (size_t i = 0; i < payload_info.insert_files.size(); ++i) {
+        auto* log = payload_binlog->add_binlogs();
+        log->set_log_path(payload_info.insert_files[i]);
+        log->set_entries_num(payload_info.entries_nums[i]);
+        log->set_memory_size(payload_info.memory_sizes[i]);
+    }
+
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, new_load_info, new_schema));
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto field = runtime->fields.find(payload);
+    ASSERT_NE(field, runtime->fields.end());
+    auto column = std::dynamic_pointer_cast<ChunkedColumnBase>(field->second);
+    ASSERT_NE(column, nullptr);
+    EXPECT_FALSE(column->TestSupportEviction());
 }
 
 TEST(test_chunk_segment, RejectRemoteVectorOutputFailsWhenVectorCellsAreCold) {

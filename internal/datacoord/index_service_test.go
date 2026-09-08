@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -303,6 +304,26 @@ func TestServer_CreateIndex(t *testing.T) {
 		req.IndexName = ""
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+
+	t.Run("existing index still rejects invalid runtime params", func(t *testing.T) {
+		invalidRetry := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    req.GetIndexName(),
+			TypeParams:   typeParams,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+				{Key: common.EvictableKey, Value: "garbage"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+				{Key: common.EvictableKey, Value: "garbage"},
+			},
+			Timestamp: 100,
+		}
+		resp, err := s.CreateIndex(ctx, invalidRetry)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("server not healthy", func(t *testing.T) {
@@ -908,6 +929,61 @@ func TestServer_AlterIndex(t *testing.T) {
 		for _, param := range describeResp.IndexInfos[0].GetUserIndexParams() {
 			assert.NotEqual(t, common.MmapEnabledKey, param.GetKey())
 		}
+	})
+	t.Run("evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		evictableReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{{
+				Key:   common.EvictableKey,
+				Value: "false",
+			}},
+		}
+		resp, err := s.AlterIndex(ctx, evictableReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		evictable, ok := common.IsEvictableEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.True(t, ok)
+		assert.False(t, evictable)
+	})
+	t.Run("invalid_evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		evictableReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{{
+				Key:   common.EvictableKey,
+				Value: "not-bool",
+			}},
+		}
+		resp, err := s.AlterIndex(ctx, evictableReq)
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	})
+	t.Run("delete_evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		deleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			DeleteKeys:   []string{common.EvictableKey},
+		}
+		resp, err := s.AlterIndex(ctx, deleteReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		_, ok := common.IsEvictableEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.False(t, ok)
 	})
 	t.Run("update_and_delete_params", func(t *testing.T) {
 		mockGetCollectionInfo()
@@ -1844,6 +1920,37 @@ func TestServer_DescribeIndex(t *testing.T) {
 		assert.Equal(t, int32(7), maxIndexVersion)
 	})
 
+	t.Run("preserve evictable metadata", func(t *testing.T) {
+		index := s.meta.indexMeta.indexes[collID][indexID]
+		originalTypeParams := index.TypeParams
+		originalIndexParams := index.IndexParams
+		originalUserIndexParams := index.UserIndexParams
+		defer func() {
+			index.TypeParams = originalTypeParams
+			index.IndexParams = originalIndexParams
+			index.UserIndexParams = originalUserIndexParams
+		}()
+
+		index.TypeParams = append([]*commonpb.KeyValuePair{}, originalTypeParams...)
+		index.TypeParams = append(index.TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+		index.IndexParams = append([]*commonpb.KeyValuePair{}, originalIndexParams...)
+		index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+		index.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}}
+
+		resp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, err)
+		if assert.Len(t, resp.GetIndexInfos(), 1) {
+			info := resp.GetIndexInfos()[0]
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(info.GetTypeParams())[common.EvictableKey])
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(info.GetIndexParams())[common.EvictableKey])
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(info.GetUserIndexParams())[common.EvictableKey])
+		}
+	})
+
 	t.Run("describe after drop index", func(t *testing.T) {
 		s.mixCoord.(*mocks.MixCoord).EXPECT().ShowLoadCollections(
 			mock.Anything,
@@ -2014,6 +2121,39 @@ func TestServer_ListIndexes(t *testing.T) {
 
 		// assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+	})
+
+	t.Run("preserve evictable metadata", func(t *testing.T) {
+		index := s.meta.indexMeta.indexes[collID][indexID]
+		originalTypeParams := index.TypeParams
+		originalIndexParams := index.IndexParams
+		originalUserIndexParams := index.UserIndexParams
+		defer func() {
+			index.TypeParams = originalTypeParams
+			index.IndexParams = originalIndexParams
+			index.UserIndexParams = originalUserIndexParams
+		}()
+
+		index.TypeParams = append([]*commonpb.KeyValuePair{}, originalTypeParams...)
+		index.TypeParams = append(index.TypeParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+		index.IndexParams = append([]*commonpb.KeyValuePair{}, originalIndexParams...)
+		index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+		index.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}}
+
+		resp, err := s.ListIndexes(ctx, req)
+		assert.NoError(t, err)
+		var target *indexpb.IndexInfo
+		for _, info := range resp.GetIndexInfos() {
+			if info.GetIndexID() == indexID {
+				target = info
+				break
+			}
+		}
+		if assert.NotNil(t, target) {
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(target.GetTypeParams())[common.EvictableKey])
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(target.GetIndexParams())[common.EvictableKey])
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(target.GetUserIndexParams())[common.EvictableKey])
+		}
 	})
 }
 
@@ -2738,6 +2878,24 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
 	})
+
+	t.Run("preserve evictable metadata", func(t *testing.T) {
+		index := s.meta.indexMeta.indexes[collID][indexID]
+		originalIndexParams := index.IndexParams
+		defer func() {
+			index.IndexParams = originalIndexParams
+		}()
+
+		index.IndexParams = append([]*commonpb.KeyValuePair{}, originalIndexParams...)
+		index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+
+		resp, err := s.GetIndexInfos(ctx, req)
+		assert.NoError(t, err)
+		infos := resp.GetSegmentInfo()[segID].GetIndexInfos()
+		if assert.Len(t, infos, 1) {
+			assert.Equal(t, "false", funcutil.KeyValuePair2Map(infos[0].GetIndexParams())[common.EvictableKey])
+		}
+	})
 }
 
 func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
@@ -2864,6 +3022,147 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 
 		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 0, len(segments))
+	})
+}
+
+func TestValidateIndexParams(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid index param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "h",
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid index user param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "h",
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("valid evictable param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+				{Key: common.EvictableKey, Value: "false"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "false"},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid evictable index param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+				{Key: common.EvictableKey, Value: "not-bool"},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid evictable user index param", func(t *testing.T) {
+		index := &model.Index{
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "not-bool"},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_index_params", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := indexparamcheck.ValidateIndexParams(index)
+		assert.Error(t, err)
 	})
 }
 

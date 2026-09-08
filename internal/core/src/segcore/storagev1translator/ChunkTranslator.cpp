@@ -98,7 +98,7 @@ ChunkTranslator::ChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list*/ field_data_info.in_load_list),
-            /* support_eviction */ true,
+            field_data_info.support_eviction,
             field_data_info.shard),
       writeback_mode_(writeback_mode),
       load_priority_(load_priority) {

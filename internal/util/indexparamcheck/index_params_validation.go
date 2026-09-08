@@ -60,6 +60,21 @@ func ValidateIndexParams(index *model.Index) error {
 	if err := ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
 	}
+	if err := validateEvictableIndexParams(index.IndexParams); err != nil {
+		return err
+	}
+	if err := validateEvictableIndexParams(index.UserIndexParams); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEvictableIndexParams(params []*commonpb.KeyValuePair) error {
+	for _, param := range params {
+		if param.GetKey() == common.EvictableKey {
+			return common.ValidateEvictableEnabled(param.GetValue())
+		}
+	}
 	return nil
 }
 

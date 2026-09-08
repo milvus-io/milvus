@@ -24,4 +24,10 @@ const (
 	JSONPathKey            = "json_path"
 	CollectionTTLConfigKey = "collection.ttl.seconds"
 	MmapEnabledKey         = "mmap.enabled"
+
+	EvictableKey            = "evictable"
+	EvictableScalarFieldKey = "evictable.scalarField"
+	EvictableScalarIndexKey = "evictable.scalarIndex"
+	EvictableVectorFieldKey = "evictable.vectorField"
+	EvictableVectorIndexKey = "evictable.vectorIndex"
 )

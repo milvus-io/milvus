@@ -84,6 +84,29 @@ func TestValidateIndexParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("valid evictable params", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: AutoIndex},
+				{Key: common.EvictableKey, Value: "false"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "true"},
+			},
+		}
+		assert.NoError(t, ValidateIndexParams(index))
+	})
+
+	t.Run("invalid evictable params", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: AutoIndex},
+				{Key: common.EvictableKey, Value: "not-bool"},
+			},
+		}
+		assert.Error(t, ValidateIndexParams(index))
+	})
+
 	t.Run("duplicated_index_params", func(t *testing.T) {
 		index := &model.Index{
 			IndexParams: []*commonpb.KeyValuePair{

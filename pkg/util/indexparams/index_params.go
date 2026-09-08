@@ -51,16 +51,34 @@ const (
 	MaxBeamWidth  = 16
 )
 
+// configableIndexParams contains index properties that can be changed without
+// rebuilding the index. They do not participate in build identity or artifacts,
+// but may still be consumed while loading the index. This is not the set of
+// parameters recognized by Knowhere.
 var configableIndexParams = typeutil.NewSet[string]()
 
 func init() {
 	configableIndexParams.Insert(common.MmapEnabledKey)
 	configableIndexParams.Insert(common.IndexOffsetCacheEnabledKey)
 	configableIndexParams.Insert(common.WarmupKey)
+	configableIndexParams.Insert(common.EvictableKey)
 }
 
 func IsConfigableIndexParam(key string) bool {
 	return configableIndexParams.Contain(key)
+}
+
+// FilterBuildParams removes runtime-configurable index properties that must not
+// affect index construction or the resulting build artifact.
+func FilterBuildParams(params []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	filtered := make([]*commonpb.KeyValuePair, 0, len(params))
+	for _, param := range params {
+		if IsConfigableIndexParam(param.GetKey()) {
+			continue
+		}
+		filtered = append(filtered, param)
+	}
+	return filtered
 }
 
 func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {

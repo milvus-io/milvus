@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -35,8 +36,8 @@ func ComposeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, sche
 			CollectionID:    info.GetCollectionID(),
 			FieldID:         info.GetFieldID(),
 			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
+			TypeParams:      indexparams.FilterBuildParams(info.GetTypeParams()),
+			IndexParams:     indexparams.FilterBuildParams(info.GetIndexParams()),
 			IsAutoIndex:     info.GetIsAutoIndex(),
 			UserIndexParams: info.GetUserIndexParams(),
 		})

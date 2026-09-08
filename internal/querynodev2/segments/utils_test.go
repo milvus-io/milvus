@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestFilterZeroValuesFromSlice(t *testing.T) {
@@ -25,6 +27,69 @@ func TestFilterZeroValuesFromSlice(t *testing.T) {
 	filteredInts := FilterZeroValuesFromSlice(ints)
 	assert.Equal(t, 3, len(filteredInts))
 	assert.EqualValues(t, []int64{10, 5, 13}, filteredInts)
+}
+
+func TestMaterializeFieldEvictableSettings(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "scalar", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				Name:       "explicit_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				Name:       "explicit_struct",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, Name: "nested_scalar", DataType: schemapb.DataType_Int64},
+				},
+			},
+			{
+				FieldID: 20,
+				Name:    "collection_struct",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 21, Name: "nested_vector", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+
+	materialized := materializeFieldEvictableSettings(schema)
+	require.NotSame(t, schema, materialized)
+	require.False(t, common.FieldHasEvictableKey(schema, 1))
+	require.False(t, common.FieldHasEvictableKey(schema, 2))
+	require.False(t, common.FieldHasEvictableKey(schema, 11))
+	require.False(t, common.FieldHasEvictableKey(schema, 21))
+
+	assertEvictable := func(fieldID int64, expected bool) {
+		helper, err := typeutil.CreateSchemaHelper(materialized)
+		require.NoError(t, err)
+		field, err := helper.GetFieldFromID(fieldID)
+		require.NoError(t, err)
+		actual, exists := common.IsEvictableEnabled(field.GetTypeParams()...)
+		require.True(t, exists)
+		assert.Equal(t, expected, actual)
+	}
+	assertEvictable(1, true)
+	assertEvictable(2, false)
+	assertEvictable(3, false)
+	assertEvictable(11, false)
+	assertEvictable(21, false)
+
+	noOverrides := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+	}
+	assert.Same(t, noOverrides, materializeFieldEvictableSettings(noOverrides))
 }
 
 func TestGetSegmentRelatedDataSize(t *testing.T) {
@@ -411,6 +476,84 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 			&querypb.FieldIndexInfo{},
 		)
 		assert.Equal(t, common.WarmupAsync, policy)
+	})
+}
+
+func TestIsDataEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("field TypeParams takes priority", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "false"},
+			},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to vector config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector})
+		assert.False(t, enable)
+	})
+}
+
+func TestIsIndexEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("index params take priority", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, &querypb.FieldIndexInfo{
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar index config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, &querypb.FieldIndexInfo{})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to vector index config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}, &querypb.FieldIndexInfo{})
+		assert.False(t, enable)
+	})
+}
+
+func TestIsScalarStatsEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("follows field TypeParams", func(t *testing.T) {
+		enable := isScalarStatsEvictableEnable(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableKey, Value: "false"},
+			},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar field config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isScalarStatsEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_VarChar})
+		assert.False(t, enable)
 	})
 }
 

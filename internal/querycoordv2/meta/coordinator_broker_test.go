@@ -339,6 +339,34 @@ func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
 		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 { return info.GetIndexID() }))
 	})
 
+	s.Run("preserve_evictable_metadata", func() {
+		indexInfo := &indexpb.IndexInfo{
+			IndexID:         1,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			IndexParams:     []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+		}
+		s.mixcoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(&indexpb.ListIndexesResponse{
+				Status:     merr.Status(nil),
+				IndexInfos: []*indexpb.IndexInfo{indexInfo},
+			}, nil).Once()
+
+		infos, err := s.broker.ListIndexes(ctx, collectionID)
+		s.NoError(err)
+		if s.Len(infos, 1) {
+			value, exists := common.IsEvictableEnabled(infos[0].GetTypeParams()...)
+			s.True(exists)
+			s.True(value)
+			value, exists = common.IsEvictableEnabled(infos[0].GetIndexParams()...)
+			s.True(exists)
+			s.True(value)
+			value, exists = common.IsEvictableEnabled(infos[0].GetUserIndexParams()...)
+			s.True(exists)
+			s.True(value)
+		}
+	})
+
 	s.Run("datacoord_return_error", func() {
 		s.mixcoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mocked")).Once()
@@ -374,6 +402,36 @@ func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
 
 		_, err := s.broker.ListIndexes(ctx, collectionID)
 		s.NoError(err)
+	})
+
+	s.Run("legacy_fallback_preserves_evictable_metadata", func() {
+		s.mixcoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(nil, merr.ErrServiceUnimplemented).Once()
+		indexInfo := &indexpb.IndexInfo{
+			IndexID:         1,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			IndexParams:     []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+		}
+		s.mixcoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(&indexpb.DescribeIndexResponse{
+				Status:     merr.Status(nil),
+				IndexInfos: []*indexpb.IndexInfo{indexInfo},
+			}, nil).Once()
+
+		infos, err := s.broker.ListIndexes(ctx, collectionID)
+		s.NoError(err)
+		if s.Len(infos, 1) {
+			value, exists := common.IsEvictableEnabled(infos[0].GetTypeParams()...)
+			s.True(exists)
+			s.True(value)
+			value, exists = common.IsEvictableEnabled(infos[0].GetIndexParams()...)
+			s.True(exists)
+			s.True(value)
+			value, exists = common.IsEvictableEnabled(infos[0].GetUserIndexParams()...)
+			s.True(exists)
+			s.True(value)
+		}
 	})
 }
 

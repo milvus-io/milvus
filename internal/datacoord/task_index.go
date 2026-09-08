@@ -542,6 +542,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Key:   common.IndexNonEncoding,
 		Value: indexNonEncoding,
 	})
+	params = indexparams.FilterBuildParams(params)
+	typeParams = indexparams.FilterBuildParams(typeParams)
 
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
