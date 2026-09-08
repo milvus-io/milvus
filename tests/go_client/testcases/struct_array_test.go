@@ -20,7 +20,6 @@
 package testcases
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
-	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -86,12 +84,6 @@ func indexAndLoad(t *testing.T, ctx CtxT, mc MC, collName string, dim int) {
 	common.CheckErr(t, err, true)
 	common.CheckErr(t, loadTask.Await(ctx), true)
 }
-
-// type aliases to keep test signatures readable
-type (
-	CtxT = context.Context
-	MC   = *base.MilvusClient
-)
 
 // TestStructArrayCreateWithClipEmbedding1 ports test_create_struct_array_with_clip_embedding1.
 func TestStructArrayCreateWithClipEmbedding1(t *testing.T) {
