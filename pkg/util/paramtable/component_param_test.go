@@ -27,6 +27,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
 
+func TestQueryNodeStrictGroupSettings(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
+	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
+	params.Save(cfg.StrictGroupAcceptanceThreshold.Key, "0")
+	params.Save(cfg.StrictGroupProbeCandidates.Key, "17")
+	assert.Equal(t, 0.0, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
+	assert.Equal(t, 17, cfg.StrictGroupProbeCandidates.GetAsInt())
+	params.Reset(cfg.StrictGroupAcceptanceThreshold.Key)
+	params.Reset(cfg.StrictGroupProbeCandidates.Key)
+	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
+	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
+}
+
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()

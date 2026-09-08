@@ -23,7 +23,6 @@
 #include "common/Consts.h"
 #include "common/JsonUtils.h"
 #include "exec/operator/search-groupby/GroupMembership.h"
-#include "common/StrictGroupSearchParams.h"
 #include "fmt/format.h"
 #include "monitor/Monitor.h"
 #include "query/Utils.h"
@@ -248,6 +247,7 @@ struct StrictGroupPhase2Context {
     SearchResult* search_result;
     bool eligible;
     double acceptance_threshold;
+    int64_t probe_candidates;
 };
 
 const char*
@@ -417,7 +417,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         group_map,
         collector,
         [&] { return group_map.IsGroupResEnough(); },
-        kStrictGroupProbeCandidates,
+        context->probe_candidates,
         &stats.probe_accepted,
         &stats.probe_group_hits);
     stats.phase1_candidates += stats.probe_candidates;
@@ -554,7 +554,8 @@ TrySingleFieldStrictGroup(
                                      info.group_by_field_ids_.front(),
                                      result,
                                      true,
-                                     info.strict_group_acceptance_threshold_};
+                                     info.strict_group_acceptance_threshold_,
+                                     info.strict_group_probe_candidates_};
     prefix.push_back(0);
     for (const auto& iterator : iterators) {
         GroupByMap<T> map(info.topk_, info.group_size_, true);

@@ -4054,7 +4054,9 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	SoPath ParamItem `refreshable:"false"`
+	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
+	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
+	SoPath                         ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -4276,6 +4278,18 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.StrictGroupAcceptanceThreshold = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
+		Version: "2.6.23", DefaultValue: "0.1", Export: true,
+		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	}
+	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
+	p.StrictGroupProbeCandidates = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
+		Version: "2.6.23", DefaultValue: "100", Export: true,
+		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	}
+	p.StrictGroupProbeCandidates.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
