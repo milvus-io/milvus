@@ -186,7 +186,9 @@ func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
 	_, hadProbe := params[common.StrictGroupProbeCandidatesKey]
 	delete(params, common.StrictGroupAcceptanceThresholdKey)
 	delete(params, common.StrictGroupProbeCandidatesKey)
-	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && info.GetGroupByFieldId() > 0
+	// Aggregation plans use only the plural field, even for one grouping key.
+	hasGroupBy := info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0
+	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && hasGroupBy
 	if eligible {
 		cfg := &paramtable.Get().QueryNodeCfg
 		threshold, err := strconv.ParseFloat(cfg.StrictGroupAcceptanceThreshold.GetValue(), 64)

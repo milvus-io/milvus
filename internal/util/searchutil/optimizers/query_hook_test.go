@@ -518,6 +518,24 @@ func TestOptimizeSearchParam(t *testing.T) {
 }
 
 func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
+	for _, tc := range []struct {
+		name     string
+		singular int64
+		plural   []int64
+	}{
+		{"legacy singular", 101, nil},
+		{"plural with unset singular", 0, []int64{101}},
+		{"aggregation plural", -1, []int64{101}},
+		{"both representations", 101, []int64{101}},
+		{"multiple fields", -1, []int64{101, 102}},
+	} {
+		suite.Run(tc.name, func() {
+			suite.checkStrictGroupServerSettings(tc.singular, tc.plural)
+		})
+	}
+}
+
+func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plural []int64) {
 	paramtable.Init()
 	cfg := paramtable.Get()
 	vKey := cfg.QueryNodeCfg.StrictGroupAcceptanceThreshold.Key
@@ -527,8 +545,10 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
 	makeRequest := func(strict bool, raw string) *querypb.SearchRequest {
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
-			QueryInfo: &planpb.QueryInfo{Topk: 10, GroupByFieldId: 101,
-				GroupSize: 3, StrictGroupSize: strict, SearchParams: raw},
+			QueryInfo: &planpb.QueryInfo{
+				Topk: 10, GroupByFieldId: singular, GroupByFieldIds: plural,
+				GroupSize: 3, StrictGroupSize: strict, SearchParams: raw,
+			},
 		}}}
 		bs, err := proto.Marshal(p)
 		suite.Require().NoError(err)
