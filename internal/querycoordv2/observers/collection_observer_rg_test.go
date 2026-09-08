@@ -1848,7 +1848,7 @@ func (s *CollectionObserverRGSuite) TestARefusedReplicaRemovalInvalidatesNoCache
 	progress := s.ob.observeResourceGroupProgress(s.ctx)
 	s.backdateTaskWatermark(key, 33, time.Hour)
 
-	refuse := mockey.Mock((*meta.ReplicaManager).RemoveReplicas).Return(errors.New("etcd unavailable")).Build()
+	refuse := mockey.Mock((*meta.ReplicaManager).RemoveReplicasInResourceGroup).Return(nil, errors.New("etcd unavailable")).Build()
 	defer refuse.UnPatch()
 	s.ob.observeTimeout(s.ctx, progress)
 
@@ -1919,4 +1919,63 @@ func (s *CollectionObserverRGSuite) TestATeardownWithNoReplicaLeftStillInvalidat
 	s.Nil(s.meta.GetCollection(s.ctx, 2300))
 	s.False(s.ob.loadTasks.Contain(key))
 	s.Equal([]int64{2300}, s.invalidated)
+}
+
+// The reviewer's L1 of round seven: the teardown reads the replica list,
+// filters it by the task's group, and removes the stalled ones by ID without
+// the collection lock. TransferReplica keeps the ID and rewrites the group,
+// so a transfer landing in that window deleted a replica that now belonged
+// to another group. The removal must re-check the group under the lock and
+// take only the replicas still in it, and everything after the removal must
+// work from what was actually removed.
+func (s *CollectionObserverRGSuite) TestATimedOutReleaseKeepsAReplicaTransferredSinceTheRead() {
+	const rgC = "rg-c"
+	s.registerLoadingCollection(2400, 2401, "2400-dmc0", 3, 24001, 24002)
+	s.putReplica(2400, 240001, 131, rgA)
+	s.putDelegator(2400, 131, "2400-dmc0", 24001, 24002)
+	s.putReplica(2400, 240002, 132, rgB)
+	s.putDelegator(2400, 132, "2400-dmc0")
+	s.putReplica(2400, 240003, 133, rgB)
+	s.putDelegator(2400, 133, "2400-dmc0")
+	_, err := s.meta.AddResourceGroup(s.ctx, rgC, &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 100},
+	})
+	s.Require().NoError(err)
+
+	s.ob.LoadCollection(s.ctx, 2400, rgB)
+	key := s.taskKey(2400, rgB)
+	s.backdateTaskWatermark(key, 33, time.Hour)
+	loadTask, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	figures := map[int64]int32{240002: 33, 240003: 33}
+
+	// The transfer lands right after the teardown's read of the replica
+	// list and before its removal: the first read hands the list back and
+	// then moves one of the stalled replicas out of the group.
+	reads := 0
+	var origin func(*meta.ReplicaManager, context.Context, int64) []*meta.Replica
+	read := mockey.Mock((*meta.ReplicaManager).GetByCollection).
+		To(func(m *meta.ReplicaManager, ctx context.Context, collectionID int64) []*meta.Replica {
+			replicas := origin(m, ctx, collectionID)
+			reads++
+			if reads == 1 {
+				s.Require().NoError(m.TransferReplica(ctx, 2400, rgB, rgC, 1))
+			}
+			return replicas
+		}).Origin(&origin).Build()
+	defer read.UnPatch()
+
+	s.ob.releaseResourceGroupOnTimeout(s.ctx, key, loadTask, figures)
+
+	transferred := s.replicaIDsInRG(2400, rgC)
+	s.Require().Len(transferred, 1, "sanity: the transfer landed in the window")
+	s.NotNil(s.meta.Get(s.ctx, transferred[0]), "the replica that left the group is kept")
+	s.Empty(s.replicaIDsInRG(2400, rgB), "the replica that stayed is removed")
+	s.Len(s.replicaIDsInRG(2400, rgA), 1)
+	s.Len(s.meta.GetByCollection(s.ctx, 2400), 2)
+	s.EqualValues(2, s.meta.GetCollection(s.ctx, 2400).GetReplicaNumber(),
+		"the write-back counts the replicas the collection actually has")
+	s.False(s.ob.loadTasks.Contain(key), "the group is empty, so the task ends")
+	s.Equal([]int64{2400}, s.invalidated)
 }
