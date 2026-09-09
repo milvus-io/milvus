@@ -808,6 +808,53 @@ func TestManagerPersistenceFailuresDoNotAdvance(t *testing.T) {
 	require.Len(t, catalog.views, 2)
 }
 
+// TestManagerConflictingSnapshotRejected verifies that publishing two
+// different snapshots under one DataVersion is rejected with a data-integrity
+// error (persistLockedWithStats / persistMemoryLockedWithStats shared guard).
+func TestManagerConflictingSnapshotRejected(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	// Commit one flush at version (2,0).
+	view, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segment(1, "ch-1", 10)},
+	})
+	require.NoError(t, err)
+	require.NoError(t, catalog.SaveDataView(ctx, view))
+	commit()
+	defer abort()
+
+	// Forge a conflicting snapshot at the SAME version with different content
+	// and load it directly into memory: the integrity guard must reject it.
+	conflict := proto.Clone(latestViewState(manager, 1)).(*viewpb.DataViewOfCollection)
+	conflict.GetShards()[0].GetPartitions()[0].SegmentIds = []int64{999}
+	require.Error(t, manager.persistMemoryLockedWithStats(
+		manager.getState(1), conflict, map[int64]SegmentStats{999: {RowNum: 1}}))
+	// The catalog-backed publish path rejects the same conflict.
+	require.Error(t, manager.persistLockedWithStats(
+		ctx, manager.getState(1), conflict, map[int64]SegmentStats{999: {RowNum: 1}}))
+	// The registry is unchanged: latest still serves the original version.
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	ref.Deref()
+	requireVersion(t, mustLatest(t, manager, 1), 2, 0)
+}
+
+// latestViewState returns a deep copy of the latest persisted proto view of a
+// Collection (test helper).
+func latestViewState(manager Manager, collectionID int64) *viewpb.DataViewOfCollection {
+	ref, err := manager.Latest(context.Background(), collectionID)
+	if err != nil || ref == nil {
+		return nil
+	}
+	defer ref.Deref()
+	return ref.DataView()
+}
+
 func TestManagerConcurrentCommitRefAndGarbageCollect(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTestManager()
@@ -1302,4 +1349,188 @@ func TestManagerDropCollectionConcurrentWithMutations(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, ref)
 	require.Empty(t, catalog.views)
+}
+
+// TestManagerVersionsKeyedByDataVersionStruct verifies that the in-memory
+// version registry is keyed by the DataVersion struct (not a string).
+func TestManagerVersionsKeyedByDataVersionStruct(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	_, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithRows(10, "ch-1", 100, 5)},
+	})
+	require.NoError(t, err)
+	commit()
+	defer abort()
+
+	state := manager.getState(1)
+	require.NotNil(t, state)
+	v := protoVersionToStruct(state.latest.view.GetDataVersion())
+	entry := state.versions[v]
+	require.NotNil(t, entry)
+	require.Len(t, entry.view.GetShards()[0].GetPartitions()[0].GetSegmentIds(), 1)
+	require.Equal(t, int64(10), entry.view.GetShards()[0].GetPartitions()[0].GetSegmentIds()[0])
+}
+
+// TestManagerEntryCarriesRowStats verifies that the per-version stats index
+// carries the projected RowNum of every published segment.
+func TestManagerEntryCarriesRowStats(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	_, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithRows(10, "ch-1", 100, 42)},
+	})
+	require.NoError(t, err)
+	commit()
+	defer abort()
+
+	state := manager.getState(1)
+	require.NotNil(t, state)
+	entry := state.versions[protoVersionToStruct(state.latest.view.GetDataVersion())]
+	require.NotNil(t, entry)
+	require.Equal(t, int64(42), entry.stats[10].RowNum)
+
+	// A recompute rebuild replaces stats from the freshest projection.
+	_, err = manager.RecomputeNow(ctx, 1, projectSegments(segmentWithRows(20, "ch-1", 100, 7)))
+	require.NoError(t, err)
+	entry = state.versions[protoVersionToStruct(state.latest.view.GetDataVersion())]
+	require.NotNil(t, entry)
+	require.Equal(t, int64(7), entry.stats[20].RowNum)
+	_, ok := entry.stats[10]
+	require.False(t, ok)
+}
+
+// TestDataViewRefExposesViewAndRowStats verifies that a DataViewRef exposes
+// the referenced DataView plus the per-segment RowNum of its own version.
+func TestDataViewRefExposesViewAndRowStats(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	_, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithRows(10, "ch-1", 100, 7)},
+	})
+	require.NoError(t, err)
+	commit()
+	defer abort()
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+
+	stat, ok := ref.Stats(10)
+	require.True(t, ok)
+	require.Equal(t, int64(7), stat.RowNum)
+	require.NotNil(t, ref.DataView())
+	require.NotNil(t, ref.Version())
+
+	// Unknown segment has no published footprint.
+	_, ok = ref.Stats(999)
+	require.False(t, ok)
+}
+
+func segmentWithRows(id int64, channel string, partition, rowNum int64) LoadableSegment {
+	seg := segment(id, channel, partition)
+	seg.RowNum = rowNum
+	return seg
+}
+
+// TestManagerRecoveryRestoresRowStats verifies the recovery gap: a persisted
+// DataView loaded from the catalog carries no stats (they are never
+// serialized), and when the recovery reconciliation projection matches the
+// persisted snapshot (no-op recompute), the latest entry's footprint must
+// still be initialized from the projection so Stats works after restart.
+func TestManagerRecoveryRestoresRowStats(t *testing.T) {
+	ctx := context.Background()
+	catalog := &fakeDataViewCatalog{}
+	// Persisted snapshot as it would exist before restart: segment 100 at
+	// version (2,0). No stats anywhere on the wire.
+	require.NoError(t, catalog.SaveDataView(ctx, &viewpb.DataViewOfCollection{
+		CollectionId: 1,
+		DataVersion:  version(2, 0),
+		Shards: []*viewpb.DataViewOfShard{{
+			Vchannel: "ch-1",
+			Partitions: []*viewpb.DataViewOfPartition{{
+				PartitionId: 10,
+				SegmentIds:  []int64{100},
+			}},
+		}},
+	}))
+
+	// Recovery reconcile: the projection matches the persisted snapshot
+	// (same membership), so recomputeNow takes the no-op branch. RowNum is
+	// the authoritative SegmentMeta footprint.
+	manager, err := RecoverManager(ctx, catalog, recoverAllCollections,
+		projectSegments(segmentWithRows(100, "ch-1", 10, 42)),
+		[]int64{1}, nil)
+	require.NoError(t, err)
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	requireVersion(t, ref.Version(), 2, 0)
+	// The footprint must be restored even though the snapshot itself was a
+	// no-op (version unchanged).
+	stat, ok := ref.Stats(100)
+	require.True(t, ok, "Stats must be restored from the projection after recovery")
+	require.Equal(t, int64(42), stat.RowNum)
+}
+
+// TestManagerFlushStatsCarryBaseSegments verifies the incremental-flush path:
+// a new version's stats index must cover every segment of the new snapshot —
+// both the segments carried over from the base version and the newly flushed
+// ones — so Stats never misses a segment that the DataView contains.
+func TestManagerFlushStatsCarryBaseSegments(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	// Flush segment 10 first (version 2,0).
+	_, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithRows(10, "ch-1", 100, 5)},
+	})
+	require.NoError(t, err)
+	commit()
+	defer abort()
+
+	// Flush segment 20 second: the new version carries BOTH segments, so the
+	// new entry's stats must cover 10 (from base) and 20 (flushed now).
+	_, commit2, abort2, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithRows(20, "ch-1", 100, 7)},
+	})
+	require.NoError(t, err)
+	commit2()
+	defer abort2()
+
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	requireVersion(t, ref.Version(), 3, 0)
+
+	stat, ok := ref.Stats(10)
+	require.True(t, ok, "base segment 10 must keep its RowNum in the new version")
+	require.Equal(t, int64(5), stat.RowNum)
+	stat, ok = ref.Stats(20)
+	require.True(t, ok, "flushed segment 20 must carry its RowNum in the new version")
+	require.Equal(t, int64(7), stat.RowNum)
+
+	// The DataView itself contains both segments.
+	ids := ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds()
+	require.ElementsMatch(t, []int64{10, 20}, ids)
 }

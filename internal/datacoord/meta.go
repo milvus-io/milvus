@@ -3178,6 +3178,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]da
 			VChannel:        segment.GetInsertChannel(),
 			PartitionID:     segment.GetPartitionID(),
 			ManifestVersion: manifestVersion,
+			RowNum:          segment.GetNumOfRows(),
 		})
 	}
 	return loadable, nil

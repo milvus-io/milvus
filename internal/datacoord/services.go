@@ -779,6 +779,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					return merr.Status(err), nil
 				}
 			}
+			// The stats RowNum must match the SegmentInfo row count that this
+			// txn commits. The checkpoint rows carried by the request are the
+			// authoritative cumulative count UpdateCheckPointOperator stores
+			// into SegmentInfo, so prefer them over the (possibly stale/zero)
+			// pre-txn meta value - aligning the DataView with SegmentInfo.
+			rowNum := segment.GetNumOfRows()
+			for _, cp := range req.GetCheckPoints() {
+				if cp.GetSegmentID() == req.GetSegmentID() && cp.GetNumOfRows() > 0 {
+					rowNum = cp.GetNumOfRows()
+					break
+				}
+			}
 			flushView, commitView, abortView, err := s.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
 				CollectionID: segment.GetCollectionID(),
 				Segments: []dataview.LoadableSegment{{
@@ -786,6 +798,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					VChannel:        segment.GetInsertChannel(),
 					PartitionID:     segment.GetPartitionID(),
 					ManifestVersion: manifestVersion,
+					RowNum:          rowNum,
 				}},
 			})
 			if err != nil {

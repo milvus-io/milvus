@@ -281,13 +281,14 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	ctx := context.Background()
 	segment := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  100,
-		PartitionID:   10,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Growing,
-		Level:         datapb.SegmentLevel_L1,
-		NumOfRows:     100,
+		ID:             10,
+		CollectionID:   100,
+		PartitionID:    10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		NumOfRows:      50,
+		StorageVersion: storage.StorageV3,
 	})
 	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, segment))
 
@@ -327,11 +328,16 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		Flushed:         true,
 		SegLevel:        datapb.SegmentLevel_L1,
 		WithFullBinlogs: true,
+		StorageVersion:  storage.StorageV3,
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}},
-		CheckPoints: []*datapb.CheckPoint{{SegmentID: 10, NumOfRows: 100}},
+		CheckPoints: []*datapb.CheckPoint{{SegmentID: 10, NumOfRows: 100, Position: &msgpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{1, 2, 3},
+			Timestamp:   1,
+		}}},
 	}
 	// The first catalog.Update attempt fails (injected) and the in-function
 	// retry converges on the second attempt, all within this single call:
@@ -352,6 +358,14 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
+	// The DataView stats RowNum must match the SegmentInfo row count this txn
+	// commits: the meta value was 50 (stale growing-side count), the
+	// checkpoint commits 100, so Stats must surface 100 - not the stale
+	// pre-txn meta value.
+	stat, ok := ref.Stats(10)
+	require.True(s.T(), ok)
+	require.Equal(s.T(), int64(100), stat.RowNum)
+	require.Equal(s.T(), int64(100), flushed.GetNumOfRows())
 	updateMock.UnPatch()
 
 	// A second identical flush (idempotent replay of an already-flushed

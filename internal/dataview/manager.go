@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -75,17 +76,20 @@ type Manager interface {
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
-type DataViewRef interface {
-	DataView() *viewpb.DataViewOfCollection
-	Version() *viewpb.DataVersion
-	Deref()
-}
+// DataViewRef is the read-only reference to one DataView version shared out
+// by the Manager. It is defined in qviews with an immutable precondition: the
+// caller must not mutate the returned DataView / SegmentStats data.
+type DataViewRef = qviews.DataViewRef
 
 type LoadableSegment struct {
 	SegmentID       int64
 	VChannel        string
 	PartitionID     int64
 	ManifestVersion int64
+	// RowNum is the segment's published row count, projected from SegmentMeta
+	// by the Coordinator. It is maintained in memory only (never persisted,
+	// never re-read from SegmentMeta) and exposed via DataViewRef.Stats.
+	RowNum int64
 }
 
 type CreateCollectionDataViewEvent struct {
@@ -115,9 +119,18 @@ const (
 	dataViewAdvanceCompact
 )
 
+// SegmentStats is the per-segment load footprint published by the Manager for
+// one DataView version. It lives in qviews so DataViewRef (also defined
+// there) can expose it through the Stats API.
+type SegmentStats = qviews.SegmentStats
+
 type versionEntry struct {
 	view *viewpb.DataViewOfCollection
-	refs *versionRefCounter
+	// stats is the per-segment published footprint (segmentID -> SegmentStats)
+	// of this version's snapshot. Immutable after publication: readers holding
+	// a ref to the entry may access it without the collection lock.
+	stats map[int64]SegmentStats
+	refs  *versionRefCounter
 	// isTombstone marks an entry whose etcd snapshot key is being dropped by
 	// GarbageCollect while the per-collection lock is released for the
 	// DropDataView round trips. Get refuses tombstoned entries so no ref can
@@ -133,7 +146,13 @@ type collectionState struct {
 	mu       sync.Mutex
 	id       int64
 	latest   *versionEntry
-	versions map[string]*versionEntry
+	versions map[qviews.DataVersion]*versionEntry
+}
+
+// newCollectionState constructs a Collection state with an empty version
+// registry keyed by DataVersion struct.
+func newCollectionState(collectionID int64) *collectionState {
+	return &collectionState{id: collectionID, versions: make(map[qviews.DataVersion]*versionEntry)}
 }
 
 type dataViewManager struct {
@@ -297,13 +316,13 @@ func RecoverManager(
 			state := manager.getOrCreateState(view.GetCollectionId())
 			state.mu.Lock()
 			persisted := canonicalDataViewClone(view)
-			key := dataVersionKey(view.GetDataVersion())
+			key := protoVersionToStruct(view.GetDataVersion())
 			if existing := state.versions[key]; existing != nil {
 				if !proto.Equal(existing.view, persisted) {
 					state.mu.Unlock()
 					mlog.Warn(ctx, "skip persisted DataView with conflicting snapshots under one version during recovery",
 						mlog.Int64("collectionID", view.GetCollectionId()),
-						mlog.String("version", key))
+						mlog.String("version", key.String()))
 					continue
 				}
 				state.mu.Unlock()
@@ -402,7 +421,7 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 	if err := addSegments(view, event.Segments); err != nil {
 		return nil, err
 	}
-	if err := m.persistLocked(ctx, state, view); err != nil {
+	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentRowStats(event.Segments)); err != nil {
 		return nil, err
 	}
 	return cloneDataVersion(view.GetDataVersion()), nil
@@ -443,10 +462,19 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 	}
 	canonicalizeDataView(next)
 	if dataViewMembershipEqual(base, next) {
+		// Recovery path: a persisted entry loaded from the catalog carries no
+		// stats (they are never serialized), so a restart leaves the latest
+		// entry with an empty footprint. Initialize it from the projection
+		// once: segment RowNum is immutable, so the fill is idempotent and
+		// never overwrites a published value (a normally-published entry is
+		// never empty).
+		if entry := state.latest; entry != nil && len(entry.stats) == 0 {
+			entry.stats = buildSegmentRowStats(segments)
+		}
 		return dataVersionFromView(base), nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.persistLocked(ctx, state, next); err != nil {
+	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentRowStats(segments)); err != nil {
 		return nil, err
 	}
 	return cloneDataVersion(next.GetDataVersion()), nil
@@ -500,7 +528,7 @@ func (m *dataViewManager) Get(_ context.Context, collectionID int64, version *vi
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	return acquireRefLocked(state, state.versions[dataVersionKey(version)]), nil
+	return acquireRefLocked(state, state.versions[protoVersionToStruct(version)]), nil
 }
 
 func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error {
@@ -519,7 +547,7 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	// the flush path for the whole sweep.
 	type collectableVersion struct {
 		version *viewpb.DataVersion
-		key     string
+		key     qviews.DataVersion
 	}
 	state.mu.Lock()
 	entries := make([]*versionEntry, 0, len(state.versions))
@@ -542,7 +570,7 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 		entry.isTombstone = true
 		collectable = append(collectable, collectableVersion{
 			version: version,
-			key:     dataVersionKey(version),
+			key:     protoVersionToStruct(version),
 		})
 	}
 	state.mu.Unlock()
@@ -580,14 +608,25 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	return nil
 }
 
+// persistLocked persists a snapshot and loads it into memory. A nil stats
+// map is normalized to an empty one so every published entry carries a
+// non-nil (possibly empty) footprint — the invariant the recovery fill and
+// Stats rely on.
 func (m *dataViewManager) persistLocked(ctx context.Context, state *collectionState, view *viewpb.DataViewOfCollection) error {
+	return m.persistLockedWithStats(ctx, state, view, make(map[int64]SegmentStats))
+}
+
+// persistLockedWithStats persists a snapshot and loads it into memory with
+// the per-segment stats of the projection that produced it. A nil stats
+// map publishes an empty footprint (Stats returns false).
+func (m *dataViewManager) persistLockedWithStats(ctx context.Context, state *collectionState, view *viewpb.DataViewOfCollection, stats map[int64]SegmentStats) error {
 	persisted := canonicalDataViewClone(view)
-	key := dataVersionKey(persisted.GetDataVersion())
+	key := protoVersionToStruct(persisted.GetDataVersion())
 	if existing := state.versions[key]; existing != nil {
 		if !proto.Equal(existing.view, persisted) {
 			return merr.WrapErrDataIntegrityMsg(
 				"DataView version %s of collection %d has conflicting snapshots",
-				key, state.id,
+				key.String(), state.id,
 			)
 		}
 		state.latest = existing
@@ -596,7 +635,7 @@ func (m *dataViewManager) persistLocked(ctx context.Context, state *collectionSt
 	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
 		return err
 	}
-	return m.persistMemoryLocked(state, persisted)
+	return m.persistMemoryLockedWithStats(state, persisted, stats)
 }
 
 // persistMemoryLocked loads a snapshot that is already persisted in the
@@ -604,19 +643,35 @@ func (m *dataViewManager) persistLocked(ctx context.Context, state *collectionSt
 // path, where the catalog write happened inside the same txn as SegmentMeta).
 // The caller holds the Collection lock.
 func (m *dataViewManager) persistMemoryLocked(state *collectionState, view *viewpb.DataViewOfCollection) error {
+	return m.persistMemoryLockedWithStats(state, view, nil)
+}
+
+// persistMemoryLockedWithStats loads a snapshot that is already persisted in
+// the catalog into the in-memory version registry (used by the flush
+// atomic-txn path, where the catalog write happened inside the same txn as
+// SegmentMeta). The caller holds the Collection lock. stats carries the
+// per-segment RowNum footprint of the projection that produced the snapshot.
+func (m *dataViewManager) persistMemoryLockedWithStats(state *collectionState, view *viewpb.DataViewOfCollection, stats map[int64]SegmentStats) error {
 	persisted := canonicalDataViewClone(view)
-	key := dataVersionKey(persisted.GetDataVersion())
+	key := protoVersionToStruct(persisted.GetDataVersion())
 	if existing := state.versions[key]; existing != nil {
 		if !proto.Equal(existing.view, persisted) {
 			return merr.WrapErrDataIntegrityMsg(
 				"DataView version %s of collection %d has conflicting snapshots",
-				key, state.id,
+				key.String(), state.id,
 			)
 		}
 		state.latest = existing
 		return nil
 	}
 	entry := newVersionEntry(persisted)
+	// Normalize nil to empty so every published entry carries a non-nil
+	// (possibly empty) footprint — the invariant the recovery fill and
+	// Stats rely on.
+	if stats == nil {
+		stats = make(map[int64]SegmentStats)
+	}
+	entry.stats = stats
 	state.versions[key] = entry
 	state.latest = entry
 	return nil
@@ -667,11 +722,25 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceStreaming)
 
+	// The flushed snapshot is incremental: next carries the base version's
+	// segments plus the flushed ones, so its stats index must merge the base
+	// entry's footprint with the flushed segments' RowNum — otherwise segments
+	// carried over from the base version would lose their published Stats.
+	stats := make(map[int64]SegmentStats)
+	if baseEntry := state.latest; baseEntry != nil {
+		for segmentID, rows := range baseEntry.stats {
+			stats[segmentID] = rows
+		}
+	}
+	for segmentID, rows := range buildSegmentRowStats(event.Segments) {
+		stats[segmentID] = rows
+	}
+
 	var once sync.Once
 	commit := func() {
 		once.Do(func() {
 			defer unlock()
-			if err := m.persistMemoryLocked(state, next); err != nil {
+			if err := m.persistMemoryLockedWithStats(state, next, stats); err != nil {
 				mlog.Warn(ctx, "failed to load prepared flush snapshot into DataView memory",
 					mlog.Int64("collectionID", event.CollectionID),
 					mlog.Err(err))
@@ -716,7 +785,7 @@ func (m *dataViewManager) lockStateForMutation(collectionID int64) (*collectionS
 			}
 			state = m.states[collectionID]
 			if state == nil {
-				state = &collectionState{id: collectionID, versions: make(map[string]*versionEntry)}
+				state = newCollectionState(collectionID)
 				m.states[collectionID] = state
 			}
 			m.mu.Unlock()
@@ -742,7 +811,7 @@ func (m *dataViewManager) getOrCreateState(collectionID int64) *collectionState 
 	defer m.mu.Unlock()
 	state := m.states[collectionID]
 	if state == nil {
-		state = &collectionState{id: collectionID, versions: make(map[string]*versionEntry)}
+		state = newCollectionState(collectionID)
 		m.states[collectionID] = state
 	}
 	return state
@@ -770,6 +839,17 @@ func (r *dataViewRef) Version() *viewpb.DataVersion {
 	return cloneDataVersion(r.entry.view.GetDataVersion())
 }
 
+// Stats returns the published SegmentStats of one segment in the referenced
+// version. It is a lock-free map lookup on the immutable versionEntry.stats;
+// ok is false when the segment has no published footprint in this version.
+func (r *dataViewRef) Stats(segmentID int64) (SegmentStats, bool) {
+	if r == nil || r.entry == nil {
+		return SegmentStats{}, false
+	}
+	stat, ok := r.entry.stats[segmentID]
+	return stat, ok
+}
+
 func (r *dataViewRef) Deref() {
 	if r == nil {
 		return
@@ -784,7 +864,11 @@ func (r *dataViewRef) Deref() {
 }
 
 func newVersionEntry(view *viewpb.DataViewOfCollection) *versionEntry {
-	return &versionEntry{view: view, refs: &versionRefCounter{}}
+	return &versionEntry{
+		view:  view,
+		stats: make(map[int64]SegmentStats),
+		refs:  &versionRefCounter{},
+	}
 }
 
 func latestView(state *collectionState) *viewpb.DataViewOfCollection {
@@ -1113,6 +1197,31 @@ func compareDataVersion(left, right *viewpb.DataVersion) int {
 		return -1
 	}
 	return 0
+}
+
+// protoVersionToStruct converts a proto DataVersion to the struct key used by
+// collectionState.versions. nil maps to the zero struct.
+func protoVersionToStruct(v *viewpb.DataVersion) qviews.DataVersion {
+	if v == nil {
+		return qviews.DataVersion{}
+	}
+	return qviews.DataVersion{
+		StreamingVersion: v.GetStreamingVersion(),
+		CompactVersion:   v.GetCompactVersion(),
+	}
+}
+
+// buildSegmentRowStats extracts the per-segment footprint from a projection.
+// It feeds versionEntry.stats at every publication point so a DataViewRef can
+// answer Stats for the exact version it references.
+func buildSegmentRowStats(segments []LoadableSegment) map[int64]SegmentStats {
+	stats := make(map[int64]SegmentStats, len(segments))
+	for _, seg := range segments {
+		if seg.SegmentID != 0 {
+			stats[seg.SegmentID] = SegmentStats{RowNum: seg.RowNum}
+		}
+	}
+	return stats
 }
 
 func dataVersionKey(version *viewpb.DataVersion) string {
