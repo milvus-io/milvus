@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include "common/Array.h"
 #include "common/Types.h"
@@ -270,4 +271,24 @@ TEST(Array, TestLiteralElementTypeMismatch) {
     bool_literal.set_same_type(true);
     bool_literal.mutable_array()->Add()->set_bool_val(false);
     expect_mismatch(string_array, bool_literal);
+}
+
+TEST(Array, CopyAndMoveExceptionContracts) {
+    using milvus::Array;
+    EXPECT_FALSE(std::is_nothrow_copy_constructible_v<Array>);
+    EXPECT_TRUE(std::is_nothrow_move_constructible_v<Array>);
+    EXPECT_TRUE(std::is_nothrow_move_assignable_v<Array>);
+
+    milvus::proto::schema::ScalarField field;
+    field.mutable_string_data()->add_data("first");
+    field.mutable_string_data()->add_data("second");
+    Array source(field);
+    Array copy(source);
+    Array assigned;
+    assigned = source;
+    EXPECT_NE(copy.data(), source.data());
+    EXPECT_NE(copy.get_offsets_data(), source.get_offsets_data());
+    EXPECT_NE(assigned.data(), source.data());
+    EXPECT_EQ(copy.get_data<std::string_view>(1), "second");
+    EXPECT_EQ(assigned.get_data<std::string_view>(0), "first");
 }
