@@ -414,6 +414,8 @@ func repackInsertDataAtProxyForStreamingService(
 			continue
 		}
 
+		// packed insert data may share backing storage with insertMsg. Building
+		// the streaming message serializes it before it leaves this function.
 		msg, err := buildInsertMessageForStreamingService(
 			pack.insertMsg.InsertRequest,
 			insertMsg.CollectionID,
