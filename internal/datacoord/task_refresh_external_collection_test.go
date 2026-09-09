@@ -1734,13 +1734,14 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(baseline))
+	mt.GetCollection(collectionID).Schema.Version = 2
 
 	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
 	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
 	patch.SchemaVersion = 2
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{patch})
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
 
@@ -1753,7 +1754,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	catalog.alteredSegments = nil
 
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{patch})
 	assert.NoError(t, err)
 	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
 	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
@@ -1765,7 +1766,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	newer := proto.Clone(patch).(*datapb.SegmentInfo)
 	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{newer})
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
 	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
