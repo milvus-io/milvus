@@ -34,10 +34,12 @@
 
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
+#include "common/Utils.h"
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::storage {
 namespace {
@@ -51,33 +53,35 @@ struct ActiveSliceTask {
     std::future<void> future;
 };
 
-class TransientBudgetGuard {
+// Holds the transient bytes and one slot for the lifetime of a slice task.
+class LoadAdmissionGuard {
  public:
-    TransientBudgetGuard(size_t slice_transient_bytes,
-                         const folly::CancellationToken& cancellation_token,
-                         const std::string& operation)
+    LoadAdmissionGuard(const size_t slice_transient_bytes,
+                       const LoadAdmissionPriority priority,
+                       const folly::CancellationToken& cancellation_token,
+                       const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
-        auto acquired =
-            TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                slice_transient_bytes_, cancellation_token);
+        const bool acquired =
+            LoadAdmissionController::GetInstance().AcquireUntil(
+                {slice_transient_bytes_, 1}, priority, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
             ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
         }
     }
 
-    ~TransientBudgetGuard() {
-        TransientMemoryBudget::GetLoadTransientBudget().Release(
-            slice_transient_bytes_);
+    ~LoadAdmissionGuard() {
+        LoadAdmissionController::GetInstance().Release(
+            {slice_transient_bytes_, 1});
     }
 
-    TransientBudgetGuard(const TransientBudgetGuard&) = delete;
-    TransientBudgetGuard&
-    operator=(const TransientBudgetGuard&) = delete;
+    LoadAdmissionGuard(const LoadAdmissionGuard&) = delete;
+    LoadAdmissionGuard&
+    operator=(const LoadAdmissionGuard&) = delete;
 
  private:
-    size_t slice_transient_bytes_;
+    const size_t slice_transient_bytes_;
 };
 
 bool
@@ -118,14 +122,6 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
             cipher_len <= std::numeric_limits<size_t>::max() - 2 * plain_len,
         "Encrypted stream budget size overflow");
     return cipher_len + 2 * plain_len;
-}
-
-size_t
-SaturatingAdd(size_t lhs, size_t rhs) {
-    if (rhs > std::numeric_limits<size_t>::max() - lhs) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return lhs + rhs;
 }
 
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
@@ -169,8 +165,9 @@ ReadOrderedEntryStream(
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
-    size_t max_active_tasks =
+    auto& budget = LoadAdmissionController::GetInstance();
+    const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority);
+    const size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
     size_t next_submit = 0;
@@ -207,7 +204,7 @@ ReadOrderedEntryStream(
                 }
             }
             std::vector<uint8_t>{}.swap(task.result->data);
-            budget.Release(task.slice_transient_bytes);
+            budget.Release({task.slice_transient_bytes, 1});
         }
     };
 
@@ -225,18 +222,21 @@ ReadOrderedEntryStream(
         }
 
         if (block_for_budget) {
-            auto acquired = budget.AcquireUntil(slice_transient_byte_count,
-                                                cancellation_token);
+            const bool acquired =
+                budget.AcquireUntil({slice_transient_byte_count, 1},
+                                    budget_priority,
+                                    cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(slice_transient_byte_count)) {
+        } else if (!budget.TryAcquire({slice_transient_byte_count, 1},
+                                      budget_priority)) {
             return false;
         }
 
         if (rememberCancellation()) {
-            budget.Release(slice_transient_byte_count);
+            budget.Release({slice_transient_byte_count, 1});
             return false;
         }
 
@@ -258,7 +258,7 @@ ReadOrderedEntryStream(
                 !active_tasks.back().future.valid()) {
                 active_tasks.pop_back();
             }
-            budget.Release(slice_transient_byte_count);
+            budget.Release({slice_transient_byte_count, 1});
             rememberError(std::current_exception());
             return false;
         }
@@ -312,7 +312,7 @@ ReadOrderedEntryStream(
         }
 
         std::vector<uint8_t>{}.swap(task.result->data);
-        budget.Release(task.slice_transient_bytes);
+        budget.Release({task.slice_transient_bytes, 1});
 
         if (first_error) {
             drainActiveTasks();
@@ -944,6 +944,8 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
     return state;
 }
 
+// Each submitted slice releases admission when its execution scope exits,
+// before the caller drains futures. Future state may retain the task closure.
 void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
     const EntryMeta& meta,
@@ -952,7 +954,8 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto input = input_;
     auto* writer = state.writer.get();
-    auto cancellation_token = cancellation_token_;
+    const auto cancellation_token = cancellation_token_;
+    const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority_);
     futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
     if (meta.encrypted) {
@@ -971,8 +974,9 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
+                budget_priority,
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -988,9 +992,11 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            i,
                                            &state,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                // Move out of packaged_task's closure: completed futures can
+                // retain that closure while submission waits for another slot.
+                auto reservation = std::move(budget_guard);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1029,8 +1035,9 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
+                budget_priority,
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1042,9 +1049,9 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            seq,
                                            &state,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                auto reservation = std::move(budget_guard);
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 

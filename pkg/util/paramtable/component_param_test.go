@@ -17,11 +17,15 @@
 package paramtable
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -196,6 +200,105 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestLoadAdmissionAsyncMemoryDefault(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	assert.EqualValues(t, 2*1024*1024*1024, pt.CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
+}
+
+func TestResolveLoadAdmissionLimits(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	cpuSlots := int64(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum())
+	for _, enabled := range []bool{false, true} {
+		for _, memory := range []string{"", "0", "67108864", "2147483648"} {
+			for _, slots := range []string{"", "0", "7", fmt.Sprint(cpuSlots)} {
+				t.Run(fmt.Sprintf("enabled=%v/memory=%s/slots=%s", enabled, memory, slots), func(t *testing.T) {
+					expected := func(item *ParamItem, value string, asyncDefault int64) int64 {
+						if value != "" {
+							require.NoError(t, pt.Save(item.Key, value))
+							return getAsInt64(value)
+						}
+						require.NoError(t, pt.Reset(item.Key))
+						if enabled {
+							return asyncDefault
+						}
+						return 0
+					}
+					wantMemory := expected(&pt.CommonCfg.LoadTransientBudgetBytes, memory, 2*1024*1024*1024)
+					wantSlots := expected(&pt.CommonCfg.LoadAdmissionSlots, slots, cpuSlots)
+					gotMemory, gotSlots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+					assert.Equal(t, wantMemory, gotMemory)
+					assert.Equal(t, wantSlots, gotSlots)
+				})
+			}
+		}
+	}
+}
+
+func TestResolveLoadAdmissionLimitsInvalidConfiguration(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	for _, enabled := range []bool{false, true} {
+		for _, invalid := range []string{"typo", "", "1.5", "9223372036854775808", "-1"} {
+			t.Run(fmt.Sprintf("enabled=%v/value=%q", enabled, invalid), func(t *testing.T) {
+				require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, invalid))
+				require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, invalid))
+				memory, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+				assert.EqualValues(t, DefaultLoadTransientBudgetBytes, memory)
+				assert.EqualValues(t, DefaultLoadAdmissionSlotsPerCPU*hardware.GetCPUNum(), slots)
+			})
+		}
+	}
+}
+
+func TestResolveLoadAdmissionLimitsPreservesConfiguredSources(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	file := filepath.Join(dir, "load-admission.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("common:\n  loadTransientBudgetBytes: 0\n  loadAdmissionSlots: 9\n"), 0o600))
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(file)})))
+	for _, enabled := range []bool{false, true} {
+		memory, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		assert.Zero(t, memory, "file-sourced explicit zero must not select the async default")
+		assert.EqualValues(t, 9, slots)
+	}
+	require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "1234"))
+	memory, _ := pt.CommonCfg.ResolveLoadAdmissionLimits(false)
+	assert.EqualValues(t, 1234, memory)
+	require.NoError(t, pt.Reset(pt.CommonCfg.LoadTransientBudgetBytes.Key))
+	memory, _ = pt.CommonCfg.ResolveLoadAdmissionLimits(true)
+	assert.Zero(t, memory, "reset must reveal the file's explicit zero")
+
+	t.Setenv("MILVUS_CONF_COMMON_LOADTRANSIENTBUDGETBYTES", "4096")
+	t.Setenv("MILVUS_CONF_COMMON_LOADADMISSIONSLOTS", "0")
+	envPt := &ComponentParam{}
+	envPt.Init(NewBaseTable(SkipRemote(true), Files(nil)))
+	for _, enabled := range []bool{false, true} {
+		memory, slots := envPt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		assert.EqualValues(t, 4096, memory)
+		assert.Zero(t, slots, "environment-sourced explicit zero must remain unlimited")
+	}
+}
+
+func TestStorageV2AsyncLoadThreadPoolSize(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	wantDefault := max(1, min(hardware.GetCPUNum(), 16))
+	assert.False(t, item.Export)
+	assert.Equal(t, wantDefault, item.GetAsInt())
+	for _, invalid := range []string{"0", "-1", "typo", "", "1.5", "2147483648"} {
+		require.NoError(t, pt.Save(item.Key, invalid))
+		assert.Equal(t, wantDefault, item.GetAsInt(), invalid)
+	}
+	require.NoError(t, pt.Save(item.Key, "3"))
+	assert.Equal(t, 3, item.GetAsInt())
+	require.NoError(t, pt.Remove(item.Key))
+	assert.Equal(t, wantDefault, item.GetAsInt())
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -218,6 +321,42 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, item.GetAsBool())
 	})
 
+	t.Run("query node storage v2 async load config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.StorageV2EnableAsyncLoad
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.storageV2.enableAsyncLoad", item.Key)
+		assert.False(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
+	})
+
+	t.Run("query node storage v2 async read window config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes", item.Key)
+		assert.True(t, item.Export)
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+
+		params.Save(item.Key, "0")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "-1")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "16MiB")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "9223372036854775808")
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
+		params.Save(item.Key, "33554432")
+		assert.EqualValues(t, 32*1024*1024, item.GetAsInt64())
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 
@@ -233,12 +372,23 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
+		assert.False(t, Params.LoadTransientBudgetBytes.Export)
 		defer params.Reset(Params.LoadTransientBudgetBytes.Key)
 		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
 		params.Save(Params.LoadTransientBudgetBytes.Key, "-1")
 		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
 		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
 		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
+
+		assert.False(t, Params.LoadAdmissionSlots.Export)
+		defer params.Reset(Params.LoadAdmissionSlots.Key)
+		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "-1")
+		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "16")
+		assert.Equal(t, int64(16), Params.LoadAdmissionSlots.GetAsInt64())
+		params.Save(Params.LoadAdmissionSlots.Key, "0")
+		assert.Equal(t, int64(0), Params.LoadAdmissionSlots.GetAsInt64())
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())

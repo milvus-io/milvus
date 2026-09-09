@@ -15,6 +15,25 @@
 
 namespace milvus::monitor {
 
+// Load admission: gauges are refreshed at scrape time; queue waits are observed
+// only for queued requests, with bounded priority and outcome labels.
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_reserved_bytes);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_capacity_bytes);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_reserved_slots);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_capacity_slots);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_high);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_low);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_high);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_low);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_high_admitted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_high_cancelled);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_low_admitted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_low_cancelled);
+
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_storage_kv_size);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_kv_size_get);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_kv_size_put);

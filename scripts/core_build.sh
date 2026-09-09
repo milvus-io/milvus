@@ -100,6 +100,7 @@ BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
 USE_SVS="OFF"
+WITH_CRT="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
@@ -111,7 +112,7 @@ fi
 : "${USE_PCH:="ON"}"
 : "${USE_UNITY_BUILD:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:f:S:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -157,6 +158,9 @@ while getopts "p:t:s:n:a:y:x:f:S:ulcgbZh" arg; do
   S)
     USE_SVS=$OPTARG
     ;;
+  R)
+    WITH_CRT=$OPTARG
+    ;;
   f)
     TANTIVY_FEATURES=$OPTARG
     ;;
@@ -177,11 +181,12 @@ parameter:
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
 -S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
+-R: build milvus-storage with AWS S3 CRT read path(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
                 "
     exit 0
     ;;
@@ -254,6 +259,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
+-DWITH_CRT=${WITH_CRT} \
 -DMILVUS_USE_PCH=${USE_PCH} \
 -DMILVUS_UNITY_BUILD=${USE_UNITY_BUILD} "
 # Azure build variables removed as we now use Arrow with Azure support directly

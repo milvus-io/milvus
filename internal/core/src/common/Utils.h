@@ -20,6 +20,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <concepts>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -387,6 +388,22 @@ lowerString(const std::string& str) {
         return std::tolower(c);
     });
     return ret;
+}
+
+// Adds unsigned integers and clamps overflow to the type's maximum value.
+template <std::unsigned_integral T>
+[[nodiscard]] constexpr T
+SaturatingAdd(T lhs, T rhs) noexcept {
+    constexpr auto max = std::numeric_limits<T>::max();
+    return rhs > max - lhs ? max : lhs + rhs;
+}
+
+// Multiplies unsigned integers and clamps overflow to the type's maximum value.
+template <std::unsigned_integral T>
+[[nodiscard]] constexpr T
+SaturatingMultiply(T lhs, T rhs) noexcept {
+    constexpr auto max = std::numeric_limits<T>::max();
+    return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
 }
 
 template <typename T>

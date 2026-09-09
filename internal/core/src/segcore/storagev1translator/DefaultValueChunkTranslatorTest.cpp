@@ -41,6 +41,22 @@
 using namespace milvus;
 using namespace milvus::segcore::storagev1translator;
 
+std::unique_ptr<DefaultValueChunkTranslator>
+MakeDefaultValueChunkTranslatorForTest(int64_t segment_id,
+                                       FieldMeta field_meta,
+                                       FieldDataInfo field_data_info,
+                                       bool use_mmap,
+                                       bool mmap_populate) {
+    return std::make_unique<DefaultValueChunkTranslator>(
+        segment_id,
+        std::move(field_meta),
+        std::move(field_data_info),
+        use_mmap,
+        mmap_populate,
+        /*warmup_policy=*/"",
+        MmapChunkWritebackMode::Disabled);
+}
+
 class DefaultValueChunkTranslatorTest : public ::testing::TestWithParam<bool> {
  protected:
     void
@@ -87,7 +103,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
 
     FieldDataInfo field_data_info(101, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     // Test num_cells
@@ -140,7 +156,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
 
     FieldDataInfo field_data_info(102, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -176,7 +192,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestVariousFixedWidthTypes) {
                              value_field);
         FieldDataInfo field_data_info(201, row_count, getMmapDirPath());
 
-        auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, field_meta, field_data_info, use_mmap, true);
 
         EXPECT_GT(translator->num_cells(), 0);
@@ -194,7 +210,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestVariousFixedWidthTypes) {
                              value_field);
         FieldDataInfo field_data_info(202, row_count, getMmapDirPath());
 
-        auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, field_meta, field_data_info, use_mmap, true);
 
         EXPECT_EQ(translator->value_size(), sizeof(int32_t));
@@ -211,7 +227,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestVariousFixedWidthTypes) {
                              value_field);
         FieldDataInfo field_data_info(203, row_count, getMmapDirPath());
 
-        auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, field_meta, field_data_info, use_mmap, true);
 
         EXPECT_EQ(translator->value_size(), sizeof(float));
@@ -228,7 +244,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestVariousFixedWidthTypes) {
                              value_field);
         FieldDataInfo field_data_info(204, row_count, getMmapDirPath());
 
-        auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, field_meta, field_data_info, use_mmap, true);
 
         EXPECT_EQ(translator->value_size(), sizeof(double));
@@ -251,7 +267,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithDefaultValue) {
 
     FieldDataInfo field_data_info(301, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -284,7 +300,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithoutDefaultValue) {
 
     FieldDataInfo field_data_info(302, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -320,7 +336,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestMultipleCells) {
 
     FieldDataInfo field_data_info(401, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     // With 10M rows and int64 (8 bytes), we expect multiple cells
@@ -368,7 +384,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestSmallRowCount) {
 
     FieldDataInfo field_data_info(501, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     // Small row count should result in a single cell
@@ -399,7 +415,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestCellsStorageBytes) {
 
     FieldDataInfo field_data_info(701, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
@@ -423,7 +439,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestGetMultipleCells) {
 
     FieldDataInfo field_data_info(801, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
@@ -470,7 +486,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestJsonType) {
 
     FieldDataInfo field_data_info(901, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -491,7 +507,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestArrayType) {
 
     FieldDataInfo field_data_info(902, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -513,7 +529,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestTimestamptzType) {
 
     FieldDataInfo field_data_info(903, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     EXPECT_GT(translator->num_cells(), 0);
@@ -550,7 +566,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
 
     FieldDataInfo field_data_info(1001, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     // Zero rows should result in zero cells
@@ -572,7 +588,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
 
     FieldDataInfo field_data_info(1101, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
@@ -637,7 +653,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapCreatesFile) {
     // Pass mmap_dir_path to FieldDataInfo
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     // Trigger cell creation
@@ -681,7 +697,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestNoMmapNoFile) {
     // Pass mmap_dir_path even though mmap is disabled
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, false /* use_mmap */, true);
 
     // Trigger cell creation
@@ -725,7 +741,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithString) {
 
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
@@ -762,7 +778,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithNullableField) {
 
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
@@ -802,7 +818,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
 
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     // Ensure we have multiple cells
@@ -853,7 +869,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapFileSize) {
 
     FieldDataInfo field_data_info(field_id, row_count, temp_dir_.string());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
@@ -897,7 +913,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringMultipleCellsWithTailBuffer) {
 
     FieldDataInfo field_data_info(1201, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     // Should have at least 2 cells (primary cells + tail cell)
@@ -954,7 +970,7 @@ TEST_P(DefaultValueChunkTranslatorTest,
 
     FieldDataInfo field_data_info(1202, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
@@ -1008,7 +1024,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestFixedWidthMultipleCellsWithTail) {
 
     FieldDataInfo field_data_info(1203, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
@@ -1060,7 +1076,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorFloat) {
 
     FieldDataInfo field_data_info(1300, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
@@ -1106,7 +1122,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
 
     FieldDataInfo field_data_info(1302, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, GetParam(), true);
 
     EXPECT_EQ(translator->value_size(), 0);
@@ -1152,7 +1168,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableSparseVector) {
 
     FieldDataInfo field_data_info(1301, row_count, getMmapDirPath());
 
-    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
     size_t num_cells = translator->num_cells();
