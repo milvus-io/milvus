@@ -18,12 +18,12 @@ package flushall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
