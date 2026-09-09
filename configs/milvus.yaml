@@ -653,6 +653,7 @@ queryCoord:
     maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   queryView:
+    targetRowsPerShardNode: 100000 # Target sealed rows per QueryNode for QueryView shard fanout.
     fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord

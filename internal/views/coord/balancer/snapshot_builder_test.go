@@ -16,7 +16,31 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestSnapshotBuilderReadsBalanceConfigForEachCycle(t *testing.T) {
+	params := paramtable.Get()
+	item := &params.QueryCoordCfg.QueryViewTargetRowsPerShardNode
+	require.NoError(t, params.Reset(item.Key))
+	t.Cleanup(func() { require.NoError(t, params.Reset(item.Key)) })
+
+	builder := NewSnapshotBuilder(
+		emptyLoadConfigStore(t),
+		emptyRegistry(t),
+		&fakeNodeProvider{infos: map[int64]*NodeInfo{}},
+		&fakeDataViewProvider{},
+		DefaultBalanceConfig(),
+	)
+
+	first := buildFullSnapshot(builder).Config
+	require.Equal(t, int64(100_000), first.TargetRowsPerShardNode)
+
+	require.NoError(t, params.Save(item.Key, "250000"))
+	second := buildFullSnapshot(builder).Config
+	require.Equal(t, int64(250_000), second.TargetRowsPerShardNode)
+	require.NotSame(t, first, second)
+}
 
 // --- fake providers used throughout the tests ---
 
@@ -608,7 +632,7 @@ func TestSnapshotBuilder_ScopedRefreshUsesCachedNonTargetAndMatchesFullPlan(t *t
 	assert.Empty(t, provider.segmentRequests, "cached non-target rows must not trigger metadata I/O")
 
 	oracle := &BalancerSnapshot{
-		Config:             builder.config,
+		Config:             builder.currentBalanceConfig(),
 		LoadConfigSnapshot: store.Snapshot(),
 		ShardViewSnapshot:  registry.Snapshot(),
 		DataViewSnapshot:   provider.DataViewSnapshot(context.Background()),
