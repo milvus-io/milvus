@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -44,6 +45,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
 )
+
+func TestMixCoordCollectionAvailability(t *testing.T) {
+	mockey.PatchConvey("broker uses the in-process rootcoord availability check", t, func() {
+		core := &rootcoord.Core{}
+		mockey.Mock((*rootcoord.Core).IsCollectionAvailable).To(func(receiver *rootcoord.Core, id int64) bool {
+			assert.Same(t, core, receiver)
+			return id == 123
+		}).Build()
+		b := broker.NewCoordinatorBroker(&mixCoordImpl{rootcoordServer: core})
+		assert.True(t, b.IsCollectionAvailable(123))
+		assert.False(t, b.IsCollectionAvailable(124))
+	})
+}
 
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
