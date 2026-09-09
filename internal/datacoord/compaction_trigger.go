@@ -473,13 +473,17 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	maxFragments := Params.DataCoordCfg.MaxFragmentsPerGroup.GetAsInt64()
 	middleSize := compactionMiddleSize(expectedSize)
 
-	// Step 1: Classify segments
+	// Step 1: Classify segments.
+	// Force compaction (manual trigger) bypasses the single-compaction
+	// classification so all segments are packed together.
 	var prioritized []*SegmentInfo
 	var compactable []*SegmentInfo
 
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
-		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if signal.isForce {
+			compactable = append(compactable, segment)
+		} else if t.ShouldDoSingleCompaction(segment, compactTime) {
 			prioritized = append(prioritized, segment)
 		} else if !isFullSegment(expectedSize, segment.GetResidualSegmentSize()) {
 			compactable = append(compactable, segment)
@@ -497,11 +501,18 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		})
 	}
 
-	// Step 2: Full-tier composition
+	// Step 2: Full-tier composition.
+	// Force compaction bypasses the fill-rate gate and minimum-segment
+	// count so every candidate is packed.
 	packer := newSegmentPacker("full-tier", compactable, compactTime)
 	fullMaxLeftSize := expectedSize - compactionFullThreshold(expectedSize)
+	minSegs := int64(2)
+	if signal.isForce {
+		fullMaxLeftSize = math.MaxInt64
+		minSegs = 1
+	}
 	for {
-		pack, _ := packer.pack(expectedSize, fullMaxLeftSize, 2, math.MaxInt64)
+		pack, _ := packer.pack(expectedSize, fullMaxLeftSize, minSegs, math.MaxInt64)
 		if len(pack) == 0 {
 			break
 		}
@@ -514,6 +525,19 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			totalRows: rows,
 			maxSize:   expectedSize,
 		})
+	}
+
+	// Force compaction: segments too large for the target size still
+	// need individual compaction tasks (e.g. to apply deletes).
+	if signal.isForce {
+		for _, s := range packer.candidates {
+			buckets = append(buckets, &compactionBucket{
+				segments:  []*SegmentInfo{s},
+				totalRows: s.GetNumOfRows(),
+				maxSize:   expectedSize,
+			})
+		}
+		packer.candidates = nil
 	}
 
 	// Step 3: Fragment-tier composition

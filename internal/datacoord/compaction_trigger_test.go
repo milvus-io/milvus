@@ -564,7 +564,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				},
 				mock0Allocator,
 				nil,
-				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 3)},
+				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			2,
@@ -598,20 +598,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
-			// Under two-tier compaction, each forced segment gets its own
-			// single-segment bucket, producing 2 separate plans.
-			gotSegIDs := make(map[int64]struct{})
-			for i := 0; i < 2; i++ {
-				select {
-				case plan := <-spy.spyChan:
-					assert.Equal(t, 1, len(plan.SegmentBinlogs))
-					gotSegIDs[plan.SegmentBinlogs[0].SegmentID] = struct{}{}
-				case <-time.After(3 * time.Second):
-					assert.Fail(t, "timeout waiting for plan")
-					return
-				}
+			select {
+			case plan := <-spy.spyChan:
+				assert.Equal(t, 2, len(plan.SegmentBinlogs))
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "timeout waiting for plan")
+				return
 			}
-			assert.Equal(t, 2, len(gotSegIDs))
 		})
 
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
@@ -648,22 +641,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			// assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
-			drained := 0
-			for {
-				select {
-				case plan := <-spy.spyChan:
-					assert.NotNil(t, plan)
-					assert.Equal(t, 1, len(plan.SegmentBinlogs))
-					drained++
-				case <-time.After(3 * time.Second):
-					if drained == 0 {
-						assert.Fail(t, "timeout waiting for plans")
-					}
-					goto done
-				}
+			select {
+			case plan := <-spy.spyChan:
+				assert.NotNil(t, plan)
+				assert.Equal(t, 2, len(plan.SegmentBinlogs))
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "timeout waiting for plans")
 			}
-		done:
-			assert.GreaterOrEqual(t, drained, 1, "expected at least 1 plan")
 		})
 
 		t.Run(tt.name+" with getCompact error", func(t *testing.T) {
@@ -939,21 +923,13 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
 
-			// Under the two-tier compaction algorithm, each forced segment
-			// gets its own single-segment bucket, so nSegments separate
-			// plans are generated instead of one merged plan.
-			gotSegmentIDs := make(map[int64]struct{})
-			for i := 0; i < nSegments; i++ {
-				select {
-				case plan := <-spy.spyChan:
-					assert.NotEmpty(t, plan)
-					assert.Equal(t, 1, len(plan.SegmentBinlogs))
-					gotSegmentIDs[plan.SegmentBinlogs[0].SegmentID] = struct{}{}
-				case <-time.After(2 * time.Second):
-					assert.Fail(t, "timeout")
-				}
+			select {
+			case plan := <-spy.spyChan:
+				assert.NotEmpty(t, plan)
+				assert.Equal(t, nSegments, len(plan.SegmentBinlogs))
+			case <-time.After(2 * time.Second):
+				assert.Fail(t, "timeout")
 			}
-			assert.Equal(t, nSegments, len(gotSegmentIDs))
 		})
 	}
 }
@@ -2097,7 +2073,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 		}})
 	}
 
-	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 3), meta: mt}
+	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}
 	trigger := newCompactionTrigger(mt, inspector, newMock0Allocator(t), newMockHandlerWithMeta(mt), newMockVersionManager())
 	err := trigger.handleSignal(&compactionSignal{
 		id:           1,
@@ -2108,18 +2084,16 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	var got []int64
-	for i := 0; i < 3; i++ {
-		select {
-		case plan := <-inspector.spyChan:
-			assert.Equal(t, 1, len(plan.GetSegmentBinlogs()))
-			got = append(got, plan.GetSegmentBinlogs()[0].GetSegmentID())
-		case <-time.After(time.Second):
-			assert.Fail(t, "expected compaction plan for mixed schema version segments")
-			return
+	select {
+	case plan := <-inspector.spyChan:
+		var got []int64
+		for _, segment := range plan.GetSegmentBinlogs() {
+			got = append(got, segment.GetSegmentID())
 		}
+		assert.ElementsMatch(t, []int64{101, 102, 103}, got)
+	case <-time.After(time.Second):
+		assert.Fail(t, "expected compaction plan for mixed schema version segments")
 	}
-	assert.ElementsMatch(t, []int64{101, 102, 103}, got)
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
