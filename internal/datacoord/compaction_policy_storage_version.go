@@ -104,15 +104,17 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		return map[CompactionTriggerType][]CompactionView{}, nil
 	}
 
-	collections := policy.meta.GetCollections()
-
 	if time.Since(policy.lastPeriod) > paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.GetAsDuration(time.Second) {
 		policy.currentCount = 0
 		policy.lastPeriod = time.Now()
 	}
 
 	maxCount := paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.GetAsInt()
+	if policy.currentCount >= maxCount {
+		return map[CompactionTriggerType][]CompactionView{TriggerTypeStorageVersionUpgrade: nil}, nil
+	}
 
+	collections := policy.meta.GetCollections()
 	views := make([]CompactionView, 0)
 	for _, collection := range collections {
 		if policy.currentCount >= maxCount {
@@ -135,7 +137,6 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 }
 
 func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Context, collectionID int64, maxCount int) ([]CompactionView, error) {
-	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to get collection from handler",
@@ -147,19 +148,13 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 		return nil, nil
 	}
 	if collection.IsExternal() {
-		log.Info(ctx, "skip storage version compaction for external collection")
+		mlog.Info(ctx, "skip storage version compaction for external collection", mlog.FieldCollectionID(collectionID))
 		return nil, nil
 	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		mlog.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
-		return nil, err
-	}
-
-	newTriggerID, err := policy.allocator.AllocID(ctx)
-	if err != nil {
-		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", mlog.Err(err))
 		return nil, err
 	}
 
@@ -195,6 +190,15 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 					segment.GetStorageVersion() == storage.StorageV3 &&
 					!segmentColumnGroupFormatsAllEqual(segment, targetFormat)))
 	}))
+	if len(segments) == 0 || policy.currentCount >= maxCount {
+		return nil, nil
+	}
+
+	newTriggerID, err := policy.allocator.AllocID(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", mlog.Err(err))
+		return nil, err
+	}
 
 	views := make([]CompactionView, 0, len(segments))
 	for _, segment := range segments {
