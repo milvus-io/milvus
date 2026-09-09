@@ -6481,12 +6481,6 @@ type BroadcastHeader struct {
 	// New broadcast message with the same resource key will be rejected.
 	// And the user can watch the resource key to known when the resource is released.
 	AckSyncUp bool `protobuf:"varint,4,opt,name=ack_sync_up,json=ackSyncUp,proto3" json:"ack_sync_up,omitempty"` // whether the broadcast operation is need to be synced up between the streaming node and the coordinator.
-	// If the ack_sync_up is false, the broadcast operation will be acked once the recovery storage see the message at current vchannel,
-	// the fast ack operation can be applied to speed up the broadcast operation.
-	// If the ack_sync_up is true, the broadcast operation will be acked after the checkpoint of current vchannel reach current message.
-	// the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
-	// e.g. if truncate collection operation want to call ack once callback after the all segment are flushed at current vchannel,
-	// it should set the ack_sync_up to be true.
 	// append_first_vchannels are the vchannels the broadcaster appends and
 	// persists BEFORE it appends any other replica of this broadcast. Empty for
 	// every broadcast except a shard split, whose source replicas must be in

@@ -862,6 +862,7 @@ message BroadcastHeader {
     // the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
     // e.g. if truncate collection operation want to call ack once callback after the all segment are flushed at current vchannel,
     // it should set the ack_sync_up to be true.
+
     // append_first_vchannels are the vchannels the broadcaster appends and
     // persists BEFORE it appends any other replica of this broadcast. Empty for
     // every broadcast except a shard split, whose source replicas must be in
