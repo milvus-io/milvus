@@ -1,72 +1,72 @@
 package streaming
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Shard split is not supported on a cluster with replication enabled: a
 // replicated transaction never expires, and the secondary maps pchannels by
 // index position, so a topology change it cannot represent would corrupt it.
-// The three messages below are therefore marked UNREPLICABLE, which keeps them
-// out of the replicate stream -- they carry SOURCE-cluster vchannel names in
-// their headers and in CreateVChannel's body, and the receiving side rewrites
-// in-body channel names for CreateCollection only.
+// The SplitShard broadcast built here is therefore marked UNREPLICABLE, which
+// keeps it out of the replicate stream -- it carries SOURCE-cluster vchannel
+// names in its header, and in its body's genesis CreateCollectionRequest.
 //
 // That is containment, not the gate. The design (20260610-shard_split.md, §8)
 // asks for the split to be REJECTED on a replicating cluster at the DataCoord
 // trigger AND again at the StreamingNode; the second check is not implemented
 // here, because the shard interceptor does not hold the WAL's replicate state.
 // TODO: thread the replicates manager into the shard interceptor and refuse
-// these three message types outright when the WAL is in a replicating topology.
+// this message type outright when the WAL is in a replicating topology.
 
-// ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
-// has already been fenced by THIS task. The caller treats it as success -- its
-// own fence holds -- and rolls forward.
+// SplitShardParam is the parameter of NewSplitShardBroadcastMessage.
 //
-// The result returned alongside it carries the recorded T_switch, read back off
-// the error (see SplitShard). The BARRIER does not need it: it is freshly
-// allocated and is only ever a lower bound. The redistribution DRAIN does --
-// it gates on channelCheckpoint(source) >= T_switch -- so a caller that lost
-// the persisted value recovers it here rather than proceeding with zero.
-var ErrSourceVChannelFenced = errors.New("source vchannel is already fenced by shard split")
-
-// ErrSourceVChannelFencedByAnotherTask is returned when the source vchannel is
-// already fenced by a DIFFERENT split task.
-//
-// This is not the caller's own retry and must not be rolled forward: two tasks
-// would then carve targets out of one source, each unaware of the other's. It
-// is how the exclusion between a rehash and an automatic split is enforced at
-// this layer -- the fence rejection alone cannot enforce it, because without the
-// task id the two cases are indistinguishable.
-var ErrSourceVChannelFencedByAnotherTask = errors.New("source vchannel is already fenced by another shard split task")
-
-// SplitShardParam is the parameter of SplitShard.
+// It merges what used to be three separate appends -- the source fence, the
+// targets' genesis, and their routing commit -- into the one broadcast this
+// package now builds: the source vchannels are appended first (so the fence
+// lands before any target can be observed), the targets' genesis travels in
+// the body alongside the routing post-image the ack callback commits.
 type SplitShardParam struct {
-	CollectionID   int64
-	SourceVChannel string
+	CollectionID int64
+	DBID         int64
 	// SplitTaskID is the unique split task id allocated by the coordinator,
 	// used for idempotency and split task correlation.
 	SplitTaskID int64
-	// Targets are the target shards the source shard splits into. Their
-	// residues must be disjoint and exactly cover the source shard's residues,
-	// which is guaranteed by the coordinator.
+	// SourceVChannels are the vchannels this split fences. One for a split or a
+	// doubling, every shard of the collection for a rehash. They are appended
+	// (and therefore persisted) before any other replica of the broadcast.
+	SourceVChannels []string
+	// Targets are the target shards the sources split into, each with its
+	// vchannel and the residues it owns. Their residues must be disjoint and
+	// exactly cover the sources' residues, which is guaranteed by the
+	// coordinator.
 	Targets []*message.SplitShardTarget
 	// RoutingModulus is the collection's routing modulus the targets' residues
-	// are taken against. Recorded in the fence message because the record is
-	// permanent while the collection's modulus moves.
+	// are taken against.
 	RoutingModulus uint64
+	// Schema is the current schema of the collection; the targets' genesis
+	// (and their schema history) starts from it.
+	Schema *schemapb.CollectionSchema
+	// PartitionIDs is the current partition snapshot of the collection,
+	// registered on every target's genesis.
+	PartitionIDs []int64
+	// Routing is the routing post-image the ack callback commits to the
+	// collection meta once every replica has landed: the grown vchannel list,
+	// every shard's state and residues, the modulus and shard_by. Carried
+	// whole so a replay never depends on mutable meta.
+	Routing *message.AlterCollectionMessageUpdates
+	// ControlChannel is the collection's control channel; it receives the
+	// broadcast like any other vchannel but is never an append-first target.
+	ControlChannel string
 }
 
 // Validate validates the parameter.
@@ -74,263 +74,173 @@ func (p *SplitShardParam) Validate() error {
 	if p.CollectionID <= 0 {
 		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
 	}
-	if p.SourceVChannel == "" {
-		return merr.WrapErrParameterMissingMsg("source vchannel must be set")
-	}
-	if p.RoutingModulus == 0 {
-		return merr.WrapErrParameterMissingMsg("routing modulus must be set")
-	}
-	// No lower bound on the target count. Targets here are the shards THIS source
-	// must front during the split window, not the shards the split produces: a
-	// source of a rehash fronts only its share of them, which may be one or, when
-	// the collection shrinks, none at all. "A split produces at least two shards"
-	// is a property of the task and is checked where the task is prepared; a
-	// fence message cannot see the other sources' shares to check it here.
-	vchannels := make(map[string]struct{}, len(p.Targets)+1)
-	vchannels[p.SourceVChannel] = struct{}{}
-	for _, target := range p.Targets {
-		if target.GetVchannel() == "" {
-			return merr.WrapErrParameterMissingMsg("target vchannel must be set")
-		}
-		if _, ok := vchannels[target.GetVchannel()]; ok {
-			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in shard split", target.GetVchannel())
-		}
-		vchannels[target.GetVchannel()] = struct{}{}
-		// The message is a PERMANENT record -- it is what a replay derives the
-		// window's fronting assignment from -- so a target without residues, or
-		// with one that is not below the modulus they are taken against, is
-		// refused here rather than written and puzzled over later.
-		if len(target.GetRouting().GetBuckets()) == 0 {
-			return merr.WrapErrParameterMissingMsg("target %s carries no residue", target.GetVchannel())
-		}
-		for _, residue := range target.GetRouting().GetBuckets() {
-			if residue >= p.RoutingModulus {
-				return merr.WrapErrParameterInvalidMsg(
-					"target %s owns residue %d, which is not below the routing modulus %d",
-					target.GetVchannel(), residue, p.RoutingModulus)
-			}
-		}
-	}
-	return nil
-}
-
-// SplitShardResult is the result of SplitShard.
-type SplitShardResult struct {
-	// SwitchTimeTick is T_switch: the time tick of the SplitShard message.
-	// The source vchannel holds only messages <= T_switch, and every message
-	// of the target vchannels is strictly greater than it.
-	SwitchTimeTick uint64
-}
-
-// SplitShard executes the write switch of a shard split on the source
-// vchannel: it appends a single SplitShard message that fences the source
-// vchannel forever. The source StreamingNode's shard handler auto-flushes
-// every growing segment of the vchannel as of the message's time tick and
-// embeds the sealed segment ids into the message header, so no separate
-// ManualFlush is needed. The returned SwitchTimeTick is T_switch.
-//
-// The call is idempotent: a retry on an already-fenced source vchannel
-// returns ErrSourceVChannelFenced together with a result carrying the recorded
-// T_switch, so the caller recovers T_switch even after a crash that lost it.
-func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*SplitShardResult, error) {
-	if err := param.Validate(); err != nil {
-		return nil, err
-	}
-
-	splitMsg, err := message.NewSplitShardMessageBuilderV2().
-		WithVChannel(param.SourceVChannel).
-		WithHeader(&message.SplitShardMessageHeader{
-			CollectionId:   param.CollectionID,
-			SplitTaskId:    param.SplitTaskID,
-			Targets:        param.Targets,
-			RoutingModulus: param.RoutingModulus,
-		}).
-		WithBody(&message.SplitShardMessageBody{}).
-		WithUnreplicable().
-		BuildMutable()
-	if err != nil {
-		return nil, errors.Wrap(err, "build split shard message failed")
-	}
-	splitResult, err := w.RawAppend(ctx, splitMsg)
-	if err != nil {
-		if streamErr := status.AsStreamingError(err); streamErr.IsShardFenced() {
-			// The source is already fenced. WHO fenced it decides what happens
-			// next, and the streamingnode carries both facts back on the error.
-			if taskID := streamErr.FencedSplitTaskId; taskID != 0 && taskID != param.SplitTaskID {
-				// Another task owns this source. Rolling forward would carve two
-				// sets of targets out of one source, each task unaware of the
-				// other's -- so this aborts instead.
-				return nil, errors.Wrapf(ErrSourceVChannelFencedByAnotherTask,
-					"source %s is fenced by split task %d, this task is %d",
-					param.SourceVChannel, taskID, param.SplitTaskID)
-			}
-			// This task's own fence, replayed. The recorded T_switch comes back
-			// with it, so the caller recovers it even after a crash that lost
-			// the persisted value. A zero task id is a fence placed by a build
-			// that did not record one: treated as our own, which is what the
-			// behavior was before the id existed.
-			return &SplitShardResult{SwitchTimeTick: streamErr.FencedTimeTick}, errors.Wrapf(ErrSourceVChannelFenced, "%s", err.Error())
-		}
-		return nil, errors.Wrap(err, "append split shard message failed")
-	}
-
-	return &SplitShardResult{
-		SwitchTimeTick: splitResult.TimeTick,
-	}, nil
-}
-
-// InitSplitTargetVChannelsParam is the parameter of InitSplitTargetVChannels.
-type InitSplitTargetVChannelsParam struct {
-	CollectionID   int64
-	DBID           int64
-	DBName         string
-	CollectionName string
-	// Schema is the current schema of the collection; the new vchannels'
-	// schema history starts from it.
-	Schema *schemapb.CollectionSchema
-	// PartitionIDs is the current partition snapshot of the collection.
-	// Partitions created concurrently with the initialization must be
-	// reconciled by the coordinator afterwards (appending the missed
-	// CreatePartition messages is idempotent).
-	PartitionIDs []int64
-	// SplitTaskID and SourceVChannels record the origin of the new vchannels.
-	// More than one source when the collection is rehashed to an arbitrary shard
-	// count: every target is then carved out of every source at once.
-	SplitTaskID     int64
-	SourceVChannels []string
-	// BarrierTimeTick is the barrier the CreateVChannel appends are held
-	// behind: the hosting streamingnode blocks each one until its TSO has
-	// passed this tick, so every message of the new WALs is strictly greater
-	// than it even if that node holds an older prefetched TSO batch.
-	//
-	// The caller sets it to T_switch (the largest one, when the targets are
-	// carved out of several sources). Any value >= T_switch is correct; a
-	// larger one only makes the targets wait longer to be born.
-	BarrierTimeTick uint64
-	// Targets are the target shards to create, each with its vchannel and the
-	// residues it owns (embedded into the CreateVChannel header).
-	Targets []*message.SplitShardTarget
-	// RoutingModulus is the collection's routing modulus the targets' residues
-	// are taken against, recorded alongside them for the same reason.
-	RoutingModulus uint64
-}
-
-// Validate validates the parameter.
-func (p *InitSplitTargetVChannelsParam) Validate() error {
-	if p.CollectionID <= 0 {
-		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
-	}
-	if p.Schema == nil {
-		return merr.WrapErrParameterMissingMsg("collection schema must be set")
-	}
-	if len(p.PartitionIDs) == 0 {
-		return merr.WrapErrParameterMissingMsg("partition snapshot must not be empty")
+	if p.SplitTaskID <= 0 {
+		return merr.WrapErrParameterInvalidMsg("split task id must be positive, got %d", p.SplitTaskID)
 	}
 	if len(p.SourceVChannels) == 0 {
 		return merr.WrapErrParameterMissingMsg("source vchannels must be set")
 	}
-	if p.BarrierTimeTick == 0 {
-		return merr.WrapErrParameterMissingMsg("barrier time tick must be set")
-	}
-	if len(p.Targets) == 0 {
-		return merr.WrapErrParameterMissingMsg("targets must not be empty")
-	}
 	if p.RoutingModulus == 0 {
 		return merr.WrapErrParameterMissingMsg("routing modulus must be set")
 	}
-	vchannels := make(map[string]struct{}, len(p.Targets)+len(p.SourceVChannels))
+	if p.Schema == nil {
+		return merr.WrapErrParameterMissingMsg("collection schema must be set")
+	}
+	if p.ControlChannel == "" {
+		return merr.WrapErrParameterMissingMsg("control channel must be set")
+	}
+	if p.Routing == nil {
+		return merr.WrapErrParameterMissingMsg("routing post-image must be set")
+	}
+
+	// No lower bound on the target count. Targets here are the shards THIS set
+	// of sources must front during the split window, not the shards the split
+	// produces: a source of a rehash fronts only its share of them, which may
+	// be one or, when the collection shrinks, none at all. "A split produces at
+	// least two shards" is a property of the task and is checked where the
+	// task is prepared; this parameter cannot see the other sources' shares to
+	// check it here.
+	vchannels := make(map[string]struct{}, len(p.SourceVChannels)+len(p.Targets))
 	for _, source := range p.SourceVChannels {
 		if source == "" {
 			return merr.WrapErrParameterMissingMsg("source vchannel must be set")
 		}
 		vchannels[source] = struct{}{}
 	}
+	routingTargets := make(map[string]struct{}, len(p.Routing.GetVirtualChannelNames()))
+	for _, vchannel := range p.Routing.GetVirtualChannelNames() {
+		routingTargets[vchannel] = struct{}{}
+	}
 	for _, target := range p.Targets {
-		if target.GetVchannel() == "" {
+		vchannel := target.GetVchannel()
+		if vchannel == "" {
 			return merr.WrapErrParameterMissingMsg("target vchannel must be set")
 		}
-		if _, ok := vchannels[target.GetVchannel()]; ok {
-			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in split target initialization", target.GetVchannel())
+		if _, ok := vchannels[vchannel]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in shard split", vchannel)
 		}
-		vchannels[target.GetVchannel()] = struct{}{}
+		vchannels[vchannel] = struct{}{}
+		// The message is a PERMANENT record -- it is what a replay derives the
+		// window's fronting assignment from -- so a target without residues, or
+		// with one that is not below the modulus they are taken against, is
+		// refused here rather than written and puzzled over later.
+		if len(target.GetRouting().GetBuckets()) == 0 {
+			return merr.WrapErrParameterMissingMsg("target %s carries no residue", vchannel)
+		}
+		for _, residue := range target.GetRouting().GetBuckets() {
+			if residue >= p.RoutingModulus {
+				return merr.WrapErrParameterInvalidMsg(
+					"target %s owns residue %d, which is not below the routing modulus %d",
+					vchannel, residue, p.RoutingModulus)
+			}
+		}
+		if _, ok := routingTargets[vchannel]; !ok {
+			return merr.WrapErrParameterMissingMsg("routing post-image is missing target vchannel %s", vchannel)
+		}
 	}
 	return nil
 }
 
-// InitSplitTargetVChannels creates every target vchannel of a shard split by
-// appending one CreateVChannel message per target — the dedicated genesis
-// message that the shard manager, the recovery storage and the flusher handle —
-// carrying the collection's current schema and partition snapshot, the target's
-// routing residues, and BarrierTimeTick = T_switch (so every message of the new
-// WAL is strictly greater than T_switch, and creation doubles as activation).
-// It returns the WAL position each target vchannel was born at.
+// SplitShardResult is the decoded result of the SplitShard broadcast.
+type SplitShardResult struct {
+	// SwitchTimeTicks is T_switch, keyed by source vchannel: the time tick of
+	// the SplitShard message on that replica. The source vchannel holds only
+	// messages <= T_switch, and every message of the target vchannels is
+	// strictly greater than it.
+	SwitchTimeTicks map[string]uint64
+	// GenesisPositions is the target vchannels' first checkpoint, one per
+	// target, in the order of SplitShardParam.Targets: the position the
+	// flusher/delegator start from, since the vchannel begins with this
+	// message.
+	GenesisPositions []*msgpb.MsgPosition
+}
+
+// NewSplitShardBroadcastMessage builds the SplitShard broadcast: the source
+// vchannels are named append-first (so the fence lands before any other
+// replica is observed), the targets' genesis and the routing post-image travel
+// in the body, and the whole thing is deduplicated by a collection-scoped
+// idempotency key derived from the split task id -- a retry of the same task
+// against the same collection is therefore the SAME broadcast, not a new one.
 //
-// The call is idempotent: every consumer of the CreateVChannel message skips an
-// already-known vchannel, so a retry after a partial failure is safe. A retry
-// does report the RE-appended genesis position rather than the original one;
-// that is still a position from which every message the vchannel carries is
-// readable, because a target takes no write until the coordinator commits the
-// routing, which happens after this call returns.
-//
-// The positions are not a convenience. A vchannel that exists but has never
-// been written to has no checkpoint, and datacoord's seek-position fallback
-// then reaches for the earliest segment's DML position — which on a target
-// holding only rewrite output carries a timestamp but neither a message ID nor
-// a WAL name, because a rewritten segment is produced by compaction rather than
-// consumed from the WAL. A dispatcher built on that position skips its Seek and
-// panics the querynode the first time it reads. Recording the genesis position
-// as the channel's first checkpoint means the fallback never has to guess: the
-// CreateVChannel message id is the one position from which every message the
-// vchannel will ever carry is readable, since the vchannel begins with it.
-func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSplitTargetVChannelsParam) ([]*msgpb.MsgPosition, error) {
+// The message is marked UNREPLICABLE for the reason given at the top of this
+// file.
+func NewSplitShardBroadcastMessage(param SplitShardParam) (message.BroadcastMutableMessage, error) {
 	if err := param.Validate(); err != nil {
 		return nil, err
 	}
-	genesis := make([]*msgpb.MsgPosition, 0, len(param.Targets))
+	vchannels := make([]string, 0, len(param.SourceVChannels)+len(param.Targets)+1)
+	vchannels = append(vchannels, param.SourceVChannels...)
 	for _, target := range param.Targets {
-		vchannel := target.GetVchannel()
-		msg, err := message.NewCreateVChannelMessageBuilderV2().
-			WithVChannel(vchannel).
-			WithHeader(&message.CreateVChannelMessageHeader{
-				CollectionId:         param.CollectionID,
-				PartitionIds:         param.PartitionIDs,
-				DbId:                 param.DBID,
-				SplitTaskId:          param.SplitTaskID,
-				SplitSourceVchannels: param.SourceVChannels,
-				Routing:              target.GetRouting(),
-				RoutingModulus:       param.RoutingModulus,
-			}).
-			WithBody(&message.CreateCollectionRequest{
-				DbName:               param.DBName,
-				CollectionName:       param.CollectionName,
-				DbID:                 param.DBID,
-				CollectionID:         param.CollectionID,
-				CollectionSchema:     param.Schema,
-				VirtualChannelNames:  []string{vchannel},
-				PhysicalChannelNames: []string{funcutil.ToPhysicalChannel(vchannel)},
-			}).
-			WithUnreplicable().
-			BuildMutable()
-		if err != nil {
-			return nil, errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
-		}
-		result, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.BarrierTimeTick})
-		if err != nil {
-			return nil, errors.Wrapf(err, "create split target vchannel %s failed", vchannel)
-		}
-		genesis = append(genesis, splitTargetGenesisPosition(vchannel, result))
+		vchannels = append(vchannels, target.GetVchannel())
 	}
-	return genesis, nil
+	vchannels = append(vchannels, param.ControlChannel)
+
+	msg, err := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    param.CollectionID,
+			SplitTaskId:     param.SplitTaskID,
+			Targets:         param.Targets,
+			RoutingModulus:  param.RoutingModulus,
+			SourceVchannels: param.SourceVChannels,
+			PartitionIds:    param.PartitionIDs,
+			DbId:            param.DBID,
+		}).
+		WithBody(&message.SplitShardMessageBody{
+			Genesis: &msgpb.CreateCollectionRequest{CollectionSchema: param.Schema},
+			Routing: param.Routing,
+		}).
+		WithBroadcast(vchannels, message.OptBuildBroadcastAppendFirst(param.SourceVChannels...)).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(param.CollectionID, fmt.Sprintf("shard-split-%d", param.SplitTaskID))).
+		WithUnreplicable().
+		BuildBroadcast()
+	if err != nil {
+		return nil, errors.Wrap(err, "build split shard broadcast message failed")
+	}
+	return msg, nil
 }
 
-// splitTargetGenesisPosition turns the CreateVChannel append result into the
-// target vchannel's first checkpoint.
+// SplitShardResultFrom decodes a SplitShard broadcast's append result into
+// each source's T_switch and each target's genesis position.
+//
+// A result missing a source or a target is a Milvus-internal bug -- the
+// broadcaster acks a broadcast only once every one of its vchannels has been
+// appended -- so it is reported as a System error (WrapErrServiceInternalMsg),
+// never as a caller mistake, and is not retriable: retrying the same broadcast
+// append result decode cannot make a missing entry appear.
+func SplitShardResultFrom(param SplitShardParam, result *types.BroadcastAppendResult) (*SplitShardResult, error) {
+	switchTimeTicks := make(map[string]uint64, len(param.SourceVChannels))
+	for _, source := range param.SourceVChannels {
+		appendResult := result.GetAppendResult(source)
+		if appendResult == nil {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"split shard broadcast result is missing source vchannel %s", source)
+		}
+		switchTimeTicks[source] = appendResult.TimeTick
+	}
+	genesisPositions := make([]*msgpb.MsgPosition, 0, len(param.Targets))
+	for _, target := range param.Targets {
+		vchannel := target.GetVchannel()
+		appendResult := result.GetAppendResult(vchannel)
+		if appendResult == nil {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"split shard broadcast result is missing target vchannel %s", vchannel)
+		}
+		genesisPositions = append(genesisPositions, splitTargetGenesisPosition(vchannel, appendResult))
+	}
+	return &SplitShardResult{
+		SwitchTimeTicks:  switchTimeTicks,
+		GenesisPositions: genesisPositions,
+	}, nil
+}
+
+// splitTargetGenesisPosition turns a target vchannel's append result into its
+// first checkpoint.
 //
 // The message id is used rather than the last-confirmed one, for the reason
 // collection creation uses it (ddl_callbacks_create_collection.go): a zero
 // last-confirmed id serializes to nil under WoodPecker and downstream
 // assertions panic on a nil position, while the message id is just as complete
-// here — the vchannel is created BY this message, so nothing precedes it.
+// here -- the vchannel is created BY this message, so nothing precedes it.
 func splitTargetGenesisPosition(vchannel string, result *types.AppendResult) *msgpb.MsgPosition {
 	return &msgpb.MsgPosition{
 		ChannelName: vchannel,
@@ -341,78 +251,4 @@ func splitTargetGenesisPosition(vchannel string, result *types.AppendResult) *ms
 		WALName:   commonpb.WALName(result.MessageID.WALName()),
 		Timestamp: result.TimeTick,
 	}
-}
-
-// DropSplitVChannelParam is the parameter of DropSplitVChannel.
-type DropSplitVChannelParam struct {
-	CollectionID int64
-	DBID         int64
-	// VChannel is the retired split source being reclaimed.
-	VChannel string
-	// SplitTaskID correlates the teardown with the split that retired it.
-	SplitTaskID int64
-}
-
-// Validate validates the parameter.
-func (p *DropSplitVChannelParam) Validate() error {
-	if p.CollectionID <= 0 {
-		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
-	}
-	if p.VChannel == "" {
-		return merr.WrapErrParameterMissingMsg("vchannel must be set")
-	}
-	return nil
-}
-
-// DropSplitVChannel retires one vchannel a shard split left behind: the
-// streamingnode tears down its shard-manager entry, recovery info and flusher.
-//
-// It must be appended BEFORE the coordinator drops the vchannel from the
-// collection, and that order is not cosmetic. DropCollection is broadcast to
-// exactly collection.VirtualChannelNames, so a vchannel removed from that list
-// first would never receive another teardown message of any kind — its
-// streamingnode state would outlive the collection itself, with no code path
-// left to clean it.
-//
-// PRECONDITION, enforced by the caller: the source must be DRAINED, which the
-// design (20260610-shard_split.md, §6.3 step 2) defines as ALL THREE of
-//
-//  1. no healthy segment remains on the source vchannel;
-//  2. channelCheckpoint(source) >= T_switch; and
-//  3. no active import job lists the source vchannel in its Vchannels.
-//
-// The third is the one most easily lost, and it is not redundant: an import is
-// deliberately NOT stopped by the fence, so a job that has not yet registered
-// any segment in meta is invisible to (1) and can still be writing.
-//
-// None of this is checked here. The streamingnode side verifies only that the
-// vchannel is SPLITTED -- the shard manager cannot observe the channel
-// checkpoint at append time, since GetCheckpoint lives in the write buffer on
-// the flusher side and neither the shard manager nor the interceptor has a path
-// to it. The teardown then closes the data sync service with drop=false, which
-// discards the write buffer WITHOUT syncing it, and the coordinator's
-// DropVirtualChannel marks any residual segment dropped. Appending this while
-// the source still holds unsynced data therefore loses writes from before
-// T_switch, silently and with a successful append.
-func DropSplitVChannel(ctx context.Context, w WALAccesser, param DropSplitVChannelParam) error {
-	if err := param.Validate(); err != nil {
-		return err
-	}
-	msg, err := message.NewDropVChannelMessageBuilderV2().
-		WithVChannel(param.VChannel).
-		WithHeader(&message.DropVChannelMessageHeader{
-			CollectionId: param.CollectionID,
-			DbId:         param.DBID,
-			SplitTaskId:  param.SplitTaskID,
-		}).
-		WithBody(&message.DropVChannelMessageBody{}).
-		WithUnreplicable().
-		BuildMutable()
-	if err != nil {
-		return errors.Wrapf(err, "build drop vchannel message for %s failed", param.VChannel)
-	}
-	if _, err := w.RawAppend(ctx, msg); err != nil {
-		return errors.Wrapf(err, "drop split vchannel %s failed", param.VChannel)
-	}
-	return nil
 }

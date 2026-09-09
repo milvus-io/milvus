@@ -1,222 +1,82 @@
 package streaming_test
 
 import (
-	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// newSplitShardParam builds a valid two-target param: one source, two targets
+// whose residues exactly cover the source's, and a routing post-image whose
+// grown vchannel list covers every target.
 func newSplitShardParam() streaming.SplitShardParam {
 	return streaming.SplitShardParam{
-		CollectionID:   1,
-		SourceVChannel: "v0",
-		SplitTaskID:    100,
-		RoutingModulus: 2,
-		Targets: []*message.SplitShardTarget{
-			{Vchannel: "v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
-			{Vchannel: "v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
-		},
-	}
-}
-
-func TestSplitShard(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	// a single SplitShard message fences the source vchannel; the source
-	// streamingnode auto-flushes the growing segments, so no separate
-	// ManualFlush is appended.
-	w.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-		if msg.MessageType() != message.MessageTypeSplitShard || msg.VChannel() != "v0" {
-			return false
-		}
-		header := message.MustAsMutableSplitShardMessageV2(msg).Header()
-		return header.GetCollectionId() == 1 && header.GetSplitTaskId() == 100 && len(header.GetTargets()) == 2
-	})).Return(&types.AppendResult{
-		MessageID: rmq.NewRmqID(2),
-		TimeTick:  2000,
-	}, nil).Once()
-
-	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.NoError(t, err)
-	assert.Equal(t, uint64(2000), result.SwitchTimeTick)
-}
-
-func TestSplitShardOnFencedVChannel(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	// the split message hits the fence of the previous split; the fenced error
-	// carries the recorded T_switch so the caller still recovers it.
-	w.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-		return msg.MessageType() == message.MessageTypeSplitShard
-	})).Return(nil, status.NewShardFenced("v0", 2000, 0)).Once()
-
-	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFenced)
-	// even on the fenced path the result carries T_switch recovered from the error.
-	assert.NotNil(t, result)
-	assert.Equal(t, uint64(2000), result.SwitchTimeTick)
-}
-
-func TestSplitShardAppendFailure(t *testing.T) {
-	// the split shard append fails with a non-fenced error.
-	w := mock_streaming.NewMockWALAccesser(t)
-	w.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
-		return msg.MessageType() == message.MessageTypeSplitShard
-	})).Return(nil, errors.New("mock append error")).Once()
-	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.Nil(t, result)
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, streaming.ErrSourceVChannelFenced)
-}
-
-func newInitSplitTargetParam() streaming.InitSplitTargetVChannelsParam {
-	return streaming.InitSplitTargetVChannelsParam{
-		CollectionID:   1,
-		DBID:           2,
-		DBName:         "db",
-		CollectionName: "col",
-		Schema: &schemapb.CollectionSchema{
-			Name: "col",
-		},
-		PartitionIDs:    []int64{10, 11},
+		CollectionID:    1,
+		DBID:            2,
 		SplitTaskID:     100,
-		SourceVChannels: []string{"by-dev-rootcoord-dml_0_1v0"},
-		BarrierTimeTick: 2000,
+		SourceVChannels: []string{"p0_1v0"},
 		RoutingModulus:  2,
 		Targets: []*message.SplitShardTarget{
-			{Vchannel: "by-dev-rootcoord-dml_1_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
-			{Vchannel: "by-dev-rootcoord-dml_2_1v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
+			{Vchannel: "p0_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			{Vchannel: "p0_1v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
 		},
+		Schema:       &schemapb.CollectionSchema{Name: "col"},
+		PartitionIDs: []int64{10, 11},
+		Routing: &message.AlterCollectionMessageUpdates{
+			VirtualChannelNames: []string{"p0_1v0", "p0_1v1", "p0_1v2"},
+		},
+		ControlChannel: "p0_vcchan",
 	}
 }
 
-func TestInitSplitTargetVChannels(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	param := newInitSplitTargetParam()
+func TestNewSplitShardBroadcastMessage(t *testing.T) {
+	param := newSplitShardParam()
+	msg, err := streaming.NewSplitShardBroadcastMessage(param)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
 
-	initialized := make(map[string]uint64, 2)
-	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, msg message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
-			assert.Equal(t, message.MessageTypeCreateVChannel, msg.MessageType())
-			createMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
-			header := createMsg.Header()
-			assert.Equal(t, int64(1), header.GetCollectionId())
-			assert.Equal(t, []int64{10, 11}, header.GetPartitionIds())
-			assert.Equal(t, int64(100), header.GetSplitTaskId())
-			assert.Equal(t, []string{"by-dev-rootcoord-dml_0_1v0"}, header.GetSplitSourceVchannels())
-			assert.NotNil(t, header.GetRouting())
-			assert.EqualValues(t, 2, header.GetRoutingModulus())
-			body, err := createMsg.Body()
-			assert.NoError(t, err)
-			assert.Equal(t, "col", body.GetCollectionSchema().GetName())
-			assert.Equal(t, []string{msg.VChannel()}, body.GetVirtualChannelNames())
-			if len(opts) > 0 {
-				initialized[msg.VChannel()] = opts[0].BarrierTimeTick
-			}
-			return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(7)}, nil
-		}).Times(2)
+	// the broadcast covers sources, targets and the control channel, deduplicated.
+	bh := msg.BroadcastHeader()
+	assert.ElementsMatch(t, []string{"p0_1v0", "p0_1v1", "p0_1v2", "p0_vcchan"}, bh.VChannels)
+	// only the sources are appended (and therefore persisted) first.
+	assert.ElementsMatch(t, param.SourceVChannels, bh.AppendFirstVChannels)
+	assert.True(t, msg.IsUnreplicable())
+	assert.Equal(t,
+		message.NewCollectionScopedIdempotencyKey(param.CollectionID, fmt.Sprintf("shard-split-%d", param.SplitTaskID)),
+		message.IdempotencyKeyOf(msg))
 
-	genesis, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
-	assert.NoError(t, err)
-	// every target vchannel is created with T_switch as the barrier.
-	assert.Equal(t, map[string]uint64{
-		"by-dev-rootcoord-dml_1_1v1": 2000,
-		"by-dev-rootcoord-dml_2_1v2": 2000,
-	}, initialized)
+	// header/body round-trip through every replica the broadcast splits into.
+	msg.OverwriteBroadcastHeader(1)
+	splits := msg.SplitIntoMutableMessage()
+	require.Len(t, splits, 4)
+	for _, replica := range splits {
+		specialized := message.MustAsMutableSplitShardMessageV2(replica)
+		header := specialized.Header()
+		assert.Equal(t, param.CollectionID, header.GetCollectionId())
+		assert.Equal(t, param.SplitTaskID, header.GetSplitTaskId())
+		assert.Equal(t, param.SourceVChannels, header.GetSourceVchannels())
+		assert.EqualValues(t, param.RoutingModulus, header.GetRoutingModulus())
+		assert.Equal(t, param.PartitionIDs, header.GetPartitionIds())
+		assert.Equal(t, param.DBID, header.GetDbId())
+		require.Len(t, header.GetTargets(), 2)
 
-	// And each one reports the position it was born at. This is what the caller
-	// persists as the channel's first checkpoint; without it a target that takes
-	// no live write before adoption has none, and datacoord answers a seek
-	// request with a rewrite segment's DML position -- a position with no message
-	// id, which panics the querynode that tries to seek from it.
-	assert.Len(t, genesis, 2)
-	byChannel := lo.SliceToMap(genesis, func(pos *msgpb.MsgPosition) (string, *msgpb.MsgPosition) {
-		return pos.GetChannelName(), pos
-	})
-	for _, vchannel := range []string{"by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"} {
-		pos, ok := byChannel[vchannel]
-		assert.True(t, ok, vchannel)
-		assert.Equal(t, uint64(2100), pos.GetTimestamp())
-		assert.NotEmpty(t, pos.GetMsgID(), "an empty message id is exactly the unseekable case")
-		assert.Equal(t, commonpb.WALName(rmq.NewRmqID(1).WALName()), pos.GetWALName(),
-			"the WAL name must travel with the id: Seek deserializes with it and panics on Unknown")
-		assert.True(t, msgdispatcher.SeekablePosition(pos))
+		body, err := specialized.Body()
+		require.NoError(t, err)
+		assert.Equal(t, "col", body.GetGenesis().GetCollectionSchema().GetName())
+		assert.Equal(t, param.Routing.GetVirtualChannelNames(), body.GetRouting().GetVirtualChannelNames())
 	}
-}
-
-func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	w.EXPECT().RawAppend(mock.Anything, mock.Anything, mock.Anything).Return(&types.AppendResult{
-		MessageID: rmq.NewRmqID(1),
-		TimeTick:  2100,
-	}, errors.New("mock append error")).Once()
-
-	genesis, err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
-	assert.Error(t, err)
-	assert.Nil(t, genesis)
-}
-
-func TestInitSplitTargetVChannelsParamValidate(t *testing.T) {
-	param := newInitSplitTargetParam()
-	assert.NoError(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.CollectionID = 0
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.Schema = nil
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.PartitionIDs = nil
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.SourceVChannels = nil
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.BarrierTimeTick = 0
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.Targets = nil
-	assert.Error(t, param.Validate())
-
-	param = newInitSplitTargetParam()
-	param.Targets[0].Vchannel = ""
-	assert.Error(t, param.Validate())
-
-	// the target must not duplicate the source.
-	param = newInitSplitTargetParam()
-	param.Targets[0].Vchannel = param.SourceVChannels[0]
-	assert.Error(t, param.Validate())
-
-	// the targets must not duplicate each other.
-	param = newInitSplitTargetParam()
-	param.Targets[1].Vchannel = param.Targets[0].Vchannel
-	assert.Error(t, param.Validate())
-
-	// validation failure happens before any append.
-	w := mock_streaming.NewMockWALAccesser(t)
-	genesis, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
-	assert.Error(t, err)
-	assert.Nil(t, genesis)
 }
 
 func TestSplitShardParamValidate(t *testing.T) {
@@ -224,14 +84,42 @@ func TestSplitShardParamValidate(t *testing.T) {
 	param := newSplitShardParam()
 	assert.NoError(t, param.Validate())
 
-	// collection id must be positive.
+	// ids must be positive.
 	param = newSplitShardParam()
 	param.CollectionID = 0
 	assert.Error(t, param.Validate())
 
-	// source vchannel must be set.
 	param = newSplitShardParam()
-	param.SourceVChannel = ""
+	param.SplitTaskID = 0
+	assert.Error(t, param.Validate())
+
+	// sources must be set, and each must be non-empty.
+	param = newSplitShardParam()
+	param.SourceVChannels = nil
+	assert.Error(t, param.Validate())
+
+	param = newSplitShardParam()
+	param.SourceVChannels = []string{""}
+	assert.Error(t, param.Validate())
+
+	// routing modulus must be set.
+	param = newSplitShardParam()
+	param.RoutingModulus = 0
+	assert.Error(t, param.Validate())
+
+	// schema must be set.
+	param = newSplitShardParam()
+	param.Schema = nil
+	assert.Error(t, param.Validate())
+
+	// control channel must be set.
+	param = newSplitShardParam()
+	param.ControlChannel = ""
+	assert.Error(t, param.Validate())
+
+	// routing post-image must be set.
+	param = newSplitShardParam()
+	param.Routing = nil
 	assert.Error(t, param.Validate())
 
 	// One target is legal: a source of a rehash fronts only its share of the
@@ -247,9 +135,9 @@ func TestSplitShardParamValidate(t *testing.T) {
 	param.Targets[0].Vchannel = ""
 	assert.Error(t, param.Validate())
 
-	// the target vchannel must not duplicate the source.
+	// the target vchannel must not duplicate a source.
 	param = newSplitShardParam()
-	param.Targets[0].Vchannel = "v0"
+	param.Targets[0].Vchannel = "p0_1v0"
 	assert.Error(t, param.Validate())
 
 	// the target vchannels must not duplicate each other.
@@ -257,35 +145,79 @@ func TestSplitShardParamValidate(t *testing.T) {
 	param.Targets[1].Vchannel = param.Targets[0].Vchannel
 	assert.Error(t, param.Validate())
 
-	// validation failure happens before any append.
-	w := mock_streaming.NewMockWALAccesser(t)
-	result, err := streaming.SplitShard(context.Background(), w, param)
-	assert.Nil(t, result)
+	// a target with no residue is refused.
+	param = newSplitShardParam()
+	param.Targets[0].Routing = &schemapb.HashRouting{}
+	assert.Error(t, param.Validate())
+
+	// a residue not below the modulus is refused.
+	param = newSplitShardParam()
+	param.Targets[0].Routing = &schemapb.HashRouting{Buckets: []uint64{2}}
+	assert.Error(t, param.Validate())
+
+	// the routing post-image must cover every target.
+	param = newSplitShardParam()
+	param.Routing = &message.AlterCollectionMessageUpdates{VirtualChannelNames: []string{"p0_1v0", "p0_1v1"}}
+	assert.Error(t, param.Validate())
+
+	// validation failure happens before any message is built.
+	w := newSplitShardParam()
+	w.CollectionID = 0
+	msg, err := streaming.NewSplitShardBroadcastMessage(w)
+	assert.Nil(t, msg)
 	assert.Error(t, err)
 }
 
-// The exclusion between a rehash and an automatic split rests on this: a fence
-// carrying ANOTHER task's id is not this task's retry, and rolling forward on it
-// would carve two sets of targets out of one source.
-func TestSplitShardAbortsOnAnotherTasksFence(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	w.EXPECT().RawAppend(mock.Anything, mock.Anything).
-		Return(nil, status.NewShardFenced("v0", 1900, 777)).Once()
+func TestSplitShardResultFrom(t *testing.T) {
+	param := newSplitShardParam()
+	// exercise more than one source.
+	param.SourceVChannels = []string{"p0_1v0", "p1_1v0"}
+	param.Routing.VirtualChannelNames = append(param.Routing.VirtualChannelNames, "p1_1v0")
 
-	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.Nil(t, result)
-	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFencedByAnotherTask)
-	assert.NotErrorIs(t, err, streaming.ErrSourceVChannelFenced)
-}
+	newResult := func() *types.BroadcastAppendResult {
+		return &types.BroadcastAppendResult{
+			AppendResults: map[string]*types.AppendResult{
+				"p0_1v0":             {MessageID: rmq.NewRmqID(1), TimeTick: 1000},
+				"p1_1v0":             {MessageID: rmq.NewRmqID(2), TimeTick: 1100},
+				"p0_1v1":             {MessageID: rmq.NewRmqID(3), TimeTick: 1200},
+				"p0_1v2":             {MessageID: rmq.NewRmqID(4), TimeTick: 1300},
+				param.ControlChannel: {MessageID: rmq.NewRmqID(5), TimeTick: 1400},
+			},
+		}
+	}
 
-// This task's own fence, replayed: rolled forward, with T_switch recovered.
-func TestSplitShardRollsForwardOnItsOwnFence(t *testing.T) {
-	w := mock_streaming.NewMockWALAccesser(t)
-	w.EXPECT().RawAppend(mock.Anything, mock.Anything).
-		Return(nil, status.NewShardFenced("v0", 1900, 100)).Once()
+	sr, err := streaming.SplitShardResultFrom(param, newResult())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]uint64{"p0_1v0": 1000, "p1_1v0": 1100}, sr.SwitchTimeTicks)
 
-	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFenced)
-	require.NotNil(t, result)
-	assert.Equal(t, uint64(1900), result.SwitchTimeTick)
+	require.Len(t, sr.GenesisPositions, 2)
+	byChannel := lo.SliceToMap(sr.GenesisPositions, func(pos *msgpb.MsgPosition) (string, *msgpb.MsgPosition) {
+		return pos.GetChannelName(), pos
+	})
+	pos1, ok := byChannel["p0_1v1"]
+	require.True(t, ok)
+	assert.Equal(t, uint64(1200), pos1.GetTimestamp())
+	assert.NotEmpty(t, pos1.GetMsgID())
+	pos2, ok := byChannel["p0_1v2"]
+	require.True(t, ok)
+	assert.Equal(t, uint64(1300), pos2.GetTimestamp())
+	assert.NotEmpty(t, pos2.GetMsgID())
+
+	// a result missing a source is a Milvus-internal bug: System, non-retriable.
+	missingSource := newResult()
+	delete(missingSource.AppendResults, "p1_1v0")
+	sr, err = streaming.SplitShardResultFrom(param, missingSource)
+	assert.Nil(t, sr)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+	assert.False(t, merr.IsRetryableErr(err))
+
+	// a result missing a target is the same class of error.
+	missingTarget := newResult()
+	delete(missingTarget.AppendResults, "p0_1v2")
+	sr, err = streaming.SplitShardResultFrom(param, missingTarget)
+	assert.Nil(t, sr)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+	assert.False(t, merr.IsRetryableErr(err))
 }
