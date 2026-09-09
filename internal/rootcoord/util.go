@@ -464,7 +464,7 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				}
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar && dtype != schemapb.DataType_Timestamptz && dtype != schemapb.DataType_UUID {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar, DataType_Timestamptz or DataType_UUID")
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
 				}
 				if dtype == schemapb.DataType_UUID {
 					strVal := fieldSchema.GetDefaultValue().GetStringData()

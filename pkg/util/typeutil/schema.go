@@ -266,6 +266,8 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 	case schemapb.DataType_UUID:
 		if column.GetScalars().GetBytesData() != nil {
 			res += len(column.GetScalars().GetBytesData().GetData()) * 16
+		} else if column.GetScalars().GetStringData() != nil {
+			res += len(column.GetScalars().GetStringData().GetData()) * 16
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
@@ -345,6 +347,14 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 					return 0, merr.WrapErrParameterInvalidMsg("invalid UUID bytes length %d, expected 16", len(fs.GetScalars().GetBytesData().GetData()[rowOffset]))
 				}
 				res += len(fs.GetScalars().GetBytesData().GetData()[rowOffset])
+			} else if fs.GetScalars().GetStringData() != nil {
+				if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				if _, err := ParseUUID(fs.GetScalars().GetStringData().GetData()[rowOffset]); err != nil {
+					return 0, err
+				}
+				res += 16
 			} else {
 				return 0, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values")
 			}
