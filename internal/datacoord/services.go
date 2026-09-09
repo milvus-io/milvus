@@ -1280,16 +1280,16 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 	}
 
 	if statesDict[commonpb.SegmentState_Dropped] {
-		if partitionID < 0 {
-			segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(ctx, collectionID)
-		} else {
-			segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(ctx, collectionID, partitionID)
-		}
-		for _, id := range segmentIDs {
-			segment := s.meta.GetSegment(ctx, id)
-			if segment != nil && segment.GetState() == commonpb.SegmentState_Dropped {
-				ret = append(ret, id)
-			}
+		droppedSegments := s.meta.SelectSegments(ctx,
+			WithCollection(collectionID),
+			SegmentFilterFunc(func(segment *SegmentInfo) bool {
+				return segment != nil &&
+					segment.GetState() == commonpb.SegmentState_Dropped &&
+					(partitionID < 0 || segment.GetPartitionID() == partitionID)
+			}),
+		)
+		for _, segment := range droppedSegments {
+			ret = append(ret, segment.GetID())
 		}
 	}
 
