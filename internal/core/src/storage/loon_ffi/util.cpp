@@ -406,7 +406,7 @@ IsCloudEndpointHost(const std::string& host) {
     return false;
 }
 
-static void
+static arrow::Status
 InjectExternalSpecProperties(
     milvus_storage::api::Properties& properties,
     int64_t collection_id,
@@ -656,10 +656,10 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → iceberg.snapshot_id. Future formats
+    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
-        return;
+        return arrow::Status::OK();
     }
     try {
         simdjson::ondemand::parser parser;
@@ -670,7 +670,8 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "iceberg-table") {
-                auto snapshot_field = doc.find_field("snapshot_id");
+                // JSON fields may appear before or after "format".
+                auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
                 if (int_err == simdjson::INCORRECT_TYPE) {
@@ -691,10 +692,15 @@ InjectExternalSpecProperties(
                     }
                 }
                 if (int_err == simdjson::SUCCESS) {
-                    milvus_storage::api::SetValue(
+                    const auto error = milvus_storage::api::SetValue(
                         properties,
-                        "iceberg.snapshot_id",
+                        PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                         std::to_string(snapshot_id).c_str());
+                    if (error.has_value()) {
+                        // An invalid snapshot must not fall back to latest.
+                        return arrow::Status::Invalid(
+                            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
+                    }
                 }
             }
         }
@@ -705,6 +711,7 @@ InjectExternalSpecProperties(
                  collection_id,
                  e.what());
     }
+    return arrow::Status::OK();
 }
 
 void
@@ -717,8 +724,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     const auto iops_config =
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .GetExternalIopsConfig();
-    InjectExternalSpecProperties(
+    const auto status = InjectExternalSpecProperties(
         properties, collection_id, external_source, external_spec, iops_config);
+    if (!status.ok()) {
+        ThrowInfo(milvus::InvalidParameter, "{}", status.message());
+    }
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
@@ -821,7 +831,7 @@ GetLoonManifest(
 //
 // Bridges Go callers into the C++ InjectExternalSpecProperties pipeline so
 // that URI parsing, endpoint derivation, AWS-form rewriting, allowlist
-// enforcement, and format-property derivation (iceberg.snapshot_id etc.)
+// enforcement, and format-property derivation (reader.exttable.snapshot_id etc.)
 // all live in a single implementation driven by the raw external_spec JSON.
 
 extern "C" LoonFFIResult
@@ -855,11 +865,15 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         // would couple concurrent FFI and native reads through global state.
         const milvus::storage::ExternalIopsConfig iops_config{iops_initial_rate,
                                                               iops_max_rate};
-        InjectExternalSpecProperties(props,
-                                     collection_id,
-                                     external_source,
-                                     external_spec ? external_spec : "",
-                                     iops_config);
+        const auto status =
+            InjectExternalSpecProperties(props,
+                                         collection_id,
+                                         external_source,
+                                         external_spec ? external_spec : "",
+                                         iops_config);
+        if (!status.ok()) {
+            RETURN_ERROR(LOON_INVALID_PROPERTIES, status.message());
+        }
 
         // Rebuild LoonProperties from the merged map. Free old entries first
         // so ownership stays with loon_properties_free.
@@ -885,8 +899,9 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         size_t i = 0;
         for (const auto& kv : props) {
             arr[i].key = strdup(kv.first.c_str());
-            const auto* sval = std::get_if<std::string>(&kv.second);
-            arr[i].value = strdup(sval ? sval->c_str() : "");
+            // Registered properties such as snapshot_id are stored as INT64.
+            const auto value = PropertyValueAsString(props, kv.first.c_str());
+            arr[i].value = strdup(value ? value->c_str() : "");
             ++i;
         }
         properties->properties = arr;
