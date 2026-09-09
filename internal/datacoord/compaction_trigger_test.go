@@ -644,7 +644,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			select {
 			case plan := <-spy.spyChan:
 				assert.NotNil(t, plan)
-				assert.Equal(t, 2, len(plan.SegmentBinlogs))
+				assert.Equal(t, 3, len(plan.SegmentBinlogs))
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "timeout waiting for plans")
 			}
