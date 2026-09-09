@@ -184,6 +184,30 @@ func (s *LoadConfigStore) Contains(collectionID int64) bool {
 	return s.configs[collectionID] != nil
 }
 
+// GetConfig returns the live load config for a single collection without
+// materializing the full balancer snapshot. Entries are immutable after Put
+// (replaced, never mutated in place), so the returned pointer can be read
+// safely by the caller. Unlike Snapshot(), this read is O(1) and never
+// triggers an O(N) snapshot rebuild, so it is the correct accessor for hot
+// single-collection paths (e.g. the load RPC current-config check).
+//
+// Precondition: callers must treat the returned *LoadConfig as read-only.
+func (s *LoadConfigStore) GetConfig(collectionID int64) *LoadConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configs[collectionID]
+}
+
+// GetConfigVersion returns the version of the live load config for a single
+// collection without materializing the full balancer snapshot. It is the
+// O(1) counterpart of LoadConfigSnapshot.ConfigVersion and is safe to pair
+// with GetConfig when a caller needs a config and its version together.
+func (s *LoadConfigStore) GetConfigVersion(collectionID int64) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.versions[collectionID]
+}
+
 // Snapshot returns the current immutable load-config view. It refreshes the
 // resident snapshot lazily when the live version has advanced. The returned
 // maps point at the store's copy-on-write snapshots and must be treated as
