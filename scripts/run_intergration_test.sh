@@ -75,7 +75,6 @@ TEST_ARGS=(
     -coverpkg=./...
     -coverprofile=profile.out
     -covermode=atomic
-    -timeout=60m
 )
 
 function test_cmd() {
@@ -85,6 +84,8 @@ function test_cmd() {
     local exclude_output
     local excluded_package
     local package
+    local package_timeout
+    local package_format
     local ran_packages=0
     local -a excluded_packages=()
     if ! package_output=$(go list -tags dynamic,test "$package_pattern"); then
@@ -115,7 +116,15 @@ function test_cmd() {
         done
         ran_packages=$((ran_packages + 1))
         echo -e "-----------------------------------\nRunning test cases at $package ..."
-        "${TEST_CMD[@]}" "$package" "${TEST_ARGS[@]}"
+        package_timeout=60m
+        package_format="${GOTESTSUM_FORMAT:-pkgname}"
+        if [[ "$package" == */tests/integration/replicas/load ]]; then
+            # Flush live test/server output and obtain a Go timeout stack before
+            # a stalled replica test exhausts the outer Jenkins job timeout.
+            package_timeout=10m
+            package_format=standard-verbose
+        fi
+        GOTESTSUM_FORMAT="$package_format" "${TEST_CMD[@]}" "$package" "${TEST_ARGS[@]}" "-timeout=$package_timeout"
         if [ -f profile.out ]; then
             # Skip the per-profile header to keep a single global "mode:" line
             # Skip the packages that are not covered by the test
