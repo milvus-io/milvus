@@ -29,8 +29,9 @@ rollout updates during a translator's lifetime.
 
 When disabled, scalar loading uses `IndexEntryReader` with its existing HIGH/LOW
 pool scheduling. When enabled, `AsyncIndexEntryReader` owns the scalar pipeline.
-Legacy storage formats, vector index loading, index building and uploads retain
-their existing APIs.
+The subsequent [legacy scalar and Knowhere streaming migration](20260909-streaming-legacy-index-loading.md)
+extends the shared infrastructure to legacy scalar and vector memory loads and
+documents each phase's executor. Index building and uploads retain their existing APIs.
 
 ## Shared code and independent scheduling
 
