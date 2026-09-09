@@ -95,7 +95,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	msg = message.MustAsMutableInsertMessageV1(msgs[0])
 	header = msg.Header()
-	assert.Equal(t, "key-1", message.IdempotencyKeyOf(msgs[0]))
+	assert.Equal(t, message.IdempotencyKey("key-1"), message.IdempotencyKeyOf(msgs[0]))
 	extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
 	assert.True(t, ok)
 	assert.Equal(t, []uint32{0}, extra.GetRowOffsets())
@@ -488,7 +488,7 @@ func stringFieldData(fieldID int64, name string, values []string) *schemapb.Fiel
 	}
 }
 
-func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage, vchannel string, key string) []uint32 {
+func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage, vchannel string, key message.IdempotencyKey) []uint32 {
 	t.Helper()
 	offsets := make([]uint32, 0)
 	for _, raw := range msgs {

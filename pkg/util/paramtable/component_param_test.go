@@ -1262,7 +1262,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
 		assert.Equal(t, int64(256*1024*1024), params.StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize())
 		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt())
-		assert.Equal(t, 1024, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
+		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())

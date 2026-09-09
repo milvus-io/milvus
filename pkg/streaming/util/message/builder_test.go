@@ -49,11 +49,11 @@ func TestReplicateMessagePreservesIdempotencyKey(t *testing.T) {
 		WithTimeTick(100).
 		WithLastConfirmed(msgID).
 		IntoImmutableMessage(msgID)
-	require.Equal(t, "key-1", message.IdempotencyKeyOf(immutableMsg))
+	require.Equal(t, message.IdempotencyKey("key-1"), message.IdempotencyKeyOf(immutableMsg))
 
 	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
 	require.NotNil(t, replicateMsg.ReplicateHeader())
-	require.Equal(t, "key-1", message.IdempotencyKeyOf(replicateMsg))
+	require.Equal(t, message.IdempotencyKey("key-1"), message.IdempotencyKeyOf(replicateMsg))
 }
 
 func TestMutableBuilder(t *testing.T) {

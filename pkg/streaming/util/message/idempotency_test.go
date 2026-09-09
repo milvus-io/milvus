@@ -127,7 +127,7 @@ func TestZeroClientKeyNeverEncodesAScope(t *testing.T) {
 		WithBody(&msgpb.InsertRequest{}).
 		WithIdempotencyKey("key-1").
 		MustBuildMutable()
-	require.Equal(t, "key-1", IdempotencyKeyOf(insert))
+	require.Equal(t, IdempotencyKey("key-1"), IdempotencyKeyOf(insert))
 	require.Equal(t, "key-1", insert.Properties().ToRawMap()[messageIdempotencyKey])
 
 	commit := NewCommitTxnMessageBuilderV2().
@@ -136,7 +136,7 @@ func TestZeroClientKeyNeverEncodesAScope(t *testing.T) {
 		WithBody(&CommitTxnMessageBody{}).
 		WithIdempotencyKey("key-1").
 		MustBuildMutable()
-	require.Equal(t, "key-1", IdempotencyKeyOf(commit))
+	require.Equal(t, IdempotencyKey("key-1"), IdempotencyKeyOf(commit))
 
 	// An empty key must not materialize the property at all: a non-idempotent
 	// write must carry no idempotency property, not an empty-valued one.
