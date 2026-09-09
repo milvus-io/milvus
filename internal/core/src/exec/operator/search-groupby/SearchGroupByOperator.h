@@ -425,7 +425,20 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
               std::vector<size_t>& topk_per_nq_prefix_sum,
-              std::vector<int32_t>* element_indices = nullptr);
+              std::vector<int32_t>* element_indices = nullptr,
+              SearchResult* search_result = nullptr);
+
+bool
+TryStrictGroupFilteredSearch(
+    milvus::OpContext* op_ctx,
+    const std::vector<std::shared_ptr<VectorIterator>>& iterators,
+    const SearchInfo& info,
+    const segcore::SegmentInternalInterface& segment,
+    SearchResult* result,
+    std::vector<CompositeGroupKey>& groups,
+    std::vector<int64_t>& offsets,
+    std::vector<float>& distances,
+    std::vector<size_t>& prefix);
 
 }  // namespace exec
 }  // namespace milvus

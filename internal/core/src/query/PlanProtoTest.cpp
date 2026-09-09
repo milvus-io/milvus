@@ -657,3 +657,70 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
 }
+
+TEST(PlanProto, StrictGroupSettings) {
+    using namespace milvus;
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(proto::plan::VectorType::FloatVector);
+    anns->set_field_id(vec.get());
+    anns->set_placeholder_tag("$0");
+    auto* info = anns->mutable_query_info();
+    info->set_metric_type("L2");
+    info->set_topk(10);
+    info->set_round_decimal(-1);
+    for (
+        const auto& params :
+        {R"({"nprobe":128})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0,"strict_group_probe_candidates":1})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0.1,"strict_group_probe_candidates":100})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0.5,"strict_group_probe_candidates":17})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":1,"strict_group_probe_candidates":9223372036854775807})"}) {
+        info->set_search_params(params);
+        auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
+        const auto& search = parsed->search_info_;
+        EXPECT_DOUBLE_EQ(search.strict_group_acceptance_threshold_,
+                         knowhere::Json::parse(params).value(
+                             kStrictGroupAcceptanceThreshold, 0.1));
+        EXPECT_FALSE(
+            search.search_params_.contains(kStrictGroupAcceptanceThreshold));
+        EXPECT_EQ(search.strict_group_probe_candidates_,
+                  knowhere::Json::parse(params).value(
+                      kStrictGroupProbeCandidates, int64_t(100)));
+        EXPECT_FALSE(
+            search.search_params_.contains(kStrictGroupProbeCandidates));
+        EXPECT_EQ(search.search_params_["nprobe"], 128);
+    }
+    for (const auto& key :
+         {kStrictGroupAcceptanceThreshold, kStrictGroupProbeCandidates}) {
+        for (const auto& value : {knowhere::Json(nullptr),
+                                  knowhere::Json(true),
+                                  knowhere::Json("0.5"),
+                                  knowhere::Json("NaN"),
+                                  knowhere::Json::array(),
+                                  knowhere::Json::object(),
+                                  knowhere::Json(-1),
+                                  knowhere::Json(1.1)}) {
+            info->set_search_params(knowhere::Json{{key, value}}.dump());
+            try {
+                query::ProtoParser(schema).PlanNodeFromProto(node);
+                FAIL() << "invalid strict group setting accepted";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+            }
+        }
+    }
+    for (const auto& value : {knowhere::Json(0),
+                              knowhere::Json(1.0),
+                              knowhere::Json(uint64_t(1) << 63)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupProbeCandidates, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
+}

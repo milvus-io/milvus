@@ -131,7 +131,9 @@ func (m *FileResourceObserver) Start() {
 		m.startonce.Do(func() {
 			m.wg.Add(1)
 			go m.syncLoop()
-			m.Notify()
+			if !m.IsEmpty() {
+				m.Notify()
+			}
 		})
 	}
 }
@@ -148,6 +150,13 @@ func (m *FileResourceObserver) Notify() {
 	case m.notifyCh <- struct{}{}:
 	default:
 	}
+}
+
+func (m *FileResourceObserver) IsEmpty() bool {
+	if m.meta == nil {
+		return true
+	}
+	return !m.meta.HasFileResource(m.ctx)
 }
 
 // if node sync at least once, it will be a valid node.
@@ -196,6 +205,10 @@ func (m *FileResourceObserver) Sync() error {
 	var syncErr error
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
+	// Version 0 means no file resource has ever been added successfully.
+	if targetVersion == 0 {
+		return nil
+	}
 
 	// sync file resource to query node if file resource mode was Sync
 	if m.qnMode == fileresource.SyncMode {
@@ -317,10 +330,7 @@ func (m *FileResourceObserver) Sync() error {
 		return true
 	})
 
-	if syncErr != nil {
-		return syncErr
-	}
-	return nil
+	return syncErr
 }
 
 func (m *FileResourceObserver) InitMeta(meta rootcoord.IMetaTable) {

@@ -78,6 +78,26 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
 // approaches 1 the pruning has silently degraded to a full scan.
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_coarse_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_refine_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_phase1_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_phase2_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_batch_count);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_probe_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_probe_accepted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_probe_group_hits);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_original_remaining_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_membership_build_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_bitmap_build_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_acceptance_ratio);
 
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);

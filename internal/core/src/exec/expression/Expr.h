@@ -296,6 +296,15 @@ class Expr : public std::enable_shared_from_this<Expr> {
         }
     }
 
+    // Bind the request-scoped sealed read snapshot to this expression.
+    // Called right after construction by the expression compiler; the pointer
+    // is borrowed from the owning QueryContext and stays valid for the whole
+    // ExecuteTask. Default no-op for expressions without per-chunk segment
+    // reads.
+    virtual void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) {
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -379,7 +388,7 @@ class SegmentExpr : public Expr {
         has_field_data_at_init_ = segment_->HasFieldData(field_id_);
         if (has_field_data_at_init_) {
             if (segment_->is_chunked()) {
-                num_data_chunk_ = segment_->num_chunk_data(field_id_);
+                num_data_chunk_ = NumChunkData(field_id_);
             } else {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
@@ -414,12 +423,43 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        snapshot_ = snapshot;
+    }
+
+    // Metadata reads through the pinned snapshot when available, else fall
+    // back to the segment (growing segments / non-pinned paths). The fallback
+    // keeps every call identical to the pre-pin behavior.
+    int64_t
+    ChunkSize(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
+                         : segment_->chunk_size(field_id, chunk_id);
+    }
+
+    int64_t
+    NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
+                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+    }
+
+    std::pair<int64_t, int64_t>
+    GetChunkByOffset(FieldId field_id, int64_t offset) const {
+        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
+                         : segment_->get_chunk_by_offset(field_id, offset);
+    }
+
+    int64_t
+    NumChunkData(FieldId field_id) const {
+        return snapshot_ ? snapshot_->num_chunk_data(field_id)
+                         : segment_->num_chunk_data(field_id);
+    }
+
     // Global row offset of (chunk, chunk_pos) within the segment.
     int64_t
     RowOffsetInSegment(size_t chunk, int64_t chunk_pos) const {
         return segment_->is_chunked()
-                   ? segment_->num_rows_until_chunk(field_id_, chunk) +
-                         chunk_pos
+                   ? NumRowsUntilChunk(field_id_, chunk) + chunk_pos
                    : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
     }
 
@@ -586,7 +626,7 @@ class SegmentExpr : public Expr {
             current_rows =
                 UseIndexCursor() && segment_->type() == SegmentType::Sealed
                     ? current_chunk_pos
-                    : segment_->num_rows_until_chunk(field_id_, current_chunk) +
+                    : NumRowsUntilChunk(field_id_, current_chunk) +
                           current_chunk_pos;
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
@@ -661,8 +701,7 @@ class SegmentExpr : public Expr {
             current_rows = current_chunk_pos;
         } else if (segment_->is_chunked()) {
             current_rows =
-                segment_->num_rows_until_chunk(field_id_, current_chunk) +
-                current_chunk_pos;
+                NumRowsUntilChunk(field_id_, current_chunk) + current_chunk_pos;
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
@@ -970,8 +1009,7 @@ class SegmentExpr : public Expr {
             int64_t chunk_id = 0;
             int64_t chunk_offset = 0;
             if (!input->empty()) {
-                auto resolved =
-                    segment_->get_chunk_by_offset(field_id_, (*input)[0]);
+                auto resolved = GetChunkByOffset(field_id_, (*input)[0]);
                 chunk_id = resolved.first;
                 chunk_offset = resolved.second;
             }
@@ -982,8 +1020,8 @@ class SegmentExpr : public Expr {
                 batch_offsets.push_back(static_cast<int32_t>(chunk_offset));
                 ++input_pos;
                 while (input_pos < input->size()) {
-                    auto resolved = segment_->get_chunk_by_offset(
-                        field_id_, (*input)[input_pos]);
+                    auto resolved =
+                        GetChunkByOffset(field_id_, (*input)[input_pos]);
                     chunk_id = resolved.first;
                     chunk_offset = resolved.second;
                     if (chunk_id != run_chunk_id) {
@@ -1048,7 +1086,7 @@ class SegmentExpr : public Expr {
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
+                    GetChunkByOffset(field_id_, offset);
                 // chunk_data<VectorArrayView> would read the wrong layout:
                 // storage holds VectorArray, and nullable rows may be compacted.
                 // Use chunk_view to build logical VectorArrayView rows.
@@ -1107,7 +1145,7 @@ class SegmentExpr : public Expr {
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
+                    GetChunkByOffset(field_id_, offset);
                 if (chunk_id != cached_chunk_id) {
                     pw.emplace(
                         segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
@@ -1521,7 +1559,7 @@ class SegmentExpr : public Expr {
             // Start of a new chunk batch
             auto run = resolve_run(i);
             auto [chunk_id, chunk_offset] =
-                segment_->get_chunk_by_offset(field_id_, run.row_id);
+                GetChunkByOffset(field_id_, run.row_id);
 
             // Collect consecutive runs belonging to the same chunk
             offsets.clear();
@@ -1537,7 +1575,7 @@ class SegmentExpr : public Expr {
             while (i < element_ids->size()) {
                 auto next_run = resolve_run(i);
                 auto [next_chunk_id, next_chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, next_run.row_id);
+                    GetChunkByOffset(field_id_, next_run.row_id);
 
                 if (next_chunk_id != chunk_id) {
                     break;  // Different chunk, process current batch
@@ -1861,8 +1899,7 @@ class SegmentExpr : public Expr {
             std::vector<int32_t> segment_offsets_array;
             if constexpr (NeedSegmentOffsets) {
                 segment_offsets_array.resize(size);
-                auto start_offset =
-                    segment_->num_rows_until_chunk(field_id_, i) + data_pos;
+                auto start_offset = NumRowsUntilChunk(field_id_, i) + data_pos;
                 for (int64_t j = 0; j < size; ++j) {
                     int64_t offset = start_offset + j;
                     segment_offsets_array[j] = static_cast<int32_t>(offset);
@@ -2027,12 +2064,12 @@ class SegmentExpr : public Expr {
 
         // Find starting chunk and offset
         auto [start_chunk_id, start_chunk_offset] =
-            segment_->get_chunk_by_offset(field_id_, segment_offset);
+            GetChunkByOffset(field_id_, segment_offset);
 
         for (size_t chunk_id = start_chunk_id;
              chunk_id < num_data_chunk_ && remaining > 0;
              chunk_id++) {
-            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_size = ChunkSize(field_id_, chunk_id);
             int64_t chunk_offset =
                 (chunk_id == start_chunk_id) ? start_chunk_offset : 0;
 
@@ -2105,7 +2142,7 @@ class SegmentExpr : public Expr {
              chunk_id < num_data_chunk_ && processed_size < row_count;
              ++chunk_id) {
             auto chunk_size = segment_->is_chunked()
-                                  ? segment_->chunk_size(field_id_, chunk_id)
+                                  ? ChunkSize(field_id_, chunk_id)
                                   : size_per_chunk_;
             auto size = std::min(chunk_size, row_count - processed_size);
             if (size == 0) {
@@ -2606,7 +2643,7 @@ class SegmentExpr : public Expr {
     int64_t
     GetDataChunkRemainingRows(size_t chunk_id, int64_t data_pos) const {
         if (segment_->is_chunked()) {
-            return segment_->chunk_size(field_id_, chunk_id) - data_pos;
+            return ChunkSize(field_id_, chunk_id) - data_pos;
         }
 
         const auto chunk_start =
@@ -3084,6 +3121,9 @@ class SegmentExpr : public Expr {
     }
 
     const segcore::SegmentInternalInterface* segment_;
+    // Request-scoped sealed read snapshot, borrowed from the owning
+    // QueryContext. Null for growing segments and non-pinned paths.
+    const segcore::SegmentReadSnapshot* snapshot_{nullptr};
     const FieldId field_id_;
     bool is_pk_field_{false};
     DataType pk_type_;

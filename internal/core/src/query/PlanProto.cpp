@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -57,6 +59,42 @@
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
 
+namespace {
+// QueryNode supplies a snapshot of server settings. These are Milvus-only
+// controls and must not be forwarded to the backend.
+void
+ParseStrictGroupSettings(SearchInfo& info) {
+    auto& params = info.search_params_;
+    if (auto it = params.find(kStrictGroupAcceptanceThreshold);
+        it != params.end()) {
+        if (!it->is_number()) {
+            ThrowInfo(InvalidParameter,
+                      "strict group acceptance must be numeric");
+        }
+        auto value = it->get<double>();
+        if (!std::isfinite(value) || value < 0 || value > 1) {
+            ThrowInfo(InvalidParameter,
+                      "strict group acceptance must be in [0,1]");
+        }
+        info.strict_group_acceptance_threshold_ = value;
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupProbeCandidates);
+        it != params.end()) {
+        if (!it->is_number_integer() ||
+            (it->is_number_unsigned() &&
+             it->get<uint64_t>() >
+                 static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
+            it->get<int64_t>() <= 0) {
+            ThrowInfo(InvalidParameter,
+                      "strict group probe must be a positive int64");
+        }
+        info.strict_group_probe_candidates_ = it->get<int64_t>();
+        params.erase(it);
+    }
+}
+}  // namespace
+
 void
 ProtoParser::PlanOptionsFromProto(
     const proto::plan::PlanOption& plan_option_proto,
@@ -97,6 +135,7 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
+    ParseStrictGroupSettings(search_info);
     search_info.materialized_view_involved =
         query_info_proto.materialized_view_involved();
     // currently, iterative filter does not support range search

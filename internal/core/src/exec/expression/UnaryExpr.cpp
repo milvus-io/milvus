@@ -754,7 +754,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 is_same = [this, reverse](milvus::proto::plan::Array& val,
                                           int64_t offset) -> bool {
                     auto [chunk_idx, chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, offset);
+                        GetChunkByOffset(field_id_, offset);
                     auto pw = segment_->template chunk_view<milvus::ArrayView>(
                         op_ctx_, field_id_, chunk_idx);
                     auto chunk = pw.get();

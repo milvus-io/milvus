@@ -2,7 +2,10 @@ package optimizers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 
 	"google.golang.org/protobuf/proto"
 
@@ -37,9 +40,6 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		req.Req.IsTopkReduce = false
 		req.Req.IsRecallEvaluation = false
 	}
-	if !useQueryHook && !useKnowhereDefaults {
-		return req, nil
-	}
 
 	collectionId := req.GetReq().GetCollectionID()
 	log := mlog.With(mlog.Int64("collection", collectionId))
@@ -47,6 +47,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
 	// plan not found
 	if serializedPlan == nil {
+		if !useQueryHook && !useKnowhereDefaults {
+			return req, nil
+		}
 		log.Warn(ctx, "serialized plan not found")
 		return req, merr.WrapErrParameterInvalid("serialized search plan", "nil")
 	}
@@ -67,6 +70,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	switch plan.GetNode().(type) {
 	case *planpb.PlanNode_VectorAnns:
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
+		if queryInfo == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("missing search query info")
+		}
 		if useQueryHook {
 			// use shardNum * segments num in shard to estimate total segment number
 			estSegmentNum := numSegments * int(channelNum)
@@ -97,12 +103,13 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 					params[common.RefineTopkRatioKey] = float32(paramtable.Get().AutoIndexConfig.GlobalRefineRefineTopkRatio.GetAsFloat())
 				}
 			}
-			if err := queryHook.Run(params); err != nil {
+			err := queryHook.Run(params)
+			if err != nil {
 				log.Warn(ctx, "failed to execute queryHook", mlog.Err(err))
 				return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 			}
 			finalTopk := params[common.TopKKey].(int64)
-			req.Req.IsTopkReduce = req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
+			isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 			queryInfo.Topk = finalTopk
 			if useKnowhereDefaults {
 				if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
@@ -119,6 +126,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 				queryInfo.SearchTopkRatio = 0
 				queryInfo.RefineTopkRatio = 0
 			}
+			req.Req.IsTopkReduce = isTopkReduce
 			if isRecallEvaluation, ok := params[common.RecallEvalKey]; ok {
 				req.Req.IsRecallEvaluation = isRecallEvaluation.(bool) && queryInfo.GetGroupByFieldId() < 0
 			} else {
@@ -134,12 +142,18 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		}
 
-		serializedExprPlan, err := proto.Marshal(&plan)
+		changed, err := applyStrictGroupSettings(queryInfo)
 		if err != nil {
-			log.Warn(ctx, "failed to marshal optimized plan", mlog.Err(err))
-			return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
+			return nil, err
 		}
-		req.Req.SerializedExprPlan = serializedExprPlan
+		if useQueryHook || useKnowhereDefaults || changed {
+			serializedExprPlan, err := proto.Marshal(&plan)
+			if err != nil {
+				log.Warn(ctx, "failed to marshal optimized plan", mlog.Err(err))
+				return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
+			}
+			req.Req.SerializedExprPlan = serializedExprPlan
+		}
 		log.Debug(ctx, "optimized search params done", mlog.Any("queryInfo", queryInfo))
 	default:
 		log.Warn(ctx, "not supported node type", mlog.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
@@ -166,4 +180,50 @@ func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int
 		return false
 	}
 	return req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+}
+
+// applyStrictGroupSettings runs after the hook, including when it is disabled.
+// Server settings override caller/hook values; unrelated JSON values retain
+// their exact numeric/string types. The serialized plan freezes this snapshot.
+func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
+	raw := info.GetSearchParams()
+	if raw == "" {
+		raw = "{}"
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &params); err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err)
+	}
+	if params == nil {
+		params = make(map[string]json.RawMessage)
+	}
+	_, hadThreshold := params[common.StrictGroupAcceptanceThresholdKey]
+	_, hadProbe := params[common.StrictGroupProbeCandidatesKey]
+	delete(params, common.StrictGroupAcceptanceThresholdKey)
+	delete(params, common.StrictGroupProbeCandidatesKey)
+	// Aggregation plans use only the plural field, even for one grouping key.
+	hasGroupBy := info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0
+	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && hasGroupBy
+	if eligible {
+		cfg := &paramtable.Get().QueryNodeCfg
+		threshold, err := strconv.ParseFloat(cfg.StrictGroupAcceptanceThreshold.GetValue(), 64)
+		if err != nil || math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 1 {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupAcceptanceThreshold.Key)
+		}
+		probe, err := strconv.ParseInt(cfg.StrictGroupProbeCandidates.GetValue(), 10, 64)
+		if err != nil || probe <= 0 {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupProbeCandidates.Key)
+		}
+		params[common.StrictGroupAcceptanceThresholdKey] = json.RawMessage(strconv.FormatFloat(threshold, 'g', -1, 64))
+		params[common.StrictGroupProbeCandidatesKey] = json.RawMessage(strconv.FormatInt(probe, 10))
+	}
+	if !eligible && !hadThreshold && !hadProbe {
+		return false, nil
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		return false, err
+	}
+	info.SearchParams = string(encoded)
+	return true, nil
 }

@@ -397,6 +397,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             published_index_has_raw_data;
     };
 
+    // State-only read view over a captured immutable PublishedSegmentState.
+    // Defined out-of-line in ChunkedSegmentSealedImpl.cpp; reads derive purely
+    // from the state (no segment pointer). See CaptureReadSnapshot().
+    class SealedReadSnapshot;
+
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
 
@@ -534,6 +539,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     int64_t
     chunk_size(FieldId field_id, int64_t chunk_id) const override;
+
+    // Capture the current published snapshot once per request. Returns a
+    // state-only SegmentReadSnapshot; nullptr is never returned (sealed
+    // segments always have a published state).
+    std::shared_ptr<const SegmentReadSnapshot>
+    CaptureReadSnapshot() const override;
 
     std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
