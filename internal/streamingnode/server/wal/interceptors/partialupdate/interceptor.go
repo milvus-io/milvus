@@ -42,6 +42,9 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	state := newPartialUpdateStateWithBudget(defaultVersionIndexTTL, b.versionIndexBudget)
 	state.channel = param.ChannelInfo
+	if param.LastTimeTickMessage != nil {
+		state.historyStartTs = param.LastTimeTickMessage.TimeTick()
+	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
 	return &appendInterceptor{
 		state:              state,
