@@ -122,9 +122,35 @@ func TestRecoveryStorageSplitShardOnUnknownVChannelIsAnInconsistency(t *testing.
 	defer mockDetect.UnPatch()
 
 	rs.handleMessage(context.Background(), newSplitShardMessage("v-unrelated", "v1", []string{"v2", "v3"}, 1, nil, 100))
-	assert.Equal(t, []string{"vchannel not found"}, reasons)
+	// Two independent checks each catch the same misroute from a different
+	// angle: handleMessage's generic "is this vchannel known at all" check,
+	// and handleSplitShard's own "does the header name this vchannel a
+	// source or a target" check -- both true, and both worth reporting.
+	assert.Equal(t, []string{"vchannel not found", "split shard replica of unknown role"}, reasons)
 	_, ok := rs.vchannels["v-unrelated"]
 	assert.False(t, ok)
+}
+
+// TestRecoveryStorageSplitShardOfUnknownRoleOnARegisteredVChannelIsAnInconsistency:
+// a replica landing on a vchannel that IS registered, but whose header lists
+// it as neither a source nor a target, skips the generic "vchannel not found"
+// check in handleMessage (the vchannel is known) and must instead be caught
+// inside handleSplitShard itself -- the asymmetry this closes is that the
+// source and target arms both act, but there was no arm, and so no report,
+// for every other role a SplitShard replica could land with.
+func TestRecoveryStorageSplitShardOfUnknownRoleOnARegisteredVChannelIsAnInconsistency(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+	addActiveVChannel(rs, "v9", 1, []int64{2})
+
+	reasons := make([]string, 0)
+	mockDetect := mockey.Mock((*recoveryStorageImpl).detectInconsistency).To(
+		func(r *recoveryStorageImpl, ctx context.Context, msg message.ImmutableMessage, reason string, extra ...mlog.Field) {
+			reasons = append(reasons, reason)
+		}).Build()
+	defer mockDetect.UnPatch()
+
+	rs.handleMessage(context.Background(), newSplitShardMessage("v9", "v1", []string{"v2", "v3"}, 1, nil, 100))
+	assert.Equal(t, []string{"split shard replica of unknown role"}, reasons)
 }
 
 func TestVChannelRecoveryInfoObserveSplitShard(t *testing.T) {

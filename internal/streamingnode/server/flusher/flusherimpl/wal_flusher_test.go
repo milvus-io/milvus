@@ -926,6 +926,44 @@ func TestWALFlusher_DispatchSplitShardSourceForwards(t *testing.T) {
 	assert.Equal(t, 1, handled)
 }
 
+// TestWALFlusher_DispatchSplitShardUnknownRoleDoesNotForward: a replica
+// landing on a vchannel the header names as neither a source nor a target
+// must not be forwarded to flusherComponents.HandleMessage either. There is
+// no data sync service action to take for it (unlike the target replica, it
+// is not a genesis; unlike the source replica, it fences nothing here), and
+// forwarding it would hand the dd_node a message it was never meant to see
+// on this vchannel.
+func TestWALFlusher_DispatchSplitShardUnknownRoleDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v9" is neither the source "v1" nor one of the targets.
+	msg := newFlusherSplitShardMessage(t, "v9", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 0, handled)
+}
+
 // TestWALFlusher_DispatchRetireDoesNotForward: an AlterCollection replica that
 // retires this vchannel (a shard-split routing commit whose new vchannel list
 // omits it) must close the data sync service the genesis spawned

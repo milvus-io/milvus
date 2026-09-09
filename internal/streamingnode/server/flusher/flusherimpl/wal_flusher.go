@@ -314,16 +314,25 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			impl.logger.DPanic(ctx, "the message type is not SplitShardMessage", mlog.Err(err))
 			return nil
 		}
-		if message.SplitShardRoleOf(splitShardMsg.Header(), msg.VChannel()) == message.SplitShardRoleTarget {
+		switch message.SplitShardRoleOf(splitShardMsg.Header(), msg.VChannel()) {
+		case message.SplitShardRoleTarget:
 			// The target replica is the genesis of a new vchannel: spawn its
 			// data sync service from it and stop. There is no flow graph to
 			// forward it to yet, and the dd_node's SplitShard branch would
 			// otherwise seal an empty segment list and set a flush timestamp on
 			// a vchannel that has written nothing.
 			return impl.flusherComponents.WhenCreateVChannel(ctx, splitShardMsg)
+		case message.SplitShardRoleSource:
+			// The source replica falls through to the data sync service, whose
+			// dd_node seals the fenced segments and sets the flush timestamp.
+		default:
+			// A replica landing on a vchannel that is neither a source nor a
+			// target has no data sync service action to take here, symmetric
+			// with the target arm above: there is nothing to spawn and nothing
+			// for the dd_node to seal, so it must not be forwarded either.
+			impl.logger.Warn(ctx, "split shard replica of unknown role, not forwarded", mlog.FieldMessage(msg))
+			return nil
 		}
-		// The source replica falls through to the data sync service, whose
-		// dd_node seals the fenced segments and sets the flush timestamp.
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
