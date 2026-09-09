@@ -71,6 +71,11 @@ func TestUUIDCreateInsertQuery(t *testing.T) {
 	err = task.Await(ctx)
 	common.CheckErr(t, err, true)
 
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
@@ -131,6 +136,11 @@ func TestUUIDDelete(t *testing.T) {
 	err = idxTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
@@ -189,6 +199,11 @@ func TestUUIDIndexLoad(t *testing.T) {
 	err = idxTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
@@ -235,6 +250,13 @@ func TestUUIDFlushLoadFilter(t *testing.T) {
 		column.NewColumnUUID("id", ids),
 		column.NewColumnUUID("device_uuid", deviceUUIDs),
 		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, vectors)))
+	common.CheckErr(t, err, true)
+
+	// index the vector field so the collection below can load; scalar UUID
+	// indexes are built after flush further down
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
 	// load so the pre-flush query below can hit the growing segment
@@ -324,6 +346,11 @@ func TestUUIDSDKPaths(t *testing.T) {
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewInvertedIndex()))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
