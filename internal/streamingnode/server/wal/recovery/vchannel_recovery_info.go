@@ -32,12 +32,12 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 	return newVChannelRecoveryInfo(msg.VChannel(), msg.Header().CollectionId, msg.Header().PartitionIds, schema, msg.TimeTick())
 }
 
-// newVChannelRecoveryInfoFromCreateVChannelMessage creates a new vchannel
-// recovery info from a shard split target vchannel's genesis message. The
-// CreateVChannel body shares the CreateCollection shape, so the same schema
-// parser seeds the vchannel meta.
-func newVChannelRecoveryInfoFromCreateVChannelMessage(msg message.ImmutableCreateVChannelMessageV2) *vchannelRecoveryInfo {
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(msg.MustBody())
+// newVChannelRecoveryInfoFromSplitShardMessage creates a new vchannel
+// recovery info from a shard split target vchannel's genesis replica. The
+// genesis carries the same CreateCollection shape, so the same schema parser
+// seeds the vchannel meta.
+func newVChannelRecoveryInfoFromSplitShardMessage(msg message.ImmutableSplitShardMessageV2) *vchannelRecoveryInfo {
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(msg.MustBody().GetGenesis())
 	return newVChannelRecoveryInfo(msg.VChannel(), msg.Header().CollectionId, msg.Header().PartitionIds, schema, msg.TimeTick())
 }
 
@@ -196,23 +196,23 @@ func (info *vchannelRecoveryInfo) ObserveDropCollection(msg message.ImmutableDro
 	info.dirty = true
 }
 
-// ObserveDropVChannel is called when a drop-vchannel message is observed: the
-// vchannel a shard split retired is being reclaimed, so its recovery info moves
-// to DROPPED and stops being rebuilt on every WAL open.
+// ObserveDropVChannel is called when a vchannel is retired: the vchannel a
+// shard split delisted is being reclaimed, so its recovery info moves to
+// DROPPED and stops being rebuilt on every WAL open.
 //
 // Same shape as ObserveDropCollection, and deliberately so — the end state is
 // identical, only the scope differs (one vchannel rather than every vchannel of
 // a collection). A vchannel that is already DROPPED is left alone, which is
 // what makes a replayed message harmless.
-func (info *vchannelRecoveryInfo) ObserveDropVChannel(msg message.ImmutableDropVChannelMessageV2) {
-	if msg.TimeTick() < info.meta.CheckpointTimeTick {
+func (info *vchannelRecoveryInfo) ObserveDropVChannel(timetick uint64) {
+	if timetick < info.meta.CheckpointTimeTick {
 		return
 	}
 	if info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		return
 	}
 	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
-	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.meta.CheckpointTimeTick = timetick
 	info.dirty = true
 }
 
