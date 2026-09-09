@@ -1412,7 +1412,7 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 			}
 		}
 	}
-	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	partitions := q.quotaPartitionSnapshot(enablePartitionRateLimit)
 	initLimiters(partitions)
 	return nil
 }
@@ -1441,22 +1441,46 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 		return props
 	}
 
-	collectionInfo, err := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collection)
+	var properties map[string]string
+	var err error
+	if reader, ok := q.meta.(quotaMetadataReader); ok {
+		properties, err = reader.GetQuotaCollectionProperties(q.ctx, collection)
+	} else {
+		// Preserve compatibility with alternative metadata implementations.
+		var collectionInfo *model.Collection
+		collectionInfo, err = q.meta.GetCollectionByIDWithMaxTs(q.ctx, collection)
+		if err == nil && len(collectionInfo.Properties) > 0 {
+			properties = make(map[string]string, len(collectionInfo.Properties))
+			for _, pair := range collectionInfo.Properties {
+				properties[pair.GetKey()] = pair.GetValue()
+			}
+		}
+	}
 	if err != nil {
 		mlog.RatedWarn(q.ctx, rate.Limit(10), "failed to get rate limit properties from collection meta",
 			mlog.FieldCollectionID(collection),
 			mlog.Err(err))
-		return make(map[string]string)
-	}
-
-	properties := make(map[string]string)
-	for _, pair := range collectionInfo.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
+		return nil
 	}
 
 	q.collectionProps[collection] = properties
 
 	return properties
+}
+
+// quotaMetadataReader avoids cloning collections and enumerating unused partition
+// IDs. IMetaTable implementations without this optional projection retain the
+// existing read path and semantics.
+type quotaMetadataReader interface {
+	GetQuotaCollectionProperties(context.Context, int64) (map[string]string, error)
+	ListQuotaPartitions(context.Context, bool) map[int64]map[int64][]int64
+}
+
+func (q *QuotaCenter) quotaPartitionSnapshot(includePartitions bool) map[int64]map[int64][]int64 {
+	if reader, ok := q.meta.(quotaMetadataReader); ok {
+		return reader.ListQuotaPartitions(q.ctx, includePartitions)
+	}
+	return q.meta.ListAllAvailPartitions(q.ctx)
 }
 
 // checkDiskQuota checks if disk quota exceeded.

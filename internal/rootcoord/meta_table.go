@@ -1021,6 +1021,12 @@ func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]in
 }
 
 func (mt *MetaTable) ListAllAvailPartitions(ctx context.Context) map[int64]map[int64][]int64 {
+	return mt.ListQuotaPartitions(ctx, true)
+}
+
+// ListQuotaPartitions returns the same collection membership as
+// ListAllAvailPartitions, without materializing partition IDs when not needed.
+func (mt *MetaTable) ListQuotaPartitions(ctx context.Context, includePartitions bool) map[int64]map[int64][]int64 {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
@@ -1040,9 +1046,32 @@ func (mt *MetaTable) ListAllAvailPartitions(ctx context.Context) map[int64]map[i
 		if _, ok := ret[dbID]; !ok {
 			ret[dbID] = make(map[int64][]int64, 64)
 		}
-		ret[dbID][collMeta.CollectionID] = lo.Map(collMeta.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })
+		var partitionIDs []int64
+		if includePartitions {
+			partitionIDs = lo.Map(collMeta.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })
+		}
+		ret[dbID][collMeta.CollectionID] = partitionIDs
 	}
 	return ret
+}
+
+// GetQuotaCollectionProperties copies only the collection properties for quota
+// calculation, rather than cloning the collection and filtering its partitions.
+func (mt *MetaTable) GetQuotaCollectionProperties(ctx context.Context, collectionID int64) (map[string]string, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil || !coll.Available() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if len(coll.Properties) == 0 {
+		return nil, nil
+	}
+	properties := make(map[string]string, len(coll.Properties))
+	for _, pair := range coll.Properties {
+		properties[pair.GetKey()] = pair.GetValue()
+	}
+	return properties, nil
 }
 
 func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error) {
