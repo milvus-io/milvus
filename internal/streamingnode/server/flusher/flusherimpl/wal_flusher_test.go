@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -777,26 +778,60 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	return w
 }
 
-func newFlusherCreateVChannelMessage(t *testing.T, vchannel string, collectionID int64) message.ImmutableCreateVChannelMessageV2 {
+// newFlusherSplitShardMessage builds one replica of a SplitShard broadcast,
+// landing on the given vchannel. Its role is decided from whether vchannel is
+// the source or one of the targets, exactly as production dispatch decides it.
+func newFlusherSplitShardMessage(t *testing.T, vchannel, source string, targets []string, collectionID int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
 	t.Helper()
-	msg := message.NewCreateVChannelMessageBuilderV2().
+	splitTargets := make([]*message.SplitShardTarget, 0, len(targets))
+	for i, target := range targets {
+		splitTargets = append(splitTargets, &message.SplitShardTarget{
+			Vchannel: target,
+			Routing:  &schemapb.HashRouting{Buckets: []uint64{uint64(i)}},
+		})
+	}
+	msg := message.NewSplitShardMessageBuilderV2().
 		WithVChannel(vchannel).
-		WithHeader(&message.CreateVChannelMessageHeader{
-			CollectionId:         collectionID,
-			PartitionIds:         []int64{2},
-			SplitTaskId:          100,
-			SplitSourceVchannels: []string{"v1"},
-			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
-			RoutingModulus:       2,
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    collectionID,
+			SplitTaskId:     100,
+			PartitionIds:    []int64{2},
+			SourceVchannels: []string{source},
+			Targets:         splitTargets,
 		}).
-		WithBody(&message.CreateCollectionRequest{
-			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		WithBody(&message.SplitShardMessageBody{
+			Genesis: &msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+			},
 		}).
 		MustBuildMutable().
-		WithTimeTick(100).
+		WithTimeTick(timetick).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(4))
-	return message.MustAsImmutableCreateVChannelMessageV2(msg)
+	return message.MustAsImmutableSplitShardMessageV2(msg)
+}
+
+// newFlusherRetireMessage builds the AlterCollection replica of a shard-split
+// routing commit landing on the given vchannel: `kept` is the new vchannel
+// list. The replica retires vchannel exactly when kept omits it.
+func newFlusherRetireMessage(t *testing.T, vchannel string, collectionID int64, kept []string, timetick uint64) message.ImmutableAlterCollectionMessageV2 {
+	t.Helper()
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{
+				VirtualChannelNames: kept,
+			},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(5))
+	return message.MustAsImmutableAlterCollectionMessageV2(msg)
 }
 
 func TestFlusherWhenCreateVChannelAlreadyBuilt(t *testing.T) {
@@ -805,7 +840,7 @@ func TestFlusherWhenCreateVChannelAlreadyBuilt(t *testing.T) {
 	flusher := newTestWALFlusher(rs)
 	// a data sync service already exists for the target vchannel: skip the spawn.
 	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
-	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherCreateVChannelMessage(t, "v2", 7))
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100))
 	assert.Len(t, flusher.flusherComponents.dataServices, 1)
 }
 
@@ -815,83 +850,148 @@ func TestFlusherWhenCreateVChannelOlderThanCheckpoint(t *testing.T) {
 	flusher := newTestWALFlusher(rs)
 	flusher.flusherComponents.recoveryCheckPointTimeTick = 1000
 	// the genesis is older than the recovery checkpoint: skip the spawn.
-	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherCreateVChannelMessage(t, "v2", 7))
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100))
 	assert.Empty(t, flusher.flusherComponents.dataServices)
 }
 
-// dispatch must NOT forward a CreateVChannel message to the data sync service
-// after spawning its genesis DSS. CreateVChannel is a V2 message and the msgpack
-// adaptor (fromMessageToTsMsgV2) has no case for it, so forwarding it would panic
-// ("unsupported message type"). The CreateCollection branch survives the same
-// fall-through only because it is a V1 message handled by the unmarshaler path.
-// Pre-populating dataServices makes spawnGenesisDataSyncService short-circuit (so
-// no real pipeline is built) while preserving the forward path that, without the
-// dispatch's `return nil`, would reach the panic.
-func TestWALFlusher_DispatchCreateVChannelDoesNotForward(t *testing.T) {
+// TestWALFlusher_DispatchSplitShardTargetDoesNotForward: dispatch must NOT
+// hand the target replica of a SplitShard broadcast to
+// flusherComponents.HandleMessage. The target replica is the genesis of a new
+// vchannel: it spawns the vchannel's data sync service (WhenCreateVChannel)
+// and stops there. The flow graph has no use for the genesis message itself,
+// and unlike the source replica, no dd_node needs to observe it.
+func TestWALFlusher_DispatchSplitShardTargetDoesNotForward(t *testing.T) {
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 	flusher := newTestWALFlusher(rs)
-	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
 
-	msg := message.NewCreateVChannelMessageBuilderV2().
-		WithVChannel("v2").
-		WithHeader(&message.CreateVChannelMessageHeader{
-			CollectionId:         7,
-			PartitionIds:         []int64{2},
-			SplitTaskId:          100,
-			SplitSourceVchannels: []string{"v1"},
-			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
-			RoutingModulus:       2,
-		}).
-		WithBody(&message.CreateCollectionRequest{
-			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
-		}).
-		MustBuildMutable().
-		WithTimeTick(100).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(rmq.NewRmqID(4))
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v2" is a target of the split.
+	msg := newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100)
 
 	require.NotPanics(t, func() {
 		require.NoError(t, flusher.dispatch(msg))
 	})
+	assert.Equal(t, 1, spawned)
+	assert.Equal(t, 0, handled)
 }
 
-// TestWALFlusher_DispatchDropVChannelDoesNotForward is the mirror of the
-// CreateVChannel case, and it exists for the same reason.
-//
-// DropVChannel is a V2 message and the msgpack adaptor (fromMessageToTsMsgV2)
-// has no case for it, so forwarding it to the data sync service would panic the
-// process with "unsupported message type". DropCollection survives the same
-// fall-through only because it is V1 and goes through the unmarshaler path.
-// Closing the data sync service and returning is the whole handling.
-func TestWALFlusher_DispatchDropVChannelDoesNotForward(t *testing.T) {
+// TestWALFlusher_DispatchSplitShardSourceForwards: the source replica of a
+// SplitShard broadcast IS forwarded to flusherComponents.HandleMessage,
+// unlike the target replica. The dd_node needs it to seal the fenced segments
+// and set the flush timestamp.
+func TestWALFlusher_DispatchSplitShardSourceForwards(t *testing.T) {
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 	flusher := newTestWALFlusher(rs)
-	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v1" is the source of the split: the replica lands on itself.
+	msg := newFlusherSplitShardMessage(t, "v1", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 1, handled)
+}
+
+// TestWALFlusher_DispatchRetireDoesNotForward: an AlterCollection replica that
+// retires this vchannel (a shard-split routing commit whose new vchannel list
+// omits it) must close the data sync service the genesis spawned
+// (WhenDropCollection) and must NOT be handed to
+// flusherComponents.HandleMessage. Reuses the drop-collection teardown,
+// already scoped to one vchannel.
+func TestWALFlusher_DispatchRetireDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
 
 	closed := 0
-	mockClose := mockey.Mock((*dataSyncServiceWrapper).Close).To(func(ds *dataSyncServiceWrapper) {
-		closed++
-	}).Build()
+	mockClose := mockey.Mock((*flusherComponents).WhenDropCollection).To(
+		func(_ *flusherComponents, ctx context.Context, vchannel string) {
+			closed++
+		}).Build()
 	defer mockClose.UnPatch()
 
-	msg := message.NewDropVChannelMessageBuilderV2().
-		WithVChannel("v2").
-		WithHeader(&message.DropVChannelMessageHeader{
-			CollectionId: 7,
-			SplitTaskId:  100,
-		}).
-		WithBody(&message.DropVChannelMessageBody{}).
-		MustBuildMutable().
-		WithTimeTick(100).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(rmq.NewRmqID(4))
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// "v0" is retired: the new vchannel list ("v1") omits it.
+	msg := newFlusherRetireMessage(t, "v0", 1, []string{"v1"}, 100)
 
 	require.NotPanics(t, func() {
 		require.NoError(t, flusher.dispatch(msg))
 	})
-	// The retired vchannel must stop holding a flusher.
 	assert.Equal(t, 1, closed)
-	assert.Empty(t, flusher.flusherComponents.dataServices)
+	assert.Equal(t, 0, handled)
+}
+
+// TestWALFlusher_DispatchAlterCollectionListedForwards: a normal
+// AlterCollection replica that does NOT retire this vchannel (it is still
+// listed in the new vchannel list) still reaches flusherComponents.HandleMessage,
+// exactly as any other plain message does.
+func TestWALFlusher_DispatchAlterCollectionListedForwards(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	closed := 0
+	mockClose := mockey.Mock((*flusherComponents).WhenDropCollection).To(
+		func(_ *flusherComponents, ctx context.Context, vchannel string) {
+			closed++
+		}).Build()
+	defer mockClose.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// "v1" stays listed in the new vchannel list: it is not retired.
+	msg := newFlusherRetireMessage(t, "v1", 1, []string{"v0", "v1"}, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, closed)
+	assert.Equal(t, 1, handled)
 }

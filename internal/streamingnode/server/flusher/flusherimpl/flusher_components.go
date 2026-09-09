@@ -42,11 +42,11 @@ func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createC
 	return impl.spawnGenesisDataSyncService(ctx, createCollectionMsg, createCollectionMsg.Header().GetCollectionId())
 }
 
-// WhenCreateVChannel handles the create-vchannel message, the genesis of a
-// shard split target vchannel: it spawns a data sync service for the new
-// vchannel exactly as a create collection genesis does.
-func (impl *flusherComponents) WhenCreateVChannel(ctx context.Context, createVChannelMsg message.ImmutableCreateVChannelMessageV2) error {
-	return impl.spawnGenesisDataSyncService(ctx, createVChannelMsg, createVChannelMsg.Header().GetCollectionId())
+// WhenCreateVChannel handles the target replica of a SplitShard broadcast,
+// the genesis of a shard split target vchannel: it spawns a data sync service
+// for the new vchannel exactly as a create collection genesis does.
+func (impl *flusherComponents) WhenCreateVChannel(ctx context.Context, splitShardMsg message.ImmutableSplitShardMessageV2) error {
+	return impl.spawnGenesisDataSyncService(ctx, splitShardMsg, splitShardMsg.Header().GetCollectionId())
 }
 
 // spawnGenesisDataSyncService spawns the data sync service of a freshly created
