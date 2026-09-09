@@ -59,8 +59,9 @@ func (idx gpuIVFFlatIndex) Params() map[string]string {
 	}
 }
 
-// NewGPUIVFFlatIndex creates a GPU IVF_FLAT index.
-func NewGPUIVFFlatIndex(metricType MetricType) Index {
+// NewGPUIvfFlatIndex creates a GPU IVF_FLAT index.
+// Set nlist with WithExtraIndexParams when overriding the server default.
+func NewGPUIvfFlatIndex(metricType MetricType) Index {
 	return gpuIVFFlatIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
@@ -69,9 +70,9 @@ func NewGPUIVFFlatIndex(metricType MetricType) Index {
 	}
 }
 
-// Deprecated: Use NewGPUIVFFlatIndex instead.
+// Deprecated: Use NewGPUIvfFlatIndex instead.
 func NewGPUIVPFlatIndex(metricType MetricType) Index {
-	return NewGPUIVFFlatIndex(metricType)
+	return NewGPUIvfFlatIndex(metricType)
 }
 
 var _ Index = gpuIVFPQIndex{}
@@ -96,8 +97,9 @@ func (idx gpuIVFPQIndex) Params() map[string]string {
 	return result
 }
 
-// NewGPUIVFPQIndex creates a GPU IVF_PQ index.
-func NewGPUIVFPQIndex(metricType MetricType) Index {
+// NewGPUIvfPQIndex creates a GPU IVF_PQ index.
+// Set nlist, m, and nbits with WithExtraIndexParams when overriding server defaults.
+func NewGPUIvfPQIndex(metricType MetricType) Index {
 	return gpuIVFPQIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
@@ -106,9 +108,9 @@ func NewGPUIVFPQIndex(metricType MetricType) Index {
 	}
 }
 
-// Deprecated: Use NewGPUIVFPQIndex instead.
+// Deprecated: Use NewGPUIvfPQIndex instead.
 func NewGPUIVPPQIndex(metricType MetricType) Index {
-	return NewGPUIVFPQIndex(metricType)
+	return NewGPUIvfPQIndex(metricType)
 }
 
 const (
