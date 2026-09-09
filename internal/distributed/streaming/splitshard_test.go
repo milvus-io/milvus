@@ -79,6 +79,19 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 	}
 }
 
+// assertSplitShardParamInvalid asserts that Validate reports the caller of
+// this package -- DataCoord's FSM -- with a Milvus bug, never a caller
+// mistake: the blame test (docs/dev/error_handling_guide.md) puts the fault on
+// whichever internal component built the malformed param, not on request
+// content, so every Validate failure is a System error (ErrServiceInternal)
+// and never retriable.
+func assertSplitShardParamInvalid(t *testing.T, param streaming.SplitShardParam) {
+	err := param.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+	assert.False(t, merr.IsRetryableErr(err))
+}
+
 func TestSplitShardParamValidate(t *testing.T) {
 	// valid param.
 	param := newSplitShardParam()
@@ -87,40 +100,57 @@ func TestSplitShardParamValidate(t *testing.T) {
 	// ids must be positive.
 	param = newSplitShardParam()
 	param.CollectionID = 0
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	param = newSplitShardParam()
 	param.SplitTaskID = 0
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
+
+	// the db id must be positive: DataCoord always resolves a real db for the
+	// collection it is splitting, so a non-positive value is a Milvus bug.
+	param = newSplitShardParam()
+	param.DBID = 0
+	assertSplitShardParamInvalid(t, param)
+
+	// partition ids must be set: a target registered with no partition
+	// accepts no insert.
+	param = newSplitShardParam()
+	param.PartitionIDs = nil
+	assertSplitShardParamInvalid(t, param)
 
 	// sources must be set, and each must be non-empty.
 	param = newSplitShardParam()
 	param.SourceVChannels = nil
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	param = newSplitShardParam()
 	param.SourceVChannels = []string{""}
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
+
+	// the source vchannels must not duplicate each other.
+	param = newSplitShardParam()
+	param.SourceVChannels = []string{"p0_1v0", "p0_1v0"}
+	assertSplitShardParamInvalid(t, param)
 
 	// routing modulus must be set.
 	param = newSplitShardParam()
 	param.RoutingModulus = 0
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// schema must be set.
 	param = newSplitShardParam()
 	param.Schema = nil
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// control channel must be set.
 	param = newSplitShardParam()
 	param.ControlChannel = ""
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// routing post-image must be set.
 	param = newSplitShardParam()
 	param.Routing = nil
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// One target is legal: a source of a rehash fronts only its share of the
 	// split's targets, and with more sources than targets it may front none.
@@ -133,32 +163,32 @@ func TestSplitShardParamValidate(t *testing.T) {
 	// target vchannel must be set.
 	param = newSplitShardParam()
 	param.Targets[0].Vchannel = ""
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// the target vchannel must not duplicate a source.
 	param = newSplitShardParam()
 	param.Targets[0].Vchannel = "p0_1v0"
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// the target vchannels must not duplicate each other.
 	param = newSplitShardParam()
 	param.Targets[1].Vchannel = param.Targets[0].Vchannel
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// a target with no residue is refused.
 	param = newSplitShardParam()
 	param.Targets[0].Routing = &schemapb.HashRouting{}
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// a residue not below the modulus is refused.
 	param = newSplitShardParam()
 	param.Targets[0].Routing = &schemapb.HashRouting{Buckets: []uint64{2}}
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// the routing post-image must cover every target.
 	param = newSplitShardParam()
 	param.Routing = &message.AlterCollectionMessageUpdates{VirtualChannelNames: []string{"p0_1v0", "p0_1v1"}}
-	assert.Error(t, param.Validate())
+	assertSplitShardParamInvalid(t, param)
 
 	// validation failure happens before any message is built.
 	w := newSplitShardParam()

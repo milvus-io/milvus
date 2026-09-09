@@ -70,27 +70,42 @@ type SplitShardParam struct {
 }
 
 // Validate validates the parameter.
+//
+// Every failure here is reported as a System error (WrapErrServiceInternalMsg),
+// never as a caller mistake: the only caller of this package is DataCoord's own
+// FSM, so a malformed param is a Milvus bug, not user input (the blame test in
+// docs/dev/error_handling_guide.md never puts fault on request content that
+// doesn't exist at this layer).
 func (p *SplitShardParam) Validate() error {
 	if p.CollectionID <= 0 {
-		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
+		return merr.WrapErrServiceInternalMsg("collection id must be positive, got %d", p.CollectionID)
 	}
 	if p.SplitTaskID <= 0 {
-		return merr.WrapErrParameterInvalidMsg("split task id must be positive, got %d", p.SplitTaskID)
+		return merr.WrapErrServiceInternalMsg("split task id must be positive, got %d", p.SplitTaskID)
+	}
+	if p.DBID <= 0 {
+		return merr.WrapErrServiceInternalMsg("db id must be positive, got %d", p.DBID)
 	}
 	if len(p.SourceVChannels) == 0 {
-		return merr.WrapErrParameterMissingMsg("source vchannels must be set")
+		return merr.WrapErrServiceInternalMsg("source vchannels must be set")
+	}
+	// A target registered with no partition accepts no insert: every insert
+	// resolves its target partition from this list, so an empty one silently
+	// makes the target unwritable rather than failing loudly here.
+	if len(p.PartitionIDs) == 0 {
+		return merr.WrapErrServiceInternalMsg("partition ids must be set")
 	}
 	if p.RoutingModulus == 0 {
-		return merr.WrapErrParameterMissingMsg("routing modulus must be set")
+		return merr.WrapErrServiceInternalMsg("routing modulus must be set")
 	}
 	if p.Schema == nil {
-		return merr.WrapErrParameterMissingMsg("collection schema must be set")
+		return merr.WrapErrServiceInternalMsg("collection schema must be set")
 	}
 	if p.ControlChannel == "" {
-		return merr.WrapErrParameterMissingMsg("control channel must be set")
+		return merr.WrapErrServiceInternalMsg("control channel must be set")
 	}
 	if p.Routing == nil {
-		return merr.WrapErrParameterMissingMsg("routing post-image must be set")
+		return merr.WrapErrServiceInternalMsg("routing post-image must be set")
 	}
 
 	// No lower bound on the target count. Targets here are the shards THIS set
@@ -103,7 +118,10 @@ func (p *SplitShardParam) Validate() error {
 	vchannels := make(map[string]struct{}, len(p.SourceVChannels)+len(p.Targets))
 	for _, source := range p.SourceVChannels {
 		if source == "" {
-			return merr.WrapErrParameterMissingMsg("source vchannel must be set")
+			return merr.WrapErrServiceInternalMsg("source vchannel must be set")
+		}
+		if _, ok := vchannels[source]; ok {
+			return merr.WrapErrServiceInternalMsg("duplicated source vchannel %s in shard split", source)
 		}
 		vchannels[source] = struct{}{}
 	}
@@ -114,10 +132,10 @@ func (p *SplitShardParam) Validate() error {
 	for _, target := range p.Targets {
 		vchannel := target.GetVchannel()
 		if vchannel == "" {
-			return merr.WrapErrParameterMissingMsg("target vchannel must be set")
+			return merr.WrapErrServiceInternalMsg("target vchannel must be set")
 		}
 		if _, ok := vchannels[vchannel]; ok {
-			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in shard split", vchannel)
+			return merr.WrapErrServiceInternalMsg("duplicated vchannel %s in shard split", vchannel)
 		}
 		vchannels[vchannel] = struct{}{}
 		// The message is a PERMANENT record -- it is what a replay derives the
@@ -125,17 +143,17 @@ func (p *SplitShardParam) Validate() error {
 		// with one that is not below the modulus they are taken against, is
 		// refused here rather than written and puzzled over later.
 		if len(target.GetRouting().GetBuckets()) == 0 {
-			return merr.WrapErrParameterMissingMsg("target %s carries no residue", vchannel)
+			return merr.WrapErrServiceInternalMsg("target %s carries no residue", vchannel)
 		}
 		for _, residue := range target.GetRouting().GetBuckets() {
 			if residue >= p.RoutingModulus {
-				return merr.WrapErrParameterInvalidMsg(
+				return merr.WrapErrServiceInternalMsg(
 					"target %s owns residue %d, which is not below the routing modulus %d",
 					vchannel, residue, p.RoutingModulus)
 			}
 		}
 		if _, ok := routingTargets[vchannel]; !ok {
-			return merr.WrapErrParameterMissingMsg("routing post-image is missing target vchannel %s", vchannel)
+			return merr.WrapErrServiceInternalMsg("routing post-image is missing target vchannel %s", vchannel)
 		}
 	}
 	return nil
