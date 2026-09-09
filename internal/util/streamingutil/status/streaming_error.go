@@ -258,7 +258,6 @@ func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingErr
 // it -- are informational only: a proxy refetches the routing table on the code
 // alone, and the split coordinator drives its own broadcast to completion
 // through the broadcaster and never reads either field back off this error.
-
 func NewShardFenced(vchannel string, fencedTimeTick uint64, fencedSplitTaskID int64) *StreamingError {
 	err := New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
 	err.FencedTimeTick = fencedTimeTick
