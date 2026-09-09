@@ -46,15 +46,18 @@ type ShardManager interface {
 
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
 
-	// CreateVChannel registers a shard split target vchannel (the genesis
-	// message of the new vchannel) for DML and segment assignment.
-	CreateVChannel(msg message.ImmutableCreateVChannelMessageV2)
+	// CreateVChannel registers a shard split target vchannel for DML and segment
+	// assignment. The message is the TARGET replica of the split broadcast: the
+	// genesis of the new vchannel, carrying the collection schema in its body.
+	CreateVChannel(msg message.ImmutableSplitShardMessageV2)
 
 	// DropVChannel retires one vchannel of a collection on this pchannel, the
-	// inverse of CreateVChannel. Guarded by the vchannel name: after the
-	// coordinator reclaims a retired source's slot, another vchannel of the same
-	// collection may hold this pchannel's entry, and it must not be torn down.
-	DropVChannel(msg message.ImmutableDropVChannelMessageV2)
+	// inverse of CreateVChannel. The message is the AlterCollection replica whose
+	// routing commit delists this vchannel. Guarded by the vchannel name: after
+	// the coordinator reclaims a retired source's slot, another vchannel of the
+	// same collection may hold this pchannel's entry, and it must not be torn
+	// down.
+	DropVChannel(msg message.ImmutableAlterCollectionMessageV2)
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 

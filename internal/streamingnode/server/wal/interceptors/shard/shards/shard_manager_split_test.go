@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -118,51 +119,76 @@ func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
 	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
 }
 
-func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
-	msg := message.NewCreateVChannelMessageBuilderV2().
+// newTestSplitShardGenesisImmutableMessage builds the TARGET replica of a split
+// broadcast: the genesis of a new vchannel, which is what registers it here.
+func newTestSplitShardGenesisImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
+	return newTestSplitShardGenesisImmutableMessageWithBody(vchannel, collectionID, partitionIDs, timetick,
+		&message.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "col"}})
+}
+
+func newTestSplitShardGenesisImmutableMessageWithBody(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64, genesis *message.CreateCollectionRequest) message.ImmutableSplitShardMessageV2 {
+	msg := message.NewSplitShardMessageBuilderV2().
 		WithVChannel(vchannel).
-		WithHeader(&message.CreateVChannelMessageHeader{
-			CollectionId:         collectionID,
-			PartitionIds:         partitionIDs,
-			SplitTaskId:          100,
-			SplitSourceVchannels: []string{"v1"},
-			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
-			RoutingModulus:       2,
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    collectionID,
+			PartitionIds:    partitionIDs,
+			SplitTaskId:     100,
+			SourceVchannels: []string{"v1"},
+			RoutingModulus:  2,
+			Targets: []*message.SplitShardTarget{
+				{Vchannel: vchannel, Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			},
 		}).
-		WithBody(&message.CreateCollectionRequest{
-			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		WithBody(&message.SplitShardMessageBody{Genesis: genesis}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID()
+	return message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3)))
+}
+
+// newTestRetireImmutableMessage builds the routing commit that retires a
+// vchannel: the shard-split routing mask plus a vchannel list without it.
+func newTestRetireImmutableMessage(vchannel string, collectionID int64, kept []string, timetick uint64) message.ImmutableAlterCollectionMessageV2 {
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{VirtualChannelNames: kept},
 		}).
 		MustBuildMutable().
 		WithTimeTick(timetick).
 		WithLastConfirmedUseMessageID()
-	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3)))
+	return message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(2)))
 }
 
 func TestShardManagerCreateVChannel(t *testing.T) {
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
 	// a shard split target vchannel of a new collection is registered for DML,
 	// exactly as a create collection genesis would register it.
-	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 2000))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("v2", 7, []int64{8}, 2000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7, "v2"))
 
 	// a target without a schema still registers the collection.
-	m.CreateVChannel(newTestCreateVChannelImmutableMessageNoSchema("v3", 9, []int64{10}, 2500))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessageNoSchema("v3", 9, []int64{10}, 2500))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(9, "v3"))
 
 	// replaying the genesis of an already-registered vchannel is a no-op.
-	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 3000))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("v2", 7, []int64{8}, 3000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7, "v2"))
 
 	// a genesis for a DIFFERENT vchannel of a collection this pchannel already
 	// holds must not take the incumbent's place, and must not be mistaken for
 	// an idempotent replay: the newcomer stays unregistered and the incumbent
 	// keeps serving.
-	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-successor", 1, []int64{2}, 3000))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("v1-successor", 1, []int64{2}, 3000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"), ErrCollectionNotFound)
 }
 
-// A CreateVChannel body may carry the schema as the pre-2.6.1 serialized bytes
+// A genesis body may carry the schema as the pre-2.6.1 serialized bytes
 // rather than the CollectionSchema message: the interceptor admits either form.
 // The shard manager must resolve both exactly as CreateCollection does, or the
 // target is registered with a nil schema and every versioned insert to it fails
@@ -177,21 +203,8 @@ func TestShardManagerCreateVChannelResolvesTheSchemaBytesForm(t *testing.T) {
 	bs, err := proto.Marshal(schema)
 	require.NoError(t, err)
 
-	msg := message.NewCreateVChannelMessageBuilderV2().
-		WithVChannel("v9").
-		WithHeader(&message.CreateVChannelMessageHeader{
-			CollectionId:         9,
-			PartitionIds:         []int64{10},
-			SplitTaskId:          100,
-			SplitSourceVchannels: []string{"v1"},
-			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
-			RoutingModulus:       2,
-		}).
-		WithBody(&message.CreateCollectionRequest{Schema: bs}).
-		MustBuildMutable().
-		WithTimeTick(2000).
-		WithLastConfirmedUseMessageID()
-	m.CreateVChannel(message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3))))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessageWithBody("v9", 9, []int64{10}, 2000,
+		&message.CreateCollectionRequest{Schema: bs}))
 
 	version, err := m.CheckWritableAndSchemaVersion("v9", &message.InsertMessageHeader{CollectionId: 9, SchemaVersion: proto.Int32(3)})
 	require.NoError(t, err)
@@ -267,22 +280,9 @@ func TestResolveVChannelCollision(t *testing.T) {
 	assert.Equal(t, "v0", winner.VChannel)
 }
 
-func newTestCreateVChannelImmutableMessageNoSchema(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
-	msg := message.NewCreateVChannelMessageBuilderV2().
-		WithVChannel(vchannel).
-		WithHeader(&message.CreateVChannelMessageHeader{
-			CollectionId:         collectionID,
-			PartitionIds:         partitionIDs,
-			SplitTaskId:          100,
-			SplitSourceVchannels: []string{"v1"},
-			Routing:              &schemapb.HashRouting{Buckets: []uint64{1}},
-			RoutingModulus:       2,
-		}).
-		WithBody(&message.CreateCollectionRequest{}).
-		MustBuildMutable().
-		WithTimeTick(timetick).
-		WithLastConfirmedUseMessageID()
-	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(4)))
+func newTestSplitShardGenesisImmutableMessageNoSchema(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
+	return newTestSplitShardGenesisImmutableMessageWithBody(vchannel, collectionID, partitionIDs, timetick,
+		&message.CreateCollectionRequest{})
 }
 
 // A retired source must keep answering "fenced", because that is the only signal
@@ -296,14 +296,7 @@ func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
 	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
 
-	dropMsg, err := message.NewDropVChannelMessageBuilderV2().
-		WithVChannel("v1").
-		WithHeader(&message.DropVChannelMessageHeader{CollectionId: 1}).
-		WithBody(&message.DropVChannelMessageBody{}).
-		BuildMutable()
-	require.NoError(t, err)
-	m.DropVChannel(message.MustAsImmutableDropVChannelMessageV2(
-		dropMsg.WithTimeTick(5000).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(2))))
+	m.DropVChannel(newTestRetireImmutableMessage("v1", 1, []string{"v1-successor"}, 5000))
 	// the registration is gone...
 	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
 	// ...but the name is still fenced, and T_switch still recoverable.
@@ -316,7 +309,7 @@ func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
 
 	// a successor landing on the freed slot is writable, and does not inherit
 	// the predecessor's fence.
-	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-successor", 1, []int64{2}, 6000))
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("v1-successor", 1, []int64{2}, 6000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
 }

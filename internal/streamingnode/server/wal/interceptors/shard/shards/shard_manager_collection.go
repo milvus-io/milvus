@@ -99,8 +99,8 @@ func (m *shardManagerImpl) GetSplitFence(collectionID int64, vchannel string) Sp
 // registration, and inherit the incumbent's state -- including a SPLITTED
 // source's fence, which leaves the new shard permanently unwritable with
 // nothing but a warning in the log. The split coordinator must retire a source
-// (DropVChannel) before a successor lands on its pchannel, and this is where
-// that contract is enforced.
+// (the routing commit that delists it) before a successor lands on its
+// pchannel, and this is where that contract is enforced.
 func (m *shardManagerImpl) CheckIfVChannelCanBeCreated(collectionID int64, vchannel string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -157,8 +157,8 @@ func (m *shardManagerImpl) CheckIfVChannelCanBeDropped(collectionID int64, vchan
 //     refresh sends the write anywhere, so it is terminal.
 //
 // The fenced answer is decided by NAME, not by the registration, because the
-// registration is keyed by collection and a retired source loses it -- to
-// DropVChannel, or to a successor winning this pchannel's single slot after a
+// registration is keyed by collection and a retired source loses it -- to the
+// retire, or to a successor winning this pchannel's single slot after a
 // recovery collision. Both leave a stale route pointing at a vchannel that was
 // really fenced, and answering those terminally turns a transparent split into a
 // write failure the client sees.
@@ -242,11 +242,12 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 // schemaOfCreateBody resolves the schema a CreateCollection-shaped body
 // carries, in either of its two forms: the CollectionSchema message, or the
 // pre-2.6.1 serialized Schema bytes. Nil when the body carries neither. Both
-// genesis messages (CreateCollection and CreateVChannel) share the body shape
-// and admit both forms, so both must resolve the schema the same way: a
-// registration that reads only one form registers a nil schema for the other,
-// and every versioned insert then fails with ErrCollectionSchemaNotFound until
-// a restart rebuilds the entry from the persisted meta.
+// genesis bodies (the CreateCollection message, and the split target replica's
+// SplitShardMessageBody.Genesis) share the shape and admit both forms, so both
+// must resolve the schema the same way: a registration that reads only one form
+// registers a nil schema for the other, and every versioned insert then fails
+// with ErrCollectionSchemaNotFound until a restart rebuilds the entry from the
+// persisted meta.
 func schemaOfCreateBody(body *message.CreateCollectionRequest) *schemapb.CollectionSchema {
 	if schema := body.GetCollectionSchema(); schema != nil {
 		return schema
@@ -257,11 +258,12 @@ func schemaOfCreateBody(body *message.CreateCollectionRequest) *schemapb.Collect
 	return nil
 }
 
-// CreateVChannel registers a shard split target vchannel. CreateVChannel is
-// the genesis message of the target vchannel and shares the CreateCollection
-// body shape, so it registers the collection for DML and segment assignment
-// on this pchannel exactly as CreateCollection does.
-func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+// CreateVChannel registers a shard split target vchannel. The TARGET replica of
+// the split broadcast is the genesis message of the target vchannel, and its
+// body carries the genesis in the CreateCollection body shape, so it registers
+// the collection for DML and segment assignment on this pchannel exactly as
+// CreateCollection does.
+func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableSplitShardMessageV2) {
 	logger := m.Logger().With(mlog.FieldMessage(msg))
 	collectionID := msg.Header().CollectionId
 	m.mu.Lock()
@@ -283,7 +285,7 @@ func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMes
 		return
 	}
 	m.createCollectionLocked(collectionID, msg.Header().PartitionIds, msg.VChannel(),
-		msg.TimeTick(), schemaOfCreateBody(msg.MustBody()), logger)
+		msg.TimeTick(), schemaOfCreateBody(msg.MustBody().GetGenesis()), logger)
 }
 
 // createCollectionLocked registers the collection and its partition managers on
@@ -379,7 +381,11 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 // all. Naming the vchannel makes the teardown idempotent AND targeted: if the
 // entry no longer describes the vchannel being dropped, the teardown already
 // happened and there is nothing to do.
-func (m *shardManagerImpl) DropVChannel(msg message.ImmutableDropVChannelMessageV2) {
+//
+// The message is the AlterCollection replica whose routing commit delists this
+// vchannel; only the collection id, the vchannel and the time tick are read
+// from it, so it needs nothing the old dedicated teardown message carried.
+func (m *shardManagerImpl) DropVChannel(msg message.ImmutableAlterCollectionMessageV2) {
 	collectionID := msg.Header().CollectionId
 	logger := m.Logger().With(mlog.FieldMessage(msg))
 

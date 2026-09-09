@@ -872,7 +872,7 @@ func (_c *MockShardManager_CreateSegment_Call) RunAndReturn(run func(message.Imm
 }
 
 // CreateVChannel provides a mock function with given fields: msg
-func (_m *MockShardManager) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+func (_m *MockShardManager) CreateVChannel(msg message.ImmutableSplitShardMessageV2) {
 	_m.Called(msg)
 }
 
@@ -882,14 +882,14 @@ type MockShardManager_CreateVChannel_Call struct {
 }
 
 // CreateVChannel is a helper method to define mock.On call
-//   - msg message.ImmutableCreateVChannelMessageV2
+//   - msg message.ImmutableSplitShardMessageV2
 func (_e *MockShardManager_Expecter) CreateVChannel(msg interface{}) *MockShardManager_CreateVChannel_Call {
 	return &MockShardManager_CreateVChannel_Call{Call: _e.mock.On("CreateVChannel", msg)}
 }
 
-func (_c *MockShardManager_CreateVChannel_Call) Run(run func(msg message.ImmutableCreateVChannelMessageV2)) *MockShardManager_CreateVChannel_Call {
+func (_c *MockShardManager_CreateVChannel_Call) Run(run func(msg message.ImmutableSplitShardMessageV2)) *MockShardManager_CreateVChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableCreateVChannelMessageV2))
+		run(args[0].(message.ImmutableSplitShardMessageV2))
 	})
 	return _c
 }
@@ -899,7 +899,7 @@ func (_c *MockShardManager_CreateVChannel_Call) Return() *MockShardManager_Creat
 	return _c
 }
 
-func (_c *MockShardManager_CreateVChannel_Call) RunAndReturn(run func(message.ImmutableCreateVChannelMessageV2)) *MockShardManager_CreateVChannel_Call {
+func (_c *MockShardManager_CreateVChannel_Call) RunAndReturn(run func(message.ImmutableSplitShardMessageV2)) *MockShardManager_CreateVChannel_Call {
 	_c.Run(run)
 	return _c
 }
@@ -971,7 +971,7 @@ func (_c *MockShardManager_DropPartition_Call) RunAndReturn(run func(message.Imm
 }
 
 // DropVChannel provides a mock function with given fields: msg
-func (_m *MockShardManager) DropVChannel(msg message.ImmutableDropVChannelMessageV2) {
+func (_m *MockShardManager) DropVChannel(msg message.ImmutableAlterCollectionMessageV2) {
 	_m.Called(msg)
 }
 
@@ -981,14 +981,14 @@ type MockShardManager_DropVChannel_Call struct {
 }
 
 // DropVChannel is a helper method to define mock.On call
-//   - msg message.ImmutableDropVChannelMessageV2
+//   - msg message.ImmutableAlterCollectionMessageV2
 func (_e *MockShardManager_Expecter) DropVChannel(msg interface{}) *MockShardManager_DropVChannel_Call {
 	return &MockShardManager_DropVChannel_Call{Call: _e.mock.On("DropVChannel", msg)}
 }
 
-func (_c *MockShardManager_DropVChannel_Call) Run(run func(msg message.ImmutableDropVChannelMessageV2)) *MockShardManager_DropVChannel_Call {
+func (_c *MockShardManager_DropVChannel_Call) Run(run func(msg message.ImmutableAlterCollectionMessageV2)) *MockShardManager_DropVChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableDropVChannelMessageV2))
+		run(args[0].(message.ImmutableAlterCollectionMessageV2))
 	})
 	return _c
 }
@@ -998,7 +998,7 @@ func (_c *MockShardManager_DropVChannel_Call) Return() *MockShardManager_DropVCh
 	return _c
 }
 
-func (_c *MockShardManager_DropVChannel_Call) RunAndReturn(run func(message.ImmutableDropVChannelMessageV2)) *MockShardManager_DropVChannel_Call {
+func (_c *MockShardManager_DropVChannel_Call) RunAndReturn(run func(message.ImmutableAlterCollectionMessageV2)) *MockShardManager_DropVChannel_Call {
 	_c.Run(run)
 	return _c
 }

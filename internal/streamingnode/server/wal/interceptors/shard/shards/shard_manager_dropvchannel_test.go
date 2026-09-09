@@ -8,7 +8,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 // TestDropVChannelIsGuardedByTheVChannelName pins the property that makes
@@ -17,7 +16,7 @@ import (
 // m.collections is keyed by COLLECTION id, one entry per pchannel. Once the
 // coordinator reclaims a retired source's slot, a later vchannel of the same
 // collection can be allocated onto this pchannel and take over that entry. A
-// DropVChannel for the old vchannel arriving after that must not delete the new
+// retire for the old vchannel arriving after that must not delete the new
 // one's registration, or the new shard would be left with no segment assignment
 // at all.
 func TestDropVChannelIsGuardedByTheVChannelName(t *testing.T) {
@@ -33,16 +32,8 @@ func TestDropVChannelIsGuardedByTheVChannelName(t *testing.T) {
 		m.collections[collectionID] = newCollectionInfo(registered, []int64{1})
 		return m
 	}
-	dropMsg := func(vchannel string) message.ImmutableDropVChannelMessageV2 {
-		msg, err := message.NewDropVChannelMessageBuilderV2().
-			WithVChannel(vchannel).
-			WithHeader(&message.DropVChannelMessageHeader{CollectionId: collectionID}).
-			WithBody(&message.DropVChannelMessageBody{}).
-			BuildMutable()
-		require.NoError(t, err)
-		return message.MustAsImmutableDropVChannelMessageV2(
-			msg.WithTimeTick(200).WithLastConfirmedUseMessageID().
-				IntoImmutableMessage(rmq.NewRmqID(2)))
+	dropMsg := func(vchannel string) message.ImmutableAlterCollectionMessageV2 {
+		return newTestRetireImmutableMessage(vchannel, collectionID, []string{newVChannel}, 200)
 	}
 
 	t.Run("drops the entry it names", func(t *testing.T) {

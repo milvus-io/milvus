@@ -34,8 +34,6 @@ type shardInterceptor struct {
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
 		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
-		message.MessageTypeCreateVChannel:     impl.handleCreateVChannel,
-		message.MessageTypeDropVChannel:       impl.handleDropVChannel,
 		message.MessageTypeDropCollection:     impl.handleDropCollection,
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
@@ -97,12 +95,11 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	return msgID, nil
 }
 
-// handleCreateVChannel handles the create-vchannel message, the genesis
-// message of a shard split target vchannel. It registers the collection on
-// this pchannel for DML and segment assignment exactly as create collection.
-func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	createVChannelMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
-	body := createVChannelMsg.MustBody()
+// handleSplitShardOnTarget handles the TARGET replica of a split broadcast: the
+// genesis message of a new vchannel. It registers the collection on this
+// pchannel for DML and segment assignment exactly as create collection.
+func (impl *shardInterceptor) handleSplitShardOnTarget(ctx context.Context, msg message.MutableMessage, splitShardMsg message.MutableSplitShardMessageV2, appendOp interceptors.Append) (message.MessageID, error) {
+	body := splitShardMsg.MustBody().GetGenesis()
 	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
 		// The same guard CreateCollection has, for the same reason and one more.
 		// Without a schema the shard manager registers a nil one -- every
@@ -111,13 +108,13 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 		// empty non-nil one from the shared parser, so the shard behaves
 		// differently before and after a restart. Refuse at the only point that
 		// can enforce it against any coordinator version.
-		return nil, status.NewUnrecoverableError("create vchannel message does not contain collection schema")
+		return nil, status.NewUnrecoverableError("split shard target replica does not contain collection schema")
 	}
 	// Resolved through the same helper the recovery storage uses, so all three
-	// genesis consumers read the body the same way -- which is the point of
-	// CreateVChannel reusing CreateCollection's body shape.
+	// genesis consumers read the body the same way -- which is the point of the
+	// target genesis reusing CreateCollection's body shape.
 	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
-	header := createVChannelMsg.Header()
+	header := splitShardMsg.Header()
 	if err := impl.shardManager.CheckIfVChannelCanBeCreated(header.GetCollectionId(), msg.VChannel()); err != nil {
 		if errors.Is(err, shards.ErrVChannelConflict) {
 			// Refuse rather than warn-and-continue. The shard manager holds one
@@ -126,7 +123,8 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 			// leaving it with no segment assignment at all -- and, if the
 			// incumbent is a fenced split source, an inherited fence that makes
 			// the new shard permanently unwritable. The coordinator must retire
-			// the source (DropVChannel) before placing a successor here.
+			// the source (the delisting routing commit) before placing a
+			// successor here.
 			impl.shardManager.Logger().Warn(ctx, "cannot create vchannel on this pchannel",
 				mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("%s", err.Error())
@@ -141,14 +139,14 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 	if err != nil {
 		return msgID, err
 	}
-	impl.shardManager.CreateVChannel(message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(msgID)))
+	impl.shardManager.CreateVChannel(message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(msgID)))
 	// The apply re-checks under the write lock and may skip the registration --
 	// the append-time check above and it are not one critical section. Allocating
 	// the function-runner key anyway would leak it: Close releases by REGISTERED
 	// vchannel, and an unregistered one is never released.
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), createVChannelMsg.VChannel()); err != nil {
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), msg.VChannel()); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "vchannel genesis appended but not registered, skipping function runner alloc",
-			mlog.FieldCollectionID(header.GetCollectionId()), mlog.FieldVChannel(createVChannelMsg.VChannel()), mlog.Err(err))
+			mlog.FieldCollectionID(header.GetCollectionId()), mlog.FieldVChannel(msg.VChannel()), mlog.Err(err))
 		return msgID, nil
 	}
 	// "Exactly as create collection" has to include the WAL's function-runner
@@ -158,7 +156,7 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 	// function, because the key is what carries the schema snapshot the
 	// materializer resolves against. The split's targets are created live, so
 	// nothing else registers them until the WAL is next recovered.
-	impl.allocFunctionRunners(header.GetCollectionId(), createVChannelMsg.VChannel(), schema)
+	impl.allocFunctionRunners(header.GetCollectionId(), msg.VChannel(), schema)
 	return msgID, nil
 }
 
@@ -181,13 +179,14 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 	return msgID, nil
 }
 
-// handleDropVChannel handles the drop-vchannel message, the inverse of
-// handleCreateVChannel: it tears down the vchannel's registration on this
-// pchannel and releases the function-runner key that creation took, so a later
-// vchannel of the same collection can be registered here.
-func (impl *shardInterceptor) handleDropVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	dropVChannelMsg := message.MustAsMutableDropVChannelMessageV2(msg)
-	if err := impl.shardManager.CheckIfVChannelCanBeDropped(dropVChannelMsg.Header().GetCollectionId(), msg.VChannel()); err != nil {
+// retireVChannel handles the AlterCollection replica whose routing commit
+// delists the vchannel it landed on: the inverse of handleSplitShardOnTarget.
+// It tears down the vchannel's registration on this pchannel and releases the
+// function-runner key that creation took, so a later vchannel of the same
+// collection can be registered here.
+func (impl *shardInterceptor) retireVChannel(ctx context.Context, msg message.MutableMessage, putCollectionMsg message.MutableAlterCollectionMessageV2, appendOp interceptors.Append) (message.MessageID, error) {
+	header := putCollectionMsg.Header()
+	if err := impl.shardManager.CheckIfVChannelCanBeDropped(header.GetCollectionId(), msg.VChannel()); err != nil {
 		// Only a vchannel a shard split has fenced may be retired. Tearing down
 		// a live one removes its segment assignment with no way back, so a
 		// teardown that names one is refused instead of applied. A teardown for
@@ -201,11 +200,11 @@ func (impl *shardInterceptor) handleDropVChannel(ctx context.Context, msg messag
 	if err != nil {
 		return msgID, err
 	}
-	impl.shardManager.DropVChannel(message.MustAsImmutableDropVChannelMessageV2(msg.IntoImmutableMessage(msgID)))
+	impl.shardManager.DropVChannel(message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID)))
 	// Mirrors handleDropCollection. Creation took this key per VCHANNEL
 	// (walFunctionRunnerKey(vchannel)), so retiring one vchannel must release
 	// exactly that one and no other.
-	function.GetManager().Release(dropVChannelMsg.Header().GetCollectionId(), walFunctionRunnerKey(dropVChannelMsg.VChannel()))
+	function.GetManager().Release(header.GetCollectionId(), walFunctionRunnerKey(msg.VChannel()))
 	return msgID, nil
 }
 
@@ -391,23 +390,54 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 	return appendOp(ctx, msg)
 }
 
-// handleSplitShardMessage handles the split shard message.
+// handleSplitShardMessage handles one replica of a SplitShard broadcast by the
+// role its vchannel plays. The control channel replica never reaches here
+// (DoAppend skips it).
+func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
+	switch message.SplitShardRoleOf(splitShardMsg.Header(), msg.VChannel()) {
+	case message.SplitShardRoleSource:
+		return impl.handleSplitShardOnSource(ctx, msg, splitShardMsg, appendOp)
+	case message.SplitShardRoleTarget:
+		return impl.handleSplitShardOnTarget(ctx, msg, splitShardMsg, appendOp)
+	default:
+		// A replica on a vchannel the split neither fences nor creates is a
+		// coordinator bug; refuse it rather than fence or register a stranger.
+		return nil, status.NewUnrecoverableError("split shard replica landed on vchannel %s, which is neither a source nor a target of task %d",
+			msg.VChannel(), splitShardMsg.Header().GetSplitTaskId())
+	}
+}
+
+// handleSplitShardOnSource handles the SOURCE replica of a split broadcast.
 // The message is the write fence of the source vchannel: it must be appended
 // exclusively (ExclusiveRequired), and after it is persisted the vchannel
 // never accepts new DML again.
-func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
+func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg message.MutableMessage, splitShardMsg message.MutableSplitShardMessageV2, appendOp interceptors.Append) (message.MessageID, error) {
 	header := splitShardMsg.Header()
 	collectionID := header.GetCollectionId()
 	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); err != nil {
-		if errors.Is(err, shards.ErrVChannelFenced) {
-			// idempotent: the vchannel is already fenced by a previous split
-			// message; carry the recorded T_switch back on the error so the
-			// split coordinator recovers it after a crash that lost it.
-			fence := impl.shardManager.GetSplitFence(collectionID, msg.VChannel())
+		if !errors.Is(err, shards.ErrVChannelFenced) {
+			return nil, status.NewUnrecoverableError("%s", err.Error())
+		}
+		// Already fenced. The broadcaster re-drives a split whose source
+		// landed but was not yet persisted, so this task's own fence must
+		// append again and succeed: the shard manager keeps the first fence
+		// (SplitShard is idempotent) and the extra record is harmless to every
+		// consumer. Another task's fence is a coordinator invariant violation
+		// (one active task per source); refusing it is what keeps two splits
+		// from carving one source twice.
+		fence := impl.shardManager.GetSplitFence(collectionID, msg.VChannel())
+		if fence.TaskID != 0 && fence.TaskID != header.GetSplitTaskId() {
 			return nil, status.NewShardFenced(msg.VChannel(), fence.TimeTick, fence.TaskID)
 		}
-		return nil, status.NewUnrecoverableError("%s", err.Error())
+		impl.shardManager.Logger().Info(ctx, "source vchannel already fenced by this task, appending the fence again",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(msg.VChannel()), mlog.Uint64("fencedTimeTick", fence.TimeTick))
+		msgID, err := appendOp(ctx, msg)
+		if err != nil {
+			return nil, err
+		}
+		impl.shardManager.SplitShard(message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(msgID)))
+		return msgID, nil
 	}
 	// Auto-flush every growing segment of the vchannel as of the fence time
 	// tick and embed the sealed segment ids into the message header, exactly
@@ -475,6 +505,14 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	putCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
 	header := putCollectionMsg.Header()
+
+	// A routing commit that no longer names this vchannel retires it: the same
+	// broadcast that grows the collection's vchannel list is what tears the
+	// retired source down here, so this replica is a teardown, not a collection
+	// update. The collection-wide apply below must not run for it.
+	if messageutil.RetiresVChannel(header, putCollectionMsg.MustBody().GetUpdates(), msg.VChannel()) {
+		return impl.retireVChannel(ctx, msg, putCollectionMsg, appendOp)
+	}
 
 	// AlterCollection atomically flushes+fences segments (if schema change) and updates
 	// in-memory schema — all within one critical region of the shard manager.

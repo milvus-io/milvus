@@ -284,8 +284,8 @@ type shardManagerImpl struct {
 	collections       map[int64]*CollectionInfo                // map collectionID to collectionInfo
 	// fencedVChannels remembers, by name, every vchannel this pchannel has
 	// fenced by shard split, together with its T_switch. It OUTLIVES the entry
-	// in collections: a retired source loses its registration to DropVChannel,
-	// or to a successor taking this pchannel's single slot, and a write that
+	// in collections: a retired source loses its registration to the retire, or
+	// to a successor taking this pchannel's single slot, and a write that
 	// still routes to it has to be answered SHARD_FENCED so the proxy refreshes
 	// -- an unrecoverable error instead fails a write that one refresh would
 	// have completed.
