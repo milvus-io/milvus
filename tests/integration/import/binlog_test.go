@@ -46,22 +46,17 @@ import (
 
 type DMLGroup struct {
 	insertRowNums []int
-	deleteRowNums []int
 }
 
 type SourceCollectionInfo struct {
 	collectionID   int64
 	partitionID    int64
-	l0SegmentIDs   []int64
 	SegmentIDs     []int64
 	insertedIDs    *schemapb.IDs
 	storageVersion int
-	// Timestamp ranges extracted from source segments' binlogs,
-	// there's only one L1 segment and one L0 segment after import so we can record the min and max timestamps directly.
+	// Timestamp range extracted from source insert binlogs.
 	l1MinTs uint64 // min timestamp from L1 segments' insert binlogs
 	l1MaxTs uint64 // max timestamp from L1 segments' insert binlogs
-	l0MinTs uint64 // min timestamp from L0 segments' delta binlogs
-	l0MaxTs uint64 // max timestamp from L0 segments' delta binlogs
 }
 
 func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
@@ -122,10 +117,8 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 
-	const delBatch = 2
 	var (
 		totalInsertRowNum = 0
-		totalDeleteRowNum = 0
 		totalInsertedIDs  = &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{
@@ -137,9 +130,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 
 	for i := range dmlGroup.insertRowNums {
 		insRow := dmlGroup.insertRowNums[i]
-		delRow := dmlGroup.deleteRowNums[i]
 		totalInsertRowNum += insRow
-		totalDeleteRowNum += delRow
 
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, insRow, dim)
 		structColumn := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, insRow, dim)
@@ -154,23 +145,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		insertedIDs := insertResult.GetIDs()
 		totalInsertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data = append(
 			totalInsertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data, insertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data...)
-
-		// delete
-		beginIndex := 0
-		for j := 0; j < delBatch; j++ {
-			if delRow == 0 {
-				continue
-			}
-			delCnt := delRow / delBatch
-			idBegin := insertedIDs.GetIntId().GetData()[beginIndex]
-			idEnd := insertedIDs.GetIntId().GetData()[beginIndex+delCnt-1]
-			deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
-				CollectionName: collectionName,
-				Expr:           fmt.Sprintf("%d <= %s <= %d", idBegin, integration.Int64Field, idEnd),
-			})
-			s.NoError(merr.CheckRPCCall(deleteResult, err))
-			beginIndex += delCnt
-		}
 
 		// flush
 		flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
@@ -196,17 +170,9 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L0
-	})
 	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
 	})
-	// check l0 segments
-	if totalDeleteRowNum > 0 {
-		s.True(len(l0Segments) > 0)
-	}
-
 	// Extract timestamp ranges from source segments' binlogs
 	var l1MinTs uint64 = math.MaxUint64
 	var l1MaxTs uint64 = 0
@@ -218,21 +184,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 				}
 				if binlog.GetTimestampTo() > l1MaxTs {
 					l1MaxTs = binlog.GetTimestampTo()
-				}
-			}
-		}
-	}
-
-	var l0MinTs uint64 = math.MaxUint64
-	var l0MaxTs uint64 = 0
-	for _, segment := range l0Segments {
-		for _, fieldBinlog := range segment.GetDeltalogs() {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				if binlog.GetTimestampFrom() < l0MinTs {
-					l0MinTs = binlog.GetTimestampFrom()
-				}
-				if binlog.GetTimestampTo() > l0MaxTs {
-					l0MaxTs = binlog.GetTimestampTo()
 				}
 			}
 		}
@@ -253,8 +204,8 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	expectResult := nq * topk
-	if expectResult > totalInsertRowNum-totalDeleteRowNum {
-		expectResult = totalInsertRowNum - totalDeleteRowNum
+	if expectResult > totalInsertRowNum {
+		expectResult = totalInsertRowNum
 	}
 	s.Equal(expectResult, len(searchResult.GetResults().GetScores()))
 
@@ -268,7 +219,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
-	s.Equal(totalInsertRowNum-totalDeleteRowNum, count)
+	s.Equal(totalInsertRowNum, count)
 
 	// query 2
 	expr = fmt.Sprintf("%s < %d", integration.Int64Field, totalInsertedIDs.GetIntId().GetData()[10])
@@ -281,9 +232,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	s.NoError(err)
 	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	expectCount := 10
-	if dmlGroup.deleteRowNums[0] >= 10 {
-		expectCount = 0
-	}
 	s.Equal(expectCount, count)
 
 	// get collectionID and partitionID
@@ -293,9 +241,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	return &SourceCollectionInfo{
 		collectionID: collectionID,
 		partitionID:  partitionID,
-		l0SegmentIDs: lo.Map(l0Segments, func(segment *datapb.SegmentInfo, _ int) int64 {
-			return segment.GetID()
-		}),
 		SegmentIDs: lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
 			return segment.GetID()
 		}),
@@ -303,8 +248,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		storageVersion: int(storage.StorageV2),
 		l1MinTs:        l1MinTs,
 		l1MaxTs:        l1MaxTs,
-		l0MinTs:        l0MinTs,
-		l0MaxTs:        l0MaxTs,
 	}
 }
 
@@ -314,23 +257,18 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	sourceCollectionInfo := s.PrepareSourceCollection(dim, dmlGroup)
 	collectionID := sourceCollectionInfo.collectionID
 	partitionID := sourceCollectionInfo.partitionID
-	l0SegmentIDs := sourceCollectionInfo.l0SegmentIDs
 	segmentIDs := sourceCollectionInfo.SegmentIDs
 	insertedIDs := sourceCollectionInfo.insertedIDs
 
 	mlog.Info(context.TODO(), "prepare source collection done",
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(partitionID),
-		mlog.Int64s("segments", segmentIDs),
-		mlog.Int64s("l0 segments", l0SegmentIDs))
+		mlog.Int64s("segments", segmentIDs))
 
 	c := s.Cluster
 	ctx := c.GetContext()
 
 	totalInsertRowNum := lo.SumBy(dmlGroup.insertRowNums, func(num int) int {
-		return num
-	})
-	totalDeleteRowNum := lo.SumBy(dmlGroup.deleteRowNums, func(num int) int {
 		return num
 	})
 
@@ -414,52 +352,6 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		"L1 segment DmlPosition should match actual max timestamp from source binlogs")
 	mlog.Info(context.TODO(), "L1 segment position verification passed")
 
-	// l0 import
-	if totalDeleteRowNum > 0 {
-		files = make([]*internalpb.ImportFile, 0)
-		for _, segmentID := range l0SegmentIDs {
-			files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/delta_log/%d/%d/%d",
-				s.Cluster.RootPath(), collectionID, common.AllPartitionsID, segmentID)}})
-		}
-		importResp, err = c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-			CollectionName: collectionName,
-			Files:          files,
-			Options: []*commonpb.KeyValuePair{
-				{Key: "l0_import", Value: "true"},
-				{Key: importutilv2.StorageVersion, Value: strconv.Itoa(sourceCollectionInfo.storageVersion)},
-			},
-		})
-		s.NoError(merr.CheckRPCCall(importResp, err))
-		mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
-
-		jobID = importResp.GetJobID()
-		err = WaitForImportDone(ctx, c, jobID)
-		s.NoError(err)
-
-		segments, err = c.ShowSegments(collectionName)
-		s.NoError(err)
-		s.NotEmpty(segments)
-		mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
-		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetLevel() == datapb.SegmentLevel_L0
-		})
-		s.Equal(1, len(l0Segments))
-		segment = l0Segments[0]
-		s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
-		s.Equal(common.AllPartitionsID, segment.GetPartitionID())
-		s.True(len(segment.GetBinlogs()) == 0)
-		s.True(len(segment.GetDeltalogs()) > 0)
-		s.NoError(CheckLogID(segment.GetDeltalogs()))
-		s.True(len(segment.GetStatslogs()) == 0)
-
-		// Verify L0 segment positions match actual timestamps from source collection
-		s.Equal(sourceCollectionInfo.l0MinTs, segment.GetStartPosition().GetTimestamp(),
-			"L0 segment StartPosition should match actual min timestamp from source deltalogs")
-		s.Equal(sourceCollectionInfo.l0MaxTs, segment.GetDmlPosition().GetTimestamp(),
-			"L0 segment DmlPosition should match actual max timestamp from source deltalogs")
-		mlog.Info(context.TODO(), "L0 segment position verification passed")
-	}
-
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
@@ -483,8 +375,8 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	expectResult := nq * topk
-	if expectResult > totalInsertRowNum-totalDeleteRowNum {
-		expectResult = totalInsertRowNum - totalDeleteRowNum
+	if expectResult > totalInsertRowNum {
+		expectResult = totalInsertRowNum
 	}
 	s.Equal(expectResult, len(searchResult.GetResults().GetScores()))
 	// check ids from collectionA, because during binlog import, even if the primary key's autoID is set to true,
@@ -508,7 +400,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
-	s.Equal(totalInsertRowNum-totalDeleteRowNum, count)
+	s.Equal(totalInsertRowNum, count)
 
 	// query 2
 	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
@@ -522,9 +414,6 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	s.NoError(err)
 	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	expectCount := 10
-	if dmlGroup.deleteRowNums[0] >= 10 {
-		expectCount = 0
-	}
 	s.Equal(expectCount, count)
 }
 
@@ -550,6 +439,15 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	})
 	s.NoError(merr.CheckRPCCall(describeCollectionResp, err))
 
+	s.False(paramtable.Get().DataCoordCfg.EnableL0Import.GetAsBool())
+	l0Resp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: collectionName,
+		Files:          []*internalpb.ImportFile{{Paths: []string{"delta_log/source"}}},
+		Options:        []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}},
+	})
+	s.NoError(err)
+	s.ErrorContains(merr.CheckRPCCall(l0Resp, err), "l0 import is disabled")
+
 	// binlog import
 	files := []*internalpb.ImportFile{
 		{
@@ -570,34 +468,7 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 }
 
-func (s *BulkInsertSuite) TestBinlogImport() {
-	dmlGroup := &DMLGroup{
-		insertRowNums: []int{500, 500, 500},
-		deleteRowNums: []int{300, 300, 300},
-	}
-	s.runBinlogTest(dmlGroup)
-}
-
+// Independent L0 import is disabled; retain ordinary binlog restore coverage.
 func (s *BulkInsertSuite) TestBinlogImport_NoDelete() {
-	dmlGroup := &DMLGroup{
-		insertRowNums: []int{500, 500, 500},
-		deleteRowNums: []int{0, 0, 0},
-	}
-	s.runBinlogTest(dmlGroup)
-}
-
-func (s *BulkInsertSuite) TestBinlogImport_Partial_0_Rows_Segment() {
-	dmlGroup := &DMLGroup{
-		insertRowNums: []int{500, 500, 500},
-		deleteRowNums: []int{500, 300, 0},
-	}
-	s.runBinlogTest(dmlGroup)
-}
-
-func (s *BulkInsertSuite) TestBinlogImport_All_0_Rows_Segment() {
-	dmlGroup := &DMLGroup{
-		insertRowNums: []int{500, 500, 500},
-		deleteRowNums: []int{500, 500, 500},
-	}
-	s.runBinlogTest(dmlGroup)
+	s.runBinlogTest(&DMLGroup{insertRowNums: []int{500, 500, 500}})
 }

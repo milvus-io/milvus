@@ -65,10 +65,6 @@ type MultiFileTypeImportSuite struct {
 
 func (s *importTestBase) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	// The binlog-import cases restore legacy L0 (delete-only) segments, which is
-	// disabled by default (dataCoord.import.enableL0Import=false); re-enable it
-	// so they keep covering the legacy path.
-	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableL0Import.Key, "true")
 	s.MiniClusterSuite.SetupSuite()
 }
 

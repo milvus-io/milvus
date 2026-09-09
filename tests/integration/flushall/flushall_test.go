@@ -18,6 +18,7 @@ package flushall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -139,12 +141,20 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 	// show and validate segments
 	for collectionName, dbName := range collectionNames {
-		resp, err := c.MilvusClient.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		s.NoError(merr.CheckRPCCall(resp, err))
-		s.Len(resp.GetInfos(), 1)
+		var resp *milvuspb.GetPersistentSegmentInfoResponse
+		// Sort compaction can replace a segment between listing its ID and
+		// fetching its details. Refresh the whole observation in that case.
+		err := retry.Handle(ctx, func() (bool, error) {
+			var err error
+			resp, err = c.MilvusClient.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+			})
+			err = merr.CheckRPCCall(resp, err)
+			return errors.Is(err, merr.ErrSegmentNotFound), err
+		}, retry.Attempts(5), retry.Sleep(100*time.Millisecond), retry.MaxSleepTime(time.Second))
+		s.Require().NoError(err)
+		s.Require().Len(resp.GetInfos(), 1)
 		segment := resp.GetInfos()[0]
 		s.Equal(segment.GetState(), commonpb.SegmentState_Flushed)
 		s.Equal(segment.GetNumRows(), int64(rowNum))
