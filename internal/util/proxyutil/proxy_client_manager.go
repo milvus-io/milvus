@@ -378,6 +378,8 @@ func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 }
 
 // SetRates notifies Proxy to limit rates of requests.
+// The request is an immutable snapshot until all clients, including retries,
+// finish. Each client copies its routing header and shares the read-only payload.
 func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error {
 	if p.proxyClient.Len() == 0 {
 		mlog.Warn(ctx, "proxy client is empty, SetRates will not send to any client")
