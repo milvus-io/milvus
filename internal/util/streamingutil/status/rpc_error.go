@@ -84,11 +84,12 @@ func ConvertStreamingError(method string, err error) error {
 // TryIntoStreamingError try to convert StreamingStatus to StreamingError.
 //
 // The whole detail message is carried over, not just (code, cause). Some codes
-// attach payload the caller acts on -- SHARD_FENCED carries T_switch in
-// FencedTimeTick -- and rebuilding the error field by field silently zeroes it,
-// which only shows up when the append crosses a process boundary: an in-process
-// append returns the *StreamingError itself and keeps the payload, so a
-// same-process test cannot see the loss.
+// attach an informational payload -- SHARD_FENCED carries the fence's time tick
+// and the id of the task that placed it in FencedTimeTick and FencedSplitTaskId
+// -- and rebuilding the error field by field silently zeroes those fields for
+// any caller that logs or inspects them, which only shows up when the append
+// crosses a process boundary: an in-process append returns the *StreamingError
+// itself and keeps the payload, so a same-process test cannot see the loss.
 func (s *StreamingClientStatus) TryIntoStreamingError() *StreamingError {
 	if s == nil {
 		return nil

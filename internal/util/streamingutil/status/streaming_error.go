@@ -34,10 +34,11 @@ func (e *StreamingError) AsPBError() *streamingpb.StreamingError {
 // *StreamingError, carrying the WHOLE message rather than (code, cause).
 //
 // Rebuilding the error field by field is the mistake this exists to prevent:
-// some codes attach a payload the caller acts on -- SHARD_FENCED carries
-// T_switch in FencedTimeTick -- and dropping it silently zeroes a value the
-// caller then reads as "no fence time tick recorded". It only shows up across a
-// process boundary, because an in-process append hands back the *StreamingError
+// some codes attach an informational payload -- SHARD_FENCED carries the
+// fence's time tick and the id of the task that placed it in FencedTimeTick
+// and FencedSplitTaskId -- and dropping it silently zeroes those fields for
+// any caller that logs or inspects them. It only shows up across a process
+// boundary, because an in-process append hands back the *StreamingError
 // itself and keeps the payload, so a same-process test cannot see the loss.
 //
 // The message is cloned: the pb it comes from belongs to a response the
@@ -252,9 +253,12 @@ func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingErr
 }
 
 // NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
-// fencedTimeTick is T_switch (the time tick the vchannel was fenced at); it is 0
-// when unknown. The split coordinator reads it back from an already-fenced
-// re-fence to recover T_switch after a crash that lost the recorded value.
+// It rejects a write to a vchannel a shard split has fenced. fencedTimeTick and
+// fencedSplitTaskID -- the fence's time tick and the id of the task that placed
+// it -- are informational only: a proxy refetches the routing table on the code
+// alone, and the split coordinator drives its own broadcast to completion
+// through the broadcaster and never reads either field back off this error.
+
 func NewShardFenced(vchannel string, fencedTimeTick uint64, fencedSplitTaskID int64) *StreamingError {
 	err := New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
 	err.FencedTimeTick = fencedTimeTick

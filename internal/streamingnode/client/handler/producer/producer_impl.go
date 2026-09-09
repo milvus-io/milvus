@@ -318,11 +318,15 @@ func (p *producerImpl) recvLoop() (err error) {
 				}
 			case *streamingpb.ProduceMessageResponse_Error:
 				// The whole pb error is carried over, not just (code, cause):
-				// SHARD_FENCED attaches T_switch in FencedTimeTick, and the
-				// coordinator reads it back off a re-fence to recover a value it
-				// lost. This is the response-body path, which only a CLUSTER
-				// deployment takes -- a pchannel hosted in-process short-circuits
-				// to the local WAL and returns the *StreamingError itself.
+				// SHARD_FENCED attaches the fence's time tick and the id of the
+				// task that placed it in FencedTimeTick/FencedSplitTaskId, both
+				// informational only -- a proxy refetches routing on the code
+				// alone, and the split coordinator never reads these fields back;
+				// carrying them over just keeps the payload from being silently
+				// zeroed for whatever does inspect it. This is the response-body
+				// path, which only a CLUSTER deployment takes -- a pchannel hosted
+				// in-process short-circuits to the local WAL and returns the
+				// *StreamingError itself.
 				statusErr := status.NewFromPBError(produceResp.Error)
 				if statusErr.IsRateLimitRejected() {
 					p.NotifyRateLimitStateChange(ratelimit.RateLimitState{
