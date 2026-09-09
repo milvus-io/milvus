@@ -1273,17 +1273,21 @@ func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error
 	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }
 
-// ListSegmentChangeGroups lists all segment change groups from etcd. Malformed
-// values are skipped with a warning instead of aborting the walk, so one bad
-// key cannot block Coordinator startup (recovery treats a missing group as
-// recoverable from the SegmentMeta projection).
+// ListSegmentChangeGroups lists all segment change groups from etcd.
+//
+// A malformed value is an ERROR, not a skip: unlike DataView snapshots (which
+// are reconstructible from the SegmentMeta projection), a group record is the
+// sole owner of its staged members' visibility — SegmentInfo has no
+// change_group_id field yet (design F4) — so silently skipping a bad key
+// orphans its members (IsInvisible=true with no owner, never published or
+// reclaimed). This matches the other 13 List methods in this file, which all
+// propagate decode errors; recovery can then fail closed on corruption.
 func (kc *Catalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
 	groups := make([]*model.SegmentChangeGroup, 0)
 	applyFn := func(_ []byte, value []byte) error {
 		group, err := model.UnmarshalSegmentChangeGroup(value)
 		if err != nil {
-			mlog.Warn(ctx, "skip malformed segment change group during list", mlog.Err(err))
-			return nil
+			return merr.Wrap(err, "failed to decode a persisted segment change group")
 		}
 		groups = append(groups, group)
 		return nil

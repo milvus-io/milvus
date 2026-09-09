@@ -330,6 +330,112 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_OwnershipChecks(t *testing.T) {
 	})
 }
 
+// TestMeta_UpdateSegmentsInfoAndChangeGroups_MissingMemberFails verifies C3: an
+// operator whose target segment is absent from meta must fail the whole
+// composite write (the group must NOT reach a terminal state while its members
+// are gone and superseded parents unretired).
+func TestMeta_UpdateSegmentsInfoAndChangeGroups_MissingMemberFails(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// Member 1001 is intentionally NOT added to meta.
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+	)
+	require.Error(t, err, "publish with an absent member must fail the txn, not write group COMMITTED")
+	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 1).State,
+		"group must stay READY, not reach a terminal state")
+}
+
+// TestMeta_UpdateSegmentsInfoAndChangeGroups_SupersededAlreadyDropped verifies
+// that a publish whose superseded parent is ALREADY Dropped still succeeds:
+// UpdateStatusOperator returns false for the already-reached state (idempotent
+// skip), which must not fail the whole txn (the C3 member-presence check is
+// scoped to members, not superseded).
+func TestMeta_UpdateSegmentsInfoAndChangeGroups_SupersededAlreadyDropped(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+	})))
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+	})))
+
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	// Superseded parent already dropped by an external path before publish.
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateStatusOperator(2001, commonpb.SegmentState_Dropped)))
+
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	committed.CommitTS = 500
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+		UpdateCommitTimestamp(1001, 500),
+		UpdateStatusOperator(2001, commonpb.SegmentState_Dropped), // already Dropped -> idempotent skip
+	)
+	require.NoError(t, err, "already-dropped superseded parent must not fail the publish")
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+}
+
+// TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable verifies C11: the
+// L0-exemption is decided at registration and PERSISTED, so recovery is stable
+// even after the L0 parent is GC'd from SegmentMeta — identical persisted bytes
+// must not flip from conflict-free into a startup error.
+func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
+	})))
+
+	g1 := newTestGroup()
+	g1.GroupID = 1
+	g1.SupersededSegmentIDs = []int64{4001}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, g1))
+	g2 := g1.Clone()
+	g2.GroupID = 2
+	g2.NewSegmentIDs = []int64{1002}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, g2))
+	require.Equal(t, []int64{4001}, g1.SupersededL0SegmentIDs, "exemption must be persisted at registration")
+
+	// Simulate GC of the L0 parent after the groups were persisted: identical
+	// bytes must reload without a conflict.
+	m.segMu.Lock()
+	delete(m.segments.segments, 4001)
+	m.segMu.Unlock()
+
+	byID, staged, superseded, err := m.loadSegmentChangeGroups(ctx)
+	require.NoError(t, err, "GC'd L0 parent must not flip persisted groups into a recovery conflict")
+	require.Len(t, byID, 2)
+	require.Equal(t, map[int64]int64{1001: 1, 1002: 2}, staged, "members stay staged")
+	require.Empty(t, superseded, "L0-exempt superseded parents are never indexed")
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_OneTxnConflictingCreates verifies
 // N1: two conflicting new groups in the SAME composite txn are rejected —
 // sibling group actions must see each other's claims, not only the in-memory

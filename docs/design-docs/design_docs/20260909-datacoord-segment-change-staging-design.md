@@ -542,8 +542,17 @@ publishGroup(ctx, g):
   # Phase 4: one catalog txn (SegmentMeta + DataView snapshot + group state)
   ops := []
   for id in g.new_segment_ids:
-      ops += SetSegmentIsInvisible(id, false), UpdateCommitTimestamp(id, commitTs),
-             (optional) UpdateSegmentPartitionStatsVersionOperator(id, <planID>)
+      ops += SetSegmentIsInvisible(id, false)
+      # C5: commit_ts applies ONLY to sources whose rows carry a data timestamp
+      # allocated at creation (import / CDC / copy): those rows become
+      # "officially present" at commit_ts. Compaction outputs (mix/sort/
+      # clustering/forcemerge) MUST keep CommitTimestamp=0 — their rows keep
+      # per-input normalized timestamps, and a non-zero commit_ts makes segcore
+      # treat every row as inserted at commit_ts, dropping any delete with
+      # timestamps[i] <= commit_ts and resurrecting already-deleted rows
+      # (MVCC/TTL shift).
+      if source.usesPublishCommitTs(g): ops += UpdateCommitTimestamp(id, commitTs)
+      ops += (optional) UpdateSegmentPartitionStatsVersionOperator(id, <planID>)
   for id in g.superseded_segment_ids:
       ops += UpdateStatusOperator(id, Dropped)        # superseded semantics; M:N see §6.3
   ops += publishSegmentManifestOperator(prepared...)   # revisions from 3b published in the same txn
@@ -791,10 +800,22 @@ lower version and the group returns to STAGED and re-reads.
 
 `SegmentChangeGroup.MaxMembers` (new config, default e.g. 512): oversized task
 output splits into multiple sequentially published groups (the previous subgroup
-COMMITTED before the next publishes). Superseded retirement happens per subgroup
-(the first subgroup's publish retires its superseded set), so published
-subgroups never block later ones. `source_job_id` is shared; `publish_epoch` is
-globally monotonic.
+COMMITTED before the next publishes). `source_job_id` is shared;
+`publish_epoch` is globally monotonic.
+
+> **Superseded retirement across subgroups (C6)**: superseded retirement is
+> NOT per-subgroup when an M:N change shares one input set. Every output of a
+> compaction carries the FULL input set as `CompactionFrom`
+> (`meta.go:2748`), so if the first subgroup retires the shared superseded
+> parents while a later subgroup's outputs are still `IsInvisible=true`, rows
+> that live only in the later outputs vanish for the whole publication window —
+> and permanently if that subgroup never publishes. Instead, a superseded
+> parent is retired only by the LAST covering subgroup (all subgroups of the
+> same `source_job_id` that list it must be COMMITTED first), i.e. superseded
+> retirement is reference-counted across subgroups of one change. Splitting the
+> output set of a single M:N compaction into subgroups therefore requires the
+> subgroup planner to respect this rule; a subgroup that is not the last owner
+> of any superseded parent retires nothing.
 
 ## Crash Recovery and Replay
 
@@ -812,10 +833,21 @@ Replay safety:
 - `publishGroup` idempotency relies on **the publish txn itself being atomic** +
   "probe before execute" at recovery: probing that members are already visible
   stops the replay, avoiding a duplicate `compact_version` advance.
-- A probe failure (DataView snapshot lacks the members but SegmentMeta already
-  flipped) can only occur in the "snapshot write failed but SegmentMeta
-  succeeded" bad intermediate — excluded by the same-txn design; recovery
-  treats it per §5.4.3 (group ABORTED + reclamation).
+- **C7 — the probe must never reclaim visible members.** Above `MaxTxnOps` the
+  chunked fallback CAN leave "members flipped but group still STAGED/READY"
+  (F3), so the probe has three outcomes, not two:
+  1. members visible AND COMMITTED evidence (a DataView snapshot contains all
+     members) → finalize the group as COMMITTED (response-lost case);
+  2. members visible but NO COMMITTED evidence → the publish's segment chunk
+     committed while the commit marker did not. Re-executing the publish is
+     idempotent (member flips are no-ops, superseded already retired are
+     skipped); the group must be finalized COMMITTED, NOT aborted — aborting
+     would drop already-visible members while their parents may already be
+     retired, losing both sides;
+  3. members not visible → re-execute the publish txn.
+  Reclamation (`UpdateStatusOperator(Dropped)` on members) is legal ONLY when
+  no member is already visible; otherwise it is data loss. The earlier draft's
+  "ABORTED + reclamation on probe failure" rule is therefore withdrawn.
 - Recovery runs inside the recovery barrier (provided by #52537); external RPCs
   do not enter, so a half-recovered state is never read.
 

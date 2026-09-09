@@ -136,9 +136,12 @@ func TestCatalog_SegmentChangeGroupLifecycle(t *testing.T) {
 	require.Empty(t, groups)
 }
 
-// TestCatalog_SegmentChangeGroupSkipsCorruptValues ensures one malformed value
-// does not abort the List walk (recovery must not brick on a bad key).
-func TestCatalog_SegmentChangeGroupSkipsCorruptValues(t *testing.T) {
+// TestCatalog_SegmentChangeGroupCorruptValueFailsClosed verifies C4: a malformed
+// persisted group record aborts the List walk (propagating the decode error),
+// because a skipped group would orphan its staged members — unlike DataView
+// snapshots, a group record is not reconstructible without SegmentInfo's
+// change_group_id field.
+func TestCatalog_SegmentChangeGroupCorruptValueFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	backing := newMemoryMetaKv()
 	metakv := mocks.NewMetaKv(t)
@@ -176,8 +179,6 @@ func TestCatalog_SegmentChangeGroupSkipsCorruptValues(t *testing.T) {
 	backing.values[buildSegmentChangeGroupKey(99, 1)] = "not-json"
 	backing.mu.Unlock()
 
-	groups, err := catalog.ListSegmentChangeGroups(ctx)
-	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	require.Equal(t, int64(10), groups[0].CollectionID)
+	_, err := catalog.ListSegmentChangeGroups(ctx)
+	require.Error(t, err, "a malformed persisted group must fail recovery, not be skipped")
 }
