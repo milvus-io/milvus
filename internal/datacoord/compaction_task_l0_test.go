@@ -758,6 +758,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		t.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.Equal("DataNode reported compaction failure", t.GetTaskProto().GetFailReason())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()

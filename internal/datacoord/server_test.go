@@ -2082,7 +2082,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			PartitionID:   2,
 			Channel:       "ch-1",
 			Type:          datapb.CompactionType_Level0DeleteCompaction,
-			State:         datapb.CompactionTaskState_failed,
+			State:         datapb.CompactionTaskState_cleaned,
 			FailReason:    "mock failure",
 			InputSegments: []int64{5},
 		})
@@ -2105,7 +2105,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		assert.Equal(t, []int64{1, 2}, plans[10].GetSources())
 		assert.Equal(t, []int64{3, 4}, plans[10].GetTargets())
 		assert.Equal(t, "MixCompaction", plans[10].GetType())
-		assert.Equal(t, "failed", plans[11].GetState())
+		assert.Equal(t, "cleaned", plans[11].GetState())
 		assert.Equal(t, "mock failure", plans[11].GetFailureReason())
 	})
 
