@@ -70,12 +70,21 @@ fail=0
 #                                         fault-injection hooks) would buy no
 #                                         safety the implicit form does not
 #                                         already require
+#   milvus_storage::ToSegcoreError(...)   declared as returning
+#                                         milvus::SegcoreError
+#                                         (milvus-storage extend_status.h), so
+#                                         throwing its result carries the
+#                                         producer-owned ErrorCode exactly like
+#                                         the direct constructor. It loses the
+#                                         milvus-side file/line that ThrowInfo
+#                                         adds, which is a message-quality
+#                                         difference, not a classification one
 #   ;                                     bare rethrow (throw;) preserving the
 #                                         original dynamic type. `throw e;` is
 #                                         deliberately NOT allowed: it rethrows
 #                                         by the CAUGHT type, slicing a derived
 #                                         SegcoreError back to its base
-ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
+ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^milvus_storage::ToSegcoreError\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
 
 # `throw` is matched anywhere on the line, not just at its start: `if (bad)
 # throw ...;` and `} else throw ...;` are throws too. Line comments are stripped

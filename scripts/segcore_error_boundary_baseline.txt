@@ -20,6 +20,7 @@ knowhere	internal/core/src/exec/expression/ExprTestBase.h
 knowhere	internal/core/src/exec/operator/IterativeElementFilterNode.cpp
 knowhere	internal/core/src/exec/operator/IterativeFilterNode.cpp
 knowhere	internal/core/src/exec/operator/RescoresNode.cpp
+knowhere	internal/core/src/exec/operator/search-groupby/StrictGroupFilteredSearch.cpp
 knowhere	internal/core/src/exec/operator/Utils.h
 knowhere	internal/core/src/exec/QueryContext.h
 knowhere	internal/core/src/indexbuilder/index_c.cpp
@@ -103,6 +104,7 @@ arrow	internal/core/src/segcore/segment_c.cpp
 arrow	internal/core/src/segcore/SegmentGrowingImpl.cpp
 arrow	internal/core/src/segcore/storagev1translator/ChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev1translator/DefaultValueChunkTranslator.cpp
+arrow	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.cpp
 arrow	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.h
 arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp
@@ -145,6 +147,10 @@ milvus_storage	internal/core/src/segcore/SegmentGrowingImpl.cpp
 milvus_storage	internal/core/src/segcore/SegmentGrowingImpl.h
 milvus_storage	internal/core/src/segcore/SegmentLoadInfo.cpp
 milvus_storage	internal/core/src/segcore/SegmentLoadInfo.h
+milvus_storage	internal/core/src/segcore/storagev2translator/AsyncChunkReader.cpp
+milvus_storage	internal/core/src/segcore/storagev2translator/AsyncChunkReader.h
+milvus_storage	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.cpp
+milvus_storage	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.h
 milvus_storage	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.cpp
 milvus_storage	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.h
 milvus_storage	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp
