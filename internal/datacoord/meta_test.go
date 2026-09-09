@@ -76,6 +76,7 @@ type MetaReloadSuite struct {
 
 func (suite *MetaReloadSuite) SetupTest() {
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	suite.catalog = catalog
 }
 
@@ -1127,6 +1128,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	// still called AlterSegments directly (the old two-call path), mockery
 	// would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1185,6 +1187,7 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 	// old two-call path), mockery would fail the test with an
 	// unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1903,6 +1906,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta.catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -5621,6 +5625,7 @@ func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing
 	)
 
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	channel1Entered := make(chan struct{})
 	releaseChannel1 := make(chan struct{})
 	channel2Entered := make(chan struct{})
@@ -5702,6 +5707,7 @@ func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *tes
 	const channel = "channel-1"
 
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	batchEntered := make(chan struct{})
 	releaseBatch := make(chan struct{})
 	singleEntered := make(chan struct{})
@@ -5949,6 +5955,7 @@ func TestChannelCP(t *testing.T) {
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &meta{}
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	m.catalog = catalog
 
 	catalog.On("GcConfirm",
@@ -6947,6 +6954,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("no rollback needed", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		var gotActions []metastore.UpdateAction
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
@@ -6996,6 +7004,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("rolls back current version", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		var gotActions []metastore.UpdateAction
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
@@ -7059,6 +7068,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		// both meta locks are held while catalog.Update runs: TryLock returns
 		// false only when the lock is already held.
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 
 		var am *analyzeMeta
 		var psm *partitionStatsMeta
@@ -7114,6 +7124,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("catalog update failure leaves memory untouched", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("update failed")).Once()
 
 		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{

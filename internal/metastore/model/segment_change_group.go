@@ -127,6 +127,14 @@ type SegmentChangeGroup struct {
 	NewSegmentIDs []int64 `json:"newSegmentIds"`
 	// SupersededSegmentIDs are the parents retired (marked Dropped) at publish.
 	SupersededSegmentIDs []int64 `json:"supersededSegmentIds"`
+	// SupersededL0SegmentIDs are the superseded parents that were exempted from
+	// the anti-duplication invariant as L0 delta segments at REGISTRATION time.
+	// The exemption decision is persisted so recovery is stable: an L0 parent
+	// may be GC'd from SegmentMeta later, and the persisted list (not a live
+	// segment-level lookup) must drive the recovery-time exemption — otherwise
+	// identical persisted bytes would flip from conflict-free to a startup
+	// brick once the L0 segment disappears (review C11).
+	SupersededL0SegmentIDs []int64 `json:"supersededL0SegmentIds"`
 	// CommitTS is allocated at publish; 0 while staged. Members share it so a
 	// batch gets one temporal commit boundary.
 	CommitTS uint64 `json:"commitTS"`
@@ -147,6 +155,7 @@ func (g *SegmentChangeGroup) Clone() *SegmentChangeGroup {
 	clone := *g
 	clone.NewSegmentIDs = append([]int64(nil), g.NewSegmentIDs...)
 	clone.SupersededSegmentIDs = append([]int64(nil), g.SupersededSegmentIDs...)
+	clone.SupersededL0SegmentIDs = append([]int64(nil), g.SupersededL0SegmentIDs...)
 	return &clone
 }
 
