@@ -17,6 +17,11 @@ default_nb = ct.default_nb
 default_dim = ct.default_dim
 default_limit = ct.default_limit
 
+pytestmark = pytest.mark.skipif(
+    not hasattr(DataType, "UUID"),
+    reason="pymilvus DataType lacks UUID (needs pymilvus with UUID enum support)",
+)
+
 
 class TestMilvusClientUUID(TestMilvusClientV2Base):
     """Test cases for UUID field type using MilvusClient."""
