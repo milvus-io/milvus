@@ -3661,7 +3661,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 		}, nil).Build()
 		defer describeMock.UnPatch()
 
-		enqueueMock := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, taskArg task) error {
+		enqueueMock := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, taskArg taskmodel.Task) error {
 			require.NoError(t, taskArg.OnEnqueue())
 			alterTask := taskArg.(*alterCollectionSchemaTask)
 			require.True(t, typeutil.IsExternalCollection(alterTask.oldSchema))
@@ -3704,7 +3704,7 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			}).Build()
 		defer showLoadMock.UnPatch()
 
-		enqueueMock := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, task task) error {
+		enqueueMock := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, task taskmodel.Task) error {
 			require.NoError(t, task.OnEnqueue())
 			alterTask := task.(*alterCollectionSchemaTask)
 			require.True(t, typeutil.IsExternalCollection(alterTask.oldSchema))
