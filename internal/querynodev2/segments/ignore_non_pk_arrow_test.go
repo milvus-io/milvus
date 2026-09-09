@@ -136,10 +136,14 @@ func setupArrowFetchFixture(tb testing.TB, rowsPerSegment int) *arrowFetchFixtur
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), rootPath)
 	chunkManager, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	require.NoError(tb, err)
-	initcore.InitRemoteChunkManager(paramtable.Get())
-	initcore.InitLocalChunkManager(rootPath)
-	initcore.InitMmapManager(paramtable.Get(), 1)
-	initcore.InitTieredStorage(paramtable.Get())
+	err = initcore.InitRemoteChunkManager(paramtable.Get())
+	require.NoError(tb, err)
+	err = initcore.InitLocalChunkManager(rootPath)
+	require.NoError(tb, err)
+	err = initcore.InitMmapManager(paramtable.Get(), 1)
+	require.NoError(tb, err)
+	err = initcore.InitTieredStorage(paramtable.Get())
+	require.NoError(tb, err)
 
 	collectionID := int64(90000)
 	partitionID := int64(9000)
@@ -241,7 +245,7 @@ func (f *arrowFetchFixture) teardown() {
 		seg.Release(f.ctx)
 	}
 	DeleteCollection(f.collection)
-	f.chunkManager.RemoveWithPrefix(f.ctx, f.rootPath)
+	_ = f.chunkManager.RemoveWithPrefix(f.ctx, f.rootPath)
 }
 
 // =========================================================================
