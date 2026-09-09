@@ -71,6 +71,11 @@ func TestUUIDCreateInsertQuery(t *testing.T) {
 	err = task.Await(ctx)
 	common.CheckErr(t, err, true)
 
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
 	// query == returns the row with expected uuid
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("id == \"%s\"", genUUID(0))).
 		WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
@@ -121,7 +126,7 @@ func TestUUIDDelete(t *testing.T) {
 	err = task.Await(ctx)
 	common.CheckErr(t, err, true)
 
-	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewTrieIndex()))
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewSortedIndex()))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
 	common.CheckErr(t, err, true)
@@ -154,7 +159,7 @@ func TestUUIDDelete(t *testing.T) {
 	require.Equal(t, nb-5, queryRes.ResultCount)
 }
 
-// TestUUIDIndexLoad tests trie index on uuid pk and query after load
+// TestUUIDIndexLoad tests sorted/inverted index on uuid pk and query after load
 func TestUUIDIndexLoad(t *testing.T) {
 	t.Parallel()
 
@@ -179,7 +184,7 @@ func TestUUIDIndexLoad(t *testing.T) {
 	err = task.Await(ctx)
 	common.CheckErr(t, err, true)
 
-	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewTrieIndex()))
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewInvertedIndex()))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
 	common.CheckErr(t, err, true)
@@ -232,6 +237,11 @@ func TestUUIDFlushLoadFilter(t *testing.T) {
 		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, vectors)))
 	common.CheckErr(t, err, true)
 
+	// load so the pre-flush query below can hit the growing segment
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, loadTask.Await(ctx))
+
 	// query BEFORE flush (growing segment) — must find 1 row
 	qBefore, err := mc.Query(ctx, client.NewQueryOption(collName).
 		WithFilter(fmt.Sprintf("id == \"%s\"", genUUID(5))).WithOutputFields("id", "device_uuid").WithConsistencyLevel(entity.ClStrong))
@@ -242,7 +252,7 @@ func TestUUIDFlushLoadFilter(t *testing.T) {
 	task, err := mc.Flush(ctx, client.NewFlushOption(collName))
 	common.CheckErr(t, err, true)
 	require.NoError(t, task.Await(ctx))
-	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	require.NoError(t, loadTask.Await(ctx))
 
@@ -311,7 +321,7 @@ func TestUUIDSDKPaths(t *testing.T) {
 	err = task.Await(ctx)
 	common.CheckErr(t, err, true)
 
-	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewTrieIndex()))
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", index.NewInvertedIndex()))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
 	common.CheckErr(t, err, true)
