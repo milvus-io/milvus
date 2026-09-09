@@ -10,6 +10,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
 from pymilvus import DataType
+from utils.etcd_config import MilvusEtcdConfigController
 from utils.util_log import test_log as log
 
 prefix = "milvus_client_api_query"
@@ -1205,6 +1206,10 @@ COMPACTION_INTEGRITY_ROUND_COUNTS = [int(os.getenv("MILVUS_COMPACTION_INTEGRITY_
 COMPACTION_INTEGRITY_VECTOR_DIM = 128
 COMPACTION_INTEGRITY_DEFAULT_VALUE = -91919530
 COMPACTION_INTEGRITY_TEXT_INLINE_THRESHOLD = int(os.getenv("MILVUS_TEXT_INLINE_THRESHOLD", "65536"))
+COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG = "common.storage.useLoonFFI"
+COMPACTION_INTEGRITY_RUN_STORAGE_TRANSITION = (
+    os.getenv("MILVUS_RUN_STORAGE_VERSION_TRANSITION_E2E", "false").lower() == "true"
+)
 COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS = [
     "id",
     "explicit_test_ts",
@@ -1527,7 +1532,11 @@ def _compaction_integrity_descendants(segment_id, children):
     return descendants
 
 
-def _assert_compaction_integrity_graph_transition(before_checkpoint, after_checkpoint):
+def _assert_compaction_integrity_graph_transition(
+    before_checkpoint,
+    after_checkpoint,
+    require_new_inputs=True,
+):
     before_all = before_checkpoint["all"]
     before_active = before_checkpoint["active"]
     after_all = after_checkpoint["all"]
@@ -1557,17 +1566,18 @@ def _assert_compaction_integrity_graph_transition(before_checkpoint, after_check
             f"previously active segment {segment_id} has no active descendant"
         )
 
-    new_roots = {
-        segment_id
-        for segment_id in new_segment_ids
-        if after_all[segment_id]["num_rows"] != 0 and not after_all[segment_id]["compaction_from"]
-    }
-    assert new_roots, f"round created no observable flushed input segments: {new_segment_ids}"
-    for segment_id in new_roots:
-        descendants = _compaction_integrity_descendants(segment_id, children)
-        assert segment_id in after_active or descendants.intersection(after_active), (
-            f"new input segment {segment_id} has no active descendant"
-        )
+    if require_new_inputs:
+        new_roots = {
+            segment_id
+            for segment_id in new_segment_ids
+            if after_all[segment_id]["num_rows"] != 0 and not after_all[segment_id]["compaction_from"]
+        }
+        assert new_roots, f"round created no observable flushed input segments: {new_segment_ids}"
+        for segment_id in new_roots:
+            descendants = _compaction_integrity_descendants(segment_id, children)
+            assert segment_id in after_active or descendants.intersection(after_active), (
+                f"new input segment {segment_id} has no active descendant"
+            )
     return round_edges
 
 
@@ -1576,6 +1586,7 @@ def _wait_for_compaction_integrity_checkpoint(
     collection_name,
     expected_rows,
     before_checkpoint,
+    require_new_inputs=True,
     timeout=600,
 ):
     start_time = time.time()
@@ -1611,7 +1622,11 @@ def _wait_for_compaction_integrity_checkpoint(
         }
         has_graph_transition = False
         try:
-            _assert_compaction_integrity_graph_transition(before_checkpoint, last_observation)
+            _assert_compaction_integrity_graph_transition(
+                before_checkpoint,
+                last_observation,
+                require_new_inputs=require_new_inputs,
+            )
             has_graph_transition = True
         except AssertionError:
             pass
@@ -1751,78 +1766,76 @@ def _assert_compaction_integrity_dataset(
 class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
     """Compaction lifecycle data-integrity tests with isolated mutable collections."""
 
-    def _detect_compaction_integrity_storage_version(self, client):
-        probe_name = cf.gen_unique_str("compaction_storage_probe")
-        created = False
-        try:
-            log.info(f"storage version probe start collection={probe_name}")
-            schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
-            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index("vector", index_type="AUTOINDEX", metric_type="COSINE")
-            self.create_collection(
-                client,
-                probe_name,
-                schema=schema,
-                index_params=index_params,
-                consistency_level="Strong",
-                num_shards=1,
-            )
-            created = True
-            self.insert(client, probe_name, [{"id": 1, "vector": [1.0, 0.0]}])
-            self.flush(client, probe_name)
-            deadline = time.time() + 120
-            while time.time() < deadline:
-                versions = {
-                    segment.storage_version
-                    for segment in client.list_segments(probe_name)
-                    if segment.num_rows != 0 and segment.storage_version in {2, 3}
-                }
-                if len(versions) == 1:
-                    storage_version = next(iter(versions))
-                    log.info(
-                        f"storage version probe complete collection={probe_name} storage_version={storage_version}"
-                    )
-                    return storage_version
-                time.sleep(2)
-            raise AssertionError("could not determine the server storage version from a flushed probe segment")
-        finally:
-            if created:
-                self.drop_collection(client, probe_name)
+    def _detect_compaction_integrity_storage_version(self, client, expected_version=None, timeout=120):
+        deadline = time.time() + timeout
+        last_versions = set()
+        while time.time() < deadline:
+            probe_name = cf.gen_unique_str("compaction_storage_probe")
+            created = False
+            try:
+                log.info(
+                    f"storage version probe start collection={probe_name} expected_version={expected_version}"
+                )
+                schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+                schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+                schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
+                index_params = self.prepare_index_params(client)[0]
+                index_params.add_index("vector", index_type="AUTOINDEX", metric_type="COSINE")
+                self.create_collection(
+                    client,
+                    probe_name,
+                    schema=schema,
+                    index_params=index_params,
+                    consistency_level="Strong",
+                    num_shards=1,
+                )
+                created = True
+                self.insert(client, probe_name, [{"id": 1, "vector": [1.0, 0.0]}])
+                self.flush(client, probe_name)
+                probe_deadline = min(deadline, time.time() + 20)
+                while time.time() < probe_deadline:
+                    last_versions = {
+                        segment.storage_version
+                        for segment in client.list_segments(probe_name)
+                        if segment.num_rows != 0
+                        and segment.state_name in COMPACTION_INTEGRITY_ACTIVE_STATES
+                        and segment.storage_version in {2, 3}
+                    }
+                    if expected_version is None and len(last_versions) == 1:
+                        storage_version = next(iter(last_versions))
+                        log.info(
+                            f"storage version probe complete collection={probe_name} "
+                            f"storage_version={storage_version}"
+                        )
+                        return storage_version
+                    if last_versions == {expected_version}:
+                        log.info(
+                            f"storage version adoption verified collection={probe_name} "
+                            f"storage_version={expected_version}"
+                        )
+                        return expected_version
+                    if last_versions:
+                        break
+                    time.sleep(2)
+            finally:
+                if created:
+                    self.drop_collection(client, probe_name)
+            time.sleep(2)
+        raise AssertionError(
+            f"server did not create a flushed segment with expected storage version "
+            f"{expected_version}: last_versions={last_versions}"
+        )
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize(
-        "primary_key_type",
-        [DataType.INT64, DataType.VARCHAR],
-        ids=["int64_pk", "varchar_pk"],
-    )
-    @pytest.mark.parametrize(
-        "round_count",
-        COMPACTION_INTEGRITY_ROUND_COUNTS,
-        ids=lambda value: f"{value}_rounds",
-    )
-    def test_compaction_active_set_transitions_preserve_all_rows_and_fields(self, primary_key_type, round_count):
-        """
-        target: verify all-type row safety at configurable round-level compaction lifecycle checkpoints
-        method: append and flush ten batches, request compaction, observe the blood graph and serving handoff, then query
-        expected: every round has a real transition and preserves every PK, persisted field, null/default, and cell byte
-        """
-        assert round_count > 0, "compaction integrity round count must be positive"
-        client = self._client()
-        collection_name = cf.gen_unique_str("compaction_data_integrity")
-        storage_version = self._detect_compaction_integrity_storage_version(client)
-        include_text = storage_version == 3
+    def _create_compaction_integrity_collection(
+        self,
+        client,
+        collection_name,
+        primary_key_type,
+        include_text,
+    ):
         output_fields = list(COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS)
         if include_text:
             output_fields.append(COMPACTION_INTEGRITY_TEXT_FIELD)
-        log.info(
-            f"compaction integrity case start collection={collection_name} pk_type={primary_key_type.name} "
-            f"storage_version={storage_version} include_text={include_text} rounds={round_count} "
-            f"segments_per_round={COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
-            f"rows_per_segment={COMPACTION_INTEGRITY_ROWS_PER_SEGMENT} fields={len(output_fields)} "
-            f"output_fields={output_fields}"
-        )
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
         if primary_key_type == DataType.INT64:
             schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
@@ -1887,6 +1900,82 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             consistency_level="Strong",
             num_shards=1,
         )
+        return output_fields
+
+    def _append_compaction_integrity_round(
+        self,
+        client,
+        collection_name,
+        expected_by_pk,
+        output_fields,
+        primary_key_type,
+        include_text,
+        round_index,
+    ):
+        for segment_index in range(COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND):
+            explicit_test_ts = round_index * COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND + segment_index + 1
+            pk_start = explicit_test_ts * COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
+            rows = []
+            for logical_pk in range(pk_start, pk_start + COMPACTION_INTEGRITY_ROWS_PER_SEGMENT):
+                row, expected = _build_compaction_integrity_row(
+                    collection_name,
+                    logical_pk,
+                    explicit_test_ts,
+                    primary_key_type,
+                    include_text,
+                )
+                rows.append(row)
+                expected_by_pk[row["id"]] = _canonical_compaction_integrity_row(
+                    expected,
+                    output_fields,
+                    primary_key_type,
+                )
+            insert_result = self.insert(client, collection_name, rows)[0]
+            assert insert_result["insert_count"] == COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
+            self.flush(client, collection_name)
+            log.info(
+                f"compaction integrity batch flushed collection={collection_name} round={round_index + 1} "
+                f"batch={segment_index + 1}/{COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
+                f"explicit_test_ts={explicit_test_ts} logical_pk_range="
+                f"[{pk_start},{pk_start + COMPACTION_INTEGRITY_ROWS_PER_SEGMENT - 1}] "
+                f"inserted_rows={insert_result['insert_count']} expected_total={len(expected_by_pk)}"
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "primary_key_type",
+        [DataType.INT64, DataType.VARCHAR],
+        ids=["int64_pk", "varchar_pk"],
+    )
+    @pytest.mark.parametrize(
+        "round_count",
+        COMPACTION_INTEGRITY_ROUND_COUNTS,
+        ids=lambda value: f"{value}_rounds",
+    )
+    def test_compaction_active_set_transitions_preserve_all_rows_and_fields(self, primary_key_type, round_count):
+        """
+        target: verify all-type row safety at configurable round-level compaction lifecycle checkpoints
+        method: append and flush ten batches, request compaction, observe the blood graph and serving handoff, then query
+        expected: every round has a real transition and preserves every PK, persisted field, null/default, and cell byte
+        """
+        assert round_count > 0, "compaction integrity round count must be positive"
+        client = self._client()
+        collection_name = cf.gen_unique_str("compaction_data_integrity")
+        storage_version = self._detect_compaction_integrity_storage_version(client)
+        include_text = storage_version == 3
+        output_fields = self._create_compaction_integrity_collection(
+            client,
+            collection_name,
+            primary_key_type,
+            include_text,
+        )
+        log.info(
+            f"compaction integrity case start collection={collection_name} pk_type={primary_key_type.name} "
+            f"storage_version={storage_version} include_text={include_text} rounds={round_count} "
+            f"segments_per_round={COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
+            f"rows_per_segment={COMPACTION_INTEGRITY_ROWS_PER_SEGMENT} fields={len(output_fields)} "
+            f"output_fields={output_fields}"
+        )
         log.info(f"compaction integrity collection ready collection={collection_name}")
 
         expected_by_pk = {}
@@ -1905,35 +1994,15 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 f"prior_active_ids={sorted(previous_checkpoint['active'])} "
                 f"prior_lineage_segments={len(previous_checkpoint['all'])}"
             )
-            for segment_index in range(COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND):
-                explicit_test_ts = round_index * COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND + segment_index + 1
-                pk_start = explicit_test_ts * COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
-                rows = []
-                for logical_pk in range(pk_start, pk_start + COMPACTION_INTEGRITY_ROWS_PER_SEGMENT):
-                    row, expected = _build_compaction_integrity_row(
-                        collection_name,
-                        logical_pk,
-                        explicit_test_ts,
-                        primary_key_type,
-                        include_text,
-                    )
-                    rows.append(row)
-                    physical_pk = row["id"]
-                    expected_by_pk[physical_pk] = _canonical_compaction_integrity_row(
-                        expected,
-                        output_fields,
-                        primary_key_type,
-                    )
-                insert_result = self.insert(client, collection_name, rows)[0]
-                assert insert_result["insert_count"] == COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
-                self.flush(client, collection_name)
-                log.info(
-                    f"compaction integrity batch flushed collection={collection_name} round={round_index + 1} "
-                    f"batch={segment_index + 1}/{COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
-                    f"explicit_test_ts={explicit_test_ts} logical_pk_range="
-                    f"[{pk_start},{pk_start + COMPACTION_INTEGRITY_ROWS_PER_SEGMENT - 1}] "
-                    f"inserted_rows={insert_result['insert_count']} expected_total={len(expected_by_pk)}"
-                )
+            self._append_compaction_integrity_round(
+                client,
+                collection_name,
+                expected_by_pk,
+                output_fields,
+                primary_key_type,
+                include_text,
+                round_index,
+            )
             compact_id = self.compact(client, collection_name)[0]
             log.info(
                 f"compaction requested collection={collection_name} round={round_index + 1} "
@@ -2015,3 +2084,228 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             f"compaction integrity case complete collection={collection_name} pk_type={primary_key_type.name} "
             f"storage_version={storage_version} rows={len(expected_by_pk)} fields={len(output_fields)}"
         )
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.skipif(
+        not COMPACTION_INTEGRITY_RUN_STORAGE_TRANSITION,
+        reason="storage-version transition mutates cluster-wide config and requires an exclusive serial E2E stage",
+    )
+    def test_compaction_storage_version_transitions_preserve_all_rows_and_fields(
+        self,
+        etcd_host,
+        etcd_port,
+        etcd_root_path,
+        etcd_user,
+        etcd_password,
+    ):
+        """
+        target: verify all-type row safety while persisted segments are rewritten V2 -> V3 -> V2
+        method: atomically switch the storage config, prove adoption with probe segments, and observe both lineage rewrites
+        expected: both transitions hand off a complete serving set with every PK, field, null/default, and cell byte intact
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("compaction_storage_transition")
+        primary_key_type = DataType.INT64
+        include_text = False
+        expected_by_pk = {}
+        created = False
+        with MilvusEtcdConfigController(
+            host=etcd_host,
+            port=etcd_port,
+            root_path=etcd_root_path,
+            user=etcd_user,
+            password=etcd_password,
+        ) as config_controller:
+            original = config_controller.read_config(COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG)
+            _log_compaction_integrity_evidence(
+                "storage_transition_config_original",
+                etcd_endpoint=config_controller.endpoint,
+                etcd_root_path=etcd_root_path,
+                config_key=COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG,
+                value=None if original.value is None else original.value.decode(),
+                mod_revision=original.mod_revision,
+            )
+            with config_controller.preserve_config(COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG):
+                try:
+                    v2_config = config_controller.set_config(COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG, "false")
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_config_committed",
+                        target_storage_version=2,
+                        value="false",
+                        mod_revision=v2_config.mod_revision,
+                    )
+                    self._detect_compaction_integrity_storage_version(client, expected_version=2)
+                    output_fields = self._create_compaction_integrity_collection(
+                        client,
+                        collection_name,
+                        primary_key_type,
+                        include_text,
+                    )
+                    created = True
+                    self._append_compaction_integrity_round(
+                        client,
+                        collection_name,
+                        expected_by_pk,
+                        output_fields,
+                        primary_key_type,
+                        include_text,
+                        round_index=0,
+                    )
+                    empty_checkpoint = {
+                        "all": {},
+                        "active": {},
+                        "serving": {},
+                        "tasks": {},
+                        "storage_versions": set(),
+                    }
+                    v2_job = self.compact(client, collection_name)[0]
+                    v2_checkpoint = _wait_for_compaction_integrity_checkpoint(
+                        client,
+                        collection_name,
+                        expected_rows=len(expected_by_pk),
+                        before_checkpoint=empty_checkpoint,
+                    )
+                    assert v2_checkpoint["storage_versions"] == {2}
+                    _assert_compaction_integrity_dataset(
+                        client,
+                        collection_name,
+                        expected_by_pk,
+                        output_fields,
+                        primary_key_type,
+                    )
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_v2_checkpoint",
+                        collection=collection_name,
+                        manual_job=v2_job,
+                        rows=len(expected_by_pk),
+                        storage_versions=sorted(v2_checkpoint["storage_versions"]),
+                        all_segments=[
+                            v2_checkpoint["all"][segment_id] for segment_id in sorted(v2_checkpoint["all"])
+                        ],
+                        active_segment_ids=sorted(v2_checkpoint["active"]),
+                        serving_segment_ids=sorted(v2_checkpoint["serving"]),
+                        compaction_tasks=[
+                            v2_checkpoint["tasks"][task_id] for task_id in sorted(v2_checkpoint["tasks"])
+                        ],
+                    )
+
+                    v3_config = config_controller.set_config(COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG, "true")
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_config_committed",
+                        target_storage_version=3,
+                        value="true",
+                        mod_revision=v3_config.mod_revision,
+                    )
+                    self._detect_compaction_integrity_storage_version(client, expected_version=3)
+                    v3_job = self.compact(client, collection_name)[0]
+                    v3_checkpoint = _wait_for_compaction_integrity_checkpoint(
+                        client,
+                        collection_name,
+                        expected_rows=len(expected_by_pk),
+                        before_checkpoint=v2_checkpoint,
+                        require_new_inputs=False,
+                    )
+                    assert v3_checkpoint["storage_versions"] == {3}
+                    v3_edges = _assert_compaction_integrity_graph_transition(
+                        v2_checkpoint,
+                        v3_checkpoint,
+                        require_new_inputs=False,
+                    )
+                    v2_to_v3_edges = {
+                        (source_id, target_id)
+                        for source_id, target_id in v3_edges
+                        if v3_checkpoint["all"][source_id]["storage_version"] == 2
+                        and v3_checkpoint["all"][target_id]["storage_version"] == 3
+                    }
+                    assert v2_to_v3_edges, f"no V2 -> V3 lineage edge observed: {v3_edges}"
+                    _assert_compaction_integrity_dataset(
+                        client,
+                        collection_name,
+                        expected_by_pk,
+                        output_fields,
+                        primary_key_type,
+                    )
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_v2_to_v3_validated",
+                        collection=collection_name,
+                        manual_job=v3_job,
+                        rows=len(expected_by_pk),
+                        transition_edges=sorted(v2_to_v3_edges),
+                        storage_versions=sorted(v3_checkpoint["storage_versions"]),
+                        all_segments=[
+                            v3_checkpoint["all"][segment_id] for segment_id in sorted(v3_checkpoint["all"])
+                        ],
+                        active_segment_ids=sorted(v3_checkpoint["active"]),
+                        serving_segment_ids=sorted(v3_checkpoint["serving"]),
+                        compaction_tasks=[
+                            v3_checkpoint["tasks"][task_id] for task_id in sorted(v3_checkpoint["tasks"])
+                        ],
+                    )
+
+                    v2_restore_config = config_controller.set_config(
+                        COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG,
+                        "false",
+                    )
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_config_committed",
+                        target_storage_version=2,
+                        value="false",
+                        mod_revision=v2_restore_config.mod_revision,
+                    )
+                    self._detect_compaction_integrity_storage_version(client, expected_version=2)
+                    v2_restore_job = self.compact(client, collection_name)[0]
+                    final_checkpoint = _wait_for_compaction_integrity_checkpoint(
+                        client,
+                        collection_name,
+                        expected_rows=len(expected_by_pk),
+                        before_checkpoint=v3_checkpoint,
+                        require_new_inputs=False,
+                    )
+                    assert final_checkpoint["storage_versions"] == {2}
+                    final_edges = _assert_compaction_integrity_graph_transition(
+                        v3_checkpoint,
+                        final_checkpoint,
+                        require_new_inputs=False,
+                    )
+                    v3_to_v2_edges = {
+                        (source_id, target_id)
+                        for source_id, target_id in final_edges
+                        if final_checkpoint["all"][source_id]["storage_version"] == 3
+                        and final_checkpoint["all"][target_id]["storage_version"] == 2
+                    }
+                    assert v3_to_v2_edges, f"no V3 -> V2 lineage edge observed: {final_edges}"
+                    _assert_compaction_integrity_dataset(
+                        client,
+                        collection_name,
+                        expected_by_pk,
+                        output_fields,
+                        primary_key_type,
+                    )
+                    _log_compaction_integrity_evidence(
+                        "storage_transition_v3_to_v2_validated",
+                        collection=collection_name,
+                        manual_job=v2_restore_job,
+                        rows=len(expected_by_pk),
+                        transition_edges=sorted(v3_to_v2_edges),
+                        storage_versions=sorted(final_checkpoint["storage_versions"]),
+                        all_segments=[
+                            final_checkpoint["all"][segment_id]
+                            for segment_id in sorted(final_checkpoint["all"])
+                        ],
+                        active_segment_ids=sorted(final_checkpoint["active"]),
+                        serving_segment_ids=sorted(final_checkpoint["serving"]),
+                        compaction_tasks=[
+                            final_checkpoint["tasks"][task_id]
+                            for task_id in sorted(final_checkpoint["tasks"])
+                        ],
+                    )
+                finally:
+                    if created:
+                        self.drop_collection(client, collection_name)
+            restored = config_controller.read_config(COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG)
+            _log_compaction_integrity_evidence(
+                "storage_transition_config_restored",
+                config_key=COMPACTION_INTEGRITY_STORAGE_VERSION_CONFIG,
+                value=None if restored.value is None else restored.value.decode(),
+                mod_revision=restored.mod_revision,
+            )
