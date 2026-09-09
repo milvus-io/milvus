@@ -8,8 +8,8 @@ The merged foundation includes native asynchronous chunk-reader opens,
 cancellation/error fixes, local-file finalization, configuration, and
 milvus-storage `a18d007`.
 
-The child shares the parent's `AsyncLoadExecutor`, `AsyncLoadPipeline`, and
-`LoadAdmissionController`; it introduces no second implementation of them.
+The child shares the parent's `AsyncLoadExecutor` and `LoadAdmissionController`.
+Field-data loading retains the parent's `AsyncLoadPipeline`.
 The child adds independent V3 scalar reader/materialization and scalar index
 integration with resource estimates. Tests accompany their implementation layer.
 The parent's field-data translator and its creation sites are retained unchanged.
@@ -33,6 +33,14 @@ Legacy storage formats, vector index loading, index building and uploads retain
 their existing APIs.
 
 ## Shared code and independent scheduling
+
+The shared executor lives in `storage/AsyncLoadExecutor.{h,cpp}` under the
+`milvus::storage` namespace, alongside load admission and `LocalFileIOPool`.
+`AsyncIndexEntryReader` and `IndexMaterializer` also live in `storage/`.
+Field-data reader preparation and cell loading stay in
+`segcore/storagev2translator/AsyncChunkReader` and `AsyncLoadPipeline`; they
+consume the shared storage executor. Scalar materialization uses the same
+executor directly, without depending on those field-data components.
 
 Async CPU work shares one `folly::CPUThreadPoolExecutor`, configured through
 `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` and defaulting to
@@ -278,3 +286,10 @@ existing scalar overhead-bound cases, 40 admission cases, and two thread-pool
 cases. The Tantivy tests now assert that eligible scalar memory and mmap loads
 bind to the same memory group returned by the parent's `GetInstance()`.
 The full historical 754-case set was not rerun for this correction.
+
+For the executor relocation on 2026-09-09, the GCC 12 Release `all_tests` build
+passed. All 88 focused cases passed: two executor tests, 59 field-data pipeline
+tests (including reader preparation), 21 packed-index reader/materializer tests,
+two Tantivy async load tests, and four scalar routing/mmap tests. The executor
+implementation and its relocated test bodies are unchanged apart from namespace,
+include paths, and formatting.
