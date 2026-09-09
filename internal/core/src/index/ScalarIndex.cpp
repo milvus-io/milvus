@@ -36,7 +36,7 @@
 #include "storage/IndexEntryWriter.h"
 #include "storage/Util.h"
 #include "folly/coro/BlockingWait.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 
 namespace milvus::index {
@@ -256,8 +256,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
             LoadUnifiedAsync(
                 packed_file, config, load_priority, cancellation_token)
                 .scheduleOn(
-                    segcore::storagev2translator::ResolveAsyncLoadExecutor(
-                        {}, load_priority)));
+                    storage::ResolveAsyncLoadExecutor({}, load_priority)));
         return;
     }
 

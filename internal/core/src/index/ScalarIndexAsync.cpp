@@ -21,7 +21,7 @@
 #include "common/Types.h"
 #include "folly/coro/WithCancellation.h"
 #include "index/Utils.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexMaterializer.h"
@@ -78,7 +78,7 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
         co_await folly::coro::co_withCancellation(
             folly::CancellationToken{},
             folly::coro::co_withExecutor(
-                segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                storage::ResolveAsyncLoadExecutor(
                     storage::LocalFileIOPool::GetInstance().GetExecutor(),
                     load_priority),
                 finalize()));

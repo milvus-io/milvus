@@ -52,7 +52,7 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/AsyncIndexEntryReader.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "storage/IndexMaterializer.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/IndexLoadPlan.h"
@@ -118,9 +118,8 @@ OpenAsyncReader(std::shared_ptr<milvus::InputStream> input, int64_t file_size) {
     return folly::coro::blockingWait(
         AsyncIndexEntryReader::Open(
             input, file_size, 0, milvus::proto::common::LoadPriority::HIGH, {})
-            .scheduleOn(
-                milvus::segcore::storagev2translator::ResolveAsyncLoadExecutor(
-                    {}, milvus::proto::common::LoadPriority::HIGH)));
+            .scheduleOn(milvus::storage::ResolveAsyncLoadExecutor(
+                {}, milvus::proto::common::LoadPriority::HIGH)));
 }
 }  // namespace
 
@@ -420,11 +419,8 @@ TEST_F(AsyncIndexEntryReaderTest,
                     0,
                     milvus::proto::common::LoadPriority::HIGH,
                     cancel.getToken())
-                    .scheduleOn(
-                        milvus::segcore::storagev2translator::
-                            ResolveAsyncLoadExecutor(
-                                {},
-                                milvus::proto::common::LoadPriority::HIGH)));
+                    .scheduleOn(milvus::storage::ResolveAsyncLoadExecutor(
+                        {}, milvus::proto::common::LoadPriority::HIGH)));
             return milvus::ErrorCode::Success;
         } catch (const milvus::SegcoreError& error) {
             return error.get_error_code();
@@ -1361,8 +1357,8 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
             std::make_shared<RecordingInputStream>(CreateInputStream(path));
         auto reader = folly::coro::blockingWait(
             AsyncIndexEntryReader::Open(input, GetFileSize(path), 100, priority)
-                .scheduleOn(milvus::segcore::storagev2translator::
-                                ResolveAsyncLoadExecutor({}, priority)));
+                .scheduleOn(
+                    milvus::storage::ResolveAsyncLoadExecutor({}, priority)));
         auto target = std::make_shared<std::vector<uint8_t>>(data.size());
         IndexLoadPlan plan;
         plan.priority = priority;
@@ -1377,8 +1373,8 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
                   2 * (kStreamSliceAlignment + 1) + kStreamSliceAlignment);
         auto artifact = folly::coro::blockingWait(
             MaterializeIndexAsync(*reader, std::move(plan))
-                .scheduleOn(milvus::segcore::storagev2translator::
-                                ResolveAsyncLoadExecutor({}, priority)));
+                .scheduleOn(
+                    milvus::storage::ResolveAsyncLoadExecutor({}, priority)));
         EXPECT_EQ(*target, data);
         EXPECT_TRUE(artifact.At("data").ready);
         for (const auto& read : input->ReadRanges()) {

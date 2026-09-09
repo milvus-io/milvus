@@ -799,6 +799,9 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
             slice_size));
     }
 
+    // Indexes built with scalar index engine version >= 3 always persist both
+    // auxiliary entries, so has_persisted_aux is true for newly built indexes.
+    // Keep the check for compatibility with older packed files.
     context->has_persisted_aux =
         catalog.HasEntry("idx_to_offsets") && catalog.HasEntry("valid_bitset");
     if (!context->has_persisted_aux) {

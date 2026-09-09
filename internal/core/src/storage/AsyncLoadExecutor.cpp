@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 
 #include <algorithm>
 #include <exception>
@@ -28,7 +28,7 @@
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "storage/ThreadPool.h"
 
-namespace milvus::segcore::storagev2translator {
+namespace milvus::storage {
 namespace {
 
 // Owns the process-wide priority queues used by async-load CPU work.
@@ -143,4 +143,4 @@ ResolveAsyncLoadExecutor(
                                                ExecutorPriority(load_priority));
 }
 
-}  // namespace milvus::segcore::storagev2translator
+}  // namespace milvus::storage

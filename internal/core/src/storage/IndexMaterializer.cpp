@@ -41,7 +41,7 @@
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/IndexLoadPlan.h"
 #include "storage/LocalFileIOPool.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 
 namespace milvus::storage {
 namespace index_materializer_detail {
@@ -341,7 +341,7 @@ PrepareTargetsAsync(IndexLoadPlan& plan,
         ThrowIfCancelled(cancellation_token,
                          "IndexMaterializer::PrepareTarget");
         co_await folly::coro::co_withExecutor(
-            segcore::storagev2translator::ResolveAsyncLoadExecutor(
+            ResolveAsyncLoadExecutor(
                 LocalFileIOPool::GetInstance().GetExecutor(), plan.priority),
             PrepareMmapTargetAsync(target, cancellation_token));
         ThrowIfCancelled(cancellation_token,
@@ -484,8 +484,7 @@ MaterializeIndexAsyncImpl(
     ThrowIfCancelled(operation_cancellation_token,
                      "IndexMaterializer::PlanValidation");
     ValidatePlan(reader.Catalog(), plan);
-    auto work_executor = segcore::storagev2translator::ResolveAsyncLoadExecutor(
-        {}, plan.priority);
+    auto work_executor = ResolveAsyncLoadExecutor({}, plan.priority);
     AssertInfo(static_cast<bool>(work_executor),
                "Shared LoadExecutor is unavailable");
     co_await PrepareTargetsAsync(plan, operation_cancellation_token);
@@ -505,9 +504,7 @@ MaterializeIndexAsyncImpl(
         operation_cancellation_token, failure_state->Token());
     auto max_inflight = plan.max_inflight_slices == 0
                             ? static_cast<size_t>(std::max<int64_t>(
-                                  1,
-                                  segcore::storagev2translator::
-                                      GetAsyncLoadThreadPoolSize()))
+                                  1, GetAsyncLoadThreadPoolSize()))
                             : plan.max_inflight_slices;
     AssertInfo(max_inflight > 0,
                "Index materializer max_inflight_slices must be positive");
@@ -598,7 +595,7 @@ MaterializeIndexAsyncImpl(
     }
     if (!cleanup_targets.empty()) {
         co_await folly::coro::co_withExecutor(
-            segcore::storagev2translator::ResolveAsyncLoadExecutor(
+            ResolveAsyncLoadExecutor(
                 LocalFileIOPool::GetInstance().GetExecutor(), plan.priority),
             FinishMmapTargetsAsync(cleanup_targets,
                                    operation_cancellation_token));
@@ -625,7 +622,7 @@ MaterializeIndexAsync(AsyncIndexEntryReader& reader,
         co_await folly::coro::co_withCancellation(
             folly::CancellationToken{},
             folly::coro::co_withExecutor(
-                segcore::storagev2translator::ResolveAsyncLoadExecutor(
+                ResolveAsyncLoadExecutor(
                     LocalFileIOPool::GetInstance().GetExecutor(),
                     plan.priority),
                 index_materializer_detail::CleanupMaterializationAsync(

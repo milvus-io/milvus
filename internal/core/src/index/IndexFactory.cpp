@@ -19,7 +19,7 @@
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -926,7 +926,7 @@ IndexFactory::ScalarIndexAsyncLoadResource(
     const storage::FileManagerContext& context) {
     auto reader = folly::coro::blockingWait(
         InspectAsyncScalarIndex(index_files, context)
-            .scheduleOn(segcore::storagev2translator::ResolveAsyncLoadExecutor(
+            .scheduleOn(storage::ResolveAsyncLoadExecutor(
                 {}, proto::common::LoadPriority::HIGH)));
     const auto& catalog = reader->Catalog();
     auto resolved_params = index_params;
@@ -961,8 +961,7 @@ IndexFactory::ScalarIndexAsyncLoadResource(
                                             storage::DefaultStreamSliceSize()));
         }
     }
-    const auto workers =
-        segcore::storagev2translator::GetAsyncLoadThreadPoolSize();
+    const auto workers = storage::GetAsyncLoadThreadPoolSize();
     // Bound one load by its materializer's in-flight slice count. Request-local
     // reservations must remain valid even if the byte budget expands later.
     const auto read_peak = std::min(

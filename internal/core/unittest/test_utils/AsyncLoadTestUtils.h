@@ -32,7 +32,7 @@
 #include "storage/FileManager.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/AsyncIndexEntryReader.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "folly/coro/BlockingWait.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/RemoteInputStream.h"
@@ -366,7 +366,7 @@ OpenAsyncIndexEntryReader(std::vector<uint8_t> bytes,
     auto reader = folly::coro::blockingWait(
         storage::AsyncIndexEntryReader::Open(
             input, input->Size(), 0, proto::common::LoadPriority::HIGH, {})
-            .scheduleOn(segcore::storagev2translator::ResolveAsyncLoadExecutor(
+            .scheduleOn(storage::ResolveAsyncLoadExecutor(
                 {}, proto::common::LoadPriority::HIGH)));
     tracking_file->ResetCounters();
     return reader;
@@ -388,7 +388,7 @@ OpenDirectIndexEntryReader(std::vector<uint8_t> bytes,
                                              collection_id,
                                              proto::common::LoadPriority::HIGH,
                                              {})
-            .scheduleOn(segcore::storagev2translator::ResolveAsyncLoadExecutor(
+            .scheduleOn(storage::ResolveAsyncLoadExecutor(
                 {}, proto::common::LoadPriority::HIGH)));
     direct_file->ResetCounters();
     return reader;
