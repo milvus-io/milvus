@@ -441,20 +441,18 @@ func TestUpsertTask_Function(t *testing.T) {
 	}
 
 	info := mustNewSchemaInfo(schema)
-	collectionID := UniqueID(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rc := mocks.NewMockRootCoordClient(t)
-	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-		Status: merr.Status(nil),
-		ID:     collectionID,
-		Count:  10,
-	}, nil)
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-	idAllocator.Start()
-	defer idAllocator.Close()
-	assert.NoError(t, err)
+	idAllocator := &allocator.IDAllocator{}
+	allocationPatch := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(100), int64(102), nil).Build()
+	defer allocationPatch.UnPatch()
+	// Keep the function-output test on the AutoID path with two existing rows.
+	queryPatch := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+		Status:     merr.Success(),
+		FieldsData: []*schemapb.FieldData{&f1},
+	}, segcore.StorageCost{}, nil).Build()
+	defer queryPatch.UnPatch()
 	task := upsertTask{
 		baseTask: baseTask{MetaCache: &MetaCache{}},
 		ctx:      context.Background(),
@@ -475,15 +473,23 @@ func TestUpsertTask_Function(t *testing.T) {
 					PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
 				},
 			},
+			DeleteMsg: &msgstream.DeleteMsg{
+				DeleteRequest: &msgpb.DeleteRequest{
+					PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(),
+				},
+			},
 		},
 		idAllocator: idAllocator,
 		schema:      info,
 		result:      &milvuspb.MutationResult{},
 	}
-	err = genFunctionFields(task.ctx, task.upsertMsg.InsertMsg, task.schema, task.req.GetPartialUpdate())
-	assert.NoError(t, err)
+	err := genFunctionFields(task.ctx, task.upsertMsg.InsertMsg, task.schema, task.req.GetPartialUpdate())
+	require.NoError(t, err)
 	err = task.insertPreExecute(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	require.Equal(t, []int64{0, 1}, task.result.GetIDs().GetIntId().GetData())
+	require.Equal(t, []int64{0, 1}, task.upsertMsg.DeleteMsg.GetPrimaryKeys().GetIntId().GetData())
+	require.Len(t, task.upsertMsg.InsertMsg.GetFieldsData()[2].GetVectors().GetFloatVector().GetData(), 8)
 
 	// process failed
 	{
