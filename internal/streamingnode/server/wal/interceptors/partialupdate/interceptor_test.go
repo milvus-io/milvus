@@ -271,6 +271,24 @@ func TestPartialUpdateChainRecoveredLocalCASReturnsRetry(t *testing.T) {
 	require.Equal(t, message.TxnStateRollbacked, session.State())
 }
 
+func TestPartialUpdateChainHistoryRejectionRollsBackBeforeAppend(t *testing.T) {
+	env := newPartialUpdateChainTestEnv(t)
+	readTS := env.allocateReadTS(t)
+	env.partial.state.historyStartTs = readTS + 1
+	txnContext := env.prepareCASTxn(t, readTS, 10)
+	appended := false
+	_, err := env.append(newChainTestCASCommit(t, txnContext), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return env.nextMessageID(), nil
+	})
+	requirePartialUpdateRetryable(t, err)
+	require.True(t, txn.IsCommitAdmissionRejected(err))
+	require.False(t, appended)
+	session, err := env.txnManager.GetSessionOfTxn(txnContext.TxnID)
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+}
+
 func TestPartialUpdateInterceptorRecordsTxnWriteAndMetaAfterAppend(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	meta := validCASMeta(100, 1)
@@ -932,6 +950,7 @@ func appendCASTxnBody(
 func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
+	state.historyStartTs = 1
 	return &appendInterceptor{
 		state: state,
 		pkDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
@@ -940,6 +959,38 @@ func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 				DataType: schemapb.DataType_Int64,
 			},
 		},
+	}
+}
+
+func TestPartialUpdateBuilderReestablishesHistoryOnReopen(t *testing.T) {
+	paramtable.Init()
+	builder := NewInterceptorBuilder()
+	for _, floor := range []uint64{90, 110} {
+		firstTick := streamingtimetick.NewTimeTickMsg(floor, walimplstest.NewTestMessageID(0), 0, true).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo:         types.PChannelInfo{Name: "p1", Term: 2},
+			LastTimeTickMessage: firstTick,
+		}).(*appendInterceptor)
+		require.Equal(t, floor, interceptor.state.historyStartTs)
+		interceptor.state.recordTxnBegin(1)
+		require.NoError(t, interceptor.state.recordTxnCAS(1, validCASMeta(100, 2), validCASScope()))
+		interceptor.state.recordTxnWrites(1, []any{int64(10)})
+		appended := false
+		_, err := interceptor.DoAppend(context.Background(), newCASCommitTxnMessage(t, "v1", 1, 120),
+			func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				appended = true
+				return walimplstest.NewTestMessageID(2), nil
+			})
+		if floor > 100 {
+			requirePartialUpdateRetryable(t, err)
+			require.True(t, txn.IsCommitAdmissionRejected(err))
+			require.False(t, appended)
+		} else {
+			require.NoError(t, err)
+			require.True(t, appended)
+		}
+		interceptor.Close()
 	}
 }
 
