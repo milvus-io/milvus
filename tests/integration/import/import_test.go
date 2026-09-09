@@ -28,10 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -46,7 +46,7 @@ type importTestBase struct {
 	failedReason string
 
 	pkType   schemapb.DataType
-	fileType importutilv2.FileType
+	fileType datapb.ImportFileType
 
 	vecType    schemapb.DataType
 	indexType  indexparamcheck.IndexType
@@ -70,7 +70,7 @@ func (s *importTestBase) SetupSuite() {
 
 func (s *importTestBase) SetupTest() {
 	s.failed = false
-	s.fileType = importutilv2.Parquet
+	s.fileType = datapb.ImportFileType_Parquet
 	s.pkType = schemapb.DataType_Int64
 
 	s.vecType = schemapb.DataType_FloatVector
@@ -129,11 +129,11 @@ func (s *importTestBase) run() {
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
-	case importutilv2.Numpy:
+	case datapb.ImportFileType_Numpy:
 		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{importFile}
-	case importutilv2.JSON:
+	case datapb.ImportFileType_Json:
 		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
@@ -142,7 +142,7 @@ func (s *importTestBase) run() {
 				},
 			},
 		}
-	case importutilv2.Parquet:
+	case datapb.ImportFileType_Parquet:
 		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -152,7 +152,7 @@ func (s *importTestBase) run() {
 				},
 			},
 		}
-	case importutilv2.CSV:
+	case datapb.ImportFileType_Csv:
 		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
@@ -239,7 +239,7 @@ func (s *BulkInsertSuite) TestGeometryTypes() {
 }
 
 func (s *MultiFileTypeImportSuite) TestMultiFileTypes() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
+	fileTypeArr := []datapb.ImportFileType{datapb.ImportFileType_Json, datapb.ImportFileType_Numpy, datapb.ImportFileType_Parquet, datapb.ImportFileType_Csv}
 	vectorTypes := []struct {
 		vecType    schemapb.DataType
 		indexType  indexparamcheck.IndexType
@@ -256,7 +256,7 @@ func (s *MultiFileTypeImportSuite) TestMultiFileTypes() {
 	for _, fileType := range fileTypeArr {
 		for _, vectorType := range vectorTypes {
 			// Numpy does not support sparse vectors.
-			if fileType == importutilv2.Numpy && vectorType.vecType == schemapb.DataType_SparseFloatVector {
+			if fileType == datapb.ImportFileType_Numpy && vectorType.vecType == schemapb.DataType_SparseFloatVector {
 				continue
 			}
 			s.Run(fmt.Sprintf("%s/%s", fileType, vectorType.vecType), func() {

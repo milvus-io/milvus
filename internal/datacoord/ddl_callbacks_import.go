@@ -37,6 +37,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	importVersionUnspecified int64 = 0 // Direct requests select a version; ACK restores historical messages as V2.
+	importVersionV2          int64 = 2 // Execute with ImportTaskV2.
+	importVersionV3          int64 = 3 // Execute with ReshardTask and ImportTaskV3.
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
@@ -78,6 +84,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
+		Version:       body.GetVersion(),
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -224,12 +231,14 @@ func (s *Server) broadcastImport(ctx context.Context,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
+	version int64,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
-			Id:    file.GetId(),
-			Paths: file.GetPaths(),
+			Id:                  file.GetId(),
+			Paths:               file.GetPaths(),
+			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 		}
 	})
 
@@ -238,25 +247,26 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Per-file PK ranges are the default path for every autoID import. The
-	// coordinator allocates each file a range once and ships it on the ImportMsg, so
-	// the datanode derives primary keys from literal values instead of allocating
-	// them locally. On a replicating cluster that is what makes both clusters produce
-	// identical primary keys; elsewhere it costs a little ID space and keeps one
-	// well-exercised code path instead of a rarely-taken special case.
-	//
-	// The local-allocator path in the datanode remains only for compatibility:
-	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
-	// autoID PKs, non-autoID collections never allocate, and jobs created before
-	// this version carry no range. A schema without a resolvable primary key is
-	// left to normal validation.
+	// Freeze one literal ID range per ordinary V3 source file before the WAL
+	// message is published. V3 uses it for RowID even with an explicit PK; AutoID
+	// collections also derive the PK from the same range. V2 keeps its old rule.
+	// Files that already carry a range (e.g. a replicated/forwarded WAL body) are
+	// authoritative and must not be re-allocated.
 	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
-			s.allocator.AllocN,
-			Params.CommonCfg.ClusterID.GetAsUint64(),
-		); err != nil {
-			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
+		(pkField.GetAutoID() || version == importVersionV3) &&
+		!importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		needsRange := make([]*internalpb.ImportFile, 0, len(files))
+		for _, file := range files {
+			if file.GetPreAllocatedAutoIds() == nil ||
+				file.GetPreAllocatedAutoIds().GetEnd() <= file.GetPreAllocatedAutoIds().GetBegin() {
+				needsRange = append(needsRange, file)
+			}
+		}
+		if len(needsRange) > 0 {
+			if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, needsRange,
+				s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64()); err != nil {
+				return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
+			}
 		}
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
@@ -303,6 +313,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
+			Version:        version,
 		}).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off

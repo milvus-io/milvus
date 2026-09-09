@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -78,9 +79,9 @@ func nonSourceFieldIDs(schema *schemapb.CollectionSchema) typeutil.Set[int64] {
 // placeholder to avoid divide-by-zero rather than a real byte cost. The caller
 // needs the distinction: a clamped floor cannot carry the per-file separator
 // correction, because rows really can occupy fewer bytes than the floor claims.
-func minRowTextBytes(schema *schemapb.CollectionSchema, ft FileType) (int64, bool) {
+func minRowTextBytes(schema *schemapb.CollectionSchema, ft datapb.ImportFileType) (int64, bool) {
 	// A JSON row is an object: braces around it, and "name": before each value.
-	jsonShaped := ft == JSON || ft == JSONLines
+	jsonShaped := ft == datapb.ImportFileType_Json || ft == datapb.ImportFileType_JsonLines
 	skip := nonSourceFieldIDs(schema)
 	var total, present int64
 	for _, field := range schema.GetFields() {
@@ -170,19 +171,19 @@ func RowCountUpperBound(ctx context.Context, cm storage.ChunkManager,
 	var bound int64
 	var exact bool
 	switch ft {
-	case Parquet:
+	case datapb.ImportFileType_Parquet:
 		bound, err = parquet.NumRows(ctx, cm, file.GetPaths()[0])
 		if err != nil {
 			return 0, false, err
 		}
 		exact = true
-	case Numpy:
+	case datapb.ImportFileType_Numpy:
 		bound, err = numpy.NumRows(ctx, cm, schema, file.GetPaths())
 		if err != nil {
 			return 0, false, err
 		}
 		exact = true
-	case JSON, CSV, JSONLines:
+	case datapb.ImportFileType_Json, datapb.ImportFileType_Csv, datapb.ImportFileType_JsonLines:
 		// No row count is recorded in the file, so divide the byte size by a
 		// provable per-row floor. This over-estimates heavily (the floor is 1 byte
 		// for an all-VarChar schema) and must stay an upper bound: under-estimating

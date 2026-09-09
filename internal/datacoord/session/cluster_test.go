@@ -448,6 +448,147 @@ func TestCluster_Import(t *testing.T) {
 	})
 }
 
+func TestCluster_QueryReshard(t *testing.T) {
+	t.Run("retry verdict overrides stale in-progress payload", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("state code: Abnormal: service not ready")
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry, result.GetState())
+		assert.Equal(t, "state code: Abnormal: service not ready", result.GetReason())
+	})
+
+	t.Run("in-progress payload wins over in-progress verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
+	})
+
+	t.Run("finished payload wins over finished verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Completed, result.GetState())
+	})
+
+	t.Run("verdict used when payload state is none", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
+	})
+}
+
+func TestCluster_QueryImportV3(t *testing.T) {
+	t.Run("retry verdict overrides stale in-progress payload", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("worker is not exist")
+		payload, err := proto.Marshal(&datapb.QueryImportTaskV3Response{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryImportV3(1, &datapb.QueryImportTaskV3Request{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry, result.GetState())
+		assert.Equal(t, "worker is not exist", result.GetReason())
+	})
+
+	t.Run("in-progress payload wins over in-progress verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		payload, err := proto.Marshal(&datapb.QueryImportTaskV3Response{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryImportV3(1, &datapb.QueryImportTaskV3Request{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
+	})
+}
+
 func TestCluster_Index(t *testing.T) {
 	t.Run("create index", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
