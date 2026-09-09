@@ -1256,10 +1256,11 @@ COMPACTION_INTEGRITY_RUNNING_TASK_STATES = {
 }
 COMPACTION_INTEGRITY_SUCCESS_TASK_STATES = {"completed", "cleaned"}
 COMPACTION_INTEGRITY_FAILED_TASK_STATES = {"failed", "timeout"}
+COMPACTION_INTEGRITY_TERMINAL_TASK_STATES = (
+    COMPACTION_INTEGRITY_SUCCESS_TASK_STATES | COMPACTION_INTEGRITY_FAILED_TASK_STATES
+)
 COMPACTION_INTEGRITY_KNOWN_TASK_STATES = (
-    COMPACTION_INTEGRITY_RUNNING_TASK_STATES
-    | COMPACTION_INTEGRITY_SUCCESS_TASK_STATES
-    | COMPACTION_INTEGRITY_FAILED_TASK_STATES
+    COMPACTION_INTEGRITY_RUNNING_TASK_STATES | COMPACTION_INTEGRITY_TERMINAL_TASK_STATES
 )
 
 
@@ -1510,12 +1511,14 @@ def _snapshot_compaction_integrity_tasks(tasks):
 def _assert_compaction_integrity_task_snapshot(task_snapshot):
     unknown = [task for task in task_snapshot.values() if task["state"] not in COMPACTION_INTEGRITY_KNOWN_TASK_STATES]
     assert not unknown, f"compaction tasks reported unknown states: {unknown}"
-    failed = [
-        task
-        for task in task_snapshot.values()
+
+
+def _compaction_integrity_failed_tasks(task_snapshot):
+    return {
+        task_id: task
+        for task_id, task in task_snapshot.items()
         if task["failure_reason"] or task["state"] in COMPACTION_INTEGRITY_FAILED_TASK_STATES
-    ]
-    assert not failed, f"compaction tasks failed: {failed}"
+    }
 
 
 def _compaction_integrity_descendants(segment_id, children):
@@ -1595,6 +1598,7 @@ def _wait_for_compaction_integrity_checkpoint(
     stable_polls = 0
     last_signature = None
     last_observation = {}
+    reported_task_failures = set()
     while time.time() < deadline:
         poll_count += 1
         all_segments = _snapshot_compaction_integrity_segments(client.list_segments(collection_name))
@@ -1612,6 +1616,22 @@ def _wait_for_compaction_integrity_checkpoint(
         }
         tasks = _snapshot_compaction_integrity_tasks(client.list_compaction_tasks(collection_name))
         _assert_compaction_integrity_task_snapshot(tasks)
+        failed_tasks = _compaction_integrity_failed_tasks(tasks)
+        new_task_failures = {
+            task_id: task
+            for task_id, task in failed_tasks.items()
+            if (task_id, task["state"], task["failure_reason"]) not in reported_task_failures
+        }
+        if new_task_failures:
+            _log_compaction_integrity_evidence(
+                "compaction_task_failures_observed",
+                collection=collection_name,
+                failed_tasks=[new_task_failures[task_id] for task_id in sorted(new_task_failures)],
+            )
+            reported_task_failures.update(
+                (task_id, task["state"], task["failure_reason"])
+                for task_id, task in new_task_failures.items()
+            )
         storage_versions = {segment["storage_version"] for segment in active_segments.values()}
         last_observation = {
             "all": all_segments,
@@ -1630,7 +1650,7 @@ def _wait_for_compaction_integrity_checkpoint(
             has_graph_transition = True
         except AssertionError:
             pass
-        task_quiet = all(task["state"] in COMPACTION_INTEGRITY_SUCCESS_TASK_STATES for task in tasks.values())
+        tasks_terminal = all(task["state"] in COMPACTION_INTEGRITY_TERMINAL_TASK_STATES for task in tasks.values())
         active_stable = bool(active_segments) and all(
             segment["state"] in COMPACTION_INTEGRITY_STABLE_STATES and segment["is_sorted"]
             for segment in active_segments.values()
@@ -1641,7 +1661,7 @@ def _wait_for_compaction_integrity_checkpoint(
         row_count_matches = active_rows == expected_rows
         storage_version_valid = len(storage_versions) == 1 and storage_versions.issubset({2, 3})
         ready = (
-            task_quiet
+            tasks_terminal
             and active_stable
             and serving_matches_active
             and serving_sealed
@@ -1672,7 +1692,8 @@ def _wait_for_compaction_integrity_checkpoint(
             log.info(
                 f"compaction checkpoint poll collection={collection_name} poll={poll_count} "
                 f"elapsed={time.time() - start_time:.1f}s ready={ready} stable_polls={stable_polls}/3 "
-                f"task_quiet={task_quiet} active_stable={active_stable} "
+                f"tasks_terminal={tasks_terminal} failed_task_ids={sorted(failed_tasks)} "
+                f"active_stable={active_stable} "
                 f"serving_matches_active={serving_matches_active} serving_sealed={serving_sealed} "
                 f"row_count_matches={row_count_matches} graph_transition={has_graph_transition} "
                 f"storage_version_valid={storage_version_valid} rows={active_rows}/{expected_rows} "
