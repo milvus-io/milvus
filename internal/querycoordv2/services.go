@@ -135,7 +135,7 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
-	cfg := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[req.GetCollectionID()]
+	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
 	if cfg == nil {
 		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 		if err != nil {
@@ -253,13 +253,12 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view runtime is nil"))
 		return resp, nil
 	}
-	snapshot := s.qviewsRuntime.loadConfigStore.Snapshot()
-	cfg := snapshot.ConfigsMap()[req.GetCollectionID()]
+	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
 	if cfg == nil {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
 		return resp, nil
 	}
-	resp.Version = snapshot.Version()
+	resp.Version = s.qviewsRuntime.loadConfigStore.GetConfigVersion(req.GetCollectionID())
 	resp.PartitionIDs = append([]int64(nil), cfg.PartitionIDs...)
 	resp.LoadFields = cloneLoadFields(cfg.LoadFields)
 	return resp, nil
