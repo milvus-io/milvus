@@ -423,11 +423,14 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 		// landed but was not yet persisted, so this task's own fence must
 		// append again and succeed: the shard manager keeps the first fence
 		// (SplitShard is idempotent) and the extra record is harmless to every
-		// consumer. Another task's fence is a coordinator invariant violation
-		// (one active task per source); refusing it is what keeps two splits
-		// from carving one source twice.
+		// consumer. A fence recorded by any other task -- including one whose
+		// TaskID reads zero -- is a coordinator invariant violation (one
+		// active task per source; every fence SplitShard places carries the
+		// placing task's id, so zero is a coordinator bug, not a legacy
+		// fence); refusing it is what keeps two splits from carving one
+		// source twice.
 		fence := impl.shardManager.GetSplitFence(collectionID, msg.VChannel())
-		if fence.TaskID != 0 && fence.TaskID != header.GetSplitTaskId() {
+		if fence.TaskID != header.GetSplitTaskId() {
 			return nil, status.NewShardFenced(msg.VChannel(), fence.TimeTick, fence.TaskID)
 		}
 		impl.shardManager.Logger().Info(ctx, "source vchannel already fenced by this task, appending the fence again",

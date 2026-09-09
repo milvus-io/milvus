@@ -165,6 +165,34 @@ func TestSplitShardOnSourceFencedByAnotherTaskIsRefused(t *testing.T) {
 	assert.Equal(t, int64(41), streamErr.FencedSplitTaskId)
 }
 
+// TestSplitShardOnSourceFencedWithZeroTaskIDIsRefused: a recorded fence whose
+// TaskID is zero is not "no task recorded" -- GetSplitFence is only reached
+// after CheckIfVChannelCanBeWritten reports the vchannel fenced, so a fence
+// exists. A zero task id there is a coordinator bug (every fence SplitShard
+// places carries the placing task's id), never a legacy/absent fence, so it
+// must be refused exactly like a fence placed by another task: no append, no
+// re-seal.
+func TestSplitShardOnSourceFencedWithZeroTaskIDIsRefused(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().GetSplitFence(int64(1), "v0").
+		Return(shards.SplitFence{TimeTick: 100, TaskID: 0}).Once()
+
+	msgID, err := i.DoAppend(context.Background(),
+		newTestSplitShardMutableMessage("v0", newTestSplitShardHeader(1, 42, "v0", "v1", "v2"), nil),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "a fence recorded with a zero task id must not be appended")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	streamErr := status.AsStreamingError(err)
+	assert.True(t, streamErr.IsUnrecoverable())
+	assert.True(t, streamErr.IsShardFenced())
+	assert.Equal(t, uint64(100), streamErr.FencedTimeTick)
+	assert.Equal(t, int64(0), streamErr.FencedSplitTaskId)
+	shardManager.AssertNotCalled(t, "FlushAndFenceSegmentAllocUntil", mock.Anything, mock.Anything)
+}
+
 func TestSplitShardOnTargetRegistersTheGenesis(t *testing.T) {
 	// A split target is created live, so nothing else registers its WAL
 	// function-runner lifecycle key until the WAL is next recovered. Without it
