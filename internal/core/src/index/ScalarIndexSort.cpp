@@ -537,40 +537,7 @@ ScalarIndexSort<T>::LoadLegacyAsync(const Config& config,
         check(values[i].idx_ >= 0 && static_cast<size_t>(values[i].idx_) < rows,
               "index row offset out of bounds");
     }
-    storage::ThrowIfCancelled(token, "ScalarIndexSort::FinalizeLegacy");
-    LoadWithoutAssemble(binary, config);
-    storage::ThrowIfCancelled(token, "ScalarIndexSort::FinalizeLegacy");
-}
-
-template <typename T>
-void
-ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
-                         const Config& config,
-                         milvus::OpContext* op_ctx) {
-    const bool use_async_load =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    // This first migration covers legacy Sort memory loading. Legacy mmap
-    // loading is migrated together with the other file-backed consumers.
-    if (use_async_load &&
-        !GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
-        const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
-                                  config, milvus::LOAD_PRIORITY)
-                                  .value_or(proto::common::LoadPriority::HIGH);
-        const auto token =
-            op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
-        try {
-            folly::coro::blockingWait(
-                LoadLegacyAsync(config, token)
-                    .scheduleOn(
-                        storage::ResolveAsyncLoadExecutor({}, priority)));
-        } catch (const std::bad_alloc& error) {
-            throw SegcoreError(MemAllocateFailed, error.what());
-        } catch (const folly::OperationCancelled& error) {
-            throw SegcoreError(FollyCancel, error.what());
-        }
-        return;
-    }
-    Load(ctx, config);
+    co_await this->FinalizeLegacyLoadAsync(std::move(binary), config, token);
 }
 
 template <typename T>

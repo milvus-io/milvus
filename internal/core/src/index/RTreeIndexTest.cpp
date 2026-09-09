@@ -2252,6 +2252,8 @@ class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
 }  // namespace
 
 TEST_F(RTreeIndexTest, V3AsyncLoadUsesNativeDirectStagingFiles) {
+    // Other fixture cases reuse build ID 1 and may retain its build directory.
+    index_meta_.build_id = 2;
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     milvus::storage::FileManagerContext ctx_build(
         field_meta_, index_meta_, chunk_manager_, fs_);

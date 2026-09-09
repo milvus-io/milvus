@@ -117,7 +117,7 @@ class IndexFactory {
         bool* use_shared_memory_overhead_group = nullptr);
 
     // Inspects async scalar metadata and estimates only that load path.
-    // Supports packed V3 indexes and legacy Sort memory loads.
+    // Supports packed V3 indexes and legacy scalar indexes.
     AsyncScalarIndexLoadResource
     ScalarIndexAsyncLoadResource(
         DataType field_type,
@@ -208,6 +208,18 @@ class IndexFactory {
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
+
+    // File-aware legacy estimates also cover mode updates before cache reload.
+    LoadResourceRequest
+    ScalarIndexLegacyLoadResource(
+        DataType field_type,
+        uint64_t index_size,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& context,
+        bool use_async_load);
 
     // Shared representation costs, parameterized by the reader's transient bytes.
     LoadResourceRequest

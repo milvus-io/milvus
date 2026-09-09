@@ -42,6 +42,7 @@ class StringIndexSortImpl;
 // Main StringIndexSort class using pImpl pattern
 class StringIndexSort : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
     static constexpr uint32_t SERIALIZATION_VERSION = 1;
     static constexpr uint64_t MAGIC_CODE =
         0x5354524E47534F52;  // "STRNGSOR" in hex

@@ -100,15 +100,9 @@ SealedIndexTranslator::SealedIndexTranslator(
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    const bool legacy_sort_memory =
-        index_info_.index_type == milvus::index::ASCENDING_SORT &&
-        !index_load_info_.enable_mmap &&
-        index_load_info_.field_type != DataType::JSON &&
-        !IsStringDataType(index_load_info_.field_type) &&
-        !(index_load_info_.field_type == DataType::ARRAY &&
-          IsStringDataType(index_load_info_.element_type));
-    if (use_async_load && (version >= 3 || legacy_sort_memory) &&
-        !IsVectorDataType(index_load_info_.field_type)) {
+    if (use_async_load && !IsVectorDataType(index_load_info_.field_type) &&
+        (version >= 3 ||
+         index_info_.index_type != milvus::index::FMINDEX_INDEX_TYPE)) {
         auto resources =
             milvus::index::IndexFactory::GetInstance()
                 .ScalarIndexAsyncLoadResource(index_load_info_.field_type,

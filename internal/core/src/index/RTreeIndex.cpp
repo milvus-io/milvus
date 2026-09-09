@@ -40,6 +40,8 @@
 #include "geos_c.h"
 #include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
@@ -324,6 +326,12 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheIndexToDisk(files, load_priority);
 
+    FinishLegacyLoad();
+}
+
+template <typename T>
+void
+RTreeIndex<T>::FinishLegacyLoad() {
     // 4. Determine local base path (without extension) for RTreeIndexWrapper.
     auto local_paths = disk_file_manager_->GetLocalFilePaths();
     AssertInfo(!local_paths.empty(),
@@ -372,6 +380,80 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     LOG_INFO(
         "Loaded R-Tree index from {} with {} rows", path_, total_num_rows_);
+}
+
+template <typename T>
+folly::coro::Task<void>
+RTreeIndex<T>::LoadLegacyAsync(const Config& config,
+                               folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "RTree::LoadLegacy");
+    auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    std::vector<std::string> metadata_files;
+    std::vector<std::string> disk_files;
+    metadata_files.reserve(files.size());
+    disk_files.reserve(files.size());
+    for (auto& file : files) {
+        if (!boost::filesystem::path(file).has_parent_path()) {
+            file = disk_file_manager_->GetRemoteIndexPrefix() + "/" + file;
+        }
+        const auto name = GetRTreeFileName(file);
+        if (name == INDEX_FILE_SLICE_META || name == "index_null_offset" ||
+            name.starts_with("index_null_offset_")) {
+            metadata_files.push_back(std::move(file));
+        } else {
+            disk_files.push_back(std::move(file));
+        }
+    }
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    std::vector<size_t> null_offsets;
+    {
+        auto metadata = co_await mem_file_manager_->LoadIndexBinarySetAsync(
+            metadata_files, priority, token);
+        if (auto nulls = metadata.GetByName("index_null_offset")) {
+            if (nulls->size % sizeof(size_t) != 0) {
+                ThrowInfo(DataFormatBroken,
+                          "Invalid legacy RTree null offsets size");
+            }
+            null_offsets.resize(nulls->size / sizeof(size_t));
+            if (nulls->size != 0) {
+                std::memcpy(
+                    null_offsets.data(), nulls->data.get(), nulls->size);
+            }
+        }
+    }
+    const auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    std::exception_ptr failure;
+    try {
+        co_await disk_file_manager_->CacheIndexToDiskAsync(
+            disk_files, prefix, priority, token);
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
+                {
+                    std::unique_lock<folly::SharedMutexWritePriority> lock(
+                        mutex_);
+                    null_offset_ = std::move(null_offsets);
+                }
+                FinishLegacyLoad();
+                storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
+            },
+            priority);
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                wrapper_.reset();
+                disk_file_manager_->RemoveIndexFiles();
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
 }
 
 template <typename T>

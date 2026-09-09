@@ -202,6 +202,13 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                  !non_exist_offsets_.empty());
     }
 
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override {
+        co_await HybridScalarIndex<T>::LoadLegacyAsync(config, token);
+        BuildExistsBitset(this->Count());
+    }
+
     JsonCastType
     GetCastType() const override {
         return cast_type_;

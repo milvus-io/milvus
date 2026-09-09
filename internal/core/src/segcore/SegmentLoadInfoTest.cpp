@@ -330,7 +330,7 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
 
     auto legacy_inverted_infos = segment_info.GetFieldIndexInfos(FieldId(110));
     ASSERT_EQ(legacy_inverted_infos.size(), 1);
-    EXPECT_TRUE(legacy_inverted_infos[0].load_resource_request.has_value());
+    EXPECT_FALSE(legacy_inverted_infos[0].load_resource_request.has_value());
 }
 
 TEST_F(SegmentLoadInfoTest, LegacySortDefersFileAwareResourceEstimate) {

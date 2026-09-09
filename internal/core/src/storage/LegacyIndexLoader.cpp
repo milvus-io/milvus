@@ -24,6 +24,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "milvus-storage/common/extend_status.h"
 #include "folly/OperationCancelled.h"
 #include "storage/AsyncFileReader.h"
 #include "storage/DataCodec.h"
@@ -34,6 +35,61 @@
 
 namespace milvus::storage {
 namespace {
+
+// Preserves legacy ChunkManager-only contexts. These synchronous reads run on
+// the selected async executor; native Arrow inputs use asynchronous range I/O.
+class LegacyChunkInput final : public milvus::InputStream {
+ public:
+    LegacyChunkInput(ChunkManagerPtr manager, std::string path)
+        : manager_(std::move(manager)),
+          path_(std::move(path)),
+          size_(manager_->Size(path_)) {
+    }
+    size_t
+    Size() const override {
+        return size_;
+    }
+    size_t
+    Tell() const override {
+        return position_;
+    }
+    bool
+    Eof() const override {
+        return position_ == size_;
+    }
+    bool
+    Seek(int64_t offset) override {
+        if (offset < 0 || static_cast<uint64_t>(offset) > size_) {
+            return false;
+        }
+        position_ = offset;
+        return true;
+    }
+    size_t
+    ReadAt(void* data, size_t offset, size_t bytes) override {
+        AssertInfo(offset <= size_ && bytes <= size_ - offset,
+                   "Legacy index read exceeds object size");
+        return manager_->Read(path_, offset, data, bytes);
+    }
+    size_t
+    Read(void* data, size_t bytes) override {
+        const auto read =
+            ReadAt(data, position_, std::min(bytes, size_ - position_));
+        position_ += read;
+        return read;
+    }
+    size_t
+    Read(int, size_t) override {
+        ThrowInfo(Unsupported,
+                  "LegacyChunkInput requires positioned memory reads");
+    }
+
+ private:
+    ChunkManagerPtr manager_;
+    std::string path_;
+    size_t size_;
+    size_t position_{0};
+};
 
 void
 CheckFormat(bool valid, const char* message) {
@@ -137,6 +193,24 @@ ParseDescriptor(const std::shared_ptr<uint8_t[]>& data,
 }
 
 }  // namespace
+
+std::shared_ptr<milvus::InputStream>
+OpenLegacyIndexInput(const ChunkManagerPtr& chunk_manager,
+                     const milvus_storage::ArrowFileSystemPtr& fs,
+                     const std::string& remote_file) {
+    // Legacy local uploads use ChunkManager paths directly, whereas Arrow's
+    // local filesystem is rooted and would prepend its root a second time.
+    if (!fs || milvus_storage::IsLocalFileSystem(fs)) {
+        AssertInfo(chunk_manager != nullptr,
+                   "Legacy index requires a file source");
+        return std::make_shared<LegacyChunkInput>(chunk_manager, remote_file);
+    }
+    auto opened = fs->OpenInputFile(remote_file);
+    if (!opened.ok()) {
+        throw milvus_storage::ToSegcoreError(opened.status());
+    }
+    return std::make_shared<RemoteInputStream>(std::move(*opened));
+}
 
 folly::coro::Task<LegacyIndexFileInfo>
 InspectLegacyIndexFileAsync(milvus::InputStream& input,

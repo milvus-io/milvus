@@ -59,6 +59,12 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
+#include <charconv>
+#include <filesystem>
+#include <set>
+#include "storage/LegacyIndexLoader.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
@@ -559,6 +565,163 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         // TODO: remove this log when #45590 is solved
         LOG_INFO("CacheIndexToDisk: cached file {}", local_index_file_name);
     }
+}
+
+folly::coro::Task<void>
+DiskFileManagerImpl::CacheIndexToDiskAsync(
+    const std::vector<std::string>& remote_files,
+    const std::string& local_index_prefix,
+    proto::common::LoadPriority priority,
+    folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    ThrowIfCancelled(token, "DiskFileManager::CacheLegacy");
+    struct Slice {
+        size_t number;
+        std::string path;
+        LegacyIndexFileInfo info;
+    };
+    std::map<std::string, std::vector<Slice>> files;
+    for (const auto& path : remote_files) {
+        const auto separator = path.find_last_of('_');
+        size_t number = 0;
+        if (separator == std::string::npos || separator + 1 == path.size()) {
+            ThrowInfo(
+                DataFormatBroken, "Missing legacy disk slice number: {}", path);
+        }
+        const auto suffix = std::string_view(path).substr(separator + 1);
+        const auto parsed = std::from_chars(
+            suffix.data(), suffix.data() + suffix.size(), number);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != suffix.data() + suffix.size()) {
+            ThrowInfo(
+                DataFormatBroken, "Invalid legacy disk slice number: {}", path);
+        }
+        ThrowIfCancelled(token, "DiskFileManager::InspectLegacy");
+        auto input = OpenLegacyIndexInput(rcm_, fs_, path);
+        auto info =
+            co_await InspectLegacyIndexFileAsync(*input, priority, token);
+        files[path.substr(0, separator)].push_back({number, path, info});
+    }
+    std::set<std::string> names;
+    std::vector<std::string> created;
+    created.reserve(files.size());
+    for (auto& [prefix, slices] : files) {
+        std::sort(
+            slices.begin(), slices.end(), [](const auto& a, const auto& b) {
+                return a.number < b.number;
+            });
+        for (size_t i = 0; i < slices.size(); ++i) {
+            if (slices[i].number != i) {
+                ThrowInfo(DataFormatBroken,
+                          "Missing or duplicate legacy disk slice: {}_{}",
+                          prefix,
+                          i);
+            }
+        }
+        const auto name = prefix.substr(prefix.find_last_of('/') + 1);
+        if (name.empty() || name == "." || name == ".." ||
+            !names.insert(name).second) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid or duplicate legacy disk filename: {}",
+                      name);
+        }
+    }
+    local_paths_.reserve(local_paths_.size() + files.size());
+    std::optional<LocalDirWriteLease> directory_lease;
+    std::unique_ptr<FileWriter> writer;
+    std::exception_ptr failure;
+    try {
+        co_await RunLocalFileIOAsync(
+            [&] {
+                ThrowIfCancelled(token,
+                                 "DiskFileManager::CreateLegacyDirectory");
+                directory_lease.emplace(
+                    AcquireLocalDirWriteLease(local_index_prefix));
+            },
+            priority);
+        for (const auto& [prefix, slices] : files) {
+            ThrowIfCancelled(token, "DiskFileManager::CreateLegacyFile");
+            const auto name = prefix.substr(prefix.find_last_of('/') + 1);
+            const auto local_path =
+                (std::filesystem::path(local_index_prefix) / name).string();
+            co_await RunLocalFileIOAsync(
+                [&] {
+                    ThrowIfCancelled(token,
+                                     "DiskFileManager::CreateLegacyFile");
+                    std::error_code error;
+                    const bool exists =
+                        std::filesystem::exists(local_path, error);
+                    if (error) {
+                        ThrowInfo(FileCreateFailed,
+                                  "Failed to inspect legacy destination {}: {}",
+                                  local_path,
+                                  error.message());
+                    }
+                    if (exists) {
+                        ThrowInfo(FileCreateFailed,
+                                  "Legacy index destination already exists: {}",
+                                  local_path);
+                    }
+                    created.push_back(local_path);
+                    LocalChunkManagerSingleton::GetInstance()
+                        .GetChunkManager()
+                        ->CreateFile(created.back());
+                    writer = std::make_unique<FileWriter>(
+                        created.back(),
+                        io::GetPriorityFromLoadPriority(priority));
+                },
+                priority);
+            LegacyIndexConsumer consume =
+                [&](size_t,
+                    std::span<const uint8_t> bytes) -> folly::coro::Task<void> {
+                ThrowIfCancelled(token, "DiskFileManager::WriteLegacy");
+                co_await RunLocalFileIOAsync(
+                    [&] {
+                        ThrowIfCancelled(token, "DiskFileManager::WriteLegacy");
+                        writer->Write(bytes.data(), bytes.size());
+                    },
+                    priority);
+            };
+            for (const auto& slice : slices) {
+                ThrowIfCancelled(token, "DiskFileManager::ReadLegacy");
+                auto input = OpenLegacyIndexInput(rcm_, fs_, slice.path);
+                co_await StreamLegacyIndexFileAsync(
+                    *input, slice.info, consume, priority, token);
+            }
+            co_await RunLocalFileIOAsync(
+                [&] {
+                    ThrowIfCancelled(token,
+                                     "DiskFileManager::FinishLegacyFile");
+                    writer->Finish();
+                    writer.reset();
+                },
+                priority);
+        }
+        ThrowIfCancelled(token, "DiskFileManager::PublishLegacyFiles");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    co_await RunLocalFileIOAsync(
+        [&] {
+            writer.reset();
+            if (failure) {
+                for (const auto& path : created) {
+                    std::error_code ignored;
+                    std::filesystem::remove(path, ignored);
+                }
+                std::error_code ignored;
+                std::filesystem::remove(local_index_prefix, ignored);
+            }
+            directory_lease.reset();
+        },
+        priority);
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
+    local_paths_.insert(local_paths_.end(),
+                        std::make_move_iterator(created.begin()),
+                        std::make_move_iterator(created.end()));
 }
 
 void

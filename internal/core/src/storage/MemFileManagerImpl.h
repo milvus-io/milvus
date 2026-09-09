@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <unordered_map>
@@ -31,11 +32,6 @@
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
-
-struct LegacyIndexMemoryEstimate {
-    size_t payload_bytes{0};
-    size_t max_transient_bytes{0};
-};
 
 class MemFileManagerImpl : public FileManagerImpl {
  public:
@@ -69,15 +65,12 @@ class MemFileManagerImpl : public FileManagerImpl {
     // Streams decoded legacy slices directly into the assembled BinarySet.
     // One persisted slice is active per call. Returned buffers are request-local
     // input memory; the loader releases admitted scratch after each copy.
+    // An optional entry name reads only that entry and its slice metadata.
     [[nodiscard]] folly::coro::Task<BinarySet>
     LoadIndexBinarySetAsync(const std::vector<std::string>& remote_files,
                             proto::common::LoadPriority priority,
-                            folly::CancellationToken token = {});
-
-    // Sums retained decoded payloads and the maximum one-file scratch estimate.
-    // Inspection reads metadata only and uses the same admission as loading.
-    [[nodiscard]] folly::coro::Task<LegacyIndexMemoryEstimate>
-    InspectLegacyIndexMemoryAsync(const std::vector<std::string>& remote_files);
+                            folly::CancellationToken token = {},
+                            std::string_view entry_name = {});
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);
@@ -102,12 +95,6 @@ class MemFileManagerImpl : public FileManagerImpl {
     CacheOptFieldToMemory(const Config& config);
 
  private:
-    // Opens the exact legacy object path, including old storage-prefix versions.
-    // The caller selects the executor. Arrow opens preserve typed status errors;
-    // contexts without an Arrow filesystem use their existing ChunkManager.
-    [[nodiscard]] std::shared_ptr<milvus::InputStream>
-    OpenLegacyIndexInput(const std::string& remote_file);
-
     bool
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
 

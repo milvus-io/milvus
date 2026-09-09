@@ -41,6 +41,9 @@
 #include "folly/SharedMutex.h"
 #include "glog/logging.h"
 #include "index/InvertedIndexTantivy.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LocalFileIOPool.h"
+#include <unordered_set>
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "knowhere/dataset.h"
@@ -299,20 +302,108 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheIndexToDisk(inverted_index_files, load_priority);
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    FinishLegacyLoad(prefix, config);
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::FinishLegacyLoad(const std::string& prefix,
+                                          const Config& config) {
     path_ = prefix;
-    auto load_in_mmap =
+    const auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
-
     if (!load_in_mmap) {
-        // the index is loaded in ram, so we can remove files in advance
-        disk_file_manager_->RemoveIndexFiles();
+        if (!this->is_index_file_) {
+            disk_file_manager_->RemoveTextLogFiles();
+        } else if (GetIndexType() == ScalarIndexType::NGRAM) {
+            disk_file_manager_->RemoveNgramIndexFiles();
+        } else {
+            disk_file_manager_->RemoveIndexFiles();
+        }
     }
-
-    // Count() goes through wrapper_, so sealed finalization must happen after
-    // the reader has been constructed rather than in LoadIndexMetas().
     FinalizeSealed(/*release_null_offsets=*/true);
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadIndexMetas(const BinarySet& metadata,
+                                        const Config& config) {
+    null_offset_.clear();
+    if (const auto nulls = metadata.GetByName(INDEX_NULL_OFFSET_FILE_NAME)) {
+        if (nulls->size % sizeof(size_t) != 0) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid legacy Tantivy null offsets size");
+        }
+        null_offset_.resize(nulls->size / sizeof(size_t));
+        if (nulls->size != 0) {
+            std::memcpy(null_offset_.data(), nulls->data.get(), nulls->size);
+        }
+    }
+}
+
+template <typename T>
+folly::coro::Task<void>
+InvertedIndexTantivy<T>::LoadLegacyAsync(const Config& config,
+                                         folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Tantivy::LoadLegacy");
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    auto disk_files = files;
+    RetainTantivyIndexFiles(disk_files);
+    const std::unordered_set<std::string> disk_set(disk_files.begin(),
+                                                   disk_files.end());
+    std::vector<std::string> metadata_files;
+    metadata_files.reserve(files.size() - disk_files.size());
+    for (const auto& file : files) {
+        if (!disk_set.contains(file)) {
+            metadata_files.push_back(file);
+        }
+    }
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    {
+        auto metadata = co_await this->file_manager_->LoadIndexBinarySetAsync(
+            metadata_files, priority, token);
+        LoadIndexMetas(metadata, config);
+    }
+    const auto prefix = !this->is_index_file_
+                            ? disk_file_manager_->GetLocalTextIndexPrefix()
+                        : GetIndexType() == ScalarIndexType::NGRAM
+                            ? disk_file_manager_->GetLocalNgramIndexPrefix()
+                            : disk_file_manager_->GetLocalIndexObjectPrefix();
+    std::exception_ptr failure;
+    try {
+        co_await disk_file_manager_->CacheIndexToDiskAsync(
+            disk_files, prefix, priority, token);
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Tantivy::FinalizeLegacy");
+                FinishLegacyLoad(prefix, config);
+                storage::ThrowIfCancelled(token, "Tantivy::FinalizeLegacy");
+            },
+            priority);
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                wrapper_.reset();
+                if (!this->is_index_file_) {
+                    disk_file_manager_->RemoveTextLogFiles();
+                } else if (GetIndexType() == ScalarIndexType::NGRAM) {
+                    disk_file_manager_->RemoveNgramIndexFiles();
+                } else {
+                    disk_file_manager_->RemoveIndexFiles();
+                }
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
 }
 
 template <typename T>

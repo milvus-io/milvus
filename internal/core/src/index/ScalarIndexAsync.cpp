@@ -32,6 +32,46 @@ namespace milvus::index {
 
 template <typename T>
 folly::coro::Task<void>
+ScalarIndex<T>::LoadLegacyAsync(const Config& config,
+                                folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "ScalarIndex::LoadLegacy");
+    AssertInfo(file_manager_ != nullptr, "Legacy load requires a file manager");
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    auto binary =
+        co_await file_manager_->LoadIndexBinarySetAsync(files, priority, token);
+    co_await FinalizeLegacyLoadAsync(std::move(binary), config, token);
+}
+
+template <typename T>
+folly::coro::Task<void>
+ScalarIndex<T>::FinalizeLegacyLoadAsync(BinarySet binary,
+                                        const Config& config,
+                                        folly::CancellationToken token) {
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    auto finalize = [&] {
+        storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
+        LoadWithoutAssemble(binary, config);
+        storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
+    };
+    // Marisa reads its trie through a temporary file even for memory loading.
+    if (GetIndexType() == ScalarIndexType::MARISA ||
+        config.contains(MMAP_FILE_PATH) ||
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+        co_await storage::RunLocalFileIOAsync(finalize, priority);
+    } else {
+        finalize();
+    }
+}
+
+template <typename T>
+folly::coro::Task<void>
 ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
                                  const Config& config,
                                  proto::common::LoadPriority load_priority,
@@ -86,6 +126,62 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
         co_await finalize();
     }
 }
+
+template folly::coro::Task<void>
+ScalarIndex<bool>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<bool>::FinalizeLegacyLoadAsync(BinarySet,
+                                           const Config&,
+                                           folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int8_t>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int8_t>::FinalizeLegacyLoadAsync(BinarySet,
+                                             const Config&,
+                                             folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int16_t>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int16_t>::FinalizeLegacyLoadAsync(BinarySet,
+                                              const Config&,
+                                              folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int32_t>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int32_t>::FinalizeLegacyLoadAsync(BinarySet,
+                                              const Config&,
+                                              folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int64_t>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<int64_t>::FinalizeLegacyLoadAsync(BinarySet,
+                                              const Config&,
+                                              folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<uint64_t>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<uint64_t>::FinalizeLegacyLoadAsync(BinarySet,
+                                               const Config&,
+                                               folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<float>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<float>::FinalizeLegacyLoadAsync(BinarySet,
+                                            const Config&,
+                                            folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<double>::LoadLegacyAsync(const Config&, folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<double>::FinalizeLegacyLoadAsync(BinarySet,
+                                             const Config&,
+                                             folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<std::string>::LoadLegacyAsync(const Config&,
+                                          folly::CancellationToken);
+template folly::coro::Task<void>
+ScalarIndex<std::string>::FinalizeLegacyLoadAsync(BinarySet,
+                                                  const Config&,
+                                                  folly::CancellationToken);
 
 template folly::coro::Task<void>
 ScalarIndex<bool>::LoadUnifiedAsync(const std::string&,

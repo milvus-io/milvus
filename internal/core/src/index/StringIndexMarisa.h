@@ -28,6 +28,7 @@ namespace milvus::index {
 
 class StringIndexMarisa : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
     explicit StringIndexMarisa(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());

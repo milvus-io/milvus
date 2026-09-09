@@ -470,11 +470,20 @@ TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
     ScalarIndexSort<int64_t> build(fixture_.ctx);
     build.Build(3, values);
     auto files = Persist(build.Serialize({}), true);
-    storage::MemFileManagerImpl manager(fixture_.ctx);
-    const auto memory = folly::coro::blockingWait(
-        manager.InspectLegacyIndexMemoryAsync(files).scheduleOn(
-            storage::ResolveAsyncLoadExecutor(
-                {}, proto::common::LoadPriority::HIGH)));
+    size_t payload_bytes = 0;
+    size_t max_transient_bytes = 0;
+    for (const auto& file : files) {
+        auto input = storage::OpenLegacyIndexInput(
+            fixture_.ctx.chunkManagerPtr, fixture_.ctx.fs, file);
+        const auto info = folly::coro::blockingWait(
+            storage::InspectLegacyIndexFileAsync(
+                *input, proto::common::LoadPriority::HIGH)
+                .scheduleOn(storage::ResolveAsyncLoadExecutor(
+                    {}, proto::common::LoadPriority::HIGH)));
+        payload_bytes += info.payload_bytes;
+        max_transient_bytes =
+            std::max(max_transient_bytes, info.max_transient_bytes);
+    }
     const auto resource =
         IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
             DataType::INT64,
@@ -497,9 +506,9 @@ TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
     EXPECT_EQ(legacy.max_memory_cost, resource.request.max_memory_cost);
     EXPECT_EQ(legacy.final_memory_cost, resource.request.final_memory_cost);
     EXPECT_FALSE(resource.overhead.has_value());
-    EXPECT_GE(resource.request.final_memory_cost, memory.payload_bytes);
+    EXPECT_GE(resource.request.final_memory_cost, payload_bytes);
     EXPECT_GE(resource.request.max_memory_cost,
-              resource.request.final_memory_cost + memory.payload_bytes +
-                  memory.max_transient_bytes);
+              resource.request.final_memory_cost + payload_bytes +
+                  max_transient_bytes);
 }
 }  // namespace

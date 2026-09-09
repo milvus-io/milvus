@@ -120,6 +120,18 @@ class ScalarIndex : public IndexBase {
 
  public:
     using IndexBase::Build;
+    using IndexBase::Load;
+
+    // Selects the legacy load path once at the synchronous caller boundary.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
+    // Coroutine entry for composed legacy scalar loads. The caller selects the
+    // async executor; Hybrid awaits its child here without a blocking wrapper.
+    virtual folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config, folly::CancellationToken token);
 
     virtual ScalarIndexType
     GetIndexType() const = 0;
@@ -300,6 +312,12 @@ class ScalarIndex : public IndexBase {
     }
 
  protected:
+    // Reuses the BinarySet finalizer; file-backed finalization runs on local I/O.
+    folly::coro::Task<void>
+    FinalizeLegacyLoadAsync(BinarySet binary,
+                            const Config& config,
+                            folly::CancellationToken token);
+
     // Uses the shared async executor, with local-file phases on LocalFileIOPool.
     folly::coro::Task<void>
     LoadUnifiedAsync(const std::string& packed_file,

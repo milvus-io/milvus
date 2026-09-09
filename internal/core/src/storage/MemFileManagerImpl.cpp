@@ -49,67 +49,11 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "milvus-storage/common/extend_status.h"
 #include "storage/EntryStreamUtils.h"
 
 namespace milvus::storage {
 
 namespace {
-
-// Preserves legacy ChunkManager-only contexts. These synchronous reads run on
-// the selected async executor; native Arrow inputs use asynchronous range I/O.
-class LegacyChunkInput final : public milvus::InputStream {
- public:
-    LegacyChunkInput(ChunkManagerPtr manager, std::string path)
-        : manager_(std::move(manager)),
-          path_(std::move(path)),
-          size_(manager_->Size(path_)) {
-    }
-    size_t
-    Size() const override {
-        return size_;
-    }
-    size_t
-    Tell() const override {
-        return position_;
-    }
-    bool
-    Eof() const override {
-        return position_ == size_;
-    }
-    bool
-    Seek(int64_t offset) override {
-        if (offset < 0 || static_cast<uint64_t>(offset) > size_) {
-            return false;
-        }
-        position_ = offset;
-        return true;
-    }
-    size_t
-    ReadAt(void* data, size_t offset, size_t bytes) override {
-        AssertInfo(offset <= size_ && bytes <= size_ - offset,
-                   "Legacy index read exceeds object size");
-        return manager_->Read(path_, offset, data, bytes);
-    }
-    size_t
-    Read(void* data, size_t bytes) override {
-        const auto read =
-            ReadAt(data, position_, std::min(bytes, size_ - position_));
-        position_ += read;
-        return read;
-    }
-    size_t
-    Read(int, size_t) override {
-        ThrowInfo(Unsupported,
-                  "LegacyChunkInput requires positioned memory reads");
-    }
-
- private:
-    ChunkManagerPtr manager_;
-    std::string path_;
-    size_t size_;
-    size_t position_{0};
-};
 
 void
 CheckLegacyAssembly(bool condition, const char* message) {
@@ -121,45 +65,12 @@ CheckLegacyAssembly(bool condition, const char* message) {
 
 }  // namespace
 
-std::shared_ptr<milvus::InputStream>
-MemFileManagerImpl::OpenLegacyIndexInput(const std::string& remote_file) {
-    // Legacy local uploads use ChunkManager paths directly, whereas Arrow's
-    // local filesystem is rooted and would prepend its root a second time.
-    if (!fs_ || milvus_storage::IsLocalFileSystem(fs_)) {
-        AssertInfo(rcm_ != nullptr, "Legacy index requires a file source");
-        return std::make_shared<LegacyChunkInput>(rcm_, remote_file);
-    }
-    auto opened = fs_->OpenInputFile(remote_file);
-    if (!opened.ok()) {
-        throw milvus_storage::ToSegcoreError(opened.status());
-    }
-    return std::make_shared<RemoteInputStream>(std::move(*opened));
-}
-
-folly::coro::Task<LegacyIndexMemoryEstimate>
-MemFileManagerImpl::InspectLegacyIndexMemoryAsync(
-    const std::vector<std::string>& remote_files) {
-    LegacyIndexMemoryEstimate result;
-    for (const auto& path : remote_files) {
-        auto input = OpenLegacyIndexInput(path);
-        const auto info = co_await InspectLegacyIndexFileAsync(
-            *input, proto::common::LoadPriority::HIGH);
-        CheckLegacyAssembly(
-            info.payload_bytes <=
-                std::numeric_limits<size_t>::max() - result.payload_bytes,
-            "total payload size overflow");
-        result.payload_bytes += info.payload_bytes;
-        result.max_transient_bytes =
-            std::max(result.max_transient_bytes, info.max_transient_bytes);
-    }
-    co_return result;
-}
-
 folly::coro::Task<BinarySet>
 MemFileManagerImpl::LoadIndexBinarySetAsync(
     const std::vector<std::string>& remote_files,
     proto::common::LoadPriority priority,
-    folly::CancellationToken token) {
+    folly::CancellationToken token,
+    std::string_view entry_name) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
     ThrowIfCancelled(token, "LegacyIndexLoader::Assemble");
@@ -170,8 +81,19 @@ MemFileManagerImpl::LoadIndexBinarySetAsync(
     std::map<std::string, File> files;
     for (const auto& file : remote_files) {
         auto name = file.substr(file.find_last_of('/') + 1);
+        if (!entry_name.empty() && name != INDEX_FILE_SLICE_META &&
+            name != entry_name) {
+            const auto suffix = std::string_view(name).substr(
+                std::min(name.size(), entry_name.size()));
+            if (!name.starts_with(entry_name) || suffix.size() < 2 ||
+                suffix.front() != '_' ||
+                suffix.substr(1).find_first_not_of("0123456789") !=
+                    std::string_view::npos) {
+                continue;
+            }
+        }
         ThrowIfCancelled(token, "LegacyIndexLoader::Open");
-        auto input = OpenLegacyIndexInput(file);
+        auto input = OpenLegacyIndexInput(rcm_, fs_, file);
         auto info =
             co_await InspectLegacyIndexFileAsync(*input, priority, token);
         CheckLegacyAssembly(
@@ -183,7 +105,7 @@ MemFileManagerImpl::LoadIndexBinarySetAsync(
                          uint8_t* destination,
                          size_t remaining) -> folly::coro::Task<size_t> {
         ThrowIfCancelled(token, "LegacyIndexLoader::Open");
-        auto input = OpenLegacyIndexInput(file.path);
+        auto input = OpenLegacyIndexInput(rcm_, fs_, file.path);
         const auto& info = file.info;
         CheckLegacyAssembly(info.payload_bytes <= remaining,
                             "slice exceeds destination");
@@ -233,6 +155,9 @@ MemFileManagerImpl::LoadIndexBinarySetAsync(
                                     item.at(TOTAL_LEN).is_number_integer(),
                                 "invalid slice metadata fields");
             const auto name = item.at(NAME).get<std::string>();
+            if (!entry_name.empty() && name != entry_name) {
+                continue;
+            }
             const auto slices = item.at(SLICE_NUM).get<int64_t>();
             const auto bytes = item.at(TOTAL_LEN).get<int64_t>();
             CheckLegacyAssembly(

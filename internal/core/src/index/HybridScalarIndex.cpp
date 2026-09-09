@@ -32,6 +32,7 @@
 #include "glog/logging.h"
 #include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
@@ -516,6 +517,34 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
              ToString(internal_index_type_));
     index->Load(ctx, config);
 
+    is_built_ = true;
+    ComputeByteSize();
+}
+
+template <typename T>
+folly::coro::Task<void>
+HybridScalarIndex<T>::LoadLegacyAsync(const Config& config,
+                                      folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "HybridScalarIndex::LoadLegacy");
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto type_file = GetRemoteIndexTypeFile(files);
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    const std::vector<std::string> type_files{type_file};
+    auto binary = co_await this->file_manager_->LoadIndexBinarySetAsync(
+        type_files, priority, token);
+    auto type = binary.GetByName(INDEX_TYPE);
+    if (type == nullptr || type->size != sizeof(uint8_t)) {
+        ThrowInfo(DataFormatBroken, "Invalid legacy Hybrid index_type");
+    }
+    DeserializeIndexType(binary);
+    // Await the child coroutine on the same executor, never its blocking Load.
+    auto index = GetInternalIndex();
+    co_await index->LoadLegacyAsync(config, token);
+    storage::ThrowIfCancelled(token, "HybridScalarIndex::FinalizeLegacy");
     is_built_ = true;
     ComputeByteSize();
 }

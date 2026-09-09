@@ -309,6 +309,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto uuid_string = boost::uuids::to_string(uuid);
     // TODO: change the mmap path of marisa index
     auto file_name = std::string("/tmp/") + uuid_string;
+    auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
@@ -325,7 +326,6 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
-        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         trie_.mmap(file_name.c_str());
         mmap_file_raii_ = std::move(trie_file_raii);
     } else {
@@ -334,9 +334,9 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
         mmap_file_raii_ = nullptr;
     }
 
-    if (!config.contains(MMAP_FILE_PATH)) {
-        unlink(file_name.c_str());
-    }
+    // The local guard removes the temporary file in memory mode, including
+    // failures while writing or opening the trie. Mmap mode owns it above.
+    trie_file_raii.reset();
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;

@@ -52,6 +52,7 @@ ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
 template <typename T>
 class HybridScalarIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     explicit HybridScalarIndex(
         uint32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
@@ -71,6 +72,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override;
 
     int64_t
     Count() override {

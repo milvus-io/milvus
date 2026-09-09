@@ -23,11 +23,20 @@
 #include <span>
 
 #include "filemanager/InputStream.h"
+#include "storage/ChunkManager.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "folly/CancellationToken.h"
 #include "folly/coro/Task.h"
 #include "pb/common.pb.h"
 
 namespace milvus::storage {
+
+// Opens an exact legacy object path. Local paths retain ChunkManager semantics;
+// object-store paths use Arrow range I/O when a filesystem is available.
+[[nodiscard]] std::shared_ptr<milvus::InputStream>
+OpenLegacyIndexInput(const ChunkManagerPtr& chunk_manager,
+                     const milvus_storage::ArrowFileSystemPtr& fs,
+                     const std::string& remote_file);
 
 // A snapshot of one immutable legacy index object's envelope. Byte counts are
 // decoded payload bytes, remote file bytes, and estimated peak scratch bytes.
