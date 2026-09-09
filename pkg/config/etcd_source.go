@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -48,9 +49,11 @@ type EtcdSource struct {
 	manager         ConfigManager
 }
 
-func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
-	etcdCli, err := etcd.CreateEtcdClient(
+// newEtcdClient creates the etcd client described by info. The client is owned
+// by the caller: it is passed into NewEtcdSource (which never constructs its
+// own client) and may be shared with other etcd users.
+func newEtcdClient(etcdInfo *EtcdInfo) (*clientv3.Client, error) {
+	return etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
 		etcdInfo.UserName,
@@ -61,9 +64,18 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		etcdInfo.KeyFile,
 		etcdInfo.CaCertFile,
 		etcdInfo.MinVersion)
-	if err != nil {
-		return nil, err
+}
+
+// NewEtcdSource creates an etcd config source over the given client. The
+// client is injected by the caller and never constructed here, so it can be
+// shared with other etcd users (e.g. the version gate confirmator); the source
+// does not own it and Close does not close it. A nil client is rejected: the
+// source would otherwise fail asynchronously in its refresher.
+func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	if etcdCli == nil {
+		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
+	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
 		ctx:            context.Background(),
