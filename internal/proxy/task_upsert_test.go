@@ -2683,7 +2683,6 @@ func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
 			require.True(t, task.req.GetPartialUpdate())
 		})
 	}
-
 }
 
 func TestClassifyFullAutoIDUpsertCapturesAllowInsertBeforeQuery(t *testing.T) {
