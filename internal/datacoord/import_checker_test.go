@@ -394,6 +394,20 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 	s.Equal("import timeout", job.GetReason())
 }
 
+// A committing job has already broadcast its commit fence, and its per-vchannel
+// callbacks may have made segments visible to queries, so a timeout must leave it
+// alone rather than fail it and drop those segments.
+func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	s.NoError(err)
+
+	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+	s.Empty(job.GetReason())
+}
+
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)

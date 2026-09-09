@@ -563,8 +563,18 @@ func (c *importChecker) tryFailingTasks(job ImportJob) {
 }
 
 func (c *importChecker) tryTimeoutJob(job ImportJob) {
-	if job.GetState() == internalpb.ImportJobState_Failed ||
-		job.GetState() == internalpb.ImportJobState_Completed {
+	switch job.GetState() {
+	case internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed:
+		return
+	case internalpb.ImportJobState_Committing:
+		// A committing job has already broadcast its commit fence, and
+		// HandleCommitVchannel clears is_importing per vchannel before the job
+		// reaches Completed, so some of its segments are already visible to
+		// queries. Failing the job here would run processFailed over those
+		// segments and drop them. Committing is not rollbackable: AbortImport
+		// and rollbackImportV2AckCallback refuse it for the same reason.
+		mlog.Warn(c.ctx, "import job reached its timeout while committing, not rolling back",
+			mlog.FieldJobID(job.GetJobID()))
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
