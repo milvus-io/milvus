@@ -16,13 +16,19 @@
 
 #pragma once
 
+#include <algorithm>
 #include <optional>
+#include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/Types.h"
 #include "exec/expression/Expr.h"
 #include "knowhere/index/index_node.h"
@@ -323,26 +329,16 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               const segcore::SegmentInternalInterface& segment,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
-              std::vector<size_t>& topk_per_nq_prefix_sum);
-
-template <typename T>
-void
-GroupIteratorsByType(
-    const std::vector<std::shared_ptr<VectorIterator>>& iterators,
-    int64_t topK,
-    int64_t group_size,
-    bool strict_group_size,
-    const std::shared_ptr<DataGetter<T>>& data_getter,
-    std::vector<GroupByValueType>& group_by_values,
-    std::vector<int64_t>& seg_offsets,
-    std::vector<float>& distances,
-    const knowhere::MetricType& metrics_type,
-    std::vector<size_t>& topk_per_nq_prefix_sum);
+              std::vector<size_t>& topk_per_nq_prefix_sum,
+              SearchResult* search_result = nullptr);
 
 template <typename T>
 struct GroupByMap {
+    using GroupKey = std::optional<T>;
+
  private:
-    std::unordered_map<std::optional<T>, int> group_map_{};
+    std::unordered_map<GroupKey, int> group_map_{};
+    std::vector<GroupKey> group_order_{};
     int group_capacity_{0};
     int group_size_{0};
     int enough_group_count_{0};
@@ -356,30 +352,76 @@ struct GroupByMap {
           group_size_(group_size),
           strict_group_size_(strict_group_size){};
     bool
-    IsGroupResEnough() {
-        bool enough = false;
+    IsGroupResEnough() const {
         if (strict_group_size_) {
-            enough = group_map_.size() == group_capacity_ &&
-                     enough_group_count_ == group_capacity_;
-        } else {
-            enough = group_map_.size() == group_capacity_;
+            return IsGroupCapacityReached() &&
+                   enough_group_count_ == group_capacity_;
         }
-        return enough;
+        return IsGroupCapacityReached();
     }
+
     bool
-    Push(const std::optional<T>& t) {
-        if (group_map_.size() >= group_capacity_ &&
-            group_map_.find(t) == group_map_.end()) {
-            return false;
+    IsGroupCapacityReached() const {
+        return group_map_.size() == static_cast<size_t>(group_capacity_);
+    }
+
+    size_t
+    GetGroupCount() const {
+        return group_map_.size();
+    }
+
+    int
+    GetEnoughGroupCount() const {
+        return enough_group_count_;
+    }
+
+    const std::vector<GroupKey>&
+    GetGroupOrder() const {
+        return group_order_;
+    }
+
+    bool
+    Contains(const GroupKey& group) const {
+        return group_map_.find(group) != group_map_.end();
+    }
+
+    int
+    GetGroupResultCount(const GroupKey& group) const {
+        auto it = group_map_.find(group);
+        return it == group_map_.end() ? 0 : it->second;
+    }
+
+    int
+    GetRemainingGroupSize(const GroupKey& group) const {
+        return std::max(0, group_size_ - GetGroupResultCount(group));
+    }
+
+    bool
+    IsGroupFull(const GroupKey& group) const {
+        auto it = group_map_.find(group);
+        return it != group_map_.end() && it->second >= group_size_;
+    }
+
+    bool
+    Push(const GroupKey& group) {
+        auto it = group_map_.find(group);
+        if (it == group_map_.end()) {
+            if (group_map_.size() >= static_cast<size_t>(group_capacity_)) {
+                return false;
+            }
+            it = group_map_.emplace(group, 0).first;
+            group_order_.emplace_back(group);
         }
-        if (group_map_[t] >= group_size_) {
+
+        if (it->second >= group_size_) {
             //we ignore following input no matter the distance as knowhere::iterator doesn't guarantee
             //strictly increase/decreasing distance output
             //but this should not be a very serious influence to overall recall rate
             return false;
         }
-        group_map_[t] += 1;
-        if (group_map_[t] >= group_size_) {
+
+        it->second += 1;
+        if (it->second >= group_size_) {
             enough_group_count_ += 1;
         }
         return true;
@@ -387,15 +429,76 @@ struct GroupByMap {
 };
 
 template <typename T>
-void
-GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
-                    int64_t topK,
-                    int64_t group_size,
-                    bool strict_group_size,
-                    const std::shared_ptr<DataGetter<T>>& data_getter,
-                    std::vector<int64_t>& offsets,
-                    std::vector<float>& distances,
-                    const knowhere::MetricType& metrics_type);
+class GroupByResultCollector {
+ public:
+    using GroupKey = std::optional<T>;
+    using Result = std::tuple<int64_t, float, GroupKey>;
+
+    void
+    Add(int64_t offset, float distance, GroupKey group) {
+        results_.emplace_back(offset, distance, std::move(group));
+        if (accepted_offsets_) {
+            accepted_offsets_->insert(offset);
+        }
+    }
+
+    void
+    EnableOffsetDeduplication() {
+        accepted_offsets_.emplace();
+        accepted_offsets_->reserve(results_.size());
+        for (const auto& result : results_) {
+            accepted_offsets_->insert(std::get<0>(result));
+        }
+    }
+
+    bool
+    IsAcceptedOffset(int64_t offset) const {
+        return accepted_offsets_ && accepted_offsets_->count(offset) != 0;
+    }
+
+    size_t
+    Size() const {
+        return results_.size();
+    }
+
+    // Other groups (including full groups) are already excluded by membership.
+    // Accepted rows are the only consumed rows that could otherwise reappear.
+    void
+    ExcludeAcceptedOffsets(TargetBitmap& invalid) const {
+        for (const auto& result : results_) {
+            const auto offset = std::get<0>(result);
+            AssertInfo(
+                offset >= 0 && static_cast<size_t>(offset) < invalid.size(),
+                "group-by result offset {} exceeds row count {}",
+                offset,
+                invalid.size());
+            invalid[offset] = true;
+        }
+    }
+
+    void
+    SortAndAppend(const knowhere::MetricType& metrics_type,
+                  std::vector<GroupByValueType>& group_by_values,
+                  std::vector<int64_t>& offsets,
+                  std::vector<float>& distances) {
+        auto comparator = [&](const auto& lhs, const auto& rhs) {
+            return milvus::query::dis_closer(
+                std::get<1>(lhs), std::get<1>(rhs), metrics_type);
+        };
+        std::sort(results_.begin(), results_.end(), comparator);
+
+        for (auto& result : results_) {
+            offsets.emplace_back(std::get<0>(result));
+            distances.emplace_back(std::get<1>(result));
+            group_by_values.emplace_back(std::move(std::get<2>(result)));
+        }
+        results_.clear();
+    }
+
+ private:
+    std::vector<Result> results_;
+    std::optional<std::unordered_set<int64_t>> accepted_offsets_;
+};
 
 }  // namespace exec
 }  // namespace milvus
