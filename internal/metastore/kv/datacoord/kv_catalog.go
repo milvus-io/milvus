@@ -1272,3 +1272,31 @@ func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.Export
 func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
 	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }
+
+// ListSegmentChangeGroups lists all segment change groups from etcd. Malformed
+// values are skipped with a warning instead of aborting the walk, so one bad
+// key cannot block Coordinator startup (recovery treats a missing group as
+// recoverable from the SegmentMeta projection).
+func (kc *Catalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
+	groups := make([]*model.SegmentChangeGroup, 0)
+	applyFn := func(_ []byte, value []byte) error {
+		group, err := model.UnmarshalSegmentChangeGroup(value)
+		if err != nil {
+			mlog.Warn(ctx, "skip malformed segment change group during list", mlog.Err(err))
+			return nil
+		}
+		groups = append(groups, group)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SegmentChangeGroupPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// DropSegmentChangeGroups removes every segment change group of one collection.
+// Used by collection drop; the per-collection prefix delete runs under the
+// caller's collection lifecycle lock.
+func (kc *Catalog) DropSegmentChangeGroups(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildSegmentChangeGroupCollectionPrefix(collectionID))
+}

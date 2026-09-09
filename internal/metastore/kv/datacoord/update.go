@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -138,6 +139,29 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.SegmentChangeGroupEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				// Same encoding as catalog.SaveSegmentChangeGroup. CommitSave
+				// marks the group record as the visibility point: in a batch
+				// publish txn the group's COMMITTED state must land after every
+				// segment/DataView action on the ordered fallback path.
+				if e.Group == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
+				}
+				value, err := model.MarshalSegmentChangeGroup(e.Group)
+				if err != nil {
+					return err
+				}
+				b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+			case metastore.ActionDelete:
+				// CommitRemove marks the group removal as the visibility point:
+				// the group must land last when its members/superseded
+				// retirement are composed before it on the ordered fallback path.
+				b.CommitRemove(buildSegmentChangeGroupKey(e.CollectionID, e.GroupID))
+			default:
+				return unsupportedAction(action)
+			}
 		default:
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
@@ -180,7 +204,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			// handleDroppedSegment GC-compat write when the segment predates
 			// binlog-prefix persistence, keeping compaction's compactFrom
 			// retirement byte-identical to catalog.AlterSegments.
-			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, nil)
+			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, e.Binlogs)
 			if err != nil {
 				return err
 			}
