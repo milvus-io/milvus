@@ -468,7 +468,7 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 				common.CheckIndex(t, descIdx, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 			} else {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				common.CheckErr(t, err, false, "TRIE is only supported on varchar or text field")
+				common.CheckErr(t, err, false, "TRIE are only supported on varchar field")
 			}
 		}
 	}
@@ -668,7 +668,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 		// server now rejects with a missing-cast-type error instead of the
 		// old "not supported on field" error.
 		{index.NewSortedIndex(), "json index must specify cast type"},
-		{index.NewTrieIndex(), "TRIE is only supported on varchar or text field"},
+		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 	for _, idxErr := range inxError {
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idxErr.idx).WithIndexName("json_index"))
@@ -696,7 +696,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 	}
 	inxError := []scalarIndexError{
 		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar, timestamptz or uuid field"},
-		{index.NewTrieIndex(), "TRIE is only supported on varchar or text field"},
+		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 
 	// create scalar and vector index on array field
