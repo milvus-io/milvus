@@ -418,6 +418,30 @@ func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error 
 	return c.ccollection.UpdateIndexMeta(meta)
 }
 
+// UpdateIndexMeta updates the native collection index metadata while keeping
+// it in the same transition epoch as schema changes.
+func (c *Collection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if meta == nil {
+		return nil
+	}
+
+	c.mu.RLock()
+	if c.ccollection == nil {
+		c.mu.RUnlock()
+		return merr.WrapErrServiceInternal("update index meta on released collection")
+	}
+	unchanged := proto.Equal(c.ccollection.IndexMeta(), meta)
+	c.mu.RUnlock()
+	if unchanged {
+		return nil
+	}
+
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	return c.updateIndexMeta(meta)
+}
+
 func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

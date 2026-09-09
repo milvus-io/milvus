@@ -4402,6 +4402,10 @@ type queryNodeConfig struct {
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+
+	// query view recovery
+	QueryViewSegmentCatchupConcurrency    ParamItem `refreshable:"false"`
+	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"false"`
 }
 
 func formatDurationWithMillisecondFallback(v string) string {
@@ -5991,6 +5995,36 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
+
+	p.QueryViewSegmentCatchupConcurrency = ParamItem{
+		Key:          "queryNode.queryView.segmentCatchupConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewSegmentCatchupConcurrency.Init(base.mgr)
+
+	p.QueryViewTransformLogDrainConcurrency = ParamItem{
+		Key:          "queryNode.queryView.transformLogDrainConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

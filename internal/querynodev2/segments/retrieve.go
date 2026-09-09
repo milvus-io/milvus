@@ -194,6 +194,13 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	return result, retrieveSegments, err
 }
 
+func RetrieveSealedSegments(ctx context.Context, plan *RetrievePlan, req *querypb.QueryRequest, selected []Segment) ([]RetrieveSegmentResult, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return retrieveOnSegments(ctx, nil, selected, SegmentTypeSealed, plan, req)
+}
+
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream
 func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) ([]Segment, error) {
 	var err error

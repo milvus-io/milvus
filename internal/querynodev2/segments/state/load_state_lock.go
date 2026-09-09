@@ -56,21 +56,20 @@ func NewLoadStateLock(state loadStateEnum) *LoadStateLock {
 		panic(fmt.Sprintf("invalid state for construction of LoadStateLock, %s", state.String()))
 	}
 
-	mu := &sync.RWMutex{}
 	return &LoadStateLock{
-		mu:     mu,
-		cv:     sync.Cond{L: mu},
-		state:  state,
-		refCnt: atomic.NewInt32(0),
+		mu:      &sync.RWMutex{},
+		changed: make(chan struct{}),
+		state:   state,
+		refCnt:  atomic.NewInt32(0),
 	}
 }
 
 // LoadStateLock is the state of segment loading.
 type LoadStateLock struct {
-	mu     *sync.RWMutex
-	cv     sync.Cond
-	state  loadStateEnum
-	refCnt *atomic.Int32
+	mu      *sync.RWMutex
+	changed chan struct{}
+	state   loadStateEnum
+	refCnt  *atomic.Int32
 	// ReleaseAll can be called only when refCnt is 0.
 	// We need it to be modified when lock is
 }
@@ -88,15 +87,15 @@ func (ls *LoadStateLock) PinIf(pred StatePredicate) bool {
 
 // Unpin unlocks the segment.
 func (ls *LoadStateLock) Unpin() {
-	ls.mu.RLock()
-	defer ls.mu.RUnlock()
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
 	newCnt := ls.refCnt.Dec()
 	if newCnt < 0 {
 		panic("unpin more than pin")
 	}
 	if newCnt == 0 {
 		// notify ReleaseAll to release segment if refcnt is zero.
-		ls.cv.Broadcast()
+		ls.notifyLocked()
 	}
 }
 
@@ -110,8 +109,8 @@ func (ls *LoadStateLock) PinIfNotReleased() bool {
 // Fast fail if segment is not in LoadStateOnlyMeta.
 func (ls *LoadStateLock) StartLoadData() (LoadStateLockGuard, error) {
 	// only meta can be loaded.
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
 
 	if ls.state == LoadStateDataLoaded {
 		return nil, nil
@@ -120,7 +119,7 @@ func (ls *LoadStateLock) StartLoadData() (LoadStateLockGuard, error) {
 		return nil, merr.WrapErrServiceInternalMsg("segment is not in LoadStateOnlyMeta, cannot start to loading data")
 	}
 	ls.state = LoadStateDataLoading
-	ls.cv.Broadcast()
+	ls.notifyLocked()
 
 	return newLoadStateLockGuard(ls, LoadStateOnlyMeta, LoadStateDataLoaded), nil
 }
@@ -131,7 +130,7 @@ func (ls *LoadStateLock) StartReleaseData() (g LoadStateLockGuard) {
 		switch ls.state {
 		case LoadStateDataLoaded:
 			ls.state = LoadStateDataReleasing
-			ls.cv.Broadcast()
+			ls.notifyLocked()
 			g = newLoadStateLockGuard(ls, LoadStateDataLoaded, LoadStateOnlyMeta)
 		case LoadStateOnlyMeta:
 			// already transit to target state, do nothing.
@@ -152,11 +151,11 @@ func (ls *LoadStateLock) StartReleaseAll() (g LoadStateLockGuard) {
 		switch ls.state {
 		case LoadStateDataLoaded:
 			ls.state = LoadStateReleased
-			ls.cv.Broadcast()
+			ls.notifyLocked()
 			g = newNopLoadStateLockGuard()
 		case LoadStateOnlyMeta:
 			ls.state = LoadStateReleased
-			ls.cv.Broadcast()
+			ls.notifyLocked()
 			g = newNopLoadStateLockGuard()
 		case LoadStateReleased:
 			// already transit to target state, do nothing.
@@ -199,12 +198,25 @@ func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then 
 	})
 	defer timer.Stop()
 
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
-	for !ready(ls.state) {
-		ls.cv.Wait()
+	for {
+		ls.mu.Lock()
+		if ready(ls.state) {
+			then()
+			ls.mu.Unlock()
+			return
+		}
+		changed := ls.changed
+		ls.mu.Unlock()
+
+		<-changed
 	}
-	then()
+}
+
+// notifyLocked wakes waiters after a state or relevant refcount transition.
+// The caller must hold ls.mu exclusively.
+func (ls *LoadStateLock) notifyLocked() {
+	close(ls.changed)
+	ls.changed = make(chan struct{})
 }
 
 type StatePredicate func(state loadStateEnum) bool

@@ -80,9 +80,24 @@ type Loader interface {
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
+	// ReserveLoadResource reserves memory and storage for segment loading. The
+	// returned reservation must be released after the load attempt finishes.
+	ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error)
+
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
 	LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
+
+	// LoadDeltaLogsWithoutResource loads deltalog into the provided segment
+	// when the caller has already reserved loading resources.
+	LoadDeltaLogsWithoutResource(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
+
+	// LoadSegment loads base sealed segment data and blocking index files into
+	// the provided segment without putting it into SegmentManager.
+	LoadSegment(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
+
+	// LoadIndex loads or replaces index files on an already loaded sealed segment.
+	LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, version int64) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
@@ -119,6 +134,22 @@ type requestResourceResult struct {
 	LogicalResource   LoadResource
 	CommittedResource LoadResource
 	ConcurrencyLevel  int
+}
+
+type LoadResourceReservation interface {
+	Release()
+}
+
+type loadResourceReservation struct {
+	loader *segmentLoader
+	result requestResourceResult
+	once   sync.Once
+}
+
+func (r *loadResourceReservation) Release() {
+	r.once.Do(func() {
+		r.loader.freeRequestResource(r.result)
+	})
 }
 
 type LoadResource struct {
@@ -574,6 +605,14 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	)
 
 	return result, nil
+}
+
+func (loader *segmentLoader) ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
+	result, err := loader.requestResource(ctx, infos...)
+	if err != nil {
+		return nil, err
+	}
+	return &loadResourceReservation{loader: loader, result: result}, nil
 }
 
 // freeRequestResource returns request memory & storage usage request.
@@ -1168,6 +1207,13 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	return nil
 }
 
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, version int64) error {
+	if segment == nil {
+		return merr.WrapErrSegmentNotFound(0, "segment is nil")
+	}
+	return segment.LoadIndex(ctx, loadInfo)
+}
+
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
@@ -1581,6 +1627,10 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 	defer loader.freeRequestResource(requestResourceResult)
+	return loader.loadDeltalogs(ctx, segment, loadInfo)
+}
+
+func (loader *segmentLoader) LoadDeltaLogsWithoutResource(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
 	return loader.loadDeltalogs(ctx, segment, loadInfo)
 }
 
