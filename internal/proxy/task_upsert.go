@@ -84,7 +84,6 @@ type upsertTask struct {
 	// partialUpdateOriginalFields is captured before function generation and
 	// query merge mutate the request payload.
 	partialUpdateOriginalFields []*schemapb.FieldData
-	partialUpdateReadTs         uint64
 
 	storageCost segcore.StorageCost
 }
@@ -177,12 +176,15 @@ func (it *upsertTask) OnEnqueue() error {
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	var err error
-	readTS := t.partialUpdateReadTs
-	if readTS == 0 {
-		if t.req.GetPartialUpdate() {
-			return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("partial update read timestamp is unavailable")
-		}
-		readTS = t.BeginTs()
+	readTS := t.BeginTs()
+	consistency := commonpb.ConsistencyLevel_Customized
+	var snapshots *typeutil.ConcurrentMap[string, uint64]
+	if t.req.GetPartialUpdate() {
+		// Every attempt gets a new Strong Query and records its executed snapshots.
+		// Do not reuse the outer Upsert's potentially old BeginTs.
+		readTS = 0
+		consistency = commonpb.ConsistencyLevel_Strong
+		snapshots = typeutil.NewConcurrentMap[string, uint64]()
 	}
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
@@ -191,7 +193,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		},
 		DbName:                t.req.GetDbName(),
 		CollectionName:        t.req.GetCollectionName(),
-		ConsistencyLevel:      commonpb.ConsistencyLevel_Customized,
+		ConsistencyLevel:      consistency,
 		NotReturnAllMeta:      false,
 		OutputFields:          []string{"*"},
 		UseDefaultConsistency: false,
@@ -241,18 +243,18 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			),
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Customized,
+			ConsistencyLevel: consistency,
 			QueryLabel:       metrics.UpsertQueryLabel,
 		},
-		request:                queryReq,
-		plan:                   plan,
-		mixCoord:               t.node.(*Proxy).mixCoord,
-		lb:                     t.node.(*Proxy).lbPolicy,
-		shardclientMgr:         t.node.(*Proxy).shardMgr,
-		chMgr:                  t.node.(*Proxy).chMgr,
-		fixedSnapshotTimestamp: readTS,
+		request:            queryReq,
+		plan:               plan,
+		mixCoord:           t.node.(*Proxy).mixCoord,
+		lb:                 t.node.(*Proxy).lbPolicy,
+		shardclientMgr:     t.node.(*Proxy).shardMgr,
+		chMgr:              t.node.(*Proxy).chMgr,
+		actualChannelsMvcc: snapshots,
 	}
-	// Pin the query snapshot to the read timestamp carried by the CAS write.
+	// Preserve the legacy snapshot for non-partial reads; Strong reads use zero.
 	qt.MvccTimestamp = readTS
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
@@ -262,6 +264,9 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	queryResult, storageCost, err := t.node.(*Proxy).query(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, storageCost, err
+	}
+	if snapshots != nil && !t.bindPartialUpdateReadSnapshots(snapshots) {
+		return nil, storageCost, merr.WrapErrServiceInternalMsg("partial update Strong read snapshot is unavailable")
 	}
 	return queryResult, storageCost, err
 }
