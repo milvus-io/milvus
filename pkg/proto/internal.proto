@@ -284,6 +284,10 @@ message RetrieveResults {
    // Element-level query support
   bool element_level = 18;
   repeated ElementIndices element_indices = 19;
+
+  // Actual MVCC snapshot used by a successful channel query, including empty results.
+  // Zero means the QueryNode did not report a snapshot.
+  uint64 mvcc_timestamp = 20;
 }
 
 message LoadIndex {
