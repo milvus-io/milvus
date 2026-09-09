@@ -119,6 +119,7 @@ ${protoc_opt} --go_out=paths=source_relative:./internalpb --go-grpc_out=require_
 ${protoc_opt} --go_out=paths=source_relative:./proxypb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./proxypb proxy.proto|| { echo 'generate proxy.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./indexpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexpb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./datapb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./datapb data_coord.proto|| { echo 'generate data_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./datapb import_v3.proto|| { echo 'generate import_v3.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./querypb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./querypb query_coord.proto|| { echo 'generate query_coord.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./planpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./segcorepb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }

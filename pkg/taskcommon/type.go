@@ -22,6 +22,8 @@ const (
 	TypeNone                  Type = "None"
 	PreImport                 Type = "PreImport"
 	Import                    Type = "Import"
+	Reshard                   Type = "Reshard"
+	ImportV3                  Type = "ImportV3"
 	Compaction                Type = "Compaction"
 	Index                     Type = "Index"
 	Stats                     Type = "Stats"
@@ -36,6 +38,8 @@ const (
 var TypeList = []Type{
 	PreImport,
 	Import,
+	Reshard,
+	ImportV3,
 	Compaction,
 	Index,
 	Stats,

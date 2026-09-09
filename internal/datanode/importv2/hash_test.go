@@ -5,8 +5,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
@@ -23,7 +25,7 @@ func TestNewHashedData(t *testing.T) {
 		},
 	}
 
-	got, err := newHashedData(schema, 2, 2)
+	got, err := newHashedData(schema, 2, 2, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(got))
 	for i := 0; i < 2; i++ {
@@ -86,6 +88,86 @@ func TestHashData(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1000, totalRows)
+}
+
+func hashSchemaWithVector() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:        101,
+				Name:           "partition_key",
+				DataType:       schemapb.DataType_Int64,
+				IsPartitionKey: true,
+			},
+			{
+				FieldID:    102,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+			},
+		},
+	}
+}
+
+// TestHashDataBySchemaSparseBatchDoesNotOverAllocate pins the floor rowsHint:
+// a batch with fewer rows than buckets must not reserve one full row per
+// bucket (numBuckets x rowSize per batch regardless of batch size, an OOM
+// hazard for high-dim vectors with many partitions). Sparse buckets get zero
+// initial capacity and grow on demand; dense batches still preallocate the
+// average.
+func TestHashDataBySchemaSparseBatchDoesNotOverAllocate(t *testing.T) {
+	schema := hashSchemaWithVector()
+	vchannels := []string{"c1", "c2", "c3", "c4"}
+	partitions := []int64{1, 2, 3, 4}
+
+	newRow := func(i int) map[int64]interface{} {
+		return map[int64]interface{}{
+			100: int64(i),
+			101: int64(i%4 + 1),
+			102: make([]float32, 32),
+		}
+	}
+
+	// Sparse: 1 row across 16 buckets. Only the single bucket receiving the row
+	// may hold capacity; the other 15 must stay at cap 0 (with the old ceiling
+	// division every bucket reserved a full row up front).
+	rows, err := storage.NewInsertData(schema)
+	assert.NoError(t, err)
+	assert.NoError(t, rows.Append(newRow(0)))
+	hashed, err := HashDataBySchema(schema, vchannels, partitions, rows)
+	assert.NoError(t, err)
+	emptyBuckets := 0
+	for i := range hashed {
+		for j := range hashed[i] {
+			vec := hashed[i][j].Data[102].(*storage.FloatVectorFieldData)
+			if cap(vec.Data) == 0 {
+				emptyBuckets++
+			}
+		}
+	}
+	assert.Equal(t, 15, emptyBuckets)
+
+	// Dense: 64 rows across 16 buckets -> every bucket preallocates the floor
+	// average of 4 rows (uneven hashing may grow individual buckets further).
+	rows, err = storage.NewInsertData(schema)
+	assert.NoError(t, err)
+	for i := 0; i < 64; i++ {
+		assert.NoError(t, rows.Append(newRow(i)))
+	}
+	hashed, err = HashDataBySchema(schema, vchannels, partitions, rows)
+	assert.NoError(t, err)
+	for i := range hashed {
+		for j := range hashed[i] {
+			vec := hashed[i][j].Data[102].(*storage.FloatVectorFieldData)
+			assert.GreaterOrEqual(t, cap(vec.Data), 4*32)
+		}
+	}
 }
 
 func TestHashDeleteData(t *testing.T) {

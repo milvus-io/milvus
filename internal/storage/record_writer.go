@@ -162,13 +162,45 @@ func NewPackedRecordWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordWriter, error) {
+	return newPackedRecordWriter(bucketName, paths, schema, false, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+}
+
+// NewPackedRecordWriterWithFieldIDNames is the packed-record writer used by
+// Import V3 temporary fragments. It writes arrow column names as field IDs,
+// matching the field-ID-based column names that every packed reader
+// (newPackedRecordReader / newFFIPackedRecordReaderFromFragments) uses to open
+// the same object.
+func NewPackedRecordWriterWithFieldIDNames(
+	bucketName string,
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordWriter, error) {
+	return newPackedRecordWriter(bucketName, paths, schema, true, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+}
+
+func newPackedRecordWriter(
+	bucketName string,
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	useFieldID bool,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordWriter, error) {
 	// Validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
 
-	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	arrowSchema, err := ConvertToArrowSchema(schema, useFieldID)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
@@ -558,6 +590,7 @@ func NewPackedTextBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedTextBatchWriter, error) {
@@ -605,7 +638,7 @@ func NewPackedTextBatchWriter(
 		SchemaBasedFormats: schemaBasedFormats,
 	}
 
-	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
+	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}

@@ -33,6 +33,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -72,6 +73,7 @@ func NewFFISegmentWriter(
 	schema *arrow.Schema,
 	config *SegmentWriterConfig,
 	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*FFISegmentWriter, error) {
 	// export schema to C Arrow format
 	var cas cdata.CArrowSchema
@@ -84,6 +86,13 @@ func NewFFISegmentWriter(
 	}
 
 	extra := segmentWriterProperties(schema, config)
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range encryptionProperties {
+		extra[key] = value
+	}
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err

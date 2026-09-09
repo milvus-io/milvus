@@ -27,6 +27,8 @@ const (
 	ChannelCheckpointPrefix             = MetaPrefix + "/channel-cp"
 	ImportJobPrefix                     = MetaPrefix + "/import-job"
 	ImportTaskPrefix                    = MetaPrefix + "/import-task"
+	ReshardTaskPrefix                   = MetaPrefix + "/reshard-task"
+	ImportTaskV3Prefix                  = MetaPrefix + "/import-task-v3"
 	PreImportTaskPrefix                 = MetaPrefix + "/preimport-task"
 	CopySegmentJobPrefix                = MetaPrefix + "/copy-segment-job"
 	CopySegmentTaskPrefix               = MetaPrefix + "/copy-segment-task"

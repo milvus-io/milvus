@@ -28,9 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -97,14 +97,14 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
-	case importutilv2.Numpy:
+	case datapb.ImportFileType_Numpy:
 		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
 			return !strings.Contains(path, "$meta")
 		})
 		files = []*internalpb.ImportFile{importFile}
-	case importutilv2.JSON:
+	case datapb.ImportFileType_Json:
 		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
@@ -113,7 +113,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				},
 			},
 		}
-	case importutilv2.Parquet:
+	case datapb.ImportFileType_Parquet:
 		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -123,7 +123,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				},
 			},
 		}
-	case importutilv2.CSV:
+	case datapb.ImportFileType_Csv:
 		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
@@ -190,21 +190,21 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_JSON() {
-	s.fileType = importutilv2.JSON
+	s.fileType = datapb.ImportFileType_Json
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_Numpy() {
-	s.fileType = importutilv2.Numpy
+	s.fileType = datapb.ImportFileType_Numpy
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_Parquet() {
-	s.fileType = importutilv2.Parquet
+	s.fileType = datapb.ImportFileType_Parquet
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_CSV() {
-	s.fileType = importutilv2.CSV
+	s.fileType = datapb.ImportFileType_Csv
 	s.testImportDynamicField()
 }

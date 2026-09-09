@@ -1095,6 +1095,8 @@ func TestServer_GcConfirm(t *testing.T) {
 
 		m := &meta{}
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		m.catalog = catalog
 
 		catalog.On("GcConfirm",
@@ -1725,6 +1727,8 @@ func TestImportV2(t *testing.T) {
 
 		// alloc failed
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1756,6 +1760,8 @@ func TestImportV2(t *testing.T) {
 
 		// job does not exist
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1805,6 +1811,8 @@ func TestImportV2(t *testing.T) {
 
 		// normal case
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -6358,6 +6366,37 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	}
 }
 
+func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing.T) {
+	ctx := context.Background()
+	const jobID int64 = 3003
+
+	completed := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 41, State: datapb.ImportTaskStateV2_Completed,
+		SegmentId: 101,
+	}, nil, nil, nil)
+	running := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 42, State: datapb.ImportTaskStateV2_InProgress,
+		SegmentId: 105,
+	}, nil, nil, nil)
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).
+		Return([]ImportTask{completed, running})
+
+	segments := NewSegmentsInfo()
+	for _, segment := range []*datapb.SegmentInfo{
+		{ID: 101, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 102, InsertChannel: "vchan-0", State: commonpb.SegmentState_Importing, NumOfRows: 0, IsImporting: true},
+		{ID: 103, InsertChannel: "vchan-1", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 104, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: false},
+		{ID: 105, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+	} {
+		segments.SetSegment(segment.GetID(), &SegmentInfo{SegmentInfo: segment})
+	}
+
+	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments}}
+	assert.Equal(t, []int64{101}, server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0"))
+}
+
 func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *testing.T) {
 	ctx := context.Background()
 
@@ -6417,6 +6456,8 @@ func TestHandleCommitVchannelRPC_MissingJobReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -6511,18 +6552,11 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
-// TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet pins a pre-existing gap
-// that this PR does not close: the fence derives its bound from the segment's
-// binlog arrays, and a V3 (manifest-backed) segment never persists those --
-// buildAlterSegmentsKvs skips the per-FieldBinlog KVs for it and the SegmentInfo
-// is written without them -- so a V3 segment reloaded after a DataCoord restart
-// compares against 0 and admits any commit timestamp, however low.
-//
-// Import segments become V3 as soon as UpdateManifest runs, so this is the main
-// import path, not a corner. The follow-up that reads Stats.TimestampTo instead
-// should flip these assertions; until then the current behavior is recorded
-// rather than left to be discovered.
-func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
+// TestHandleCommitVchannelRPC_V3SegmentUsesPersistedStatsFence verifies that a
+// manifest-backed segment remains fenced after DataCoord restart, when the
+// legacy FieldBinlog arrays are absent and Statistics.TimestampTo is the only
+// durable timestamp bound.
+func TestHandleCommitVchannelRPC_V3SegmentUsesPersistedStatsFence(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
@@ -6565,12 +6599,11 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 		CommitTimestamp: 300, // below Stats.TimestampTo=500, yet admitted
 	})
 	assert.NoError(t, err)
-	assert.True(t, merr.Ok(resp), "the fence does not fire for a reloaded V3 segment")
+	assert.False(t, merr.Ok(resp), "commit must remain fenced below persisted Statistics.TimestampTo")
 
 	seg := server.meta.GetSegment(ctx, 11)
 	require.NotNil(t, seg)
-	assert.EqualValues(t, 300, seg.GetCommitTimestamp())
-	assert.False(t, seg.GetIsImporting())
-	assert.EqualValues(t, 0, maxBinlogTimestampTo(seg.GetBinlogs()),
-		"the bound the fence compares against is 0 despite Stats.TimestampTo=500")
+	assert.EqualValues(t, 0, seg.GetCommitTimestamp())
+	assert.True(t, seg.GetIsImporting(), "failed fence must not make the segment visible")
+	assert.EqualValues(t, 500, seg.EnsureStats().GetTimestampTo())
 }
