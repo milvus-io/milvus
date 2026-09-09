@@ -718,7 +718,18 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		mixCoord := mocks.NewMixCoord(t)
+		svr.mixCoord = mixCoord
 		channelName := "ch"
+		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				CollectionName:      "test_collection",
+				CollectionID:        req.CollectionID,
+				Schema:              &schemapb.CollectionSchema{},
+				VirtualChannelNames: []string{fmt.Sprintf("%s%d", channelName, req.CollectionID)},
+			}, nil
+		})
 
 		type testCase struct {
 			collID          int64
@@ -882,7 +893,36 @@ func TestGetSegmentsByStates(t *testing.T) {
 			assert.ElementsMatch(t, tc.expected, resp.GetSegments())
 		}
 
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                  13,
+			CollectionID:        1,
+			PartitionID:         1,
+			InsertChannel:       channelName + "1",
+			State:               commonpb.SegmentState_Flushed,
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{1, 2},
+			CreatedByCompaction: true,
+			IsInvisible:         true,
+			StartPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{8, 9, 10},
+			},
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{11, 12, 13},
+				Timestamp:   2,
+			},
+		})))
 		resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
+			CollectionID: 1,
+			PartitionID:  -1,
+			States:       []commonpb.SegmentState{commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushed},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{1, 2, 3, 4, 6, 7}, resp.GetSegments())
+
+		resp, err = svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
 			CollectionID: 1,
 			PartitionID:  -1,
 			States:       []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped},

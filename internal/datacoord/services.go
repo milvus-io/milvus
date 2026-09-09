@@ -1248,22 +1248,48 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 			Status: merr.Status(err),
 		}, nil
 	}
-	var segmentIDs []UniqueID
-	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(ctx, collectionID)
-	} else {
-		segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(ctx, collectionID, partitionID)
-	}
-	ret := make([]UniqueID, 0, len(segmentIDs))
-
 	statesDict := make(map[commonpb.SegmentState]bool)
 	for _, state := range states {
 		statesDict[state] = true
 	}
+
+	var segmentIDs []UniqueID
+	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
+	if err != nil {
+		return &datapb.GetSegmentsByStatesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	for _, channel := range channels {
+		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
+		if channelSegmentsView == nil {
+			continue
+		}
+		segmentIDs = append(segmentIDs, channelSegmentsView.FlushedSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.GrowingSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.L0SegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.ImportingSegmentIDs...)
+	}
+
+	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegment(ctx, id)
+		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment != nil && statesDict[segment.GetState()] {
 			ret = append(ret, id)
+		}
+	}
+
+	if statesDict[commonpb.SegmentState_Dropped] {
+		if partitionID < 0 {
+			segmentIDs = s.meta.GetSegmentsIDOfCollectionWithDropped(ctx, collectionID)
+		} else {
+			segmentIDs = s.meta.GetSegmentsIDOfPartitionWithDropped(ctx, collectionID, partitionID)
+		}
+		for _, id := range segmentIDs {
+			segment := s.meta.GetSegment(ctx, id)
+			if segment != nil && segment.GetState() == commonpb.SegmentState_Dropped {
+				ret = append(ret, id)
+			}
 		}
 	}
 
