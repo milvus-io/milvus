@@ -1585,10 +1585,13 @@ func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 }
 
 func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *proxypb.Limiter {
+	return q.toRequestLimiterForProxyCount(limiter, q.proxies.GetProxyCount())
+}
+
+func (q *QuotaCenter) toRequestLimiterForProxyCount(limiter *rlinternal.RateLimiterNode, proxyNum int) *proxypb.Limiter {
 	var rates []*internalpb.Rate
 	switch q.rateAllocateStrategy {
 	case Average:
-		proxyNum := q.proxies.GetProxyCount()
 		if proxyNum == 0 {
 			return nil
 		}
@@ -1628,23 +1631,29 @@ func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *pro
 
 func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 	clusterRateLimiter := q.rateLimiter.GetRootLimiters()
+	proxyNum := q.proxies.GetProxyCount()
+	toLimiter := func(node *rlinternal.RateLimiterNode) *proxypb.Limiter {
+		return q.toRequestLimiterForProxyCount(node, proxyNum)
+	}
 
 	// collect db rate limit if clusterRateLimiter has database limiter children
 	dbLimiters := make(map[int64]*proxypb.LimiterNode, clusterRateLimiter.GetChildren().Len())
 	clusterRateLimiter.GetChildren().Range(func(dbID int64, dbRateLimiters *rlinternal.RateLimiterNode) bool {
-		dbLimiter := q.toRequestLimiter(dbRateLimiters)
+		dbLimiter := toLimiter(dbRateLimiters)
 
 		// collect collection rate limit if dbRateLimiters has collection limiter children
 		collectionLimiters := make(map[int64]*proxypb.LimiterNode, dbRateLimiters.GetChildren().Len())
 		dbRateLimiters.GetChildren().Range(func(collectionID int64, collectionRateLimiters *rlinternal.RateLimiterNode) bool {
-			collectionLimiter := q.toRequestLimiter(collectionRateLimiters)
+			collectionLimiter := toLimiter(collectionRateLimiters)
 
 			// collect partitions rate limit if collectionRateLimiters has partition limiter children
-			partitionLimiters := make(map[int64]*proxypb.LimiterNode, collectionRateLimiters.GetChildren().Len())
+			var partitionLimiters map[int64]*proxypb.LimiterNode
+			if count := collectionRateLimiters.GetChildren().Len(); count > 0 {
+				partitionLimiters = make(map[int64]*proxypb.LimiterNode, count)
+			}
 			collectionRateLimiters.GetChildren().Range(func(partitionID int64, partitionRateLimiters *rlinternal.RateLimiterNode) bool {
 				partitionLimiters[partitionID] = &proxypb.LimiterNode{
-					Limiter:  q.toRequestLimiter(partitionRateLimiters),
-					Children: make(map[int64]*proxypb.LimiterNode, 0),
+					Limiter: toLimiter(partitionRateLimiters),
 				}
 				return true
 			})
@@ -1665,7 +1674,7 @@ func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 	})
 
 	clusterLimiter := &proxypb.LimiterNode{
-		Limiter:  q.toRequestLimiter(clusterRateLimiter),
+		Limiter:  toLimiter(clusterRateLimiter),
 		Children: dbLimiters,
 	}
 
