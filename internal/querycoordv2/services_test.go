@@ -1390,6 +1390,14 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 		return info.GetSegmentID() == catchingUpSegmentID
 	}))
 
+	detailErr := merr.WrapErrServiceUnavailableMsg("mock segment detail failure")
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, growingSegmentID).Return(nil, detailErr).Once()
+	resp, err = server.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{CollectionID: collection})
+	suite.NoError(err)
+	suite.Equal(merr.Code(detailErr), resp.GetStatus().GetCode())
+	suite.Contains(resp.GetStatus().GetReason(), "failed to get collection segment info")
+	suite.Contains(resp.GetStatus().GetReason(), "failed to get growing segment details")
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	req := &querypb.GetSegmentInfoRequest{

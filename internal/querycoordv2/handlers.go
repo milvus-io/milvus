@@ -114,7 +114,7 @@ func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64)
 		segmentIDs := lo.Keys(growingInfos)
 		segmentDetails, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
 		if err != nil {
-			return nil, err
+			return nil, merr.Wrap(err, "failed to get growing segment details")
 		}
 		for _, detail := range segmentDetails {
 			info, ok := growingInfos[detail.GetID()]
