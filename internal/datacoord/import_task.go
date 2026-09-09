@@ -27,11 +27,15 @@ type TaskType int
 const (
 	PreImportTaskType TaskType = 0
 	ImportTaskType    TaskType = 1
+	ReshardTaskType   TaskType = 2
+	ImportTaskV3Type  TaskType = 3
 )
 
 var ImportTaskTypeName = map[TaskType]string{
 	0: "PreImportTask",
 	1: "ImportTask",
+	2: "ReshardTask",
+	3: "ImportTaskV3",
 }
 
 func (t TaskType) String() string {
@@ -65,70 +69,137 @@ func WithRequestSource() ImportTaskFilter {
 
 type UpdateAction func(task ImportTask)
 
+type taskStateSetter interface {
+	setState(datapb.ImportTaskStateV2)
+}
+
+type taskReasonSetter interface {
+	setReason(string)
+}
+
+type taskCompleteTimeSetter interface {
+	setCompleteTime(string)
+}
+
+type taskNodeIDSetter interface {
+	setNodeID(int64)
+}
+
+type taskRunIDSetter interface {
+	setRunID(int64)
+}
+
+type taskLogRangeSetter interface {
+	setLogRange(*datapb.IDRange)
+}
+
+type taskFileStatsSetter interface {
+	setFileStats([]*datapb.ImportFileStats)
+}
+
+type taskSegmentIDsSetter interface {
+	setSegmentIDs([]UniqueID)
+}
+
+type taskStatsSegmentIDsSetter interface {
+	setStatsSegmentIDs([]UniqueID)
+}
+
+// Compile-time assertions documenting which task types implement which
+// UpdateAction setters. When adding a task type, add it to the corresponding
+// assertion group instead of touching every Update* function.
+var (
+	_ taskStateSetter           = (*preImportTask)(nil)
+	_ taskStateSetter           = (*importTask)(nil)
+	_ taskStateSetter           = (*reshardTask)(nil)
+	_ taskStateSetter           = (*importTaskV3)(nil)
+	_ taskReasonSetter          = (*preImportTask)(nil)
+	_ taskReasonSetter          = (*importTask)(nil)
+	_ taskReasonSetter          = (*reshardTask)(nil)
+	_ taskReasonSetter          = (*importTaskV3)(nil)
+	_ taskCompleteTimeSetter    = (*preImportTask)(nil)
+	_ taskCompleteTimeSetter    = (*importTask)(nil)
+	_ taskNodeIDSetter          = (*preImportTask)(nil)
+	_ taskNodeIDSetter          = (*importTask)(nil)
+	_ taskNodeIDSetter          = (*reshardTask)(nil)
+	_ taskNodeIDSetter          = (*importTaskV3)(nil)
+	_ taskRunIDSetter           = (*reshardTask)(nil)
+	_ taskRunIDSetter           = (*importTaskV3)(nil)
+	_ taskLogRangeSetter        = (*importTaskV3)(nil)
+	_ taskFileStatsSetter       = (*preImportTask)(nil)
+	_ taskSegmentIDsSetter      = (*importTask)(nil)
+	_ taskSegmentIDsSetter      = (*importTaskV3)(nil)
+	_ taskStatsSegmentIDsSetter = (*importTask)(nil)
+)
+
 func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t ImportTask) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*preImportTask).task.Load().State = state
-		case ImportTaskType:
-			t.(*importTask).task.Load().State = state
+		if setter, ok := t.(taskStateSetter); ok {
+			setter.setState(state)
 		}
 	}
 }
 
 func UpdateReason(reason string) UpdateAction {
 	return func(t ImportTask) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*preImportTask).task.Load().Reason = reason
-		case ImportTaskType:
-			t.(*importTask).task.Load().Reason = reason
+		if setter, ok := t.(taskReasonSetter); ok {
+			setter.setReason(reason)
 		}
 	}
 }
 
 func UpdateCompleteTime(completeTime string) UpdateAction {
 	return func(t ImportTask) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*preImportTask).task.Load().CompleteTime = completeTime
-		case ImportTaskType:
-			t.(*importTask).task.Load().CompleteTime = completeTime
+		if setter, ok := t.(taskCompleteTimeSetter); ok {
+			setter.setCompleteTime(completeTime)
 		}
 	}
 }
 
 func UpdateNodeID(nodeID int64) UpdateAction {
 	return func(t ImportTask) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*preImportTask).task.Load().NodeID = nodeID
-		case ImportTaskType:
-			t.(*importTask).task.Load().NodeID = nodeID
+		if setter, ok := t.(taskNodeIDSetter); ok {
+			setter.setNodeID(nodeID)
+		}
+	}
+}
+
+func UpdateRunID(runID int64) UpdateAction {
+	return func(t ImportTask) {
+		if setter, ok := t.(taskRunIDSetter); ok {
+			setter.setRunID(runID)
+		}
+	}
+}
+
+func UpdateLogRange(logRange *datapb.IDRange) UpdateAction {
+	return func(t ImportTask) {
+		if setter, ok := t.(taskLogRangeSetter); ok {
+			setter.setLogRange(logRange)
 		}
 	}
 }
 
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
-		if task, ok := t.(*preImportTask); ok {
-			task.task.Load().FileStats = fileStats
+		if setter, ok := t.(taskFileStatsSetter); ok {
+			setter.setFileStats(fileStats)
 		}
 	}
 }
 
 func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
-		if task, ok := t.(*importTask); ok {
-			task.task.Load().SegmentIDs = segmentIDs
+		if setter, ok := t.(taskSegmentIDsSetter); ok {
+			setter.setSegmentIDs(segmentIDs)
 		}
 	}
 }
 
 func UpdateStatsSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
-		if task, ok := t.(*importTask); ok {
-			task.task.Load().SortedSegmentIDs = segmentIDs
+		if setter, ok := t.(taskStatsSegmentIDsSetter); ok {
+			setter.setStatsSegmentIDs(segmentIDs)
 		}
 	}
 }

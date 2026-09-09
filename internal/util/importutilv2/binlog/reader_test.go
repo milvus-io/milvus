@@ -252,17 +252,17 @@ func (suite *ReaderSuite) createMockChunk(schema *schemapb.CollectionSchema, ins
 			return nil
 		})
 
-	if expectRead {
-		cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
-				for _, filePath := range deltaLogs {
-					if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
-						return nil
-					}
+	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range deltaLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
 				}
-				return nil
-			})
+			}
+			return nil
+		})
 
+	if expectRead {
 		var (
 			paths = make([]string, 0)
 			bytes = make([][]byte, 0)
@@ -388,7 +388,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -600,18 +600,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -764,7 +764,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
 		suite.NoError(err)
 		suite.NotNil(reader)
 

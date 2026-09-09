@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package importutilv2
 
 import (
@@ -17,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
@@ -38,7 +55,7 @@ func schemaVec(dim int, extraScalars int) *schemapb.CollectionSchema {
 
 func Test_minRowTextBytes(t *testing.T) {
 	// dim=768 float vector: >= 768 numeric chars (conservative lower bound); scalars add >= 1 each.
-	got, _ := minRowTextBytes(schemaVec(768, 1), CSV)
+	got, _ := minRowTextBytes(schemaVec(768, 1), datapb.ImportFileType_Csv)
 	assert.GreaterOrEqual(t, got, int64(768))
 	assert.LessOrEqual(t, got, int64(768+16)) // still a tight-ish floor
 }
@@ -63,7 +80,7 @@ func Test_rowByteHelpers_skipFunctionOutput(t *testing.T) {
 	// sparse (102) is a function output and the autoID pk (100) is generated, so
 	// only the VarChar text field remains -- and VarChar may be empty, so the floor
 	// falls through to 1 rather than erroring on the sparse field.
-	m, clamped := minRowTextBytes(schemaBM25AutoID(), CSV)
+	m, clamped := minRowTextBytes(schemaBM25AutoID(), datapb.ImportFileType_Csv)
 	assert.Equal(t, int64(1), m)
 	assert.True(t, clamped, "the 1 is a placeholder, not a provable byte cost")
 }
@@ -122,7 +139,7 @@ func Test_minRowTextBytes_skipsNullableAndDefault(t *testing.T) {
 			{FieldID: 103, Name: "n2", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}},
 		},
 	}
-	got, _ := minRowTextBytes(schema, CSV)
+	got, _ := minRowTextBytes(schema, datapb.ImportFileType_Csv)
 	assert.Equal(t, int64(2), got) // was 4 before the fix (nullable+default counted)
 }
 
@@ -143,16 +160,16 @@ func Test_minRowTextBytes_jsonPaysForFieldNames(t *testing.T) {
 
 	// {"text":} -- braces plus quotes and colon around the one required name. The
 	// VarChar value itself may be empty, so it still adds nothing.
-	json, _ := minRowTextBytes(schema, JSON)
+	json, _ := minRowTextBytes(schema, datapb.ImportFileType_Json)
 	assert.Equal(t, int64(2+len("text")+3), json)
 
-	jsonl, _ := minRowTextBytes(schema, JSONLines)
+	jsonl, _ := minRowTextBytes(schema, datapb.ImportFileType_JsonLines)
 	assert.Equal(t, json, jsonl)
 
 	// CSV keeps its names in the header, so a single-column row really can be one
 	// byte. This gap is not closable and is why the reserveRanges error explains
 	// itself rather than pretending the count is a real row count.
-	csv, _ := minRowTextBytes(schema, CSV)
+	csv, _ := minRowTextBytes(schema, datapb.ImportFileType_Csv)
 	assert.Equal(t, int64(1), csv)
 }
 
@@ -171,7 +188,7 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 		},
 	}
 
-	got, _ := minRowTextBytes(legacy, JSONLines)
+	got, _ := minRowTextBytes(legacy, datapb.ImportFileType_JsonLines)
 	// The floor for `{"text":""}` is `"text":` (7) plus the braces (2). $meta adds
 	// nothing: no name bytes, and no separator, since it is not a present field.
 	assert.Equal(t, int64(9), got) // was 18 before the fix
@@ -192,7 +209,7 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 			},
 		},
 	}
-	modernGot, _ := minRowTextBytes(modern, JSONLines)
+	modernGot, _ := minRowTextBytes(modern, datapb.ImportFileType_JsonLines)
 	assert.Equal(t, got, modernGot, "legacy and modern $meta must size identically")
 }
 
@@ -209,7 +226,7 @@ func Test_minRowTextBytes_singleColumnCSVProvesNothing(t *testing.T) {
 			},
 		},
 	}
-	got, clamped := minRowTextBytes(schema, CSV)
+	got, clamped := minRowTextBytes(schema, datapb.ImportFileType_Csv)
 	assert.Equal(t, int64(1), got)
 	assert.True(t, clamped, "the 1 is a placeholder, not a provable byte cost")
 }
@@ -233,7 +250,7 @@ func Test_RowCountUpperBound_multiColumnCSVChargesRowSeparators(t *testing.T) {
 		},
 	}
 
-	minRow, clamped := minRowTextBytes(schema, CSV)
+	minRow, clamped := minRowTextBytes(schema, datapb.ImportFileType_Csv)
 	require.Equal(t, int64(1), minRow)
 	require.False(t, clamped)
 

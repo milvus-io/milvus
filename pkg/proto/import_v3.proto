@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package milvus.proto.data;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/datapb";
+
+// This file contains the V3 import control-plane contracts that do not depend
+// on data_coord.proto.
+import "internal.proto";
+import "schema.proto";
+
+enum ImportFileType {
+  Unspecified = 0;
+  Json = 1;
+  JsonLines = 2;
+  Csv = 3;
+  Parquet = 4;
+  Numpy = 5;
+  BackupBinlog = 6;
+}
+
+message SortFieldSpec {
+  int64 field_id = 1;
+  schema.DataType data_type = 2;
+}
+
+message SortSpec {
+  repeated SortFieldSpec fields = 1;
+}
+
+message ReaderOptions {
+  string separator = 1;
+  string null_key = 2;
+  uint64 start_ts = 3;
+  uint64 end_ts = 4;
+  int64 storage_version = 5;
+}
+
+message SourceFileSpec {
+  internal.ImportFile file = 1;
+  ImportFileType file_type = 2;
+  ReaderOptions options = 3;
+}
+
+message ReshardTaskPlan {
+  int64 collection_id = 1;
+  schema.CollectionSchema schema = 2;
+  schema.CollectionSchema temp_schema = 3;
+  repeated string vchannels = 4;
+  repeated int64 partitions = 5;
+  repeated SourceFileSpec sources = 6;
+  SortSpec sort = 7;
+  int64 fragment_size = 8;
+  // Whether the job restores backup/binlog files. Backup sources already carry
+  // every function output column, so functions run only for ordinary imports.
+  bool backup = 9;
+}
+
+message FragmentDescriptor {
+  int32 channel_index = 1;
+  int32 partition_index = 2;
+  int64 seq = 3;
+  string path = 4;
+  int64 rows = 5;
+  int64 logical_bytes = 6;
+}
+
+message ReshardManifest {
+  repeated FragmentDescriptor fragments = 1;
+}
+
+message FragmentRef {
+  string path = 1;
+  int64 row_count = 2;
+}
+
+message ColumnGroupSpec {
+  int64 id = 1;
+  repeated int64 fields = 2;
+  string format = 3;
+}
+
+message TextColumnWriteSpec {
+  int64 field_id = 1;
+  int64 inline_limit = 2;
+  int64 lob_limit = 3;
+  int64 flush_limit = 4;
+}
+
+message V2PackedIOConfig {
+  int64 buffer_size = 1;
+  int64 multipart_size = 2;
+}
+
+message WriterSpec {
+  int64 storage_version = 1;
+  int64 schema_version = 2;
+  repeated ColumnGroupSpec groups = 3;
+  string format = 4;
+  repeated TextColumnWriteSpec text = 5;
+  V2PackedIOConfig v2 = 6;
+  int64 ttl_nanos = 7;
+  int64 pk_capacity = 8;
+  repeated int64 bm25_fields = 9;
+  string bloom_type = 10;
+  double bloom_fpp = 11;
+}
+
+// ImportTaskPlan is the only persisted Planning object for an ImportTaskV3.
+// It is self-contained so a worker needs one object read and never depends on
+// an ImportJob-side snapshot or a separately published task index.
+message ImportTaskPlan {
+  SortSpec sort = 1;
+  string vchannel = 2;
+  int64 partition_id = 3;
+  repeated FragmentRef fragments = 4;
+  int64 rows = 5;
+  int32 fan_in = 6;
+  WriterSpec writer = 7;
+  schema.CollectionSchema schema = 8;
+  schema.CollectionSchema temp_schema = 9;
+  uint64 data_ts = 10;
+  int64 collection_id = 11;
+  // Whether the job restores backup/binlog files. Fragments of a backup job
+  // already carry every function output column; ordinary fragments carry them
+  // because Reshard computed them.
+  bool backup = 13;
+}

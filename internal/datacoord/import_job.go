@@ -121,6 +121,7 @@ type ImportJob interface {
 	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
+	GetVersion() datapb.ImportJobVersion
 	Clone() ImportJob
 }
 

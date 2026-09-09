@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "import_v3.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -1430,6 +1431,16 @@ message CopySegmentJob {
   string snapshot_fingerprint = 22;
 }
 
+// ImportJobVersion versions the DataCoord job state machine independently
+// from msg.ImportMsg.version, which versions worker execution protocols.
+enum ImportJobVersion {
+  ImportJobVersionUnspecified = 0;
+  // Legacy PreImportTask + ImportTaskV2 workflow.
+  ImportJobVersionV1 = 1;
+  // ReshardTask + ImportTaskV3 workflow.
+  ImportJobVersionV3 = 3;
+}
+
 message ImportJob {
   int64 jobID = 1;
   int64 dbID = 2;
@@ -1451,6 +1462,7 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  ImportJobVersion version = 21;
 }
 
 enum ImportTaskStateV2 {
@@ -1492,6 +1504,114 @@ message ImportTaskV2 {
   repeated int64 sorted_segmentIDs = 10;
   string created_time = 11;
   ImportTaskSourceV2 source = 12;
+}
+
+// V3 tasks intentionally keep run_id on the task rather than introducing a
+// separate attempt/run catalog level. State names are deliberately simple so
+// V2 and V3 recovery can share the same scheduler vocabulary.
+message ReshardTask {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  int64 slot = 8;
+  // The ImportFile IDs this task covers. Source ownership is the only
+  // planning fact Pending recovery needs; every other execution input is
+  // re-derived from the ImportJob when the task is dispatched.
+  repeated int64 source_ids = 9;
+}
+
+// ImportTaskV3 persists only the per-segment ownership that Planning recovery
+// cannot re-derive: the fragment set this task covers plus its bucket. Every
+// other execution input is re-derived from the ImportJob and current config
+// when the task is dispatched, and travels inside ImportTaskV3Request.
+message ImportTaskV3 {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  int64 segment_id = 8;
+  IDRange log_range = 9;
+  int64 slot = 10;
+  int64 rows = 11;
+  repeated FragmentRef fragments = 12;
+  string vchannel = 13;
+  int64 partition_id = 14;
+}
+
+message ReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 slot = 4;
+  index.StorageConfig storage_config = 5;
+  repeated common.KeyValuePair plugin_context = 6;
+  ReshardTaskPlan plan = 7;
+}
+
+message ImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 segment_id = 4;
+  IDRange log_range = 5;
+  int64 slot = 6;
+  index.StorageConfig storage_config = 7;
+  repeated common.KeyValuePair plugin_context = 8;
+  ImportTaskPlan plan = 9;
+}
+
+message SegmentResult {
+  int64 rows = 1;
+  repeated FieldBinlog insert_logs = 2;
+  FieldBinlog pk_log = 3;
+  repeated FieldBinlog bm25_logs = 4;
+  string manifest_path = 5;
+  Statistics statistics = 6;
+  repeated int64 expiration_quantiles = 7;
+}
+
+message QueryReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryReshardTaskResponse {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+}
+
+message DropReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Response {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated SegmentResult segments = 4;
+}
+
+message DropImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
 }
 
 enum GcCommand {

@@ -96,6 +96,22 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 }
 
+func (s *ImportServicesSuite) TestImportV2_UnsupportedTaskVersionReturnsError() {
+	ctx := context.Background()
+	paramtable.Init()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.ImportV2(ctx, &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		Version: 99,
+	})
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
+}
+
 func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
 	paramtable.Init()
 	ctx := context.Background()
@@ -148,6 +164,7 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.allocator = nil
@@ -168,6 +185,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -191,6 +209,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass but broadcast to fail
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -263,6 +282,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -553,6 +573,7 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -764,6 +785,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AddJobFailsReturnsError
 	}, nil)
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -816,6 +839,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessWithProvidedJobI
 	}, nil)
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -868,6 +893,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessAllocatesJobIDWh
 	}, nil)
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -916,11 +943,13 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 	mockHandler := NewNMockHandler(s.T())
 	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 		ID:            100,
-		VChannelNames: []string{"v1"},
+		VChannelNames: []string{"v2", "v1"},
 	}, nil)
 
 	var savedJob *datapb.ImportJob
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -947,7 +976,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 		CollectionID:   100,
 		CollectionName: "test_collection",
 		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
+		ChannelNames:   []string{"v1", "v2"},
 		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 		Files: []*internalpb.ImportFile{
 			{Id: 0, Paths: []string{"/test/file1.json"}},
@@ -959,6 +988,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 		},
 		DataTimestamp: 123456789,
 		JobID:         2000,
+		Version:       importVersionV3,
 	}
 
 	resp, err := server.createImportJobFromAck(ctx, req)
@@ -969,6 +999,9 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 
 	// Verify file IDs were assigned correctly
 	s.NotNil(savedJob)
+	s.Equal(datapb.ImportJobVersion_ImportJobVersionV3, savedJob.GetVersion())
+	s.Equal([]string{"v2", "v1"}, savedJob.GetVchannels())
+	s.ElementsMatch([]string{"v1", "v2"}, savedJob.GetReadyVchannels())
 	files := savedJob.GetFiles()
 	s.Len(files, 3)
 	s.Equal(int64(1001), files[0].GetId()) // idStart + 0 + 1
@@ -988,6 +1021,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportDisabledCreates
 
 	var savedJob *datapb.ImportJob
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1044,6 +1079,66 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportDisabledCreates
 	s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
 }
 
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_UnsupportedTaskVersionCreatesFailedJob() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	var savedJob *datapb.ImportJob
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, job *datapb.ImportJob) error {
+		savedJob = job
+		return nil
+	})
+
+	importMeta, err := NewImportMeta(ctx, catalog, nil, nil)
+	s.NoError(err)
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		ChannelNames:   []string{"v1"},
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
+		Files:          []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
+		Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "unknown-to-old-coordinator"}},
+		DataTimestamp:  123456789,
+		JobID:          2000,
+		Version:        99,
+	})
+
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal("2000", resp.GetJobID())
+	s.NotNil(savedJob)
+	s.Equal(datapb.ImportJobVersion_ImportJobVersionV1, savedJob.GetVersion())
+	s.Equal(internalpb.ImportJobState_Failed, savedJob.GetState())
+	s.Contains(savedJob.GetReason(), "unsupported import task version 99")
+	s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
+	s.Empty(savedJob.GetFiles())
+	s.Equal([]string{"v1"}, savedJob.GetVchannels())
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_UnsupportedTaskVersionWithoutJobIDIsCorrupt() {
+	ctx := context.Background()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+		Version: 99,
+	})
+
+	s.NoError(err)
+	s.Equal(merr.Code(merr.ErrDataIntegrity), resp.GetStatus().GetCode())
+	s.Contains(resp.GetStatus().GetReason(), "has no job ID")
+	s.Empty(resp.GetJobID())
+}
+
 func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesPendingJob() {
 	paramtable.Init()
 	ctx := context.Background()
@@ -1060,6 +1155,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 
 	var savedJob *datapb.ImportJob
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1180,4 +1277,76 @@ func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
+}
+
+func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	var capturedVersion int64
+	mockBroadcast := mockey.Mock((*Server).broadcastImport).To(func(
+		_ *Server, _ context.Context, _ string, _ int64, _ []int64, _ []*internalpb.ImportFile,
+		_ []*commonpb.KeyValuePair, _ *schemapb.CollectionSchema, _ int64, _ []string,
+		_ string, version int64,
+	) (int64, bool, error) {
+		capturedVersion = version
+		return 0, false, nil
+	}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{importMeta: &importMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil).Times(4)
+	server.allocator = mockAllocator
+
+	newReq := func(version int64) *internalpb.ImportRequestInternal {
+		return &internalpb.ImportRequestInternal{
+			CollectionID:   100,
+			CollectionName: "test",
+			PartitionIDs:   []int64{1},
+			ChannelNames:   []string{"v1"},
+			Schema:         &schemapb.CollectionSchema{Name: "test"},
+			Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+			Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+			Version:        version,
+		}
+	}
+
+	params := paramtable.Get()
+	defer params.Reset(params.DataCoordCfg.EnableImportV3.Key)
+
+	// Gate off: an unversioned request is normalized to V2, but an explicitly
+	// forwarded V3 message is honored anyway -- the message version is
+	// authoritative, the gate only selects the version of new unversioned
+	// requests at the entrance.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err := server.ImportV2(ctx, newReq(importVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(importVersionV2, capturedVersion)
+
+	resp, err = server.ImportV2(ctx, newReq(importVersionV3))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(importVersionV3, capturedVersion)
+
+	// Gate on: an unversioned request is normalized to V3, an explicit V2 message
+	// stays V2.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "true")
+	resp, err = server.ImportV2(ctx, newReq(importVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(importVersionV3, capturedVersion)
+
+	resp, err = server.ImportV2(ctx, newReq(importVersionV2))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(importVersionV2, capturedVersion)
+
+	// An unknown explicit version is still rejected before broadcast.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err = server.ImportV2(ctx, newReq(99))
+	s.NoError(err)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
 }

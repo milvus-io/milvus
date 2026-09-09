@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -64,7 +65,7 @@ func NewReader(ctx context.Context,
 			return nil, err
 		}
 		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, nil)
 	}
 
 	fileType, err := GetFileType(importFile)
@@ -72,15 +73,15 @@ func NewReader(ctx context.Context,
 		return nil, err
 	}
 	switch fileType {
-	case JSON:
+	case datapb.ImportFileType_Json:
 		return json.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case JSONLines:
+	case datapb.ImportFileType_JsonLines:
 		return json.NewLinesReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case Numpy:
+	case datapb.ImportFileType_Numpy:
 		return numpy.NewReader(ctx, cm, schema, importFile.GetPaths(), bufferSize)
-	case Parquet:
+	case datapb.ImportFileType_Parquet:
 		return parquet.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case CSV:
+	case datapb.ImportFileType_Csv:
 		sep, err := GetCSVSep(options)
 		if err != nil {
 			return nil, err
