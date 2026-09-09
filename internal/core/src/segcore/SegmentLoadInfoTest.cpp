@@ -333,6 +333,24 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     EXPECT_TRUE(legacy_inverted_infos[0].load_resource_request.has_value());
 }
 
+TEST_F(SegmentLoadInfoTest, LegacySortDefersFileAwareResourceEstimate) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* index = proto.add_index_infos();
+    index->set_fieldid(108);
+    index->set_indexid(5001);
+    index->set_current_scalar_index_version(2);
+    index->add_index_file_paths("/path/to/legacy_sort");
+    auto* param = index->add_index_params();
+    param->set_key(milvus::index::INDEX_TYPE);
+    param->set_value(milvus::index::ASCENDING_SORT);
+    SegmentLoadInfo info(proto, schema_);
+    const auto indexes = info.GetFieldIndexInfos(FieldId(108));
+    ASSERT_EQ(indexes.size(), 1);
+    EXPECT_FALSE(indexes[0].load_resource_request.has_value());
+}
+
 TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {
     auto proto = proto_;
     for (int i = 0; i < 16; ++i) {

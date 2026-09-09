@@ -197,6 +197,49 @@ IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
                                       uint64_t{sizeof(int32_t)});
 }
 
+LoadResourceRequest
+LegacySortLoadResource(uint64_t index_size,
+                       int64_t num_rows,
+                       const std::vector<std::string>& files,
+                       const storage::FileManagerContext& context,
+                       bool use_async_load) {
+    storage::MemFileManagerImpl manager(context);
+    const auto memory =
+        use_async_load
+            ? folly::coro::blockingWait(
+                  manager.InspectLegacyIndexMemoryAsync(files).scheduleOn(
+                      storage::ResolveAsyncLoadExecutor(
+                          {}, proto::common::LoadPriority::HIGH)))
+            : folly::coro::blockingWait(
+                  manager.InspectLegacyIndexMemoryAsync(files));
+    LoadResourceRequest request{};
+    request.has_raw_data = true;
+    const auto retained = std::max<uint64_t>(index_size, memory.payload_bytes);
+    auto auxiliary_bytes = SortLegacyAuxBytes(num_rows);
+    if (context.fieldDataMeta.field_schema.data_type() ==
+        proto::schema::DataType::Array) {
+        // Nested Sort offsets address flattened elements, not segment rows.
+        // The smallest arithmetic Sort entry gives a conservative element count.
+        const auto elements =
+            memory.payload_bytes / sizeof(IndexStructure<int8_t>);
+        auxiliary_bytes = std::max<uint64_t>(
+            auxiliary_bytes,
+            milvus::SaturatingAdd(
+                milvus::SaturatingMultiply(elements, size_t{sizeof(int32_t)}),
+                (elements + 7) / 8));
+        request.has_raw_data = false;
+    }
+    request.final_memory_cost =
+        milvus::SaturatingAdd(retained, auxiliary_bytes);
+    // Reserve the assembled input through finalization and one file's scratch.
+    // Both rollout modes use this estimate: a later reload can observe a flag
+    // update, while the translator's resource reservation remains unchanged.
+    request.max_memory_cost = milvus::SaturatingAdd(
+        request.final_memory_cost,
+        milvus::SaturatingAdd(retained, memory.max_transient_bytes));
+    return request;
+}
+
 uint64_t
 MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
     if (num_rows <= 0) {
@@ -924,6 +967,22 @@ IndexFactory::ScalarIndexAsyncLoadResource(
     int64_t num_rows,
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& context) {
+    const auto version =
+        GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
+                                    SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    if (version < 3) {
+        AssertInfo(
+            index_params.at("index_type") == ASCENDING_SORT && !mmap_enable &&
+                field_type != DataType::JSON && !IsStringDataType(field_type) &&
+                !(field_type == DataType::ARRAY &&
+                  IsStringDataType(static_cast<DataType>(
+                      context.fieldDataMeta.field_schema.element_type()))),
+            "Legacy async planning currently supports Sort memory loads");
+        return {LegacySortLoadResource(
+                    index_size, num_rows, index_files, context, true),
+                std::nullopt};
+    }
     auto reader = folly::coro::blockingWait(
         InspectAsyncScalarIndex(index_files, context)
             .scheduleOn(storage::ResolveAsyncLoadExecutor(
@@ -1060,6 +1119,26 @@ IndexFactory::ScalarIndexLoadResource(
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
+    if (scalar_version < 3 && index_type_it->second == ASCENDING_SORT &&
+        !mmap_enable && field_type != DataType::JSON &&
+        !IsStringDataType(field_type) &&
+        !(field_type == DataType::ARRAY &&
+          IsStringDataType(
+              static_cast<DataType>(file_manager_context.fieldDataMeta
+                                        .field_schema.element_type()))) &&
+        file_manager_context.Valid() && !index_files.empty()) {
+        if (stream_load_info) {
+            stream_load_info->reset();
+        }
+        if (use_shared_memory_overhead_group) {
+            *use_shared_memory_overhead_group = false;
+        }
+        return LegacySortLoadResource(index_size_in_bytes,
+                                      num_rows,
+                                      index_files,
+                                      file_manager_context,
+                                      false);
+    }
     std::optional<ScalarIndexType> internal_index_type;
     if (index_type_it->second == milvus::index::HYBRID_INDEX_TYPE) {
         try {

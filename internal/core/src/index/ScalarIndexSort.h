@@ -80,6 +80,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    // Propagates cancellation to streaming legacy memory loads.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
     int64_t
     Count() override {
         return total_num_rows_;
@@ -178,6 +184,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
  private:
+    // Materializes legacy slices into the existing Sort input representation.
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config, folly::CancellationToken token);
+
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 

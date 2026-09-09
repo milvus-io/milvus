@@ -24,12 +24,18 @@
 #include <unordered_map>
 
 #include "storage/IndexData.h"
+#include "storage/LegacyIndexLoader.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
+
+struct LegacyIndexMemoryEstimate {
+    size_t payload_bytes{0};
+    size_t max_transient_bytes{0};
+};
 
 class MemFileManagerImpl : public FileManagerImpl {
  public:
@@ -60,6 +66,19 @@ class MemFileManagerImpl : public FileManagerImpl {
     LoadIndexToMemory(const std::vector<std::string>& remote_files,
                       milvus::proto::common::LoadPriority priority);
 
+    // Streams decoded legacy slices directly into the assembled BinarySet.
+    // One persisted slice is active per call. Returned buffers are request-local
+    // input memory; the loader releases admitted scratch after each copy.
+    [[nodiscard]] folly::coro::Task<BinarySet>
+    LoadIndexBinarySetAsync(const std::vector<std::string>& remote_files,
+                            proto::common::LoadPriority priority,
+                            folly::CancellationToken token = {});
+
+    // Sums retained decoded payloads and the maximum one-file scratch estimate.
+    // Inspection reads metadata only and uses the same admission as loading.
+    [[nodiscard]] folly::coro::Task<LegacyIndexMemoryEstimate>
+    InspectLegacyIndexMemoryAsync(const std::vector<std::string>& remote_files);
+
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);
 
@@ -83,6 +102,12 @@ class MemFileManagerImpl : public FileManagerImpl {
     CacheOptFieldToMemory(const Config& config);
 
  private:
+    // Opens the exact legacy object path, including old storage-prefix versions.
+    // The caller selects the executor. Arrow opens preserve typed status errors;
+    // contexts without an Arrow filesystem use their existing ChunkManager.
+    [[nodiscard]] std::shared_ptr<milvus::InputStream>
+    OpenLegacyIndexInput(const std::string& remote_file);
+
     bool
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
 

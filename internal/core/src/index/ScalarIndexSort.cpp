@@ -57,6 +57,10 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "folly/coro/BlockingWait.h"
 
 namespace milvus::index {
 
@@ -488,6 +492,85 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     // clear index_datas to free memory early
     index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
+}
+
+template <typename T>
+folly::coro::Task<void>
+ScalarIndexSort<T>::LoadLegacyAsync(const Config& config,
+                                    folly::CancellationToken token) {
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    auto binary = co_await this->file_manager_->LoadIndexBinarySetAsync(
+        files, priority, token);
+    auto check = [](bool valid, const char* message) {
+        if (!valid) {
+            ThrowInfo(
+                DataFormatBroken, "Invalid legacy Sort index: {}", message);
+        }
+    };
+    const auto length = binary.GetByName("index_length");
+    check(length != nullptr && length->size == sizeof(size_t),
+          "invalid index_length");
+    size_t count;
+    std::memcpy(&count, length->data.get(), sizeof(count));
+    check(count <= static_cast<size_t>(std::numeric_limits<int32_t>::max()),
+          "index length exceeds offset representation");
+    const auto data = binary.GetByName("index_data");
+    check(data != nullptr && data->size == count * sizeof(IndexStructure<T>),
+          "invalid index_data length");
+    size_t rows = count;
+    if (auto row_data = binary.GetByName("index_num_rows")) {
+        check(row_data->size == sizeof(rows), "invalid index_num_rows");
+        std::memcpy(&rows, row_data->data.get(), sizeof(rows));
+    }
+    check(rows <= static_cast<size_t>(std::numeric_limits<int32_t>::max()),
+          "row count exceeds offset representation");
+    if (auto nested = binary.GetByName("is_nested_index")) {
+        check(nested->size == sizeof(bool) && nested->data[0] <= 1,
+              "invalid nested index flag");
+    }
+    const auto* values =
+        reinterpret_cast<const IndexStructure<T>*>(data->data.get());
+    for (size_t i = 0; i < count; ++i) {
+        check(values[i].idx_ >= 0 && static_cast<size_t>(values[i].idx_) < rows,
+              "index row offset out of bounds");
+    }
+    storage::ThrowIfCancelled(token, "ScalarIndexSort::FinalizeLegacy");
+    LoadWithoutAssemble(binary, config);
+    storage::ThrowIfCancelled(token, "ScalarIndexSort::FinalizeLegacy");
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
+                         const Config& config,
+                         milvus::OpContext* op_ctx) {
+    const bool use_async_load =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    // This first migration covers legacy Sort memory loading. Legacy mmap
+    // loading is migrated together with the other file-backed consumers.
+    if (use_async_load &&
+        !GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+        const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                                  config, milvus::LOAD_PRIORITY)
+                                  .value_or(proto::common::LoadPriority::HIGH);
+        const auto token =
+            op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+        try {
+            folly::coro::blockingWait(
+                LoadLegacyAsync(config, token)
+                    .scheduleOn(
+                        storage::ResolveAsyncLoadExecutor({}, priority)));
+        } catch (const std::bad_alloc& error) {
+            throw SegcoreError(MemAllocateFailed, error.what());
+        } catch (const folly::OperationCancelled& error) {
+            throw SegcoreError(FollyCancel, error.what());
+        }
+        return;
+    }
+    Load(ctx, config);
 }
 
 template <typename T>

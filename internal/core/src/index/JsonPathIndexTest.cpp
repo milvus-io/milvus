@@ -454,6 +454,52 @@ TEST(JsonPathIndexTest, SortDouble_V3PlannedLoadPreservesExistsSemantics) {
     AssertDoubleComparisonUnknowns(load_index);
 }
 
+TEST(JsonPathIndexTest, SortDouble_LegacyContextLoadFinalizesWrapper) {
+    auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto async_load_guard = folly::makeGuard([old_enabled]() {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    JsonV3LoadFixture fixture("json_sort_legacy_context_load");
+    auto json_fd = MakeJsonFieldData(
+        {R"({"a": 1.0})", R"({"a": 2.0})", R"({"a": "bad"})", R"({"a": 3.0})"});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> build_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    build_index.BuildWithFieldData({json_fd});
+    auto stats = build_index.Upload({});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> load_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    Config load_config;
+    load_config[INDEX_FILES] = stats->GetIndexFiles();
+    load_config[LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    load_config[ENABLE_MMAP] = false;
+    load_config[JSON_PATH] = "/a";
+    load_config[INDEX_TYPE] = ASCENDING_SORT;
+    OpContext op_ctx;
+    static_cast<IndexBase&>(load_index)
+        .Load(tracer::TraceContext{}, load_config, &op_ctx);
+
+    EXPECT_EQ(load_index.Count(), 4);
+    const auto exists = load_index.Exists();
+    EXPECT_EQ(exists.size(), 4);
+    EXPECT_EQ(exists.count(), 4);
+    EXPECT_EQ(load_index.IsNotNull().count(), 3);
+    const double value = 2.0;
+    EXPECT_EQ(load_index.NotIn(1, &value).count(), 2);
+}
+
 TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {
     auto json_fd = MakeMixedJsonDoubleFieldData();
     auto schema = MakeJsonSchema();

@@ -1184,7 +1184,13 @@ class SegmentLoadInfo {
                 scalar_v3 ||
                 (!IsVectorDataType(load_index_info.field_type) &&
                  index_type_it != load_index_info.index_params.end() &&
-                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
+                 (index_type_it->second == milvus::index::HYBRID_INDEX_TYPE ||
+                  (index_type_it->second == milvus::index::ASCENDING_SORT &&
+                   !load_index_info.enable_mmap &&
+                   load_index_info.field_type != DataType::JSON &&
+                   !IsStringDataType(load_index_info.field_type) &&
+                   !(load_index_info.field_type == DataType::ARRAY &&
+                     IsStringDataType(load_index_info.element_type)))));
             auto request =
                 milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                     load_index_info.field_type,

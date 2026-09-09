@@ -15,18 +15,14 @@
 // limitations under the License.
 
 #include "storage/AsyncIndexEntryReader.h"
+#include "storage/AsyncFileReader.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstring>
 #include <limits>
 #include <utility>
 #include "arrow/buffer.h"
-#include "folly/coro/Promise.h"
 #include "folly/coro/WithCancellation.h"
-#include "folly/futures/Future.h"
-#include "milvus-storage/common/extend_status.h"
-#include "milvus-storage/filesystem/async_random_access_file.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryFormat.h"
@@ -35,36 +31,6 @@
 #include "storage/RemoteInputStream.h"
 
 namespace milvus::storage {
-namespace {
-
-// Keep the Arrow status intact for retry classification. The coroutine does
-// not abandon a caller-owned destination while the Arrow future can write it.
-folly::coro::Future<arrow::Result<int64_t>>
-AwaitRead(arrow::Future<int64_t> arrow_future) {
-    auto [promise, future] =
-        folly::coro::makePromiseContract<arrow::Result<int64_t>>();
-    auto completion =
-        std::make_shared<folly::coro::Promise<arrow::Result<int64_t>>>(
-            std::move(promise));
-    arrow_future.AddCallback(
-        [completion](const arrow::Result<int64_t>& result) {
-            completion->setValue(result);
-        });
-    return future;
-}
-
-bool
-IsRetryableRead(const arrow::Status& status) {
-    if (auto detail =
-            milvus_storage::ExtendStatusDetail::UnwrapStatus(status)) {
-        return detail->retryable();
-    }
-    return status.ToString().find("Failed to flush response stream") !=
-           std::string::npos;
-}
-
-}  // namespace
-
 const IndexEntryCatalogEntry&
 IndexEntryCatalog::At(std::string_view name) const {
     const auto it =
@@ -231,41 +197,8 @@ AsyncIndexEntryReader::ReadRangeAsync(uint64_t offset,
                    n);
         co_return;
     }
-    auto* native = dynamic_cast<milvus_storage::NonBlockingRandomAccessFile*>(
-        remote_file_.get());
-    for (int attempt = 0;; ++attempt) {
-        ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadRange");
-        auto future =
-            native != nullptr
-                ? native->ReadAtAsyncInto(offset, bytes, destination)
-                : remote_file_
-                      ->ReadAsync(
-                          arrow::io::default_io_context(), offset, bytes)
-                      .Then([destination, bytes](
-                                const std::shared_ptr<arrow::Buffer>& buffer)
-                                -> arrow::Result<int64_t> {
-                          if (buffer == nullptr || buffer->size() != bytes) {
-                              return arrow::Status::IOError(
-                                  "Short buffered async range read");
-                          }
-                          std::memcpy(destination, buffer->data(), bytes);
-                          return bytes;
-                      });
-        auto result = co_await folly::coro::co_withCancellation(
-            folly::CancellationToken{}, AwaitRead(std::move(future)));
-        ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadRange");
-        if (result.ok()) {
-            AssertInfo(*result == bytes,
-                       "Short native async range read: expected {}, got {}",
-                       bytes,
-                       *result);
-            co_return;
-        }
-        if (!IsRetryableRead(result.status()) || attempt == 5) {
-            throw milvus_storage::ToSegcoreError(result.status());
-        }
-        co_await folly::futures::sleep(std::chrono::milliseconds(1 << attempt));
-    }
+    co_await ReadFileRangeAsync(
+        *remote_file_, offset, destination, bytes, token);
 }
 
 folly::coro::Task<void>

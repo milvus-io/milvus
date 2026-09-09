@@ -100,7 +100,14 @@ SealedIndexTranslator::SealedIndexTranslator(
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    if (use_async_load && version >= 3 &&
+    const bool legacy_sort_memory =
+        index_info_.index_type == milvus::index::ASCENDING_SORT &&
+        !index_load_info_.enable_mmap &&
+        index_load_info_.field_type != DataType::JSON &&
+        !IsStringDataType(index_load_info_.field_type) &&
+        !(index_load_info_.field_type == DataType::ARRAY &&
+          IsStringDataType(index_load_info_.element_type));
+    if (use_async_load && (version >= 3 || legacy_sort_memory) &&
         !IsVectorDataType(index_load_info_.field_type)) {
         auto resources =
             milvus::index::IndexFactory::GetInstance()
@@ -256,7 +263,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
-        index->Load(ctx_, config_);
+        index->Load(ctx_, config_, ctx);
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>

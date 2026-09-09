@@ -49,6 +49,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ChunkManager.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
@@ -1459,6 +1460,50 @@ TEST(ScalarIndexSortArrayNestedTest, NestedBuildByteSizeAndQuery) {
     EXPECT_TRUE(in30[4]);
 
     boost::filesystem::remove_all(root_path);
+}
+
+TEST(ScalarIndexSortArrayNestedTest, LegacyStreamRoundTrip) {
+    const auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard([&] {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+    const auto root = fmt::format("{}/stlsort_nested_legacy", TestLocalPath);
+    auto ctx = MakeNestedCtx(root, proto::schema::DataType::Int32, false, 3121);
+    auto cleanup =
+        folly::makeGuard([&] { boost::filesystem::remove_all(root); });
+    std::vector<ScalarFieldProto> arrays(2);
+    for (int value : {10, 20, 30, 20, 40}) {
+        arrays[0].mutable_int_data()->add_data(value);
+    }
+    arrays[1].mutable_int_data()->add_data(50);
+    auto data = MakeIntArrayFieldData(arrays, false, nullptr);
+    index::ScalarIndexSort<int32_t> build(ctx, true);
+    build.BuildWithFieldData({data});
+    auto stats = build.Upload({});
+    Config config{{index::INDEX_FILES, stats->GetIndexFiles()},
+                  {index::ENABLE_MMAP, false}};
+    index::ScalarIndexSort<int32_t> loaded(ctx, true);
+    loaded.Load(tracer::TraceContext{}, config, nullptr);
+    EXPECT_EQ(loaded.Count(), 6);
+    const int32_t value = 20;
+    const auto hits = loaded.In(1, &value);
+    EXPECT_EQ(hits.count(), 2);
+    EXPECT_TRUE(hits[1]);
+    EXPECT_TRUE(hits[3]);
+    const auto resource =
+        index::IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+            DataType::ARRAY,
+            stats->GetMemSize(),
+            {{index::INDEX_TYPE, index::ASCENDING_SORT},
+             {index::SCALAR_INDEX_ENGINE_VERSION, "2"}},
+            false,
+            2,
+            stats->GetIndexFiles(),
+            ctx);
+    EXPECT_GE(resource.request.final_memory_cost, loaded.ByteSize());
+    EXPECT_FALSE(resource.request.has_raw_data);
 }
 
 TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {

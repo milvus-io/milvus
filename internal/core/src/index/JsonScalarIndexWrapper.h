@@ -224,6 +224,15 @@ class JsonScalarIndexWrapper : public BaseIndex {
         BuildExistsBitset(this->Count());
     }
 
+    // Keep wrapper finalization when the base index gains a context-aware load.
+    // Legacy JSON migration (including cancellation) is a later step.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext*) override {
+        Load(ctx, config);
+    }
+
     JsonCastType
     GetCastType() const override {
         return cast_type_;

@@ -12,9 +12,12 @@
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
+#include "common/Slice.h"
 #include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/ScalarIndexSort.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
@@ -296,3 +299,207 @@ TEST(StlSortIndexTest, MmapByteSizeCountsValidBitsetOnce) {
 
 // V2 compat test removed: kScalarIndexUseV3 flag deleted,
 // Upload()/Load() now always route to V3 paths.
+
+namespace {
+
+class ScalarIndexSortLegacyAsyncLoadTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        old_enabled_ =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+        old_threads_ = storage::GetAsyncLoadThreadPoolSize();
+        storage::SetAsyncLoadThreadPoolSize(1);
+        old_slots_ =
+            storage::LoadAdmissionController::GetInstance().CapacitySlots();
+        storage::LoadAdmissionController::GetInstance().SetCapacitySlots(1);
+    }
+    void
+    TearDown() override {
+        storage::LoadAdmissionController::GetInstance().SetCapacitySlots(
+            old_slots_);
+        storage::SetAsyncLoadThreadPoolSize(old_threads_);
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled_);
+    }
+    std::vector<std::string>
+    Persist(const BinarySet& binary, bool sliced) {
+        std::vector<std::string> paths;
+        auto write = [&](const std::string& name,
+                         const uint8_t* data,
+                         size_t size) {
+            storage::IndexData codec(data, size);
+            codec.SetFieldDataMeta(fixture_.field_meta);
+            codec.set_index_meta(fixture_.index_meta);
+            auto encoded = codec.Serialize(storage::StorageType::Remote);
+            // Deliberately use an old arbitrary prefix, not a newly derived path.
+            const auto path = fixture_.root_path + "/old-prefix/" + name;
+            fixture_.chunk_manager->Write(path, encoded.data(), encoded.size());
+            paths.push_back(path);
+        };
+        for (const auto& [name, data] : binary.binary_map_) {
+            if (sliced && name == "index_data" && data->size > 1) {
+                const auto first = data->size / 2;
+                write(GenSlicedFileName(name, 0), data->data.get(), first);
+                write(GenSlicedFileName(name, 1),
+                      data->data.get() + first,
+                      data->size - first);
+                Config meta;
+                meta[META] = Config::array(
+                    {{{NAME, name}, {SLICE_NUM, 2}, {TOTAL_LEN, data->size}}});
+                const auto text = meta.dump();
+                write(INDEX_FILE_SLICE_META,
+                      reinterpret_cast<const uint8_t*>(text.data()),
+                      text.size());
+            } else {
+                write(name, data->data.get(), data->size);
+            }
+        }
+        return paths;
+    }
+    Config
+    ConfigFor(const std::vector<std::string>& files) {
+        return {{INDEX_FILES, files},
+                {ENABLE_MMAP, false},
+                {SCALAR_INDEX_ENGINE_VERSION, 2},
+                {LOAD_PRIORITY, proto::common::LoadPriority::LOW}};
+    }
+    ScalarSortAsyncLoadFixture fixture_{"scalar_sort_legacy_stream"};
+    bool old_enabled_{};
+    int old_threads_{};
+    size_t old_slots_{};
+};
+
+TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
+       SlicedAndUnslicedNullableQueryParity) {
+    const std::vector<int64_t> values{30, 10, 20, 10, 50};
+    const bool valid[]{true, false, true, true, false};
+    ScalarIndexSort<int64_t> build(fixture_.ctx);
+    build.Build(values.size(), values.data(), valid);
+    for (bool sliced : {false, true}) {
+        auto files = Persist(build.Serialize({}), sliced);
+        for (bool enabled : {false, true}) {
+            segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+            for (bool arrow : {false, true}) {
+                auto context =
+                    arrow ? fixture_.ctx
+                          : storage::FileManagerContext(fixture_.field_meta,
+                                                        fixture_.index_meta,
+                                                        fixture_.chunk_manager,
+                                                        nullptr);
+                ScalarIndexSort<int64_t> loaded(context);
+                IndexBase& base = loaded;
+                OpContext op_ctx;
+                base.Load(tracer::TraceContext{}, ConfigFor(files), &op_ctx);
+                EXPECT_EQ(loaded.Count(), values.size());
+                EXPECT_EQ(loaded.IsNull().count(), 2);
+                const int64_t needle = 10;
+                const auto hits = loaded.In(1, &needle);
+                EXPECT_EQ(hits.count(), 1);
+                EXPECT_TRUE(hits[3]);
+                const auto misses = loaded.NotIn(1, &needle);
+                EXPECT_EQ(misses.count(), 2);
+                EXPECT_FALSE(misses[1]);
+                EXPECT_FALSE(misses[4]);
+                EXPECT_EQ(loaded.Reverse_Lookup(0), 30);
+            }
+        }
+    }
+}
+
+TEST_F(ScalarIndexSortLegacyAsyncLoadTest, AllNullPayloadAndOldMetadata) {
+    const int64_t values[]{30, 10};
+    const bool valid[]{false, false};
+    ScalarIndexSort<int64_t> build(fixture_.ctx);
+    build.Build(2, values, valid);
+    auto binary = build.Serialize({});
+    binary.Erase("is_nested_index");
+    ScalarIndexSort<int64_t> loaded(fixture_.ctx);
+    loaded.Load(
+        tracer::TraceContext{}, ConfigFor(Persist(binary, false)), nullptr);
+    EXPECT_EQ(loaded.Count(), 2);
+    EXPECT_EQ(loaded.IsNull().count(), 2);
+}
+
+TEST_F(ScalarIndexSortLegacyAsyncLoadTest, MissingSliceAndInvalidSortSizeFail) {
+    const int64_t values[]{30, 10, 20};
+    ScalarIndexSort<int64_t> build(fixture_.ctx);
+    build.Build(3, values);
+    auto binary = build.Serialize({});
+    auto files = Persist(binary, true);
+    files.erase(std::remove_if(files.begin(),
+                               files.end(),
+                               [](const auto& path) {
+                                   return path.ends_with(
+                                       GenSlicedFileName("index_data", 1));
+                               }),
+                files.end());
+    ScalarIndexSort<int64_t> missing(fixture_.ctx);
+    EXPECT_THROW(
+        missing.Load(tracer::TraceContext{}, ConfigFor(files), nullptr),
+        SegcoreError);
+    auto length = binary.GetByName("index_length");
+    length->size = 1;
+    ScalarIndexSort<int64_t> invalid(fixture_.ctx);
+    EXPECT_THROW(
+        invalid.Load(
+            tracer::TraceContext{}, ConfigFor(Persist(binary, false)), nullptr),
+        SegcoreError);
+}
+
+TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
+       CancellationReachesLegacyLoadThroughIndexBase) {
+    ScalarIndexSort<int64_t> index(fixture_.ctx);
+    IndexBase& base = index;
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext ctx;
+    ctx.cancellation_token = source.getToken();
+    try {
+        base.Load(tracer::TraceContext{}, ConfigFor({"not-opened"}), &ctx);
+        FAIL() << "expected cancellation before open";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
+       EstimateIncludesRetainedInputAndSingleFileScratch) {
+    const int64_t values[]{30, 10, 20};
+    ScalarIndexSort<int64_t> build(fixture_.ctx);
+    build.Build(3, values);
+    auto files = Persist(build.Serialize({}), true);
+    storage::MemFileManagerImpl manager(fixture_.ctx);
+    const auto memory = folly::coro::blockingWait(
+        manager.InspectLegacyIndexMemoryAsync(files).scheduleOn(
+            storage::ResolveAsyncLoadExecutor(
+                {}, proto::common::LoadPriority::HIGH)));
+    const auto resource =
+        IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+            DataType::INT64,
+            1,
+            {{"index_type", ASCENDING_SORT},
+             {SCALAR_INDEX_ENGINE_VERSION, "2"}},
+            false,
+            3,
+            files,
+            fixture_.ctx);
+    const auto legacy = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64,
+        0,
+        1,
+        {{"index_type", ASCENDING_SORT}, {SCALAR_INDEX_ENGINE_VERSION, "2"}},
+        false,
+        3,
+        files,
+        fixture_.ctx);
+    EXPECT_EQ(legacy.max_memory_cost, resource.request.max_memory_cost);
+    EXPECT_EQ(legacy.final_memory_cost, resource.request.final_memory_cost);
+    EXPECT_FALSE(resource.overhead.has_value());
+    EXPECT_GE(resource.request.final_memory_cost, memory.payload_bytes);
+    EXPECT_GE(resource.request.max_memory_cost,
+              resource.request.final_memory_cost + memory.payload_bytes +
+                  memory.max_transient_bytes);
+}
+}  // namespace

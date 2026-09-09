@@ -116,7 +116,8 @@ class IndexFactory {
         std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
         bool* use_shared_memory_overhead_group = nullptr);
 
-    // Inspects V3 metadata on the async executor and estimates that path only.
+    // Inspects async scalar metadata and estimates only that load path.
+    // Supports packed V3 indexes and legacy Sort memory loads.
     AsyncScalarIndexLoadResource
     ScalarIndexAsyncLoadResource(
         DataType field_type,
