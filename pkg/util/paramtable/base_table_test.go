@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	etcdkv "github.com/milvus-io/milvus/pkg/v3/util/etcd"
 )
 
 var baseParams = NewBaseTable(SkipRemote(true))
@@ -31,6 +32,11 @@ var baseParams = NewBaseTable(SkipRemote(true))
 func TestMain(m *testing.M) {
 	baseParams.init()
 	code := m.Run()
+	// Stop the shared embedded etcd server (started lazily by the version-gate
+	// tests) after all tests.
+	if etcdkv.HasServer() {
+		etcdkv.StopEtcdServer()
+	}
 	os.Exit(code)
 }
 
