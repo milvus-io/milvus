@@ -174,15 +174,17 @@ const (
 
 // Search, Index parameter keys
 const (
-	TopKKey         = "topk"
-	SearchParamKey  = "search_param"
-	SegmentNumKey   = "segment_num"
-	WithFilterKey   = "with_filter"
-	DataTypeKey     = "data_type"
-	ChannelNumKey   = "channel_num"
-	WithOptimizeKey = "with_optimize"
-	CollectionKey   = "collection"
-	RecallEvalKey   = "recall_eval"
+	TopKKey                           = "topk"
+	SearchParamKey                    = "search_param"
+	StrictGroupAcceptanceThresholdKey = "strict_group_acceptance_threshold"
+	StrictGroupProbeCandidatesKey     = "strict_group_probe_candidates"
+	SegmentNumKey                     = "segment_num"
+	WithFilterKey                     = "with_filter"
+	DataTypeKey                       = "data_type"
+	ChannelNumKey                     = "channel_num"
+	WithOptimizeKey                   = "with_optimize"
+	CollectionKey                     = "collection"
+	RecallEvalKey                     = "recall_eval"
 
 	ParamsKey      = "params"
 	IndexTypeKey   = "index_type"

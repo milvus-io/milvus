@@ -93,6 +93,13 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
+            // The optional recreation caller classifies preparation failures.
+            // Do not disguise typed cancellation/corruption errors as an
+            // Unsupported backend and accidentally make them recoverable.
+            if (!search_result.allow_vector_iterator_recreation_ &&
+                dynamic_cast<const SegcoreError*>(&e) != nullptr) {
+                throw;
+            }
             std::string operator_type = "";
             if (search_info.group_by_field_id_.has_value()) {
                 operator_type = "group_by";
