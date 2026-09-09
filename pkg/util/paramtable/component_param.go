@@ -3169,6 +3169,7 @@ type queryCoordConfig struct {
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
 	QueryViewFullReconsileInterval        ParamItem `refreshable:"true"`
+	QueryViewTargetRowsPerShardNode       ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3908,6 +3909,23 @@ Set to 0 to disable the penalty period.`,
 		},
 	}
 	p.QueryViewFullReconsileInterval.Init(base.mgr)
+
+	p.QueryViewTargetRowsPerShardNode = ParamItem{
+		Key:          "queryCoord.queryView.targetRowsPerShardNode",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Doc:          "Target number of sealed rows per QueryNode used to derive the free fanout budget for each QueryView shard. Must be positive. Changes take effect on the next reconciliation.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				mlog.Warn(context.TODO(), "queryCoord.queryView.targetRowsPerShardNode must be positive, using default 100000",
+					mlog.String("configured", v))
+				return "100000"
+			}
+			return v
+		},
+	}
+	p.QueryViewTargetRowsPerShardNode.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -565,6 +565,8 @@ queryCoord:
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
+  queryView:
+    targetRowsPerShardNode: 100000 # Target number of sealed rows per QueryNode used to derive the free fanout budget for each QueryView shard. Changes take effect on the next reconciliation.
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
   grpc:

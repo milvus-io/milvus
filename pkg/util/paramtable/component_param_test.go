@@ -223,6 +223,25 @@ func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
 	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
 }
 
+func TestComponentParam_QueryViewTargetRowsPerShardNode(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewTargetRowsPerShardNode
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.targetRowsPerShardNode", item.Key)
+	assert.Equal(t, "100000", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "250000"))
+	assert.EqualValues(t, 250_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "0"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "invalid"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()

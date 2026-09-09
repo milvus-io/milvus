@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // SnapshotBuilder assembles a BalancerSnapshot from the various sources:
@@ -131,7 +132,7 @@ func (b *SnapshotBuilder) build(ctx context.Context, pending triggerBatch) (*Bal
 
 	// 4. Assemble the scoped snapshot consumed by BalancePolicy.
 	snap := &BalancerSnapshot{
-		Config:                b.config,
+		Config:                b.currentBalanceConfig(),
 		LoadConfigSnapshot:    loadSnapshot,
 		ShardViewSnapshot:     targetSnapshot,
 		DataViewSnapshot:      dataViewSnapshot,
@@ -150,6 +151,15 @@ func (b *SnapshotBuilder) build(ctx context.Context, pending triggerBatch) (*Bal
 	}
 
 	return snap, targetShards
+}
+
+func (b *SnapshotBuilder) currentBalanceConfig() *BalanceConfig {
+	if b == nil || b.config == nil {
+		return nil
+	}
+	config := *b.config
+	config.TargetRowsPerShardNode = paramtable.Get().QueryCoordCfg.QueryViewTargetRowsPerShardNode.GetAsInt64()
+	return &config
 }
 
 // takeRowCountDirtyShards atomically swaps the observer-owned dirty set. Marks
