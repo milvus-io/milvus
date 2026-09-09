@@ -1201,7 +1201,7 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
 
 COMPACTION_INTEGRITY_ROWS_PER_SEGMENT = 1000
 COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND = 10
-COMPACTION_INTEGRITY_ROUNDS = 3
+COMPACTION_INTEGRITY_ROUND_COUNTS = [int(os.getenv("MILVUS_COMPACTION_INTEGRITY_ROUNDS", "3"))]
 COMPACTION_INTEGRITY_VECTOR_DIM = 128
 COMPACTION_INTEGRITY_DEFAULT_VALUE = -91919530
 COMPACTION_INTEGRITY_TEXT_INLINE_THRESHOLD = int(os.getenv("MILVUS_TEXT_INLINE_THRESHOLD", "65536"))
@@ -1209,6 +1209,9 @@ COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS = [
     "id",
     "explicit_test_ts",
     "bool_value",
+    "int8_value",
+    "int16_value",
+    "int32_value",
     "int64_value",
     "float_value",
     "double_value",
@@ -1227,6 +1230,15 @@ COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS = [
     "dynamic_payload",
 ]
 COMPACTION_INTEGRITY_TEXT_FIELD = "text_payload"
+
+
+def _log_compaction_integrity_evidence(event, **evidence):
+    log.info(
+        f"compaction_integrity_evidence {json.dumps({'event': event, **evidence}, sort_keys=True)}",
+        extra={"persist_on_pass": True},
+    )
+
+
 COMPACTION_INTEGRITY_ACTIVE_STATES = {"Growing", "Sealed", "Flushing", "Flushed", "Importing"}
 COMPACTION_INTEGRITY_STABLE_STATES = {"Sealed", "Flushed"}
 COMPACTION_INTEGRITY_RUNNING_TASK_STATES = {
@@ -1264,6 +1276,12 @@ def _compaction_integrity_float32(logical_pk, explicit_test_ts, field_id, elemen
 def _compaction_integrity_float64(logical_pk, explicit_test_ts, field_id):
     # Integer and the dyadic division are both exact in IEEE-754 binary64 for this test's key range.
     return float(logical_pk * (1 << 20) + explicit_test_ts * 1024 + field_id) / 8.0
+
+
+def _compaction_integrity_signed_integer(logical_pk, explicit_test_ts, field_id, bit_width):
+    value = (logical_pk * 2654435761 + explicit_test_ts * 2246822519 + field_id) & ((1 << bit_width) - 1)
+    sign_bit = 1 << (bit_width - 1)
+    return value - (1 << bit_width) if value & sign_bit else value
 
 
 def _compaction_integrity_float16_vector(logical_pk, explicit_test_ts, field_id):
@@ -1329,11 +1347,12 @@ def _build_compaction_integrity_row(run_id, logical_pk, explicit_test_ts, primar
         "id": physical_pk,
         "explicit_test_ts": explicit_test_ts,
         "bool_value": None if logical_pk % 11 == 0 else bool(logical_pk % 2),
+        "int8_value": _compaction_integrity_signed_integer(logical_pk, explicit_test_ts, 20, 8),
+        "int16_value": _compaction_integrity_signed_integer(logical_pk, explicit_test_ts, 21, 16),
+        "int32_value": _compaction_integrity_signed_integer(logical_pk, explicit_test_ts, 22, 32),
         "int64_value": logical_pk * 17 - explicit_test_ts,
         "float_value": (
-            None
-            if logical_pk % 13 == 0
-            else _compaction_integrity_float32(logical_pk, explicit_test_ts, 4)
+            None if logical_pk % 13 == 0 else _compaction_integrity_float32(logical_pk, explicit_test_ts, 4)
         ),
         "double_value": _compaction_integrity_float64(logical_pk, explicit_test_ts, 5),
         "varchar_payload": f"{varchar_signature}|{varchar_signature[::-1]}|{'x' * (logical_pk % 37)}",
@@ -1348,13 +1367,10 @@ def _build_compaction_integrity_row(run_id, logical_pk, explicit_test_ts, primar
             }
         ),
         "int64_array": (
-            None
-            if logical_pk % 5 == 0
-            else [logical_pk, explicit_test_ts, 9, logical_pk ^ explicit_test_ts]
+            None if logical_pk % 5 == 0 else [logical_pk, explicit_test_ts, 9, logical_pk ^ explicit_test_ts]
         ),
         "float_array": [
-            _compaction_integrity_float32(logical_pk, explicit_test_ts, 10, element_index)
-            for element_index in range(4)
+            _compaction_integrity_float32(logical_pk, explicit_test_ts, 10, element_index) for element_index in range(4)
         ],
         "string_array": [
             _compaction_integrity_signature(run_id, logical_pk, explicit_test_ts, 11) + f"|element={element_index}"
@@ -1411,6 +1427,12 @@ def _canonical_compaction_integrity_cell(field_name, value, primary_key_type):
         encoded = struct.pack("<q", int(value))
     elif field_name == "bool_value":
         encoded = struct.pack("<?", bool(value))
+    elif field_name == "int8_value":
+        encoded = struct.pack("<b", int(value))
+    elif field_name == "int16_value":
+        encoded = struct.pack("<h", int(value))
+    elif field_name == "int32_value":
+        encoded = struct.pack("<i", int(value))
     elif field_name == "float_value":
         encoded = struct.pack("<f", float(value))
     elif field_name == "double_value":
@@ -1428,6 +1450,9 @@ def _canonical_compaction_integrity_cell(field_name, value, primary_key_type):
     elif field_name == "float_vector":
         encoded = struct.pack(f"<{len(value)}f", *(float(item) for item in value))
     elif field_name in {"binary_vector", "float16_vector", "bfloat16_vector", "int8_vector"}:
+        if isinstance(value, list):
+            assert len(value) == 1, f"expected one byte-vector payload for {field_name}, got {len(value)}"
+            value = value[0]
         encoded = bytes(value)
     elif field_name == "sparse_vector":
         encoded = b"".join(
@@ -1519,9 +1544,7 @@ def _assert_compaction_integrity_graph_transition(before_checkpoint, after_check
 
     new_segment_ids = set(after_all) - set(before_all)
     round_edges = {
-        (source_id, target_id)
-        for target_id in new_segment_ids
-        for source_id in after_all[target_id]["compaction_from"]
+        (source_id, target_id) for target_id in new_segment_ids for source_id in after_all[target_id]["compaction_from"]
     }
     assert round_edges, f"round created no observable compaction transition: new_segments={new_segment_ids}"
     assert all(after_all[source_id]["state"] == "Dropped" for source_id, _ in round_edges), (
@@ -1555,11 +1578,14 @@ def _wait_for_compaction_integrity_checkpoint(
     before_checkpoint,
     timeout=600,
 ):
+    start_time = time.time()
     deadline = time.time() + timeout
+    poll_count = 0
     stable_polls = 0
     last_signature = None
     last_observation = {}
     while time.time() < deadline:
+        poll_count += 1
         all_segments = _snapshot_compaction_integrity_segments(client.list_segments(collection_name))
         active_segments = {
             segment_id: segment
@@ -1589,18 +1615,23 @@ def _wait_for_compaction_integrity_checkpoint(
             has_graph_transition = True
         except AssertionError:
             pass
+        task_quiet = all(task["state"] in COMPACTION_INTEGRITY_SUCCESS_TASK_STATES for task in tasks.values())
+        active_stable = bool(active_segments) and all(
+            segment["state"] in COMPACTION_INTEGRITY_STABLE_STATES and segment["is_sorted"]
+            for segment in active_segments.values()
+        )
+        serving_matches_active = set(serving_segments) == set(active_segments)
+        serving_sealed = all(segment["state"] == "Sealed" for segment in serving_segments.values())
+        active_rows = sum(segment["num_rows"] for segment in active_segments.values())
+        row_count_matches = active_rows == expected_rows
+        storage_version_valid = len(storage_versions) == 1 and storage_versions.issubset({2, 3})
         ready = (
-            bool(active_segments)
-            and all(task["state"] in COMPACTION_INTEGRITY_SUCCESS_TASK_STATES for task in tasks.values())
-            and all(
-                segment["state"] in COMPACTION_INTEGRITY_STABLE_STATES and segment["is_sorted"]
-                for segment in active_segments.values()
-            )
-            and set(serving_segments) == set(active_segments)
-            and all(segment["state"] == "Sealed" for segment in serving_segments.values())
-            and sum(segment["num_rows"] for segment in active_segments.values()) == expected_rows
-            and len(storage_versions) == 1
-            and storage_versions.issubset({2, 3})
+            task_quiet
+            and active_stable
+            and serving_matches_active
+            and serving_sealed
+            and row_count_matches
+            and storage_version_valid
             and has_graph_transition
         )
         signature = (
@@ -1614,7 +1645,32 @@ def _wait_for_compaction_integrity_checkpoint(
             stable_polls = 1
         else:
             stable_polls = 0
+        if signature != last_signature or ready or poll_count % 15 == 0:
+            segment_state_counts = {
+                state: sum(segment["state"] == state for segment in all_segments.values())
+                for state in sorted({segment["state"] for segment in all_segments.values()})
+            }
+            task_state_counts = {
+                state: sum(task["state"] == state for task in tasks.values())
+                for state in sorted({task["state"] for task in tasks.values()})
+            }
+            log.info(
+                f"compaction checkpoint poll collection={collection_name} poll={poll_count} "
+                f"elapsed={time.time() - start_time:.1f}s ready={ready} stable_polls={stable_polls}/3 "
+                f"task_quiet={task_quiet} active_stable={active_stable} "
+                f"serving_matches_active={serving_matches_active} serving_sealed={serving_sealed} "
+                f"row_count_matches={row_count_matches} graph_transition={has_graph_transition} "
+                f"storage_version_valid={storage_version_valid} rows={active_rows}/{expected_rows} "
+                f"segment_states={segment_state_counts} task_states={task_state_counts} "
+                f"active_ids={sorted(active_segments)} serving_ids={sorted(serving_segments)} "
+                f"storage_versions={sorted(storage_versions)}"
+            )
         if stable_polls >= 3:
+            log.info(
+                f"compaction checkpoint reached collection={collection_name} polls={poll_count} "
+                f"elapsed={time.time() - start_time:.1f}s active_ids={sorted(active_segments)} "
+                f"serving_ids={sorted(serving_segments)} rows={active_rows}"
+            )
             return last_observation
         last_signature = signature
         time.sleep(2)
@@ -1628,6 +1684,10 @@ def _assert_compaction_integrity_dataset(
     output_fields,
     primary_key_type,
 ):
+    log.info(
+        f"data integrity validation start collection={collection_name} rows={len(expected_by_pk)} "
+        f"fields={len(output_fields)} output_fields={output_fields}"
+    )
     query_filter = "id >= 0" if primary_key_type == DataType.INT64 else 'id != ""'
     iterator = client.query_iterator(
         collection_name,
@@ -1638,11 +1698,13 @@ def _assert_compaction_integrity_dataset(
     )
     seen_primary_keys = set()
     actual_count = 0
+    batch_index = 0
     try:
         while True:
             batch = iterator.next()
             if not batch:
                 break
+            batch_index += 1
             for actual in batch:
                 physical_pk = actual["id"]
                 actual_count += 1
@@ -1665,6 +1727,10 @@ def _assert_compaction_integrity_dataset(
                         f"actual_len={len(actual_bytes)}, expected_len={len(expected_bytes)}, "
                         f"actual_prefix={actual_bytes[:64].hex()}, expected_prefix={expected_bytes[:64].hex()}"
                     )
+            log.info(
+                f"data integrity validation progress collection={collection_name} batch={batch_index} "
+                f"batch_rows={len(batch)} validated_rows={actual_count}/{len(expected_by_pk)}"
+            )
     finally:
         iterator.close()
 
@@ -1674,6 +1740,10 @@ def _assert_compaction_integrity_dataset(
     assert seen_primary_keys == set(expected_by_pk), (
         f"primary key set mismatch: missing={set(expected_by_pk) - seen_primary_keys}, "
         f"unexpected={seen_primary_keys - set(expected_by_pk)}"
+    )
+    log.info(
+        f"data integrity validation complete collection={collection_name} rows={actual_count} "
+        f"fields={len(output_fields)} batches={batch_index}"
     )
 
 
@@ -1685,6 +1755,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         probe_name = cf.gen_unique_str("compaction_storage_probe")
         created = False
         try:
+            log.info(f"storage version probe start collection={probe_name}")
             schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
             schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
@@ -1709,7 +1780,11 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                     if segment.num_rows != 0 and segment.storage_version in {2, 3}
                 }
                 if len(versions) == 1:
-                    return next(iter(versions))
+                    storage_version = next(iter(versions))
+                    log.info(
+                        f"storage version probe complete collection={probe_name} storage_version={storage_version}"
+                    )
+                    return storage_version
                 time.sleep(2)
             raise AssertionError("could not determine the server storage version from a flushed probe segment")
         finally:
@@ -1722,12 +1797,18 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         [DataType.INT64, DataType.VARCHAR],
         ids=["int64_pk", "varchar_pk"],
     )
-    def test_compaction_active_set_transitions_preserve_all_rows_and_fields(self, primary_key_type):
+    @pytest.mark.parametrize(
+        "round_count",
+        COMPACTION_INTEGRITY_ROUND_COUNTS,
+        ids=lambda value: f"{value}_rounds",
+    )
+    def test_compaction_active_set_transitions_preserve_all_rows_and_fields(self, primary_key_type, round_count):
         """
-        target: verify all-type row safety at three round-level compaction lifecycle checkpoints
+        target: verify all-type row safety at configurable round-level compaction lifecycle checkpoints
         method: append and flush ten batches, request compaction, observe the blood graph and serving handoff, then query
         expected: every round has a real transition and preserves every PK, persisted field, null/default, and cell byte
         """
+        assert round_count > 0, "compaction integrity round count must be positive"
         client = self._client()
         collection_name = cf.gen_unique_str("compaction_data_integrity")
         storage_version = self._detect_compaction_integrity_storage_version(client)
@@ -1735,6 +1816,13 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         output_fields = list(COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS)
         if include_text:
             output_fields.append(COMPACTION_INTEGRITY_TEXT_FIELD)
+        log.info(
+            f"compaction integrity case start collection={collection_name} pk_type={primary_key_type.name} "
+            f"storage_version={storage_version} include_text={include_text} rounds={round_count} "
+            f"segments_per_round={COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
+            f"rows_per_segment={COMPACTION_INTEGRITY_ROWS_PER_SEGMENT} fields={len(output_fields)} "
+            f"output_fields={output_fields}"
+        )
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
         if primary_key_type == DataType.INT64:
             schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
@@ -1742,6 +1830,9 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             schema.add_field("id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
         schema.add_field("explicit_test_ts", DataType.INT64)
         schema.add_field("bool_value", DataType.BOOL, nullable=True)
+        schema.add_field("int8_value", DataType.INT8)
+        schema.add_field("int16_value", DataType.INT16)
+        schema.add_field("int32_value", DataType.INT32)
         schema.add_field("int64_value", DataType.INT64)
         schema.add_field("float_value", DataType.FLOAT, nullable=True)
         schema.add_field("double_value", DataType.DOUBLE)
@@ -1796,6 +1887,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             consistency_level="Strong",
             num_shards=1,
         )
+        log.info(f"compaction integrity collection ready collection={collection_name}")
 
         expected_by_pk = {}
         previous_checkpoint = {
@@ -1806,7 +1898,13 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             "storage_versions": set(),
         }
 
-        for round_index in range(COMPACTION_INTEGRITY_ROUNDS):
+        for round_index in range(round_count):
+            log.info(
+                f"compaction integrity round start collection={collection_name} round={round_index + 1}/"
+                f"{round_count} prior_rows={len(expected_by_pk)} "
+                f"prior_active_ids={sorted(previous_checkpoint['active'])} "
+                f"prior_lineage_segments={len(previous_checkpoint['all'])}"
+            )
             for segment_index in range(COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND):
                 explicit_test_ts = round_index * COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND + segment_index + 1
                 pk_start = explicit_test_ts * COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
@@ -1829,8 +1927,18 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 insert_result = self.insert(client, collection_name, rows)[0]
                 assert insert_result["insert_count"] == COMPACTION_INTEGRITY_ROWS_PER_SEGMENT
                 self.flush(client, collection_name)
+                log.info(
+                    f"compaction integrity batch flushed collection={collection_name} round={round_index + 1} "
+                    f"batch={segment_index + 1}/{COMPACTION_INTEGRITY_SEGMENTS_PER_ROUND} "
+                    f"explicit_test_ts={explicit_test_ts} logical_pk_range="
+                    f"[{pk_start},{pk_start + COMPACTION_INTEGRITY_ROWS_PER_SEGMENT - 1}] "
+                    f"inserted_rows={insert_result['insert_count']} expected_total={len(expected_by_pk)}"
+                )
             compact_id = self.compact(client, collection_name)[0]
-            assert compact_id > 0, "manual compaction did not create a job"
+            log.info(
+                f"compaction requested collection={collection_name} round={round_index + 1} "
+                f"manual_job={compact_id} expected_rows={len(expected_by_pk)}"
+            )
             checkpoint = _wait_for_compaction_integrity_checkpoint(
                 client,
                 collection_name,
@@ -1839,6 +1947,26 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             )
             round_edges = _assert_compaction_integrity_graph_transition(previous_checkpoint, checkpoint)
             assert checkpoint["storage_versions"] == {storage_version}
+            _log_compaction_integrity_evidence(
+                "round_checkpoint",
+                collection=collection_name,
+                round=round_index + 1,
+                manual_job=compact_id,
+                expected_rows=len(expected_by_pk),
+                storage_versions=sorted(checkpoint["storage_versions"]),
+                round_edges=[
+                    {"source": source_id, "target": target_id} for source_id, target_id in sorted(round_edges)
+                ],
+                all_segments=[checkpoint["all"][segment_id] for segment_id in sorted(checkpoint["all"])],
+                active_segment_ids=sorted(checkpoint["active"]),
+                serving_segment_ids=sorted(checkpoint["serving"]),
+                compaction_tasks=[checkpoint["tasks"][task_id] for task_id in sorted(checkpoint["tasks"])],
+            )
+            log.info(
+                f"compaction transition verified collection={collection_name} round={round_index + 1} "
+                f"manual_job={compact_id} round_edges={sorted(round_edges)} "
+                f"active_ids={sorted(checkpoint['active'])} serving_ids={sorted(checkpoint['serving'])}"
+            )
             _assert_compaction_integrity_dataset(
                 client,
                 collection_name,
@@ -1846,17 +1974,44 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 output_fields,
                 primary_key_type,
             )
+            _log_compaction_integrity_evidence(
+                "round_data_validated",
+                collection=collection_name,
+                round=round_index + 1,
+                rows=len(expected_by_pk),
+                fields=len(output_fields),
+                primary_key_type=primary_key_type.name,
+                storage_version=storage_version,
+            )
             previous_checkpoint = checkpoint
             log.info(
-                f"round={round_index + 1} manual_job={compact_id} rows={len(expected_by_pk)} "
+                f"compaction integrity round complete collection={collection_name} round={round_index + 1} "
+                f"manual_job={compact_id} rows={len(expected_by_pk)} "
                 f"storage_version={storage_version} active_segments={sorted(checkpoint['active'])} "
                 f"round_compaction_edges={len(round_edges)} lineage_segments={len(checkpoint['all'])}"
             )
 
+        log.info(
+            f"compaction integrity final validation start collection={collection_name} "
+            f"rows={len(expected_by_pk)} rounds={round_count}"
+        )
         _assert_compaction_integrity_dataset(
             client,
             collection_name,
             expected_by_pk,
             output_fields,
             primary_key_type,
+        )
+        _log_compaction_integrity_evidence(
+            "final_data_validated",
+            collection=collection_name,
+            rounds=round_count,
+            rows=len(expected_by_pk),
+            fields=len(output_fields),
+            primary_key_type=primary_key_type.name,
+            storage_version=storage_version,
+        )
+        log.info(
+            f"compaction integrity case complete collection={collection_name} pk_type={primary_key_type.name} "
+            f"storage_version={storage_version} rows={len(expected_by_pk)} fields={len(output_fields)}"
         )
