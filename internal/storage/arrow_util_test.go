@@ -491,3 +491,30 @@ func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
 	}()
 	alloc.AssertSize(t, 0)
 }
+
+// Alternating kept/deleted rows make compaction append one-row ranges.
+// With destination capacity reserved, those calls must not allocate per range.
+func TestRecordBuilderAppendSingleRowDoesNotAllocate(t *testing.T) {
+	field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64}
+	source := array.NewInt64Builder(memory.DefaultAllocator)
+	defer source.Release()
+	source.AppendValues([]int64{7, 8}, nil)
+	values := source.NewArray()
+	defer values.Release()
+	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int64}}, nil), []arrow.Array{values}, 2), map[FieldID]int{100: 0})
+	defer rec.Release()
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer rb.Release()
+	rb.builders[0].Reserve(1024)
+	require.NoError(t, rb.Append(rec, 0, 1))
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := rb.Append(rec, 0, 1); err != nil {
+			panic(err)
+		}
+	})
+	require.Zero(t, allocs, "single-row Append must not allocate a source-column slice")
+	out := rb.Build()
+	defer out.Release()
+	require.Equal(t, 102, out.Column(100).Len())
+	require.Equal(t, int64(7), out.Column(100).(*array.Int64).Value(101))
+}
