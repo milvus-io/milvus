@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -201,6 +202,23 @@ type OptBuildBroadcast func(*messagespb.BroadcastHeader)
 func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 	return func(bh *messagespb.BroadcastHeader) {
 		bh.AckSyncUp = true
+	}
+}
+
+// OptBuildBroadcastAppendFirst names the vchannels the broadcaster appends and
+// persists before any other replica of the broadcast. Every name must be one of
+// the broadcast's vchannels; the control channel is never appended first.
+func OptBuildBroadcastAppendFirst(vchannels ...string) OptBuildBroadcast {
+	return func(bh *messagespb.BroadcastHeader) {
+		for _, vchannel := range vchannels {
+			if funcutil.IsControlChannel(vchannel) {
+				panic("the control channel cannot be appended first")
+			}
+			if !slices.Contains(bh.Vchannels, vchannel) {
+				panic("append-first vchannel " + vchannel + " is not a broadcast target")
+			}
+		}
+		bh.AppendFirstVchannels = typeutil.NewSet(vchannels...).Collect()
 	}
 }
 
