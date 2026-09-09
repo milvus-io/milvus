@@ -548,6 +548,42 @@ func TestAckPartialPanicsOnControlChannel(t *testing.T) {
 	})
 }
 
+// TestAckPartialPanicsOnAckSyncUp asserts AckPartial's invariant guard: an
+// AckSyncUp broadcast is only ever declared done as a whole (a vchannel is
+// acked only once its checkpoint reaches the message), so the append-first
+// mechanism that AckPartial serves has no user with AckSyncUp; a partial ack
+// here would silently break that contract.
+func TestAckPartialPanicsOnAckSyncUp(t *testing.T) {
+	paramtable.Init()
+	registry.ResetRegistration()
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	metrics := newBroadcasterMetrics()
+	ackScheduler := newAckCallbackScheduler(mlog.With())
+	msg, err := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&messagespb.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{"p0_1v0", "p1_1v1"}, message.OptBuildBroadcastAckSyncUp()).
+		BuildBroadcast()
+	require.NoError(t, err)
+	msg = msg.WithBroadcastID(970)
+	taskProto := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, []byte{0x00, 0x00})
+	task := newBroadcastTaskFromProto(taskProto, metrics, ackScheduler)
+	task.SetLogger(mlog.With())
+
+	assert.Panics(t, func() {
+		_ = task.AckPartial(context.Background(), map[string]*types.AppendResult{
+			"p0_1v0": {MessageID: walimplstest.NewTestMessageID(1), TimeTick: 100},
+		})
+	})
+}
+
 // TestBroadcastFirstGroupPersistFailurePropagatesError asserts that when
 // AckPartial fails to persist the append-first group (here: the catalog save
 // fails against an already-canceled context, so saveTaskIfDirty returns an

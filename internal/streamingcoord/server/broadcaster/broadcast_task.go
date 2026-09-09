@@ -508,6 +508,10 @@ func (b *broadcastTask) AckPartial(ctx context.Context, results map[string]*type
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.header().AckSyncUp {
+		panic("broadcast task invariant violated: an AckSyncUp broadcast cannot be partially acked at append time")
+	}
+
 	msgs := make([]message.ImmutableMessage, 0, len(results))
 	for vchannel, result := range results {
 		if funcutil.IsControlChannel(vchannel) {

@@ -57,3 +57,24 @@ func TestOptBuildBroadcastAppendFirst(t *testing.T) {
 			MustBuildBroadcast()
 	}, "the control channel can never be appended first")
 }
+
+// TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive asserts
+// that AppendFirst and AckSyncUp can never both be set on the same broadcast,
+// regardless of the order the options are applied in.
+func TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive(t *testing.T) {
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0"}, OptBuildBroadcastAckSyncUp(), OptBuildBroadcastAppendFirst("p0_1v0")).
+			MustBuildBroadcast()
+	}, "append-first cannot be added to an already ack-sync-up broadcast")
+
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0"}, OptBuildBroadcastAppendFirst("p0_1v0"), OptBuildBroadcastAckSyncUp()).
+			MustBuildBroadcast()
+	}, "ack-sync-up cannot be added to an already append-first broadcast")
+}
