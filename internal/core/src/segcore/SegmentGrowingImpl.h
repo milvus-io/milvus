@@ -484,6 +484,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                 tracked_resource_,
                 fmt::format("growing_segment_{}_destructor", id_));
         }
+        UpdateCollectionMemoryUsage(tracked_collection_id_,
+                                    -tracked_resource_.memory_bytes);
     }
 
     void
@@ -813,6 +815,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     UpdateResourceTracking(const Schema& schema);
 
  private:
+    static void
+    UpdateCollectionMemoryUsage(int64_t collection_id, int64_t memory_bytes);
+
     void
     AddTexts(FieldId field_id,
              const std::string* texts,
@@ -927,6 +932,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager
     ResourceUsage tracked_resource_{};
+    int64_t tracked_collection_id_{0};
     // Mutex to protect tracked_resource_ updates (refund-then-charge must be atomic)
     mutable std::mutex resource_tracking_mutex_;
 

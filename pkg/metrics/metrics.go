@@ -19,8 +19,10 @@ package metrics
 import (
 	// #nosec
 	_ "net/http/pprof"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 const (
@@ -219,6 +221,9 @@ var (
 		})
 
 	metricRegisterer prometheus.Registerer
+
+	coreMetricsProcessorMu sync.RWMutex
+	coreMetricsProcessor   func(map[string]*dto.MetricFamily)
 )
 
 // GetRegisterer returns the global prometheus registerer
@@ -240,4 +245,22 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(ThreadNum)
 	r.MustRegister(ThreadCPUActiveNumByPool)
 	metricRegisterer = r
+}
+
+// SetCoreMetricsProcessor sets the synchronous processor for each core metrics scrape.
+// Passing nil disables processing. The processor must support concurrent scrapes.
+func SetCoreMetricsProcessor(processor func(map[string]*dto.MetricFamily)) {
+	coreMetricsProcessorMu.Lock()
+	defer coreMetricsProcessorMu.Unlock()
+	coreMetricsProcessor = processor
+}
+
+// ProcessCoreMetrics processes the current scrape without retaining its metric families.
+func ProcessCoreMetrics(families map[string]*dto.MetricFamily) {
+	coreMetricsProcessorMu.RLock()
+	processor := coreMetricsProcessor
+	coreMetricsProcessorMu.RUnlock()
+	if processor != nil {
+		processor(families)
+	}
 }

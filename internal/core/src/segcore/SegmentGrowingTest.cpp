@@ -37,6 +37,7 @@
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "common/IndexMeta.h"
+#include "common/PrometheusClient.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -73,6 +74,25 @@ using namespace milvus::segcore;
 using namespace milvus;
 
 namespace {
+
+std::optional<double>
+GrowingCollectionMemoryUsage(int64_t collection_id) {
+    for (const auto& family :
+         milvus::monitor::getPrometheusClient().GetRegistry().Collect()) {
+        if (family.name != "internal_growing_segment_memory_usage_bytes") {
+            continue;
+        }
+        for (const auto& metric : family.metric) {
+            for (const auto& label : metric.label) {
+                if (label.name == "collection_id" &&
+                    label.value == std::to_string(collection_id)) {
+                    return metric.gauge.value;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
 
 void
 AddStorageV3SystemFields(const SchemaPtr& schema) {
@@ -2060,6 +2080,10 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
     schema->set_primary_field_id(pk_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    constexpr int64_t kCollectionID = 987654323;
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(kCollectionID);
+    segment->SetLoadInfo(load_info);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
@@ -2073,6 +2097,8 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
                     dataset1.timestamps_.data(),
                     dataset1.raw_);
     auto resource1 = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID),
+              resource1.memory_bytes);
 
     // Second insert
     const int64_t N2 = 500;
@@ -2087,6 +2113,29 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
 
     // Resource should increase after second insert
     EXPECT_GT(resource2.memory_bytes, resource1.memory_bytes);
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID),
+              resource2.memory_bytes);
+
+    auto other = CreateGrowingSegment(schema, empty_index_meta);
+    other->SetLoadInfo(load_info);
+    auto offset = other->PreInsert(N1);
+    other->Insert(offset,
+                  N1,
+                  dataset1.row_ids_.data(),
+                  dataset1.timestamps_.data(),
+                  dataset1.raw_);
+    auto* other_impl = dynamic_cast<SegmentGrowingImpl*>(other.get());
+    ASSERT_NE(other_impl, nullptr);
+    auto other_resource = other_impl->EstimateSegmentResourceUsage();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID),
+              resource2.memory_bytes + other_resource.memory_bytes);
+    segment.reset();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID),
+              other_resource.memory_bytes);
+    load_info.clear_collectionid();
+    other->SetLoadInfo(load_info);
+    other.reset();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID), std::nullopt);
 }
 
 TEST(Growing, ResourceTrackingAfterDelete) {
@@ -2098,6 +2147,9 @@ TEST(Growing, ResourceTrackingAfterDelete) {
     schema->set_primary_field_id(pk_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(987654324);
+    segment->SetLoadInfo(load_info);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
@@ -2124,6 +2176,10 @@ TEST(Growing, ResourceTrackingAfterDelete) {
     // Resource estimation should still work after delete
     auto resource_after_delete = segment_impl->EstimateSegmentResourceUsage();
     EXPECT_GT(resource_after_delete.memory_bytes, 0);
+    EXPECT_EQ(GrowingCollectionMemoryUsage(987654324),
+              resource_after_delete.memory_bytes);
+    segment.reset();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(987654324), std::nullopt);
 }
 
 TEST(Growing, ConcurrentInsertResourceTracking) {
@@ -2134,9 +2190,14 @@ TEST(Growing, ConcurrentInsertResourceTracking) {
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
+    constexpr int64_t kCollectionID = 987654325;
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(kCollectionID);
+    segment->SetLoadInfo(load_info);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID), std::nullopt);
 
     const int num_threads = 4;
     const int64_t rows_per_thread = 100;
@@ -2169,6 +2230,30 @@ TEST(Growing, ConcurrentInsertResourceTracking) {
     // Verify resource estimation is consistent and positive
     auto resource = segment_impl->EstimateSegmentResourceUsage();
     EXPECT_GT(resource.memory_bytes, 0);
+    // Concurrent estimates may be published out of order.
+    auto memory_usage = GrowingCollectionMemoryUsage(kCollectionID);
+    ASSERT_TRUE(memory_usage.has_value());
+    EXPECT_GT(memory_usage.value(), 0);
+    EXPECT_LE(memory_usage.value(), resource.memory_bytes);
+
+    // The next serial insert must publish the current estimate.
+    auto dataset =
+        DataGen(schema, rows_per_thread, 42 + num_threads, total_rows);
+    auto offset = segment->PreInsert(rows_per_thread);
+    ASSERT_EQ(offset, total_rows);
+    segment->Insert(offset,
+                    rows_per_thread,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    EXPECT_EQ(segment->get_row_count(), total_rows + rows_per_thread);
+    auto updated_resource = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_GT(updated_resource.memory_bytes, resource.memory_bytes);
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID),
+              updated_resource.memory_bytes);
+
+    segment.reset();
+    EXPECT_EQ(GrowingCollectionMemoryUsage(kCollectionID), std::nullopt);
 }
 
 TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {

@@ -17,12 +17,17 @@
 package querynodev2
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -166,4 +171,95 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))
 	m = getStreamingQuotaMetrics()
 	assert.Nil(t, m)
+}
+
+func TestAppendQueryNodeCollectionMemoryUsage(t *testing.T) {
+	const nodeID = "101"
+	const source = "internal_cache_shard_memory_usage_bytes"
+	const growing = "internal_growing_segment_memory_usage_bytes"
+	const target = "milvus_querynode_collection_memory_usage_bytes"
+	const header = "# TYPE " + source + " gauge\n"
+	tests := []struct {
+		name     string
+		text     string
+		expected map[string]float64
+	}{
+		{
+			name: "sum data types and shards by collection",
+			text: header +
+				source + "{data_type=\"scalar_field\",shard=\"channel_1001v0\"} 128\n" +
+				source + "{data_type=\"vector_index\",shard=\"channel_1001v0\"} 256\n" +
+				source + "{data_type=\"vector_field\",shard=\"channel_1001v1\"} 512\n" +
+				source + "{data_type=\"other\",shard=\"channel_1002v0\"} 32\n" +
+				"# TYPE internal_cache_shard_disk_usage_bytes gauge\n" +
+				"internal_cache_shard_disk_usage_bytes{shard=\"channel_1001v0\"} 4096\n",
+			expected: map[string]float64{"1001": 896, "1002": 32},
+		},
+		{
+			name:     "single shard",
+			text:     header + source + "{shard=\"channel_1001v0\"} 64\n",
+			expected: map[string]float64{"1001": 64},
+		},
+		{
+			name: "sum sealed and growing memory",
+			text: header + source + "{shard=\"channel_1001v0\"} 128\n" +
+				"# TYPE " + growing + " gauge\n" +
+				growing + "{collection_id=\"1001\"} 512\n" +
+				growing + "{collection_id=\"1002\"} 32\n",
+			expected: map[string]float64{"1001": 640, "1002": 32},
+		},
+		{
+			name: "growing without sealed memory",
+			text: "# TYPE " + growing + " gauge\n" +
+				growing + "{collection_id=\"1001\"} 64\n" +
+				growing + "{collection_id=\"0\"} 128\n" +
+				growing + "{collection_id=\"invalid\"} 256\n",
+			expected: map[string]float64{"1001": 64},
+		},
+		{
+			name: "skip unknown attribution and retain attributed zero",
+			text: header +
+				source + "{shard=\"invalid\"} 1\n" +
+				source + "{shard=\"channel_0v0\"} 2\n" +
+				source + "{shard=\"channel_-1v0\"} 4\n" +
+				source + "{shard=\"channel_9223372036854775808v0\"} 8\n" +
+				source + "{collection_id=\"1001\"} 16\n" +
+				source + "{shard=\"channel_1001v0\"} 0\n",
+			expected: map[string]float64{"1001": 0},
+		},
+		{name: "no source samples"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var parser expfmt.TextParser
+			families, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
+			require.NoError(t, err)
+			original := make(map[string]*dto.MetricFamily, len(families))
+			for name, family := range families {
+				original[name] = proto.Clone(family).(*dto.MetricFamily)
+			}
+			appendQueryNodeCollectionMemoryUsage(nodeID, families)
+			if len(test.expected) == 0 {
+				require.NotContains(t, families, target)
+			} else {
+				family := families[target]
+				require.NotNil(t, family)
+				require.Equal(t, dto.MetricType_GAUGE, family.GetType())
+				require.Len(t, family.GetMetric(), len(test.expected))
+				actual := make(map[string]float64)
+				for _, metric := range family.GetMetric() {
+					require.Len(t, metric.GetLabel(), 2)
+					require.Equal(t, "collection_id", metric.Label[0].GetName())
+					require.Equal(t, "node_id", metric.Label[1].GetName())
+					require.Equal(t, nodeID, metric.Label[1].GetValue())
+					actual[metric.Label[0].GetValue()] = metric.GetGauge().GetValue()
+				}
+				require.Equal(t, test.expected, actual)
+			}
+			for name, family := range original {
+				require.True(t, proto.Equal(family, families[name]), name)
+			}
+		})
+	}
 }

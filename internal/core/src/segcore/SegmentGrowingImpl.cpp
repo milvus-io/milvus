@@ -49,6 +49,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
+#include "common/PrometheusClient.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
@@ -688,6 +689,33 @@ SegmentGrowingImpl::UpdateResourceTracking() {
 }
 
 void
+SegmentGrowingImpl::UpdateCollectionMemoryUsage(int64_t collection_id,
+                                                int64_t memory_bytes) {
+    if (collection_id <= 0 || memory_bytes == 0) {
+        return;
+    }
+    static auto& family =
+        prometheus::BuildGauge()
+            .Name("internal_growing_segment_memory_usage_bytes")
+            .Help("Growing segment memory usage by collection in bytes.")
+            .Register(milvus::monitor::getPrometheusClient().GetRegistry());
+    static std::mutex mutex;
+    static std::map<int64_t, prometheus::Gauge*> metrics;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = metrics.find(collection_id);
+    if (it == metrics.end()) {
+        auto& gauge =
+            family.Add({{"collection_id", std::to_string(collection_id)}});
+        it = metrics.emplace(collection_id, &gauge).first;
+    }
+    it->second->Increment(memory_bytes);
+    if (it->second->Value() == 0) {
+        family.Remove(it->second);
+        metrics.erase(it);
+    }
+}
+
+void
 SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
     auto new_resource = EstimateSegmentResourceUsage(schema);
 
@@ -706,6 +734,17 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
             new_resource, fmt::format("growing_segment_{}_charge", id_));
     }
 
+    auto collection_id = load_info_.collectionid();
+    if (collection_id != tracked_collection_id_) {
+        UpdateCollectionMemoryUsage(tracked_collection_id_,
+                                    -old_resource.memory_bytes);
+        UpdateCollectionMemoryUsage(collection_id, new_resource.memory_bytes);
+    } else {
+        UpdateCollectionMemoryUsage(
+            collection_id,
+            new_resource.memory_bytes - old_resource.memory_bytes);
+    }
+    tracked_collection_id_ = collection_id;
     tracked_resource_ = new_resource;
 }
 
@@ -970,12 +1009,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
-    // step 5: update the resource usage
-    UpdateResourceTracking(*schema);
-
-    // step 6: update small indexes
+    // step 5: publish the inserted rows
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+
+    // step 6: update the resource usage
+    UpdateResourceTracking(*schema);
 }
 
 void
@@ -1476,6 +1515,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: push delete info to delete_record
     deleted_record_.LoadPush(pks, timestamps);
+    UpdateResourceTracking(*schema);
 }
 
 cachinglayer::PinWrapper<SpanBase>
@@ -3064,6 +3104,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     if (manifest_path != "") {
         LoadColumnsGroups(manifest_path);
         FillAbsentFields();
+        UpdateResourceTracking();
         return;
     }
 

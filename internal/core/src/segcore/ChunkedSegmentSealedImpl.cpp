@@ -122,6 +122,7 @@
 #include "prometheus/histogram.h"
 #include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/SealedIndexingRecord.h"
@@ -513,6 +514,8 @@ ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
         translator =
             std::make_unique<storagev2translator::TimestampIndexTranslator>(
                 id_, column, num_rows, warmup_policy);
+    translator->meta()->metric_attribution = MetricAttributionFromShard(
+        CaptureLoadInfoSnapshot()->GetInsertChannel());
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
     auto cell_holder =
@@ -585,6 +588,8 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
     std::unique_ptr<cachinglayer::Translator<storagev2translator::PkIndexCell>>
         translator = std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
+    translator->meta()->metric_attribution = MetricAttributionFromShard(
+        CaptureLoadInfoSnapshot()->GetInsertChannel());
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
     if (eager) {
@@ -2762,6 +2767,9 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                         translator = std::make_unique<
                             storagev2translator::TimestampIndexTranslator>(
                             id_, column, num_rows, info.warmup_policy);
+                    translator->meta()->metric_attribution =
+                        MetricAttributionFromShard(
+                            segment_load_info.GetInsertChannel());
                     auto slot =
                         cachinglayer::Manager::GetInstance().CreateCacheSlot(
                             std::move(translator));
@@ -6815,6 +6823,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                         dim,
                         is_sparse,
                         field_meta.get_data_type());
+            translator->meta()->metric_attribution = MetricAttributionFromShard(
+                snapshot->load_info->GetInsertChannel());
 
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -8585,6 +8595,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                     translator = std::make_unique<
                         storagev2translator::TimestampIndexTranslator>(
                         id_, column, num_rows, "");
+                translator->meta()->metric_attribution =
+                    MetricAttributionFromShard(
+                        segment_load_info.GetInsertChannel());
                 auto slot =
                     cachinglayer::Manager::GetInstance().CreateCacheSlot(
                         std::move(translator));
