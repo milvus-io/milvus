@@ -411,6 +411,7 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	server := &Server{
 		importMeta: importMeta,
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
