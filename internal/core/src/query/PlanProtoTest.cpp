@@ -31,6 +31,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
 #include "query/Plan.h"
 #include "query/PlanProto.h"
 
@@ -124,6 +125,23 @@ BuildSearchPlanNode(float search_topk_ratio,
     query_info->set_refine_topk_ratio(refine_topk_ratio);
 
     return plan_node;
+}
+
+std::shared_ptr<milvus::plan::FilterBitsNode>
+FindFilterBitsNode(const std::shared_ptr<milvus::plan::PlanNode>& node) {
+    if (node == nullptr) {
+        return nullptr;
+    }
+    if (auto filter =
+            std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(node)) {
+        return filter;
+    }
+    for (const auto& source : node->sources()) {
+        if (auto filter = FindFilterBitsNode(source)) {
+            return filter;
+        }
+    }
+    return nullptr;
 }
 
 }  // namespace
@@ -307,6 +325,201 @@ TEST(PlanProto, SupportsMembershipFiltersInScorers) {
     }
 }
 
+TEST(PlanProto, BloomBlobMovesFromOwnedSearchPlanNode) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto vector_field_id = schema->get_field_id(FieldName("fakevec"));
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto plan_node = std::make_unique<planpb::PlanNode>(
+        BuildSearchPlanNode(1.0F, 1.0F, vector_field_id));
+    auto* bloom = plan_node->mutable_vector_anns()
+                      ->mutable_predicates()
+                      ->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
+    bloom->set_filter_blob(BuildEmptyMbf1());
+
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto parsed_plan =
+        query::ProtoParser(schema).CreatePlan(std::move(plan_node));
+    auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        filter_node->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(plan_node, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, BuildEmptyMbf1());
+
+    parsed_plan.reset();
+    filter_node.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
+}
+
+TEST(PlanProto, BloomBlobMovesThroughNestedLogicBesideLargeTerm) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto vector_field_id = schema->get_field_id(FieldName("fakevec"));
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto plan_node = std::make_unique<planpb::PlanNode>(
+        BuildSearchPlanNode(1.0F, 1.0F, vector_field_id));
+
+    // OR(NOT(Bloom), AND(large IN, Bloom)) exercises nested recursive Expr
+    // carriers while keeping the GenericValue list as a leaf for extraction.
+    auto* outer = plan_node->mutable_vector_anns()
+                      ->mutable_predicates()
+                      ->mutable_binary_expr();
+    outer->set_op(planpb::BinaryExpr::LogicalOr);
+    auto* unary = outer->mutable_left()->mutable_unary_expr();
+    unary->set_op(planpb::UnaryExpr::Not);
+    auto* left_bloom = unary->mutable_child()->mutable_bloom_filter_expr();
+    left_bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    left_bloom->mutable_column_info()->set_data_type(
+        proto::schema::DataType::Int64);
+    left_bloom->set_filter_blob(BuildEmptyMbf1());
+
+    auto* inner = outer->mutable_right()->mutable_binary_expr();
+    inner->set_op(planpb::BinaryExpr::LogicalAnd);
+    auto* term = inner->mutable_left()->mutable_term_expr();
+    term->mutable_column_info()->set_field_id(scalar_field_id.get());
+    term->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
+    constexpr int kTermValueCount = 4096;
+    for (int i = 0; i < kTermValueCount; ++i) {
+        term->add_values()->set_int64_val(i);
+    }
+    auto* right_bloom = inner->mutable_right()->mutable_bloom_filter_expr();
+    right_bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    right_bloom->mutable_column_info()->set_data_type(
+        proto::schema::DataType::Int64);
+    right_bloom->set_filter_blob(BuildEmptyMbf1());
+
+    const auto* left_blob_data = left_bloom->filter_blob().data();
+    const auto* right_blob_data = right_bloom->filter_blob().data();
+    auto parsed_plan =
+        query::ProtoParser(schema).CreatePlan(std::move(plan_node));
+    auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+
+    auto parsed_outer =
+        std::dynamic_pointer_cast<const expr::LogicalBinaryExpr>(
+            filter_node->filter());
+    ASSERT_NE(parsed_outer, nullptr);
+    ASSERT_EQ(parsed_outer->inputs().size(), 2);
+    auto parsed_unary = std::dynamic_pointer_cast<const expr::LogicalUnaryExpr>(
+        parsed_outer->inputs()[0]);
+    ASSERT_NE(parsed_unary, nullptr);
+    ASSERT_EQ(parsed_unary->inputs().size(), 1);
+    auto parsed_left_bloom =
+        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+            parsed_unary->inputs()[0]);
+    ASSERT_NE(parsed_left_bloom, nullptr);
+
+    auto parsed_inner =
+        std::dynamic_pointer_cast<const expr::LogicalBinaryExpr>(
+            parsed_outer->inputs()[1]);
+    ASSERT_NE(parsed_inner, nullptr);
+    ASSERT_EQ(parsed_inner->inputs().size(), 2);
+    auto parsed_term = std::dynamic_pointer_cast<const expr::TermFilterExpr>(
+        parsed_inner->inputs()[0]);
+    ASSERT_NE(parsed_term, nullptr);
+    ASSERT_EQ(parsed_term->vals_.size(), kTermValueCount);
+    EXPECT_EQ(parsed_term->vals_.front().int64_val(), 0);
+    EXPECT_EQ(parsed_term->vals_.back().int64_val(), kTermValueCount - 1);
+    auto parsed_right_bloom =
+        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+            parsed_inner->inputs()[1]);
+    ASSERT_NE(parsed_right_bloom, nullptr);
+
+    EXPECT_EQ(parsed_left_bloom->filter_blob_->data(), left_blob_data);
+    EXPECT_EQ(parsed_right_bloom->filter_blob_->data(), right_blob_data);
+}
+
+TEST(PlanProto, BloomBlobMovesFromOwnedRetrievePlanNode) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto plan_node = std::make_unique<planpb::PlanNode>();
+    auto* bloom = plan_node->mutable_query()
+                      ->mutable_predicates()
+                      ->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
+    bloom->set_filter_blob(BuildEmptyMbf1());
+
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto parsed_plan =
+        query::ProtoParser(schema).CreateRetrievePlan(std::move(plan_node));
+    auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        filter_node->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(plan_node, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, BuildEmptyMbf1());
+
+    parsed_plan.reset();
+    filter_node.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
+}
+
+TEST(PlanProto, BloomBlobMovesFromOwnedScoreFunction) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto function = std::make_unique<planpb::ScoreFunction>();
+    function->set_type(planpb::FunctionTypeWeight);
+    function->set_weight(2.0F);
+    auto* bloom = function->mutable_filter()->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
+    bloom->set_filter_blob(BuildEmptyMbf1());
+
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto scorer = query::ProtoParser(schema).ParseScorer(std::move(function));
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        scorer->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(function, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, BuildEmptyMbf1());
+
+    scorer.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
+}
+
 TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {
     using namespace milvus::query;
 
@@ -443,4 +656,71 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
     EXPECT_EQ(
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
+}
+
+TEST(PlanProto, StrictGroupSettings) {
+    using namespace milvus;
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(proto::plan::VectorType::FloatVector);
+    anns->set_field_id(vec.get());
+    anns->set_placeholder_tag("$0");
+    auto* info = anns->mutable_query_info();
+    info->set_metric_type("L2");
+    info->set_topk(10);
+    info->set_round_decimal(-1);
+    for (
+        const auto& params :
+        {R"({"nprobe":128})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0,"strict_group_probe_candidates":1})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0.1,"strict_group_probe_candidates":100})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":0.5,"strict_group_probe_candidates":17})",
+         R"({"nprobe":128,"strict_group_acceptance_threshold":1,"strict_group_probe_candidates":9223372036854775807})"}) {
+        info->set_search_params(params);
+        auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
+        const auto& search = parsed->search_info_;
+        EXPECT_DOUBLE_EQ(search.strict_group_acceptance_threshold_,
+                         knowhere::Json::parse(params).value(
+                             kStrictGroupAcceptanceThreshold, 0.1));
+        EXPECT_FALSE(
+            search.search_params_.contains(kStrictGroupAcceptanceThreshold));
+        EXPECT_EQ(search.strict_group_probe_candidates_,
+                  knowhere::Json::parse(params).value(
+                      kStrictGroupProbeCandidates, int64_t(100)));
+        EXPECT_FALSE(
+            search.search_params_.contains(kStrictGroupProbeCandidates));
+        EXPECT_EQ(search.search_params_["nprobe"], 128);
+    }
+    for (const auto& key :
+         {kStrictGroupAcceptanceThreshold, kStrictGroupProbeCandidates}) {
+        for (const auto& value : {knowhere::Json(nullptr),
+                                  knowhere::Json(true),
+                                  knowhere::Json("0.5"),
+                                  knowhere::Json("NaN"),
+                                  knowhere::Json::array(),
+                                  knowhere::Json::object(),
+                                  knowhere::Json(-1),
+                                  knowhere::Json(1.1)}) {
+            info->set_search_params(knowhere::Json{{key, value}}.dump());
+            try {
+                query::ProtoParser(schema).PlanNodeFromProto(node);
+                FAIL() << "invalid strict group setting accepted";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+            }
+        }
+    }
+    for (const auto& value : {knowhere::Json(0),
+                              knowhere::Json(1.0),
+                              knowhere::Json(uint64_t(1) << 63)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupProbeCandidates, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
 }

@@ -16,7 +16,7 @@
 
 // buildFixture, parseFixture and fixtureFilter are fixtures for the validator tests, not
 // package API. The proxy only ever calls Validate; blobs are built by the SDK
-// (client/v3/roaringfilter) and decoded by segcore, so exporting a second
+// (client/v3/membership/roaringfilter) and decoded by segcore, so exporting a second
 // builder and a second decoder from this package would be dead weight that has
 // to stay bit-compatible with two other implementations.
 //
@@ -44,7 +44,7 @@ type fixtureFilter struct {
 // buildFixture encodes members as a portable Roaring64 bitmap in an MRB1 envelope.
 //
 // It is not the SDK builder and does not try to be: the SDK
-// (client/v3/roaringfilter) additionally pre-rejects member sets the proxy
+// (client/v3/membership/roaringfilter) additionally pre-rejects member sets the proxy
 // would reject, and no buildFixture call site in this package asserts a rejection -- they
 // all require.NoError. Reproducing that admission logic here
 // would be a second copy of it that nothing checks.

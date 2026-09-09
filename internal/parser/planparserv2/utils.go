@@ -262,14 +262,14 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
-	// A raw-bytes value has exactly two consumers — the bloom_match filter blob
-	// and the roaring_match bitmap blob — each validated and embedded by its own
-	// Fill*ExpressionValue without passing through castValue. Reject it in every
-	// typed/JSON comparison context here, at the proxy, instead of fanning out a
-	// GenericValue kBytesVal that segcore's plan parser cannot evaluate.
+	// A raw-bytes value has exactly one consumer family — the membership filter
+	// blob argument of membership_match — each
+	// validated and embedded by the unified fill path without passing through
+	// castValue. Reject it in every typed/JSON comparison context here, at the
+	// proxy, instead of fanning out a GenericValue kBytesVal that segcore's plan
+	// parser cannot evaluate.
 	if IsBytes(value) {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"a bytes template value can only be used as the bloom_match or roaring_match filter argument")
+		return nil, bytesTemplateValueError()
 	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
@@ -307,6 +307,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	// the value's own type are what identify the mismatch anyway.
 	return nil, merr.WrapErrQueryPlanMsg(
 		"cannot cast value to %s: incompatible source type", dataType.String())
+}
+
+func bytesTemplateValueError() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"a bytes template value can only be used as the membership filter argument " +
+			"of membership_match")
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
@@ -460,6 +466,11 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*planpb.Expr, error) {
 	leftColumnInfo := toColumnInfo(left)
 	rightColumnInfo := toColumnInfo(right)
+
+	if (left.expr.GetIsTemplate() && left.expr.GetValueExpr() == nil) ||
+		(right.expr.GetIsTemplate() && right.expr.GetValueExpr() == nil) {
+		return nil, merr.WrapErrQueryPlanMsg("template variables in composite expressions cannot be compared with fields")
+	}
 
 	if left.expr.GetIsTemplate() {
 		return &planpb.Expr{

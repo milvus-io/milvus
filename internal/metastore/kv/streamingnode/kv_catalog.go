@@ -14,6 +14,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -47,7 +49,7 @@ import (
 //	        └── 456398247938
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 
@@ -175,6 +177,65 @@ func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string
 	return infos, nil
 }
 
+// ListQueryViews lists the StreamingNode query view recovery metadata of the pchannel.
+func (c *catalog) ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error) {
+	prefix := buildQueryViewPrefix(pChannelName)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]*viewpb.QueryViewOfShard, 0, len(values))
+	for idx, value := range values {
+		view := &viewpb.QueryViewOfShard{}
+		if err := proto.Unmarshal([]byte(value), view); err != nil {
+			return nil, merr.Wrapf(err, "unmarshal query view %s failed", keys[idx])
+		}
+		expectedKey, err := buildQueryViewKey(pChannelName, view.GetMeta())
+		if err != nil {
+			return nil, err
+		}
+		if typeutil.After(keys[idx], prefix) != typeutil.After(expectedKey, prefix) {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"mismatched query view recovery meta, key %s, vchannel %s",
+				keys[idx],
+				view.GetMeta().GetVchannel(),
+			)
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+// SaveQueryViews persists Up views and removes recovery records in every other state.
+func (c *catalog) SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error {
+	if len(views) == 0 {
+		return nil
+	}
+
+	saves := make(map[string]string, len(views))
+	removals := make([]string, 0)
+	for _, view := range views {
+		meta := view.GetMeta()
+		key, err := buildQueryViewKey(pChannelName, meta)
+		if err != nil {
+			return err
+		}
+		if meta.GetState() == viewpb.QueryViewState_QueryViewStateUp {
+			data, err := marshalQueryViewForPersistence(view)
+			if err != nil {
+				return merr.Wrapf(err, "marshal query view %s at pchannel %s failed", meta.GetVchannel(), pChannelName)
+			}
+			removals = removeString(removals, key)
+			saves[key] = string(data)
+			continue
+		}
+		delete(saves, key)
+		removals = append(removals, key)
+	}
+	return c.metaKV.MultiSaveAndRemove(ctx, saves, removals)
+}
+
 // GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string) (*streamingpb.WALCheckpoint, error) {
 	key := buildConsumeCheckpointKey(pchannelName)
@@ -237,6 +298,10 @@ func buildSegmentAssignmentPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectorySegmentAssign + "/"
 }
 
+func buildQueryViewPrefix(pChannelName string) string {
+	return buildWALPrefix(pChannelName) + DirectoryQueryView + "/"
+}
+
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -252,6 +317,42 @@ func buildVChannelSchemaKey(pChannelName string, vchannelName string, version ui
 // buildSegmentAssignmentKey returns the key for a specific segment assignment.
 func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
 	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
+}
+
+func buildQueryViewKey(pChannelName string, meta *viewpb.QueryViewMeta) (string, error) {
+	if meta == nil {
+		return "", merr.WrapErrServiceInternalMsg("query view meta is nil")
+	}
+	version := meta.GetVersion()
+	if version == nil || version.GetDataVersion() == nil {
+		return "", merr.WrapErrServiceInternalMsg("query view %s has nil version", meta.GetVchannel())
+	}
+	pchannel, collectionID, vchannelIndex, err := funcutil.ParseVChannel(meta.GetVchannel())
+	if err != nil {
+		return "", err
+	}
+	if pchannel != pChannelName {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view vchannel %s pchannel %s mismatches catalog pchannel %s",
+			meta.GetVchannel(),
+			pchannel,
+			pChannelName,
+		)
+	}
+	if collectionID != meta.GetCollectionId() {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view collection %d mismatches vchannel %s collection %d",
+			meta.GetCollectionId(),
+			meta.GetVchannel(),
+			collectionID,
+		)
+	}
+	dataVersion := version.GetDataVersion()
+	return fmt.Sprintf("%s%d/%d/%d/%d/%d/%d",
+		buildQueryViewPrefix(pChannelName),
+		meta.GetCollectionId(), meta.GetReplicaId(), vchannelIndex,
+		dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion(), version.GetQueryVersion(),
+	), nil
 }
 
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.
@@ -275,4 +376,25 @@ func buildSalvageCheckpointPrefix(pchannelName string) string {
 // buildSalvageCheckpointPath builds the path for salvage checkpoint for a specific source cluster.
 func buildSalvageCheckpointPath(pchannelName, sourceClusterID string) string {
 	return buildSalvageCheckpointPrefix(pchannelName) + sourceClusterID
+}
+
+func marshalQueryViewForPersistence(view *viewpb.QueryViewOfShard) ([]byte, error) {
+	clone := proto.Clone(view).(*viewpb.QueryViewOfShard)
+	for _, queryNode := range clone.GetQueryNode() {
+		for _, partition := range queryNode.GetPartitions() {
+			partition.ReadySegmentIds = nil
+		}
+	}
+	return proto.Marshal(clone)
+}
+
+func removeString(values []string, value string) []string {
+	for idx := 0; idx < len(values); {
+		if values[idx] == value {
+			values = append(values[:idx], values[idx+1:]...)
+			continue
+		}
+		idx++
+	}
+	return values
 }

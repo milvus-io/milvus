@@ -196,12 +196,19 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     }
     // For array types, always use BITMAP for low cardinality. For high
     // cardinality, nested indexes index the flattened scalar elements, so the
-    // sort index can serve them and STL_SORT replaces INVERTED; regular array
-    // fields keep INVERTED because the sort index cannot handle array values.
-    // These are hardcoded and config parameters don't apply to arrays.
+    // sort index can serve them and STL_SORT replaces INVERTED once the whole
+    // cluster is guaranteed to run scalar_index_version_ >=
+    // kNestedHybridStlSortMinVersion; below that, an older reader's
+    // ScalarIndexSort predates nested-index support and cannot load a nested
+    // STL_SORT physical index. Regular array fields keep INVERTED because the
+    // sort index cannot handle array values. These are hardcoded and config
+    // parameters don't apply to arrays.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = is_nested_index_ ? ScalarIndexType::STLSORT
-                                                : ScalarIndexType::INVERTED;
+        internal_index_type_ =
+            (is_nested_index_ &&
+             scalar_index_version_ >= kNestedHybridStlSortMinVersion)
+                ? ScalarIndexType::STLSORT
+                : ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -301,6 +308,7 @@ HybridScalarIndex<T>::Build(const Config& config) {
     auto scalar_index_version =
         GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
             .value_or(kLastVersionWithoutHybridIndexConfig);
+    scalar_index_version_ = scalar_index_version;
 
     if (scalar_index_version >= kHybridIndexConfigVersion) {
         // Version 3+: Use configurable index types

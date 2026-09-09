@@ -35,6 +35,9 @@ void
 SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
+SetLoadAdmissionSlots(int64_t slots);
+
+void
 SetHighPriorityThreadCoreCoefficient(const float);
 
 void
@@ -122,6 +125,30 @@ UpdateArrowIOThreadPoolMetrics();
 // packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
+
+// Updates the rollout default used by newly constructed manifest translators.
+void
+SetStorageV2AsyncLoadEnabled(bool enabled);
+
+// Sets a positive async executor worker limit without creating an unused pool.
+// Resizes an existing pool in place; reports invalid values or resize failures.
+CStatus
+SetStorageV2AsyncLoadThreadPoolSize(int threads);
+
+// Returns the effective worker limit, including before first executor use.
+int
+GetStorageV2AsyncLoadThreadPoolSize();
+
+// Target estimated-byte threshold for one Storage V3 async read window.
+// The value must be positive; non-positive values restore the process default.
+// A window always contains at least one cell, so an oversized cell may exceed
+// the configured threshold.
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+
+// Returns the effective Storage V3 async read-window threshold in bytes.
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes();
 
 #ifdef __cplusplus
 };

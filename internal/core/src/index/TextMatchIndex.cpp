@@ -41,6 +41,10 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
+    auto memory_budget_in_bytes =
+        commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+            ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+            : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id,
         true,
@@ -51,7 +55,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         analyzer_params,
         /*analyzer_extra_info=*/"",
         milvus::tantivy::DEFAULT_NUM_THREADS,
-        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        memory_budget_in_bytes,
         enable_background_merge);
     set_is_growing(true);
 }
@@ -291,9 +295,20 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
-    int64_t offset = 0;
+    const std::vector<FieldDataPtr>& field_datas,
+    bool nullable,
+    int64_t offset_begin) {
+    int64_t offset = offset_begin;
     if (nullable) {
+        int64_t total = 0;
+        for (const auto& data : field_datas) {
+            total += data->get_null_count();
+        }
+        {
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
+            null_offset_.reserve(null_offset_.size() +
+                                 static_cast<size_t>(total));
+        }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             auto null_count = data->get_null_count();

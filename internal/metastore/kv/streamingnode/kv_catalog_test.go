@@ -2,12 +2,15 @@ package streamingnode
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -16,7 +19,9 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -59,8 +64,140 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
-	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	err = catalog.SaveConsumeCheckpoint(canceledCtx, "p1", &streamingpb.WALCheckpoint{})
 	assert.Error(t, err)
+}
+
+func TestCatalogQueryViews(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogQueryViews")
+	ctx := context.Background()
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{
+			NodeId: 100,
+			Partitions: []*viewpb.QueryViewOfPartition{{
+				PartitionId:     200,
+				SegmentIds:      []int64{300},
+				ReadySegmentIds: []int64{300},
+			}},
+		}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err := catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Empty(t, views[0].GetQueryNode()[0].GetPartitions()[0].GetReadySegmentIds())
+
+	next := proto.Clone(view).(*viewpb.QueryViewOfShard)
+	next.Meta.Version.QueryVersion++
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{next}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, int64(31), views[0].GetMeta().GetVersion().GetQueryVersion())
+}
+
+func TestCatalogQueryViewWritesUseReliableMetaKV(t *testing.T) {
+	metaKV := &etcdkv.EmbedEtcdKV{}
+	var attempts atomic.Int32
+	mockWrite := mockey.Mock((*etcdkv.EmbedEtcdKV).MultiSaveAndRemove).
+		To(func(_ *etcdkv.EmbedEtcdKV, _ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
+			if attempts.Add(1) == 1 {
+				return merr.WrapErrServiceUnavailableMsg("injected metastore failure")
+			}
+			return nil
+		}).Build()
+	t.Cleanup(func() { mockWrite.UnPatch() })
+
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, NewCataLog(metaKV).SaveQueryViews(context.Background(), "p1", []*viewpb.QueryViewOfShard{view}))
+	assert.Equal(t, int32(2), attempts.Load())
+}
+
+func TestBuildQueryViewKeyRejectsMismatchedIdentity(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{
+		CollectionId: 1,
+		ReplicaId:    10,
+		Vchannel:     "p1_1v0",
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+			QueryVersion: 30,
+		},
+	}
+
+	key, err := buildQueryViewKey("p1", meta)
+	require.NoError(t, err)
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/1/10/0/20/0/30", key)
+
+	_, err = buildQueryViewKey("p2", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "pchannel")
+
+	meta.CollectionId = 2
+	_, err = buildQueryViewKey("p1", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "collection")
+}
+
+func TestCatalogListQueryViewsRejectsCompactKeyValueMismatch(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+	}
+	value, err := marshalQueryViewForPersistence(view)
+	require.NoError(t, err)
+
+	kv := mocks.NewMetaKv(t)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildQueryViewPrefix("p1")).Return(
+		[]string{"streamingnode-meta/wal/p1/qv/1/10/1/20/0/30"},
+		[]string{string(value)},
+		nil,
+	)
+
+	views, err := NewCataLog(kv).ListQueryViews(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, views)
+	assert.ErrorContains(t, err, "mismatched query view")
 }
 
 // TestCatalogSegmentAssignments round-trips segment assignments through the
@@ -378,4 +515,5 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/", buildQueryViewPrefix("p1"))
 }

@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"testing"
@@ -90,30 +91,41 @@ func TestStatsManager(t *testing.T) {
 	assert.Equal(t, uint64(150), stat.Modified.BinarySize)
 
 	err = m.AllocRows(5, ModifiedMetrics{Rows: 250, BinarySize: 250})
-	assert.ErrorIs(t, err, ErrNotEnoughSpace)
+	assert.NoError(t, err)
 
 	err = m.AllocRows(6, ModifiedMetrics{Rows: 150, BinarySize: 150})
 	assert.NoError(t, err)
 
 	assert.Equal(t, uint64(250), m.vchannelStats["vchannel3"].Insert.BinarySize)
-	assert.Equal(t, uint64(100), m.vchannelStats["vchannel2"].Insert.BinarySize)
+	assert.Equal(t, uint64(350), m.vchannelStats["vchannel2"].Insert.BinarySize)
 	assert.Equal(t, uint64(250), m.vchannelStats["vchannel"].Insert.BinarySize)
 
-	assert.Equal(t, uint64(350), m.pchannelStats["pchannel"].Insert.BinarySize)
+	assert.Equal(t, uint64(600), m.pchannelStats["pchannel"].Insert.BinarySize)
 	assert.Equal(t, uint64(250), m.pchannelStats["pchannel2"].Insert.BinarySize)
 
 	m.UpdateOnSync(3, SyncOperationMetrics{BinLogCounterIncr: 100})
 	m.UpdateOnSync(1000, SyncOperationMetrics{BinLogCounterIncr: 100})
 
 	err = m.AllocRows(3, ModifiedMetrics{Rows: 400, BinarySize: 400})
+	assert.NoError(t, err)
+	stat = m.GetStatsOfSegment(3)
+	assert.Equal(t, ModifiedMetrics{Rows: 550, BinarySize: 550}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
+	err = m.AllocRows(3, ModifiedMetrics{Rows: 1, BinarySize: 1})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
 	err = m.AllocRows(5, ModifiedMetrics{Rows: 250, BinarySize: 250})
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
 	err = m.AllocRows(6, ModifiedMetrics{Rows: 400, BinarySize: 400})
-	assert.ErrorIs(t, err, ErrNotEnoughSpace)
+	assert.NoError(t, err)
+	stat = m.GetStatsOfSegment(6)
+	assert.Equal(t, ModifiedMetrics{Rows: 650, BinarySize: 650}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
 
 	err = m.AllocRows(7, ModifiedMetrics{Rows: 400, BinarySize: 400})
-	assert.ErrorIs(t, err, ErrTooLargeInsert)
+	assert.NoError(t, err)
+	stat = m.GetStatsOfSegment(7)
+	assert.Equal(t, ModifiedMetrics{Rows: 400, BinarySize: 400}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
 
 	assert.Panics(t, func() {
 		// alloc rows on a sealed segment should panic
@@ -147,6 +159,90 @@ func TestStatsManager(t *testing.T) {
 	assert.Empty(t, m.pchannelStats)
 	assert.Empty(t, m.segmentIndex)
 	assert.Empty(t, m.sealOperators)
+}
+
+func TestRegisterSealOperatorImmediatelySealsRecoveredOverTargetSegment(t *testing.T) {
+	paramtable.Init()
+	m := NewStatsManager()
+
+	sealed := make(chan utils.SealSegmentSignal, 1)
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})
+	sealOperator.EXPECT().AsyncFlushSegment(mock.MatchedBy(func(signal utils.SealSegmentSignal) bool {
+		return signal.SegmentBelongs.SegmentID == 10 && signal.SealPolicy.Policy == policy.PolicyNameCapacity
+	})).Run(func(signal utils.SealSegmentSignal) {
+		select {
+		case sealed <- signal:
+		default:
+		}
+	}).Maybe()
+
+	recovered := createSegmentStats(101, 401, 400)
+	recovered.MaxRows = 100
+	assert.False(t, recovered.ReachLimit)
+	m.RegisterSealOperator(sealOperator, []SegmentBelongs{{
+		PChannel:     "pchannel",
+		VChannel:     "vchannel",
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    10,
+	}}, []*SegmentStats{recovered})
+
+	select {
+	case signal := <-sealed:
+		assert.Equal(t, int64(10), signal.SegmentBelongs.SegmentID)
+	case <-time.After(time.Second):
+		t.Fatal("recovered over-target segment was not sealed during registration")
+	}
+	m.UnregisterSealOperator(sealOperator)
+}
+
+func TestCapacityScanRecoversDroppedSealNotification(t *testing.T) {
+	stat := createSegmentStats(110, 410, 400)
+	belongs := SegmentBelongs{
+		PChannel:     "pchannel",
+		VChannel:     "vchannel",
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    11,
+	}
+	m := &StatsManager{
+		segmentStats:  map[int64]*SegmentStats{11: stat},
+		segmentIndex:  map[int64]SegmentBelongs{11: belongs},
+		sealOperators: make(map[string]SealOperator),
+	}
+	worker := &sealWorker{
+		statsManager: m,
+		sealNotifier: make(chan sealSegmentIDWithPolicy, 1),
+	}
+	m.worker = worker
+
+	sealed := make(chan utils.SealSegmentSignal, 1)
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().AsyncFlushSegment(mock.MatchedBy(func(signal utils.SealSegmentSignal) bool {
+		return signal.SegmentBelongs.SegmentID == 11 && signal.SealPolicy.Policy == policy.PolicyNameCapacity
+	})).Run(func(signal utils.SealSegmentSignal) {
+		sealed <- signal
+	}).Once()
+	m.sealOperators[belongs.PChannel] = sealOperator
+
+	// Saturate the best-effort notifier so the capacity hint is dropped.
+	worker.sealNotifier <- sealSegmentIDWithPolicy{segmentID: 999, sealPolicy: policy.PolicyCapacity()}
+	worker.NotifySealSegment(11, policy.PolicyCapacity())
+	select {
+	case signal := <-sealed:
+		t.Fatalf("capacity seal unexpectedly bypassed the saturated notifier for segment %d", signal.SegmentBelongs.SegmentID)
+	default:
+	}
+
+	// This is the same scan invoked by the worker timer.
+	worker.notifyToSealSegmentWithCapacityPolicy()
+	select {
+	case signal := <-sealed:
+		assert.Equal(t, int64(11), signal.SegmentBelongs.SegmentID)
+	case <-time.After(time.Second):
+		t.Fatal("periodic capacity scan did not recover the dropped notification")
+	}
 }
 
 func TestStatsManagerRuntimeFlushSizeForMemoryPressure(t *testing.T) {
@@ -621,6 +717,7 @@ func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *Seg
 			Rows:       row,
 			BinarySize: binarySize,
 		},
+		MaxRows:          math.MaxUint64,
 		MaxBinarySize:    maxBinarSize,
 		CreateTime:       time.Now(),
 		LastModifiedTime: time.Now(),

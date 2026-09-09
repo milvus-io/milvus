@@ -471,7 +471,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	})
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, q.mixCoord)
+		dataCoordTopology, err := getDataCoordTopology(ctx, q.mixCoord)
 		if err != nil {
 			return err
 		}

@@ -76,7 +76,7 @@ func getQuotaMetrics(node *Proxy) (*metricsinfo.ProxyQuotaMetrics, error) {
 	return &metricsinfo.ProxyQuotaMetrics{
 		Hms:          metricsinfo.HardwareMetrics{},
 		Rms:          rms,
-		QueueMetrics: node.sched.getMetrics(),
+		QueueMetrics: node.sched.GetMetrics(),
 	}, nil
 }
 

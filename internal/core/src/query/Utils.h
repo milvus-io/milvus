@@ -22,11 +22,20 @@
 #include "common/Consts.h"
 #include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
+#include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "knowhere/array_store.h"
 
 namespace milvus::query {
+inline bool
+CanUseStrictGroupFilteredIterator(const SearchInfo& info, int64_t nq) {
+    return info.strict_group_acceptance_threshold_ > 0 &&
+           info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+           nq == 1 && !info.element_level() &&
+           info.group_by_field_ids_.size() == 1;
+}
+
 inline void
 FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
     auto total_num = num_queries * topk;

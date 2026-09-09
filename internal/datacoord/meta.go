@@ -97,6 +97,10 @@ type meta struct {
 
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
+	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
+	// segment. It must be acquired before segMu. Manifest I/O runs outside
+	// segMu; final full-record catalog and memory publication runs under segMu.
+	segmentManifestLocks *lock.KeyLock[int64]
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -272,13 +276,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:          ctx,
-		catalog:      catalog,
-		collections:  typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
-		chunkManager: chunkManager,
-		broker:       broker,
+		ctx:                  ctx,
+		catalog:              catalog,
+		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:             NewSegmentsInfo(),
+		segmentManifestLocks: lock.NewKeyLock[int64](),
+		channelCPs:           newChannelCps(),
+		chunkManager:         chunkManager,
+		broker:               broker,
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -1302,6 +1307,9 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	if len(u.deltalogs) == 0 {
 		return false
 	}
+	if u.segment.GetStorageVersion() == storage.StorageV3 && u.segment.GetManifestPath() != "" {
+		return modPack.fail(merr.WrapErrServiceInternalMsg("StorageV3 L0 manifest publication must use CommitSegmentManifest, segmentID=%d", u.segmentID))
+	}
 
 	if u.segment.GetManifestPath() == "" {
 		if err := binlog.CompressFieldBinlogs(u.deltalogs); err != nil {
@@ -1406,9 +1414,32 @@ func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {
 		if err := updateManifestPathIfNewer(u.segment, u.manifestPath); err != nil {
 			return modPack.fail(err)
 		}
-		clearBinlogPaths(u.deltalogs)
 	}
-	return addDeltalogsToSegment(modPack, u.segmentID, u.segment, u.deltalogs)
+	return applyL0Deltalogs(modPack, u.segmentID, u.segment, u.deltalogs)
+}
+
+// applyL0Deltalogs is the catalog half of an L0 result. Both the legacy L0
+// manifest writer and the segment-manifest commit adapter use it, so merging,
+// statistics accumulation, retry deduplication, and path elision are shared.
+func applyL0Deltalogs(modPack *updateSegmentPack, segmentID int64, segment *SegmentInfo, deltalogs []*datapb.FieldBinlog) bool {
+	if segment.GetManifestPath() != "" {
+		clearBinlogPaths(deltalogs)
+	}
+	return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
+}
+
+// AddL0DeltalogsOperator applies an L0 result after its manifest pointer has
+// been published separately. It deliberately does not perform manifest I/O.
+func AddL0DeltalogsOperator(segmentID int64, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(modPack.meta.ctx, "meta update: add L0 deltalog failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+		return applyL0Deltalogs(modPack, segmentID, segment, deltalogs)
+	}
 }
 
 func AddL0DeltalogsAndUpdateManifestOperator(
@@ -1595,6 +1626,63 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 	}
 }
 
+// UpdateBumpSchemaVersionMaterializationOperator applies the catalog half of an
+// in-place schema-bump materialization to a segment clone. It is the operator
+// counterpart of the pre-CommitSegmentManifest completeBumpSchemaVersionCompactionMutation
+// in-place branch, minus the manifest CAS and pointer write, which
+// CommitSegmentManifest now owns. It:
+//   - upserts the freshly written column groups onto SegmentInfo.Binlogs
+//     (mergeSegmentColumnGroups, idempotent by FieldID) so the materialized
+//     field becomes indexable — this is load-bearing, see buildNewInsertLogsV3;
+//   - advances the schema version (never regresses it);
+//   - folds the reported footprint INCREMENT into Stats.
+//
+// It must NOT set ManifestPath: CommitSegmentManifest sets it from the revision
+// it commits. Replay idempotency is enforced by the caller
+// (commitBumpV3Materialization short-circuits once the persisted schema version
+// has reached the target), and the column-group merge is itself idempotent by
+// FieldID, so this operator is a straight apply.
+func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVersion int32, newGroups []*datapb.FieldBinlog, statsDelta *datapb.Statistics) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			modPack.err = merr.WrapErrSegmentNotFound(segmentID)
+			return false
+		}
+		before := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
+
+		if len(newGroups) > 0 {
+			merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs,
+				lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
+			segment.Binlogs = merged
+			if len(droppedFieldIDs) > 0 {
+				// Materialization only ADDS output-field column groups; it must
+				// never empty a pre-existing group. A non-empty drop set means the
+				// result collides with existing data — refuse rather than silently
+				// orphan a group's KV.
+				modPack.err = merr.WrapErrServiceInternalMsg("schema bump materialization dropped column groups %v for segment %d", droppedFieldIDs, segmentID)
+				return false
+			}
+		}
+
+		if newSchemaVersion > segment.GetSchemaVersion() {
+			segment.SchemaVersion = newSchemaVersion
+		}
+
+		if statsDelta != nil {
+			segment.Stats = addStatsDelta(modPack.meta.ctx, segmentID, segment.GetStats(), statsDelta)
+		}
+
+		// Bump DataVersion so querynodes with the segment loaded Reopen and pick
+		// up the new column group. Materialization always changes Binlogs, so this
+		// fires; guard on equality anyway to stay a no-op on an empty apply.
+		if !proto.Equal(before, segment.SegmentInfo) {
+			segment.DataVersion++
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -1670,7 +1758,23 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 
 		// update segments num rows
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if count > 0 {
+		// V3 segments carry the authoritative cumulative row count on the
+		// checkpoint (FlushedRows + batchRows maintained on the writer). Their
+		// in-memory binlog arrays are a pass-through cache that may be empty
+		// (V3 recovery) or delta-only (growing source flush), so the
+		// array-derived count must never override the checkpoint.
+		if segment.GetStorageVersion() == storage.StorageV3 {
+			if cpNumRows > 0 {
+				if cpNumRows != count && count > 0 {
+					mlog.Info(modPack.meta.ctx, "check point reported row count inconsistent with binlog row count",
+						mlog.Int64("segmentID", segmentID),
+						mlog.Int64("binlog reported (wrong)", cpNumRows),
+						mlog.Int64("segment binlog row count (correct)", count))
+				}
+				segment.NumOfRows = cpNumRows
+			}
+			// no valid checkpoint: keep the current NumOfRows
+		} else if count > 0 {
 			if cpNumRows != count {
 				mlog.Info(modPack.meta.ctx, "check point reported row count inconsistent with binlog row count",
 					mlog.Int64("segmentID", segmentID),
@@ -1678,9 +1782,6 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 					mlog.Int64("segment binlog row count (correct)", count))
 			}
 			segment.NumOfRows = count
-		} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
-			// V3 storage: binlogs are empty, use checkpoint's NumOfRows
-			segment.NumOfRows = cpNumRows
 		}
 
 		return true
@@ -1699,6 +1800,13 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		if manifestPath == "" || segment.ManifestPath == manifestPath {
 			return false
 		}
+		// Inline publication is used by single-writer manifest paths: the flush of
+		// a growing/L0 segment (SaveBinlogPaths, serialized by its single WAL
+		// owner) and the finalization of a fresh copy/import target. These segments
+		// have no concurrent manifest writer, so no CommitSegmentManifest
+		// serialization is needed even for StorageV3. Concurrent post-flush writers
+		// (stats, index, GC, compaction, batch DDL) never reach this operator; they
+		// build revisions and advance the pointer through CommitSegmentManifest.
 		segment.ManifestPath = manifestPath
 		return true
 	}

@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -361,12 +363,28 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
 		return err
 	}
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
-	if err != nil {
-		return err
+
+	var newSegmentIDs []UniqueID
+	if isMaterializationResult(result) {
+		// In-place schema-bump materialization: DataCoord runs the StorageV3
+		// manifest transaction itself via CommitSegmentManifest, which acquires
+		// the per-segment lock then segMu and therefore MUST NOT run inside the
+		// segMu-held CompleteCompactionMutation. Commit it out here, mirroring how
+		// L0 commits V3 deltalogs (see l0CompactionTask.saveSegmentMeta).
+		ids, err := t.commitBumpV3Materialization(context.TODO(), result)
+		if err != nil {
+			return err
+		}
+		newSegmentIDs = ids
+	} else {
+		newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
+		if err != nil {
+			return err
+		}
+		newSegmentIDs = lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
+		metricMutation.commit()
 	}
-	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-	metricMutation.commit()
+
 	for _, newSegID := range newSegmentIDs {
 		select {
 		case getBuildIndexChSingleton() <- newSegID:
@@ -374,13 +392,131 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		}
 	}
 
-	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to setState meta saved", mlog.Err(err))
 		return err
 	}
 	log.Info(context.TODO(), "bumpSchemaVersionTask success to save segment meta")
 	return nil
+}
+
+// isMaterializationResult reports whether a bump result is an in-place function
+// materialization, which ships a serializable manifest delta for DataCoord to
+// commit, rather than a version-bump-only or full-rewrite result adopted through
+// CompleteCompactionMutation.
+func isMaterializationResult(result *datapb.CompactionPlanResult) bool {
+	segs := result.GetSegments()
+	return len(segs) == 1 && segs[0].GetManifestDelta() != nil
+}
+
+// commitBumpV3Materialization publishes an in-place schema-bump materialization
+// through CommitSegmentManifest: DataCoord runs the StorageV3 manifest
+// transaction on the segment's CURRENT manifest from the datanode-shipped
+// descriptors (rebasing against concurrent commits) and, atomically under segMu,
+// upserts the new column groups, advances the schema version, and folds in the
+// Stats increment. It returns the segment IDs to enqueue for index building.
+//
+// This is the schema-bump analog of l0CompactionTask.buildL0V3ManifestCommit
+// (which now batches its targets through CommitSegmentManifests) and obeys the
+// same lock contract: it never runs while segMu is held.
+func (t *bumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context, result *datapb.CompactionPlanResult) ([]UniqueID, error) {
+	if len(t.GetTaskProto().GetInputSegments()) != 1 {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction should have exactly one input segment")
+	}
+	if len(result.GetSegments()) != 1 {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction result should have exactly one segment")
+	}
+	resultSegment := result.GetSegments()[0]
+	segmentID := t.GetTaskProto().GetInputSegments()[0]
+	if resultSegment.GetSegmentID() != segmentID {
+		return nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump materialization result segment %d does not match input segment %d", resultSegment.GetSegmentID(), segmentID)
+	}
+
+	current := t.meta.GetSegment(ctx, segmentID)
+	if current == nil {
+		return nil, merr.WrapErrSegmentNotFound(segmentID)
+	}
+	if !isSegmentHealthy(current) {
+		return nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+	}
+	if current.GetStorageVersion() != storage.StorageV3 || current.GetManifestPath() == "" {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization requires a published StorageV3 manifest, segmentID=%d", segmentID)
+	}
+	if current.GetIsInvisible() {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction input segment should not be invisible")
+	}
+	if t.GetTaskProto().GetSchema() == nil {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction requires task schema")
+	}
+	newSchemaVersion := t.GetTaskProto().GetSchema().GetVersion()
+
+	// Restart-safe idempotent-replay guard. Materialization advances the segment
+	// schema version to newSchemaVersion atomically with the column-group /
+	// manifest / Stats commit (all in one CommitSegmentManifest catalog write),
+	// and the segment is exclusively locked for compaction, so nothing else
+	// advances its schema version. Therefore the persisted schema version is an
+	// exactly-once token:
+	//   - current < target: not yet applied (or a prior attempt failed before its
+	//     catalog write, leaving the pointer and version untouched) -> commit.
+	//   - current == target: already applied and persisted -> short-circuit before
+	//     any object-storage I/O, so a saveSegmentMeta retry (even across a
+	//     DataCoord restart, where a V3 segment's in-memory Binlogs are empty
+	//     until rebuilt from the manifest) neither double-adds column groups to
+	//     the manifest nor double-counts Stats.
+	//   - current > target: a newer bump already superseded this stale task.
+	// This replaces the resultManifest==currentManifest replay check the pre-baked
+	// adoption path used, and unlike an in-memory Binlogs diff it survives restart.
+	if current.GetSchemaVersion() == newSchemaVersion {
+		mlog.Info(ctx, "schema bump materialization already applied; skipping manifest commit",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.Int64("segmentID", segmentID),
+			mlog.Int32("schemaVersion", newSchemaVersion))
+		return []UniqueID{segmentID}, nil
+	}
+	if current.GetSchemaVersion() > newSchemaVersion {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction schema version is older than input segment")
+	}
+
+	delta := resultSegment.GetManifestDelta()
+	if delta == nil || len(delta.GetColumnGroups()) == 0 {
+		return nil, merr.WrapErrIllegalCompactionPlan("schema bump materialization result missing manifest delta")
+	}
+
+	manifestMeta, ok := t.meta.(interface {
+		CommitSegmentManifest(context.Context, SegmentManifestCommit) error
+	})
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization requires DataCoord meta implementation")
+	}
+
+	// The column groups are merged onto SegmentInfo.Binlogs idempotently by
+	// FieldID, so the full result set is safe to pass even on the (schema-version
+	// gated) forward path.
+	// No ExpectedManifest: a structured mutation is generated from the pointer
+	// current under the per-segment commit lock, and CommitSegmentManifest aborts
+	// publication itself if the pointer moves during manifest I/O. Pinning the
+	// pre-lock read here would only spuriously abort after a benign concurrent
+	// commit (e.g. a stats publication) advanced the pointer.
+	if err := manifestMeta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: compaction.CreateStorageConfig(),
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
+				Stats:        packed.StatEntriesFromProto(delta.GetStats()),
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			Operators: []UpdateOperator{
+				UpdateBumpSchemaVersionMaterializationOperator(segmentID, newSchemaVersion, resultSegment.GetInsertLogs(), resultSegment.GetStats()),
+			},
+		},
+	}); err != nil {
+		return nil, err
+	}
+	return []UniqueID{segmentID}, nil
 }
 
 func (t *bumpSchemaVersionTask) processMetaSaved() bool {

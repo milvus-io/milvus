@@ -539,3 +539,5 @@ LocalPlanner::Plan(
 
 }  // namespace exec
 }  // namespace milvus
+
+#undef CALL_OPERATOR

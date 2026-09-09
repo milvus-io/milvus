@@ -1044,6 +1044,84 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
 }
 
 TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     SealedReadSnapshotMirrorsSegmentReadinessSemantics) {
+    constexpr int64_t kRowCount = 8;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kRowCount / 2, 100, 0, 1, 1);
+    auto second = DataGen(schema, kRowCount / 2, 101, 0, 1, 1);
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    // Index-only field: raw data dropped, ready bit clear in steady state.
+    std::vector<int64_t> index_values(kRowCount);
+    std::iota(index_values.begin(), index_values.end(), int64_t{0});
+    auto index_valid = std::make_unique<bool[]>(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        index_valid[i] = true;
+    }
+    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = value_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("snapshot-index-only", std::move(scalar_index));
+    segment->LoadIndex(load_index_info);
+    segment->DropFieldData(value_fid);
+    ASSERT_FALSE(segment->HasFieldData(value_fid));
+
+    // The snapshot must replicate the segment's per-method readiness
+    // semantics: a clear ready bit yields 0 for chunk_size / num_chunk_data,
+    // and get_chunk_by_offset / num_rows_until_chunk do not gate on readiness.
+    auto snapshot = segment->CaptureReadSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(segment->num_chunk_data(value_fid), 0);
+    EXPECT_EQ(snapshot->num_chunk_data(value_fid),
+              segment->num_chunk_data(value_fid));
+    ASSERT_EQ(segment->chunk_size(value_fid, 0), 0);
+    EXPECT_EQ(snapshot->chunk_size(value_fid, 0),
+              segment->chunk_size(value_fid, 0));
+
+    // Field with raw data loaded: full parity on every accessor.
+    EXPECT_EQ(snapshot->num_chunk_data(pk_fid),
+              segment->num_chunk_data(pk_fid));
+    EXPECT_EQ(snapshot->chunk_size(pk_fid, 1), segment->chunk_size(pk_fid, 1));
+    EXPECT_EQ(snapshot->num_rows_until_chunk(pk_fid, 1),
+              segment->num_rows_until_chunk(pk_fid, 1));
+    EXPECT_EQ(snapshot->get_chunk_by_offset(pk_fid, 5),
+              segment->get_chunk_by_offset(pk_fid, 5));
+    EXPECT_EQ(snapshot->get_row_count(), segment->get_row_count());
+}
+
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     SealedReadSnapshotRejectsClearedState) {
+    constexpr int64_t kRowCount = 8;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kRowCount / 2, 100, 0, 1, 1);
+    auto second = DataGen(schema, kRowCount / 2, 101, 0, 1, 1);
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    // A cleared state publishes runtime == nullptr; capturing a snapshot must
+    // fail loudly instead of dereferencing the null runtime.
+    segment->ClearData();
+    EXPECT_THROW({ auto snapshot = segment->CaptureReadSnapshot(); },
+                 milvus::SegcoreError);
+}
+
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
      NullableTimestamptzCallbackHandlesNullData) {
     constexpr int64_t kRowCount = 8;
     auto schema = std::make_shared<Schema>();

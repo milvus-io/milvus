@@ -17,181 +17,24 @@
 package storagev2
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestGetFilesystemKeyFromStorageConfig(t *testing.T) {
-	tests := []struct {
-		name          string
-		storageConfig *indexpb.StorageConfig
-		expected      string
-	}{
-		{
-			name:          "nil storage config",
-			storageConfig: nil,
-			expected:      "",
-		},
-		{
-			name: "local storage with root path",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "local",
-				RootPath:    "/var/lib/milvus/data",
-			},
-			expected: "/var/lib/milvus/data",
-		},
-		{
-			name: "local storage with empty root path",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "local",
-				RootPath:    "",
-			},
-			expected: "",
-		},
-		{
-			name: "minio storage valid address and bucket",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "localhost:9000",
-				BucketName:  "test-bucket",
-			},
-			expected: "localhost:9000/test-bucket",
-		},
-		{
-			name: "minio storage empty address",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "",
-				BucketName:  "test-bucket",
-			},
-			expected: "",
-		},
-		{
-			name: "minio storage empty bucket name",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "localhost:9000",
-				BucketName:  "",
-			},
-			expected: "",
-		},
-		{
-			name: "minio storage both empty",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "",
-				BucketName:  "",
-			},
-			expected: "",
-		},
-		{
-			name: "S3 endpoint format",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "s3",
-				Address:     "s3.amazonaws.com",
-				BucketName:  "my-bucket",
-			},
-			expected: "s3.amazonaws.com/my-bucket",
-		},
-		{
-			name: "minio with IP address",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "192.168.1.100:9000",
-				BucketName:  "data-bucket",
-			},
-			expected: "192.168.1.100:9000/data-bucket",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetFilesystemKeyFromStorageConfig(tt.storageConfig)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestGetFilesystemKeyFromStorageConfigWithOtherFields(t *testing.T) {
-	// Test that other fields in StorageConfig don't affect the result for object storage
-	storageConfig := &indexpb.StorageConfig{
-		Address:           "localhost:9000",
-		BucketName:        "test-bucket",
-		AccessKeyID:       "access-key",
-		SecretAccessKey:   "secret-key",
-		UseSSL:            true,
-		RootPath:          "/root/path",
-		UseIAM:            false,
-		IAMEndpoint:       "iam-endpoint",
-		StorageType:       "s3",
-		UseVirtualHost:    true,
-		Region:            "us-east-1",
-		CloudProvider:     "aws",
-		RequestTimeoutMs:  30000,
-		SslCACert:         "cert",
-		GcpCredentialJSON: "json",
-		MaxConnections:    10,
-	}
-
-	result := GetFilesystemKeyFromStorageConfig(storageConfig)
-	assert.Equal(t, "localhost:9000/test-bucket", result)
-
-	// Test that other fields don't affect the result for local storage
-	localConfig := &indexpb.StorageConfig{
-		Address:           "localhost:9000", // Should be ignored for local
-		BucketName:        "test-bucket",    // Should be ignored for local
-		AccessKeyID:       "access-key",
-		SecretAccessKey:   "secret-key",
-		UseSSL:            true,
-		RootPath:          "/var/lib/milvus/data",
-		UseIAM:            false,
-		IAMEndpoint:       "iam-endpoint",
-		StorageType:       "local",
-		UseVirtualHost:    true,
-		Region:            "us-east-1",
-		CloudProvider:     "aws",
-		RequestTimeoutMs:  30000,
-		SslCACert:         "cert",
-		GcpCredentialJSON: "json",
-		MaxConnections:    10,
-	}
-
-	result = GetFilesystemKeyFromStorageConfig(localConfig)
-	assert.Equal(t, "/var/lib/milvus/data", result)
-}
-
-// TestGetFilesystemMetricsWithConfig tests GetFilesystemMetricsWithConfig with local storage
 func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
 	localConfig := &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    dir,
 	}
 	metrics, err := GetFilesystemMetricsWithConfig(localConfig)
-	if err != nil {
-		t.Skipf("Skipping CGO test: %v", err)
-		return
-	}
-
-	require.NotNil(t, metrics, "Metrics should not be nil")
+	require.NoError(t, err)
+	require.NotNil(t, metrics)
 	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
@@ -217,172 +60,60 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	}
 }
 
-// TestPublishFilesystemMetricsWithLocalConfig tests PublishFilesystemMetricsWithConfig
-func TestPublishFilesystemMetricsWithLocalConfig(t *testing.T) {
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	localConfig := &indexpb.StorageConfig{
-		StorageType: "local",
-		RootPath:    dir,
-	}
-	metrics, err := PublishFilesystemMetricsWithConfig(localConfig)
-	if err != nil {
-		t.Skipf("Skipping CGO test: %v", err)
-		return
+func TestListFilesystemMetrics(t *testing.T) {
+	metricsBefore, err := ListFilesystemMetrics()
+	require.NoError(t, err)
+	existingDisplayKeys := make(map[string]struct{}, len(metricsBefore))
+	for _, fsMetrics := range metricsBefore {
+		existingDisplayKeys[fsMetrics.DisplayKey] = struct{}{}
 	}
 
-	require.NotNil(t, metrics, "Metrics should not be nil")
-	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.GetFileInfoCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.FailedCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadCreated, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
-}
-
-// TestPublishFilesystemMetricsWithConfig tests PublishFilesystemMetricsWithConfig function
-func TestPublishFilesystemMetricsWithConfig(t *testing.T) {
-	// Set up local storage for testing
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	// Initialize local arrow filesystem
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	// Test with local storage config
-	localConfig := &indexpb.StorageConfig{
-		StorageType: "local",
-		RootPath:    dir,
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	expectedDisplayPrefixes := map[string]struct{}{
+		"file://" + dirA + "#fs:": {},
+		"file://" + dirB + "#fs:": {},
+	}
+	for _, dir := range []string{dirA, dirB} {
+		_, err := GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
+			StorageType: "local",
+			RootPath:    dir,
+		})
+		require.NoError(t, err)
 	}
 
-	metrics, err := PublishFilesystemMetricsWithConfig(localConfig)
-	assert.NoError(t, err)
+	metricsList, err := ListFilesystemMetrics()
+	require.NoError(t, err)
 
-	// Verify metrics struct is not nil
-	require.NotNil(t, metrics, "Metrics should not be nil")
-
-	// Verify all 8 metrics fields are present
-	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.GetFileInfoCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.FailedCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadCreated, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
+	newFilesystemCount := 0
+	for _, fsMetrics := range metricsList {
+		if _, ok := existingDisplayKeys[fsMetrics.DisplayKey]; ok {
+			continue
+		}
+		newFilesystemCount++
+		matched := false
+		for prefix := range expectedDisplayPrefixes {
+			if strings.HasPrefix(fsMetrics.DisplayKey, prefix) {
+				delete(expectedDisplayPrefixes, prefix)
+				matched = true
+				break
+			}
+		}
+		assert.True(t, matched, fsMetrics.DisplayKey)
+		assert.GreaterOrEqual(t, fsMetrics.ReadCount, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.WriteCount, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.ReadBytes, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.WriteBytes, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.GetFileInfoCount, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.FailedCount, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadCreated, int64(0))
+		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadFinished, int64(0))
+	}
+	require.Equal(t, 2, newFilesystemCount)
+	require.Empty(t, expectedDisplayPrefixes)
 }
 
-// TestPublishDefaultFilesystemMetrics tests PublishDefaultFilesystemMetrics function
-func TestPublishDefaultFilesystemMetrics(t *testing.T) {
-	// Set up local storage for testing
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	// Initialize local arrow filesystem
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	// Test PublishDefaultFilesystemMetrics
-	metrics, err := PublishDefaultFilesystemMetrics()
-	assert.NoError(t, err)
-	assert.NotNil(t, metrics, "Metrics should not be nil")
-}
-
-// TestNilConfig tests error handling for nil config
 func TestNilConfig(t *testing.T) {
 	_, err := GetFilesystemMetricsWithConfig(nil)
 	assert.Error(t, err)
-
-	_, err = PublishFilesystemMetricsWithConfig(nil)
-	assert.Error(t, err)
-}
-
-// TestGetFilesystemKeyFromStorageConfigEdgeCases tests edge cases for key generation
-func TestGetFilesystemKeyFromStorageConfigEdgeCases(t *testing.T) {
-	tests := []struct {
-		name          string
-		storageConfig *indexpb.StorageConfig
-		expected      string
-	}{
-		{
-			name: "empty storage type defaults to object storage logic",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "",
-				Address:     "localhost:9000",
-				BucketName:  "bucket",
-			},
-			expected: "localhost:9000/bucket",
-		},
-		{
-			name: "unknown storage type uses object storage logic",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "unknown",
-				Address:     "localhost:9000",
-				BucketName:  "bucket",
-			},
-			expected: "localhost:9000/bucket",
-		},
-		{
-			name: "azure storage type",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "azure",
-				Address:     "account.blob.core.windows.net",
-				BucketName:  "container",
-			},
-			expected: "account.blob.core.windows.net/container",
-		},
-		{
-			name: "gcp storage type",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "gcp",
-				Address:     "storage.googleapis.com",
-				BucketName:  "my-gcp-bucket",
-			},
-			expected: "storage.googleapis.com/my-gcp-bucket",
-		},
-		{
-			name: "address with special characters",
-			storageConfig: &indexpb.StorageConfig{
-				StorageType: "minio",
-				Address:     "minio-service.namespace.svc.cluster.local:9000",
-				BucketName:  "bucket-name-with-dashes",
-			},
-			expected: "minio-service.namespace.svc.cluster.local:9000/bucket-name-with-dashes",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetFilesystemKeyFromStorageConfig(tt.storageConfig)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }

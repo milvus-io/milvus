@@ -116,6 +116,10 @@ func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 	for k, v := range pConfig {
 		config.SetKey(k, v)
 	}
+	// ProducerExtraConfig includes the raw message.max.bytes value. Keep the
+	// normalized ParamItem authoritative here as well, so an undersized raw
+	// value cannot prevent the health-check producer from being created.
+	config.SetKey("message.max.bytes", paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.GetAsInt())
 	producer, err := kafka.NewProducer(&config)
 	if err != nil {
 		clusterStatus.Reason = fmt.Sprintf("failed to create Kafka producer: %v", err)

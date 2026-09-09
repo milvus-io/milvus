@@ -1340,6 +1340,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	// A fresh StorageV3 copy target publishes its first manifest inline via
+	// UpdateManifest/UpdateSegmentsInfo, which writes through AlterSegments.
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{

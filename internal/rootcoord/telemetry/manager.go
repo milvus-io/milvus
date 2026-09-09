@@ -74,6 +74,33 @@ type TelemetryConfig struct {
 // window to serve and one to absorb the quiet one.
 const defaultRetainedWindows = 2
 
+// The heartbeat response has no authoritative config hash, so an empty command list is
+// ambiguous to existing clients: it can mean either "your non-empty hash still matches" or
+// "the effective config set is now empty". When the latter follows deletion of the last
+// matching config, send this stable no-op persistent command once. All telemetry SDKs accept
+// an empty push_config object without changing runtime settings and compute the same hash from
+// command ID, type, and payload.
+//
+// Empty-string and sentinel hashes are both accepted as the empty state. That keeps fresh
+// clients on the original empty hash while allowing a client with a stale non-empty hash to
+// converge without a protobuf change. The sentinel is synthesized at response time; it must
+// never be stored or exposed through the command APIs.
+const (
+	emptyConfigSentinelCommandID = "00000000-0000-0000-0000-000000000000"
+	emptyConfigSentinelHash      = "d34aea1518ff0217"
+)
+
+func newEmptyConfigSentinelCommand() *commonpb.ClientCommand {
+	return &commonpb.ClientCommand{
+		CommandId:   emptyConfigSentinelCommandID,
+		CommandType: "push_config",
+		Payload:     []byte("{}"),
+		CreateTime:  0,
+		TargetScope: "global",
+		Persistent:  true,
+	}
+}
+
 // normalize replaces values that cannot mean what they say with their defaults.
 //
 // It exists because a caller may build a TelemetryConfig field by field and leave zeroes
@@ -645,6 +672,12 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 		if reply == nil {
 			continue
 		}
+		// The empty-config sentinel is synthesized and has no command-store entry. Its ACK
+		// only confirms that the client adopted the sentinel hash; retaining it would expose
+		// a phantom command in reply history and make cleanup probe a reserved ID.
+		if reply.CommandId == emptyConfigSentinelCommandID {
+			continue
+		}
 
 		cmdType, cmdPayload := m.lookupCommandInfo(reply.CommandId)
 		stored = append(stored, &StoredCommandReply{
@@ -791,7 +824,19 @@ func (m *TelemetryManager) getCommandsForClientWithID(clientID string, req *milv
 		}
 	}
 
-	// Compute hash only over configs this client will receive
+	// The wire response has no authoritative hash. If the last matching config was deleted,
+	// an existing client still reports its old non-empty hash but an ordinary empty response
+	// cannot tell it to clear that hash. Transition only that stale state through a stable
+	// no-op persistent command. Fresh clients keep using the original empty hash, while both
+	// empty representations suppress future sentinel delivery.
+	if len(filteredConfigs) == 0 {
+		if req.ConfigHash != "" && req.ConfigHash != emptyConfigSentinelHash {
+			result = append(result, newEmptyConfigSentinelCommand())
+		}
+		return result
+	}
+
+	// Compute hash only over configs this client will receive.
 	filteredConfigHash := computeClientConfigHash(filteredConfigs)
 
 	// Only send configs if client's hash differs from filtered hash

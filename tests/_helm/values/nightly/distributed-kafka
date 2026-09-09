@@ -86,6 +86,9 @@ extraConfigFiles:
         # enable storage v3
         useLoonFFI: true
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         bumpSchemaVersion:
           enabled: true

@@ -629,6 +629,37 @@ func runCompact(t *testing.T, f *bumpFixture) *datapb.CompactionSegment {
 	return result.GetSegments()[0]
 }
 
+// materializeShippedDelta plays DataCoord's half of the split additive commit:
+// it applies the CompactionSegment's shipped ManifestDelta onto BaseManifest —
+// the same loon transaction DataCoord's CommitSegmentManifest runs — and
+// returns the resulting manifest path so data assertions can read it back.
+func materializeShippedDelta(t *testing.T, f *bumpFixture, seg *datapb.CompactionSegment) string {
+	t.Helper()
+	delta := seg.GetManifestDelta()
+	require.NotNil(t, delta, "additive result must ship a manifest delta")
+	require.NotEmpty(t, delta.GetColumnGroups(), "shipped delta must carry the new column groups")
+	basePath, baseVersion, err := packed.UnmarshalManifestPath(seg.GetBaseManifest())
+	require.NoError(t, err)
+	manifest, err := packed.CommitManifestUpdates(basePath, baseVersion, f.cfg, &packed.ManifestUpdates{
+		ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
+		Stats:        packed.StatEntriesFromProto(delta.GetStats()),
+	})
+	require.NoError(t, err)
+	return manifest
+}
+
+// runAdditiveCompact runs an additive (in-place) compaction and returns the
+// result segment plus the manifest produced by materializing its shipped
+// delta. The additive path does not commit on the DataNode: the result carries
+// an empty Manifest, the source BaseManifest, and the transaction INPUT as
+// ManifestDelta for DataCoord to commit on the segment's current base.
+func runAdditiveCompact(t *testing.T, f *bumpFixture) (*datapb.CompactionSegment, string) {
+	seg := runCompact(t, f)
+	require.Empty(t, seg.GetManifest(), "additive result must not carry a committed manifest")
+	require.Equal(t, f.sourceManifest, seg.GetBaseManifest())
+	return seg, materializeShippedDelta(t, f, seg)
+}
+
 func fieldIDsOf(schema *schemapb.CollectionSchema) []int64 {
 	ids := make([]int64, 0, len(schema.GetFields()))
 	for _, f := range typeutil.GetAllFieldSchemas(schema) {
@@ -860,12 +891,12 @@ func TestBumpUTAdditiveNullableColumn(t *testing.T) {
 		FieldID: addedID, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true,
 	}))
 
-	seg := runCompact(t, fix)
+	// [A21] delta-adoption prerequisites (empty Manifest, source BaseManifest,
+	// non-empty ManifestDelta) are asserted inside runAdditiveCompact.
+	seg, manifest := runAdditiveCompact(t, fix)
 	require.Equal(t, fix.segment.GetSegmentID(), seg.GetSegmentID(), "additive is in-place")
 	require.EqualValues(t, len(fix.rows), seg.GetNumOfRows())
-	// [A21] CAS adoption prerequisites.
-	require.Equal(t, fix.sourceManifest, seg.GetBaseManifest())
-	require.NotEqual(t, fix.sourceManifest, seg.GetManifest(), "manifest must advance")
+	require.NotEqual(t, fix.sourceManifest, manifest, "materialized manifest must advance")
 
 	// Golden: old columns unchanged, new column all NULL.
 	want := make([]fixtureRow, len(fix.rows))
@@ -880,8 +911,8 @@ func TestBumpUTAdditiveNullableColumn(t *testing.T) {
 	}
 	readSchema := &schemapb.CollectionSchema{Fields: append(physicalReadFields(fix.sourceSchema),
 		fix.targetSchema.GetFields()[len(fix.targetSchema.GetFields())-1])}
-	verifySegmentData(t, fix.cfg, seg.GetManifest(), readSchema, want)
-	verifyManifestFields(t, fix.cfg, seg.GetManifest(), []int64{addedID}, nil)
+	verifySegmentData(t, fix.cfg, manifest, readSchema, want)
+	verifyManifestFields(t, fix.cfg, manifest, []int64{addedID}, nil)
 
 	// Increment stats describe only the new column group.
 	require.NotNil(t, seg.GetStats())
@@ -892,7 +923,7 @@ func TestBumpUTAdditiveNullableColumn(t *testing.T) {
 	require.EqualValues(t, len(fix.rows), seg.GetInsertLogs()[0].GetBinlogs()[0].GetEntriesNum())
 
 	// [TS1][S0] additive must not touch system columns: both pass through.
-	verifySystemColumns(t, fix, seg.GetManifest(),
+	verifySystemColumns(t, fix, manifest,
 		func(i int) int64 { return int64(i) },
 		func(i int) int64 { return int64(fix.rows[i].ts) })
 }
@@ -992,13 +1023,13 @@ func TestBumpUTAdditiveDefaultColumn(t *testing.T) {
 		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
 	}))
 
-	seg := runCompact(t, fix)
+	seg, manifest := runAdditiveCompact(t, fix)
 	// #52781 (merged): the packed reader default-fills absent default-valued fields,
 	// so the added column materializes its declared default (42), not NULL.
 	want := goldenWithAdded(fix.rows, addedID, func(int) any { return int64(42) })
 	readSchema := &schemapb.CollectionSchema{Fields: append(physicalReadFields(fix.sourceSchema),
 		typeutil.GetField(fix.targetSchema, addedID))}
-	verifySegmentData(t, fix.cfg, seg.GetManifest(), readSchema, want)
+	verifySegmentData(t, fix.cfg, manifest, readSchema, want)
 	require.EqualValues(t, 0, seg.GetStats().GetNullCounts()[addedID])
 }
 
@@ -1021,7 +1052,7 @@ func TestBumpUTAdditiveMixedColumns(t *testing.T) {
 			},
 		))
 
-	seg := runCompact(t, fix)
+	seg, manifest := runAdditiveCompact(t, fix)
 	want := goldenWithAdded(fix.rows, nullID, func(int) any { return nil })
 	want = goldenWithAdded(want, defID, func(int) any { return int64(7) })
 	want = goldenWithAdded(want, textID, func(int) any { return nil })
@@ -1029,8 +1060,8 @@ func TestBumpUTAdditiveMixedColumns(t *testing.T) {
 		typeutil.GetField(fix.targetSchema, nullID),
 		typeutil.GetField(fix.targetSchema, defID),
 		typeutil.GetField(fix.targetSchema, textID))}
-	verifySegmentData(t, fix.cfg, seg.GetManifest(), readSchema, want)
-	verifyManifestFields(t, fix.cfg, seg.GetManifest(), []int64{nullID, defID, textID}, nil)
+	verifySegmentData(t, fix.cfg, manifest, readSchema, want)
+	verifyManifestFields(t, fix.cfg, manifest, []int64{nullID, defID, textID}, nil)
 	require.EqualValues(t, 3, seg.GetStats().GetInsertBinlogCount())
 }
 
@@ -1040,7 +1071,7 @@ func TestBumpUTAdditiveBM25Materialization(t *testing.T) {
 	setupBumpUTEnv(t)
 	fix := buildBumpFixture(t, withBM25Target())
 
-	seg := runCompact(t, fix)
+	seg, manifest := runAdditiveCompact(t, fix)
 	require.EqualValues(t, len(fix.rows), seg.GetNumOfRows())
 	texts := make([]any, 0, 1)
 	rows := make([]string, len(fix.rows))
@@ -1049,7 +1080,7 @@ func TestBumpUTAdditiveBM25Materialization(t *testing.T) {
 	}
 	texts = append(texts, rows)
 	expected := expectedBM25SparseRows(t, fix.targetSchema, fix.targetSchema.GetFunctions()[0], texts...)
-	requireSparseRows(t, fix, seg.GetManifest(), 102, len(fix.rows), expected)
+	requireSparseRows(t, fix, manifest, 102, len(fix.rows), expected)
 	// [ST1][S1] the committed stats ledger must equal the accumulation of
 	// exactly the written rows — deserializable+non-empty cannot see
 	// over/under-counting.
@@ -1099,8 +1130,8 @@ func TestBumpUTAdditiveMinHashMaterialization(t *testing.T) {
 		}),
 	)
 
-	seg := runCompact(t, fix)
-	got, total := readAllColumns(t, fix.cfg, seg.GetManifest(), &schemapb.CollectionSchema{
+	_, manifest := runAdditiveCompact(t, fix)
+	got, total := readAllColumns(t, fix.cfg, manifest, &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(fix.targetSchema, 102)},
 	})
 	require.Equal(t, len(fix.rows), total)
@@ -1136,8 +1167,8 @@ func TestBumpUTAdditiveBM25MultiAnalyzer(t *testing.T) {
 		withMultiAnalyzerBM25Target(),
 	)
 
-	seg := runCompact(t, fix)
-	requireSparseRows(t, fix, seg.GetManifest(), 102, len(fix.rows), nil) // multi-analyzer needs the lang input; alignment oracle lives in A4/F21
+	_, manifest := runAdditiveCompact(t, fix)
+	requireSparseRows(t, fix, manifest, 102, len(fix.rows), nil) // multi-analyzer needs the lang input; alignment oracle lives in A4/F21
 }
 
 // [A7][S0] multi-batch additive: new column stays row-aligned with the anchor
@@ -1154,14 +1185,14 @@ func TestBumpUTAdditiveMultiBatchAlignment(t *testing.T) {
 			FieldID: addedID, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true,
 		}))
 
-	seg := runCompact(t, fix)
+	seg, manifest := runAdditiveCompact(t, fix)
 	require.EqualValues(t, rows, seg.GetNumOfRows())
 
 	readSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		typeutil.GetField(fix.targetSchema, bumpFxPKField),
 		typeutil.GetField(fix.targetSchema, addedID),
 	}}
-	got, total := readAllColumns(t, fix.cfg, seg.GetManifest(), readSchema)
+	got, total := readAllColumns(t, fix.cfg, manifest, readSchema)
 	require.Equal(t, rows, total)
 	for i := 0; i < rows; i += 997 { // stride sampling incl. batch boundaries
 		require.Equal(t, int64(i), got[bumpFxPKField][i], "pk alignment at %d", i)
@@ -1183,13 +1214,13 @@ func TestBumpUTAdditiveFunctionInputAddedAfterSeal(t *testing.T) {
 		withBM25Target(),
 	)
 
-	seg := runCompact(t, fix)
+	seg, manifest := runAdditiveCompact(t, fix)
 	require.EqualValues(t, len(fix.rows), seg.GetNumOfRows())
 	// Both the synthesized input column and the function output must land.
 	// Empty synthesized text yields empty embeddings, so cells may legally read
 	// back NULL — row cardinality is the invariant here.
-	verifyManifestFields(t, fix.cfg, seg.GetManifest(), []int64{bumpFxTextField, 102}, nil)
-	_, total := readAllColumns(t, fix.cfg, seg.GetManifest(), &schemapb.CollectionSchema{
+	verifyManifestFields(t, fix.cfg, manifest, []int64{bumpFxTextField, 102}, nil)
+	_, total := readAllColumns(t, fix.cfg, manifest, &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(fix.targetSchema, 102)},
 	})
 	require.Equal(t, len(fix.rows), total)
@@ -1623,7 +1654,6 @@ func faultWriterResult(w *faultBatchWriter, fix *bumpFixture) *bumpSchemaVersion
 		}},
 		storageVersion: storage.StorageV3,
 		basePath:       basePath,
-		baseVersion:    1,
 	}
 }
 
@@ -1675,22 +1705,23 @@ func TestBumpUTFaultAdditiveCloseError(t *testing.T) {
 	verifySourceIntact(t, fix)
 }
 
-// [A14][S1] manifest commit fails: writer output is still destroyed and the
-// source manifest pointer never advances.
-func TestBumpUTFaultAdditiveCommitError(t *testing.T) {
+// [A14][S1] delta extraction fails after Close (the writer output exposes no
+// column-group descriptors): error surfaces and the source manifest pointer
+// never advances. The manifest COMMIT itself moved to DataCoord — the additive
+// result ships a ManifestDelta instead of committing here — so commit-failure
+// handling is covered by the CommitSegmentManifest tests in datacoord.
+func TestBumpUTFaultAdditiveDeltaExtractionError(t *testing.T) {
 	setupBumpUTEnv(t)
 	fix := additiveFixture(t)
 	fw := &faultBatchWriter{}
 	writerPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).setupWriter).
 		Return(faultWriterResult(fw, fix), nil).Build()
 	defer writerPatch.UnPatch()
-	commitPatch := mockey.Mock(packed.CommitManifestUpdates).
-		Return("", errBumpUTInjected).Build()
-	defer commitPatch.UnPatch()
 
 	_, err := fix.task.Compact()
-	require.ErrorIs(t, err, errBumpUTInjected)
-	require.Equal(t, 1, fw.closes, "writer must be closed before commit")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "column group entries")
+	require.Equal(t, 1, fw.closes, "writer must be closed before delta extraction")
 	verifySourceIntact(t, fix)
 }
 
@@ -2097,9 +2128,9 @@ func TestBumpUTAdditiveTextLOBRoundTrip(t *testing.T) {
 	preLob := listLobFiles(t, fix)
 	require.NotEmpty(t, preLob, "fixture must produce a real LOB file")
 
-	seg := runCompact(t, fix)
+	_, manifest := runAdditiveCompact(t, fix)
 
-	require.Equal(t, srcRefs, readTextRefs(t, fix, seg.GetManifest(), textID),
+	require.Equal(t, srcRefs, readTextRefs(t, fix, manifest, textID),
 		"additive must not touch LOB references")
 	require.Equal(t, preLob, listLobFiles(t, fix), "LOB blob files must stay byte-identical")
 }
@@ -2193,8 +2224,8 @@ func TestBumpUTAdditiveDataFileLedgerExactAppend(t *testing.T) {
 	pre := listSegmentDataFiles(t, fix)
 	require.NotEmpty(t, pre)
 
-	seg := runCompact(t, fix)
-	require.NotEmpty(t, seg.GetManifest())
+	_, manifest := runAdditiveCompact(t, fix)
+	require.NotEmpty(t, manifest)
 
 	post := listSegmentDataFiles(t, fix)
 	for f, size := range pre {
@@ -2213,11 +2244,14 @@ func TestBumpUTIdempotentRerunAppendsNothing(t *testing.T) {
 	fix := buildBumpFixture(t, withRows(20), withTargetAddedField(&schemapb.FieldSchema{
 		FieldID: 103, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true,
 	}))
-	first := runCompact(t, fix)
+	// The additive result ships a delta; materialize it (DataCoord's role) so
+	// the re-run sees the reconciled manifest, exactly like a real retry after
+	// a successful adoption.
+	first, firstManifest := runAdditiveCompact(t, fix)
 	mid := listSegmentDataFiles(t, fix)
 
 	segment2 := proto.Clone(fix.segment).(*datapb.CompactionSegmentBinlogs)
-	segment2.Manifest = first.GetManifest()
+	segment2.Manifest = firstManifest
 	segment2.FieldBinlogs = first.GetInsertLogs()
 	plan2 := proto.Clone(fix.task.plan).(*datapb.CompactionPlan)
 	plan2.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{segment2}
@@ -2228,7 +2262,7 @@ func TestBumpUTIdempotentRerunAppendsNothing(t *testing.T) {
 	result2, err := task2.Compact()
 	require.NoError(t, err)
 	seg2 := result2.GetSegments()[0]
-	require.Equal(t, first.GetManifest(), seg2.GetManifest(), "re-run must be a pure metadata bump")
+	require.Equal(t, firstManifest, seg2.GetManifest(), "re-run must be a pure metadata bump")
 	require.Equal(t, mid, listSegmentDataFiles(t, fix), "re-run must not write any data file")
 }
 

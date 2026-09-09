@@ -195,7 +195,7 @@ ClobberStackAndHeap(const std::string& value) {
 
 }  // namespace
 
-TEST(JsonFieldDataTest, FillFieldDataWithDefaultValueOwnsData) {
+TEST(JsonFieldDataTest, DefaultValueRowsSharePreinitializedBuffer) {
     // Regression test for #52843: the default value used to be stored as a
     // non-owning Json view onto a local std::string that dies with
     // FillFieldData, leaving every filled row dangling.
@@ -204,15 +204,48 @@ TEST(JsonFieldDataTest, FillFieldDataWithDefaultValueOwnsData) {
     milvus::proto::schema::ValueField default_value;
     default_value.set_bytes_data(default_json);
 
-    auto field_data = milvus::storage::CreateFieldData(
-        milvus::DataType::JSON, milvus::DataType::NONE, true, 1, 5);
-    field_data->FillFieldData(milvus::DefaultValueType{default_value}, 5);
+    auto field_data = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::JSON,
+        true,
+        5,
+        milvus::DefaultValueType{default_value});
 
     ClobberStackAndHeap(default_json);
 
+    const char* shared_buffer = nullptr;
     for (int i = 0; i < 5; i++) {
         auto* json = static_cast<const milvus::Json*>(field_data->RawValue(i));
         EXPECT_EQ(std::string_view(json->data()),
                   std::string_view(default_json));
+        if (i == 0) {
+            shared_buffer = json->data().data();
+        } else {
+            EXPECT_EQ(json->data().data(), shared_buffer);
+        }
+    }
+}
+
+TEST(FieldDataDefaultConstructionTest, InitializesScalarAndNullRows) {
+    milvus::proto::schema::ValueField default_value;
+    default_value.set_int_data(42);
+    auto default_rows = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::INT32,
+        true,
+        3,
+        milvus::DefaultValueType{default_value});
+
+    ASSERT_EQ(default_rows->Length(), 3);
+    ASSERT_EQ(default_rows->get_null_count(), 0);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_TRUE(default_rows->is_valid(i));
+        EXPECT_EQ(*static_cast<const int32_t*>(default_rows->RawValue(i)), 42);
+    }
+
+    auto null_rows = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::INT32, true, 3, std::nullopt);
+    ASSERT_EQ(null_rows->Length(), 3);
+    ASSERT_EQ(null_rows->get_null_count(), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FALSE(null_rows->is_valid(i));
     }
 }

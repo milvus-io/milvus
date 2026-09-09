@@ -1,12 +1,14 @@
 import functools
 import json
 import math
+import os
 import random
 import re
 import threading
 import time
 import unittest
 import uuid
+import zlib
 from collections import Counter
 from datetime import UTC, datetime
 from enum import Enum
@@ -321,12 +323,77 @@ class Op(Enum):
 timeout = 120
 search_timeout = 30
 query_timeout = 30
+HEAVY_OP_WAIT_SECONDS = 120
+DROP_COLLECTION_POOL_SIZE = 12
+DROP_COLLECTION_REFILL_THRESHOLD = 3
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
 MAX_ERROR_SAMPLE_LENGTH = 500
+
+
+def _wait_for_next_operation(checker, wait_seconds):
+    """Wait between checker operations while remaining responsive to shutdown."""
+    deadline = time.monotonic() + wait_seconds
+    while checker._keep_running:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        sleep(min(1, remaining))
+
+
+def _get_initial_operation_jitter(checker, jitter_seconds):
+    """Return a stable per-checker delay that spreads synchronized operations."""
+    if jitter_seconds <= 0:
+        return 0
+    worker_match = re.fullmatch(r"gw(\d+)", os.getenv("PYTEST_XDIST_WORKER", ""))
+    try:
+        worker_count = int(os.getenv("PYTEST_XDIST_WORKER_COUNT", "0"))
+    except ValueError:
+        worker_count = 0
+    if worker_match and worker_count > 0:
+        worker_index = int(worker_match.group(1))
+        if worker_index < worker_count:
+            slot_start = worker_index * jitter_seconds // worker_count
+            slot_end = (worker_index + 1) * jitter_seconds // worker_count
+            slot_width = max(1, slot_end - slot_start)
+            operation_offset = zlib.crc32(type(checker).__name__.encode("utf-8")) % slot_width
+            return min(jitter_seconds - 1, slot_start + operation_offset)
+    identity = f"{type(checker).__name__}:{getattr(checker, 'c_name', '')}"
+    return zlib.crc32(identity.encode("utf-8")) % jitter_seconds
+
+
+def _run_checker_with_interval(checker, default_interval_seconds):
+    """Run a checker with optional initial jitter and an interruptible interval."""
+    jitter_seconds = getattr(checker, "initial_jitter_seconds", 0)
+    if jitter_seconds > 0:
+        initial_delay = _get_initial_operation_jitter(checker, jitter_seconds)
+        _wait_for_next_operation(checker, initial_delay)
+
+    interval_seconds = getattr(checker, "operation_interval_seconds", None) or default_interval_seconds
+    while checker._keep_running:
+        checker.run_task()
+        _wait_for_next_operation(checker, interval_seconds)
+
+
+def configure_heavy_operation_schedules(checkers):
+    """Throttle and stagger heavy operations in the concurrent chaos workload."""
+    for operation in (
+        Op.flush,
+        Op.drop,
+        Op.add_field,
+        Op.snapshot,
+        Op.restore_snapshot,
+        Op.add_vector_field,
+    ):
+        checker = checkers.get(operation)
+        if checker is not None:
+            checker.configure_operation_schedule(
+                interval_seconds=HEAVY_OP_WAIT_SECONDS,
+                initial_jitter_seconds=HEAVY_OP_WAIT_SECONDS,
+            )
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -398,12 +465,11 @@ def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
             if flag:
                 collection_name = self.c_name
                 log_str = f"[{prefix}]" + fmt.format(**locals())
-                # TODO: add report function in this place, like uploading to influxdb
                 try:
-                    t0 = time.perf_counter()
+                    record_started = time.perf_counter()
                     request_records.insert(operation_name, collection_name, start_time, elapsed, str(result))
-                    tt = time.perf_counter() - t0
-                    log.debug(f"insert request record cost {tt}s")
+                    record_elapsed = time.perf_counter() - record_started
+                    log.debug(f"insert request record cost {record_elapsed}s")
                 except Exception as e:
                     log.error(e)
                 log.debug(log_str)
@@ -411,7 +477,6 @@ def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
                 self.rsp_times.append(elapsed)
                 self.average_time = (elapsed + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                # add first success record if there is no success record before
                 if (
                     len(self.fail_records) > 0
                     and self.fail_records[-1][0] == "failure"
@@ -450,12 +515,15 @@ def exception_handler():
                 log_row_length = 300
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + "......" if len(e_str) > log_row_length else e_str
-                if class_name:
-                    log_message = f"Error in {class_name}.{function_name}: {log_e}"
+                log_message = (
+                    f"Error in {class_name}.{function_name}: {log_e}"
+                    if class_name
+                    else f"Error in {function_name}: {log_e}"
+                )
+                if enable_traceback:
+                    log.exception(log_message)
                 else:
-                    log_message = f"Error in {function_name}: {log_e}"
-                log.exception(log_message)
-                log.error(log_e)
+                    log.error(log_message)
                 if hasattr(self, "error_messages"):
                     start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
                     record_error_message(self, function_name, e_str, start_time)
@@ -495,7 +563,14 @@ class Checker:
         self.average_time = 0
         self.scale = 1 * 10**6
         self.files = []
+        self.operation_interval_seconds = None
+        self.initial_jitter_seconds = 0
         self.word_freq = Counter()
+        c_name = collection_name if collection_name is not None else cf.gen_unique_str("Checker_")
+        self.c_name = c_name
+        p_name = partition_name if partition_name is not None else "_default"
+        self.p_name = p_name
+        self.p_names = [self.p_name] if partition_name is not None else None
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
 
@@ -518,14 +593,10 @@ class Checker:
         # Also create a connection for low-level APIs that MilvusClient doesn't support
         self.alias = cf.gen_unique_str("checker_alias_")
         connections.connect(alias=self.alias, uri=uri, token=token)
-        c_name = collection_name if collection_name is not None else cf.gen_unique_str("Checker_")
-        self.c_name = c_name
-        p_name = partition_name if partition_name is not None else "_default"
-        self.p_name = p_name
-        self.p_names = [self.p_name] if partition_name is not None else None
 
         # Get or create schema
-        if self.milvus_client.has_collection(c_name):
+        collection_exists = self.milvus_client.has_collection(c_name)
+        if collection_exists:
             collection_info = self.milvus_client.describe_collection(c_name)
             schema = CollectionSchema.construct_from_dict(collection_info)
         else:
@@ -550,7 +621,7 @@ class Checker:
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
 
         # Create collection if not exists
-        if not self.milvus_client.has_collection(c_name):
+        if not collection_exists:
             self.milvus_client.create_collection(
                 collection_name=c_name,
                 schema=schema,
@@ -575,33 +646,37 @@ class Checker:
         # Get existing indexes and their fields
         indexed_fields = set()
         try:
-            index_names = self.milvus_client.list_indexes(c_name)
-            for idx_name in index_names:
-                try:
-                    idx_info = self.milvus_client.describe_index(c_name, idx_name)
-                    if "field_name" in idx_info:
-                        indexed_fields.add(idx_info["field_name"])
-                except Exception as e:
-                    log.debug(f"Failed to describe index {idx_name}: {e}")
+            index_names = self.milvus_client.list_indexes(c_name, timeout=timeout)
         except Exception as e:
-            log.debug(f"Failed to list indexes: {e}")
+            raise RuntimeError(f"Failed to list indexes for collection {c_name}") from e
+        for idx_name in index_names:
+            try:
+                idx_info = self.milvus_client.describe_index(c_name, idx_name, timeout=timeout)
+                if "field_name" in idx_info:
+                    indexed_fields.add(idx_info["field_name"])
+            except Exception as e:
+                raise RuntimeError(f"Failed to describe index {idx_name} for collection {c_name}") from e
 
         log.debug(f"Already indexed fields: {indexed_fields}")
+        # An existing collection owns its index lifecycle. During recovery,
+        # list_indexes may temporarily omit an in-progress index; recreating it
+        # here amplifies the pending queue across concurrent checker workers.
+        create_missing_indexes = not collection_exists
 
         # create index for scalar fields
         for f in self.scalar_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="INVERTED")
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
-                log.debug(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for json fields
         for f in self.json_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             for json_path, json_cast in [("name", "varchar"), ("address", "varchar"), ("count", "double")]:
                 try:
@@ -613,18 +688,20 @@ class Checker:
                     )
                     self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 except Exception as e:
-                    log.debug(f"Failed to create json index for {f}['{json_path}']: {e}")
+                    raise RuntimeError(
+                        f"Failed to create JSON index for {f}['{json_path}'] in collection {c_name}"
+                    ) from e
 
         # create index for geometry fields
         for f in self.geometry_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="RTREE")
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
-                log.debug(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for float vector fields
         vector_index_created = False
@@ -633,6 +710,8 @@ class Checker:
                 vector_index_created = True
                 log.debug(f"Float vector field {f} already has index")
                 continue
+            if not create_missing_indexes:
+                continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
@@ -640,13 +719,15 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for int8 vector fields
         for f in self.int8_vector_field_names:
             if f in indexed_fields:
                 vector_index_created = True
                 log.debug(f"Int8 vector field {f} already has index")
+                continue
+            if not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INT8_INDEX_PARAM)
@@ -655,13 +736,15 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
             if f in indexed_fields:
                 vector_index_created = True
                 log.debug(f"Binary vector field {f} already has index")
+                continue
+            if not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BINARY_INDEX_PARAM)
@@ -670,22 +753,22 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for bm25 sparse fields
         for f in self.bm25_sparse_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BM25_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for bm25 sparse field {f}")
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for minhash fields
         for f in self.minhash_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_MINHASH_INDEX_PARAM)
@@ -694,27 +777,31 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for emb list fields
         for f in self.emb_list_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_EMB_LIST_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for emb list field {f}")
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # Load collection - only if at least one vector field has an index
         self.replica_number = replica_number
         if vector_index_created:
             try:
-                self.milvus_client.load_collection(collection_name=c_name, replica_number=self.replica_number)
+                self.milvus_client.load_collection(
+                    collection_name=c_name,
+                    replica_number=self.replica_number,
+                    timeout=timeout,
+                )
                 log.debug(f"Loaded collection {c_name} with replica_number={self.replica_number}")
             except Exception as e:
-                log.warning(f"Failed to load collection {c_name}: {e}. Collection may need to be loaded manually.")
+                raise RuntimeError(f"Failed to load collection {c_name}") from e
         else:
             log.warning(
                 f"No vector index created for collection {c_name}, skipping load. You may need to create indexes and load manually."
@@ -730,10 +817,20 @@ class Checker:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
             self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
+            self.milvus_client.flush(collection_name=c_name, timeout=timeout)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
         self.initial_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
         self.scale = 100000  # timestamp scale to make time.time() as int64
+
+    def configure_operation_schedule(self, interval_seconds, initial_jitter_seconds=0):
+        """Configure an operation cadence without changing checker coverage."""
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        if initial_jitter_seconds < 0:
+            raise ValueError("initial_jitter_seconds must be non-negative")
+        self.operation_interval_seconds = interval_seconds
+        self.initial_jitter_seconds = initial_jitter_seconds
 
     def get_schema(self):
         collection_info = self.milvus_client.describe_collection(self.c_name)
@@ -1761,9 +1858,7 @@ class FlushChecker(Checker):
             return str(e), False
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+        _run_checker_with_interval(self, constants.WAIT_PER_OP * 6)
 
 
 class AddFieldChecker(Checker):
@@ -1796,7 +1891,11 @@ class AddFieldChecker(Checker):
 
             new_field_name = cf.gen_unique_str("new_field_")
             self.milvus_client.add_collection_field(
-                collection_name=self.c_name, field_name=new_field_name, data_type=DataType.INT64, nullable=True
+                collection_name=self.c_name,
+                field_name=new_field_name,
+                data_type=DataType.INT64,
+                nullable=True,
+                timeout=timeout,
             )
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
@@ -1816,9 +1915,7 @@ class AddFieldChecker(Checker):
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class InsertChecker(Checker):
@@ -2352,7 +2449,7 @@ class CollectionDropChecker(Checker):
         self.collection_pool = []
         self.gen_collection_pool(schema=self.schema)
 
-    def gen_collection_pool(self, pool_size=50, schema=None):
+    def gen_collection_pool(self, pool_size=DROP_COLLECTION_POOL_SIZE, schema=None):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
@@ -2377,24 +2474,14 @@ class CollectionDropChecker(Checker):
     @exception_handler()
     def run_task(self):
         res, result = self.drop_collection()
+        if result:
+            if len(self.collection_pool) <= DROP_COLLECTION_REFILL_THRESHOLD:
+                self.gen_collection_pool(schema=self.schema)
+            self.c_name = self.collection_pool[0]
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            res, result = self.run_task()
-            if result:
-                try:
-                    if len(self.collection_pool) <= 10:
-                        self.gen_collection_pool(schema=self.schema)
-                except Exception as e:
-                    log.error(f"Failed to generate collection pool: {e}")
-                try:
-                    c_name = self.collection_pool[0]
-                    # Update current collection name to use from pool
-                    self.c_name = c_name
-                except Exception as e:
-                    log.error(f"Failed to init new collection: {e}")
-            sleep(constants.WAIT_PER_OP)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class PartitionCreateChecker(Checker):
@@ -2636,8 +2723,6 @@ class QueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2673,8 +2758,6 @@ class TextMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("TextMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
@@ -2729,8 +2812,6 @@ class PhraseMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PhraseMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2775,8 +2856,6 @@ class JsonQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("JsonQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2827,8 +2906,6 @@ class GeoQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("GeoQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2870,8 +2947,6 @@ class DeleteChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name, schema=schema, shards_num=shards_num)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
         query_expr = f"{self.int64_field_name} > 0"
@@ -3745,9 +3820,7 @@ class SnapshotChecker(Checker):
         return self.snapshot()
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 3)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class SnapshotRestoreChecker(Checker):
@@ -3984,9 +4057,7 @@ class SnapshotRestoreChecker(Checker):
         return self.restore_snapshot()
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 3)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class NullVectorSearchChecker(Checker):
@@ -4100,8 +4171,6 @@ class NullVectorQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("NullVectorQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         # Only collect nullable dense vector fields from the original schema.
@@ -4216,39 +4285,66 @@ class NullVectorQueryChecker(Checker):
 class AddVectorFieldChecker(Checker):
     """check add nullable vector field operations: add field, create index, insert, query to verify"""
 
+    VECTOR_DIM = 8
+
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AddVectorFieldChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
+        self._add_vector_field_result = None
+        self._new_vector_field_name = cf.gen_unique_str("new_vec_")
+        self._vector_field_added = False
+        self._vector_index_created = False
 
     @trace()
     def add_vector_field(self):
+        """Run one vector-field mutation per checker lifecycle."""
+        if self._add_vector_field_result is None:
+            result = self._add_vector_field_once()
+            if result[1]:
+                self._add_vector_field_result = result
+            return result
+        else:
+            log.debug("[AddVectorFieldChecker] reusing the first successful mutation result")
+        return self._add_vector_field_result
+
+    def _add_vector_field_once(self):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
-            new_vec_field = cf.gen_unique_str("new_vec_")
-            dim = self.dim
-            self.milvus_client.add_collection_field(
-                collection_name=self.c_name,
-                field_name=new_vec_field,
-                data_type=DataType.FLOAT_VECTOR,
-                dim=dim,
-                nullable=True,
-            )
-            log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
-            time.sleep(1)
+            new_vec_field = self._new_vector_field_name
+            dim = self.VECTOR_DIM
+            if not self._vector_field_added:
+                self.milvus_client.add_collection_field(
+                    collection_name=self.c_name,
+                    field_name=new_vec_field,
+                    data_type=DataType.FLOAT_VECTOR,
+                    dim=dim,
+                    nullable=True,
+                    timeout=timeout,
+                )
+                self._vector_field_added = True
+                log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
+                time.sleep(1)
 
-            # Create HNSW index for new vector field
-            index_params = IndexParams()
-            index_params.add_index(
-                field_name=new_vec_field,
-                index_type="HNSW",
-                metric_type="COSINE",
-                params={"M": 16, "efConstruction": 200},
-            )
-            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-            log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
+            # This checker validates the added field lifecycle, so use FLAT to
+            # avoid turning schema coverage into a long-running HNSW workload.
+            if not self._vector_index_created:
+                index_params = IndexParams()
+                index_params.add_index(
+                    field_name=new_vec_field,
+                    index_type="FLAT",
+                    metric_type="COSINE",
+                )
+                self.milvus_client.create_index(
+                    collection_name=self.c_name,
+                    index_params=index_params,
+                    timeout=timeout,
+                    sync=False,
+                )
+                self._vector_index_created = True
+                log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
 
             # Insert data (gen_row_data_by_schema handles nullable vectors)
             _, insert_result = self.insert_data()
@@ -4288,9 +4384,7 @@ class AddVectorFieldChecker(Checker):
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class EntityTTLChecker(Checker):

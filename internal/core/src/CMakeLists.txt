@@ -114,6 +114,21 @@ add_subdirectory( minhash )
 
 milvus_add_pkg_config("milvus_core")
 
+# Keep unity builds scoped to first-party code. Enabling CMAKE_UNITY_BUILD
+# globally also changes vendored targets (notably Knowhere/FAISS), which contain
+# translation-unit-local symbols that collide when their sources are merged.
+# Protobuf-generated sources are not unity-compatible, while milvus_query was
+# slower in isolation because merging its ten sources reduced parallelism.
+if (MILVUS_UNITY_BUILD)
+    foreach(_target
+        milvus_common milvus_storage milvus_index milvus_segcore
+        milvus_exec)
+        set_target_properties(${_target} PROPERTIES
+            UNITY_BUILD ON
+            UNITY_BUILD_BATCH_SIZE 8)
+    endforeach()
+endif()
+
 # ---- Precompiled Headers (PCH) ----
 # Apply the same STL PCH to all OBJECT libraries. Each target generates its
 # own PCH binary (small per-target overhead) but avoids cross-directory
@@ -135,6 +150,10 @@ if (MILVUS_USE_PCH)
         milvus_exec milvus_futures milvus_rescores
         milvus_plan)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
+        if (MILVUS_PCH_CXX_COMPILER_LAUNCHER)
+            set_property(TARGET ${_target} PROPERTY
+                CXX_COMPILER_LAUNCHER "${MILVUS_PCH_CXX_COMPILER_LAUNCHER}")
+        endif()
     endforeach()
 endif()
 

@@ -997,15 +997,21 @@ func (v *ValidateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	}
 
 	if v.checkMaxLen {
+		// Resolved once per field rather than once per row: the GetAsX scalar
+		// getters go through config.Manager.GetCachedValue, which read-locks the config
+		// manager's cache before the map lookup, and this loop runs for every
+		// row of every insert that carries a JSON or dynamic field.
+		// checkVarCharFieldData likewise resolves its limit before its row loop
+		// (from the schema's type params rather than from config).
+		maxLength := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
 		for _, s := range jsonArray {
-			if int64(len(s)) > paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64() {
+			if int64(len(s)) > maxLength {
 				if field.GetIsDynamic() {
-					msg := fmt.Sprintf("the length (%d) of dynamic field exceeds max length (%d)", len(s),
-						paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+					msg := fmt.Sprintf("the length (%d) of dynamic field exceeds max length (%d)", len(s), maxLength)
 					return merr.WrapErrParameterInvalid("valid length dynamic field", "length exceeds max length", msg)
 				}
 				msg := fmt.Sprintf("the length (%d) of json field (%s) exceeds max length (%d)", len(s),
-					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+					field.GetFieldName(), maxLength)
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
 			}
 		}

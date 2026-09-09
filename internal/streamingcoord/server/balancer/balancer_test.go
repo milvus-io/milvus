@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -285,6 +286,161 @@ func TestBalancer(t *testing.T) {
 	assert.ErrorIs(t, f.Get(), balancer.ErrBalancerClosed)
 }
 
+func TestBalancerFreezeNodeInOtherResourceGroup(t *testing.T) {
+	// Regression test for #53176: a frozen node that is still in the session
+	// (GetAllStreamingNodes) but invisible to CollectAllStatus (because it
+	// belongs to a non-primary resource group) must NOT be silently unfrozen
+	// during the freeze cleanup in fetchStreamingNodeStatus.
+	paramtable.Init()
+	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("freeze-other-rg-%d", time.Now().UnixNano()))
+	oldMetaSubPath := paramtable.Get().EtcdCfg.MetaSubPath.SwapTempValue("meta")
+	oldExpectedStreamingNodeNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	defer paramtable.Get().EtcdCfg.RootPath.SwapTempValue(oldRootPath)
+	defer paramtable.Get().EtcdCfg.MetaSubPath.SwapTempValue(oldMetaSubPath)
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue(oldExpectedStreamingNodeNum)
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	// Signal every balance round through this channel so the test can wait
+	// deterministically for the round that runs the freeze cleanup.
+	collected := make(chan struct{}, 64)
+	// session view: node 3 is alive but belongs to another resource group.
+	// Guarded by a mutex: the balancer goroutine reads it via the mock
+	// closure while the test mutates it to simulate node 3 leaving the session.
+	var allNodesMu sync.RWMutex
+	allNodes := map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg-primary"},
+		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg-primary"},
+		3: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"}, ResourceGroup: "rg-other"},
+	}
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// No .Maybe(): the freeze cleanup MUST call GetAllStreamingNodes every round,
+	// otherwise this test would silently pass on the buggy RG-filtered cleanup.
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+		allNodesMu.RLock()
+		defer allNodesMu.RUnlock()
+		result := make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(allNodes))
+		for id, node := range allNodes {
+			result[id] = node
+		}
+		return result, nil
+	})
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rgName string) (map[int64]*types.StreamingNodeStatus, error) {
+		select {
+		case collected <- struct{}{}:
+		default:
+		}
+		// node 3 is NOT in the primary resource group status view.
+		return map[int64]*types.StreamingNodeStatus{
+			1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+			2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
+		}, nil
+	})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "initial-channel",
+				Term:       1,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("initial-channel"))
+	assert.NoError(t, err)
+	assert.NotNil(t, b)
+	defer b.Close()
+
+	// waitForBalanceRound requests a balance round and blocks until it has
+	// completed. The first Trigger's future is set inside apply() before the
+	// round runs, so the collected signal only proves a round started; the
+	// second Trigger's future is set only when the execute loop returns to
+	// the select, which is after the in-flight round finished. That makes
+	// every assertion after this helper ordered after the cleanup ran.
+	waitForBalanceRound := func() {
+		assert.NoError(t, b.Trigger(ctx)) // request a round
+		select {
+		case <-collected: // that (or a later) round has started
+		case <-time.After(30 * time.Second):
+			t.Fatal("no balance round observed")
+		}
+		assert.NoError(t, b.Trigger(ctx)) // returns only after the in-flight round completed
+	}
+	// Drain any signals left by rounds before the freeze request was applied.
+	drainCollected := func() {
+		for {
+			select {
+			case <-collected:
+			default:
+				return
+			}
+		}
+	}
+	waitForBalanceRound()
+
+	// freeze node 3, which is in session but not in the primary RG status view.
+	resp, err := b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{AllowRebalance: true},
+		Nodes: &streamingpb.WALBalancePolicyNodes{
+			FreezeNodeIds: []int64{3},
+		},
+	})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{3}, resp.FreezeNodeIds)
+
+	// Force one full balance round after the freeze: the cleanup in
+	// fetchStreamingNodeStatus must run and must NOT unfreeze node 3.
+	drainCollected()
+	waitForBalanceRound()
+
+	// node 3 must still be frozen: excluded from available nodes and still
+	// tracked in the freeze set.
+	nodes, err := b.GetAvailableStreamingNodes(ctx)
+	assert.NoError(t, err)
+	assert.NotContains(t, nodes, int64(3))
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{AllowRebalance: true},
+	})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{3}, resp.FreezeNodeIds)
+
+	// The freeze must still be released when the node genuinely leaves the
+	// session, otherwise freezeNodes accumulates dead IDs.
+	allNodesMu.Lock()
+	delete(allNodes, 3)
+	allNodesMu.Unlock()
+	drainCollected()
+	waitForBalanceRound()
+	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
+		Config: &streamingpb.WALBalancePolicyConfig{AllowRebalance: true},
+	})
+	assert.NoError(t, err)
+	assert.Empty(t, resp.FreezeNodeIds)
+}
+
 func TestBalancerWaitUntilSchemaDropReady(t *testing.T) {
 	paramtable.Init()
 	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("schema-drop-ready-%d", time.Now().UnixNano()))
@@ -433,6 +589,14 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+		},
+		2: {
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"},
+		},
+	}, nil).Maybe()
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 		now := time.Now()
 		mvccTimeTick := tsoutil.ComposeTSByTime(now)
@@ -577,6 +741,11 @@ func TestBalancer_PrimaryResourceGroupChangeTriggersBalance(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+		},
+	}, nil).Maybe()
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 		rgHints <- resourceGroupHint
 		return map[int64]*types.StreamingNodeStatus{

@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 )
 
 func TestNewBloomFilterBlob(t *testing.T) {
@@ -92,7 +92,7 @@ func TestNewBloomFilterBlobMatchesCppFixture(t *testing.T) {
 		BlobHex   string   `json:"blob_hex"`
 	}
 
-	data, err := os.ReadFile(filepath.Join("..", "sbbf", "testdata", "cpp_generated_100_int64.json"))
+	data, err := os.ReadFile(filepath.Join("..", "membership", "sbbf", "testdata", "cpp_generated_100_int64.json"))
 	require.NoError(t, err, "C++ fixture missing; regenerate it with MILVUS_SBBF_REGEN_CPP_FIXTURE=1 and BloomFilterExprTest.CppGeneratedFixtureIsReproducible")
 
 	var fixture cppFixture
@@ -183,7 +183,7 @@ func (s *BloomFilterSuite) TestSearchBloomMatchInt64() {
 
 	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		s.Equal(collectionName, sr.GetCollectionName())
-		s.Contains(sr.GetDsl(), "bloom_match(myfield, {bf})")
+		s.Contains(sr.GetDsl(), "membership_match(myfield, {bf}, type=bloom)")
 		s.assertBloomBytesVal(sr.GetExprTemplateValues(), blob)
 
 		return &milvuspb.SearchResults{
@@ -202,7 +202,7 @@ func (s *BloomFilterSuite) TestSearchBloomMatchInt64() {
 	}).Once()
 
 	_, err = s.client.Search(ctx, NewSearchOption(collectionName, 10, s.floatVectors()).
-		WithFilter("bloom_match(myfield, {bf})").
+		WithFilter("membership_match(myfield, {bf}, type=bloom)").
 		WithTemplateParam("bf", blob))
 	s.NoError(err)
 }
@@ -219,7 +219,7 @@ func (s *BloomFilterSuite) TestSearchBloomMatchVarchar() {
 
 	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		s.Equal(collectionName, sr.GetCollectionName())
-		s.Contains(sr.GetDsl(), "bloom_match(myfield, {bf})")
+		s.Contains(sr.GetDsl(), "membership_match(myfield, {bf}, type=bloom)")
 		s.assertBloomBytesVal(sr.GetExprTemplateValues(), blob)
 
 		return &milvuspb.SearchResults{
@@ -238,7 +238,7 @@ func (s *BloomFilterSuite) TestSearchBloomMatchVarchar() {
 	}).Once()
 
 	_, err = s.client.Search(ctx, NewSearchOption(collectionName, 10, s.floatVectors()).
-		WithFilter("bloom_match(myfield, {bf})").
+		WithFilter("membership_match(myfield, {bf}, type=bloom)").
 		WithTemplateParam("bf", blob))
 	s.NoError(err)
 }
@@ -255,7 +255,7 @@ func (s *BloomFilterSuite) TestQueryBloomMatchInt64() {
 
 	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 		s.Equal(collectionName, qr.GetCollectionName())
-		s.Contains(qr.GetExpr(), "bloom_match(myfield, {bf})")
+		s.Contains(qr.GetExpr(), "membership_match(myfield, {bf}, type=bloom)")
 		s.assertBloomBytesVal(qr.GetExprTemplateValues(), blob)
 
 		return &milvuspb.QueryResults{
@@ -267,7 +267,7 @@ func (s *BloomFilterSuite) TestQueryBloomMatchInt64() {
 	}).Once()
 
 	_, err = s.client.Query(ctx, NewQueryOption(collectionName).
-		WithFilter("bloom_match(myfield, {bf})").
+		WithFilter("membership_match(myfield, {bf}, type=bloom)").
 		WithTemplateParam("bf", blob).
 		WithOutputFields("ID"))
 	s.NoError(err)
