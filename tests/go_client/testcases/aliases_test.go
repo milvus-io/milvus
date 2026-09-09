@@ -14,15 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package testcases
 
-// vChan shortcuts for virtual channel.
-type vChan = string
+import (
+	"context"
 
-// pChan shortcuts for physical channel.
-type pChan = string
+	"github.com/milvus-io/milvus/tests/go_client/base"
+)
 
-type pChanStatistics struct {
-	minTs Timestamp
-	maxTs Timestamp
-}
+// Type aliases shared across all test files to keep test signatures readable.
+// They live here (not in a feature-specific file) so no file depends on another
+// test file for a cross-cutting declaration.
+type (
+	CtxT = context.Context
+	MC   = *base.MilvusClient
+)

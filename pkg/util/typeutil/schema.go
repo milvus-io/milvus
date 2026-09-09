@@ -1023,6 +1023,281 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 	return c.resultBuffer
 }
 
+// CreateFieldDataRangeView creates FieldData views for the logical row range
+// [rowStart, rowEnd). The returned values share their backing data with src;
+// only protobuf wrapper objects and slice headers are newly allocated. It
+// returns false when the range or field variant cannot safely use a view.
+//
+// dataStarts and dataEnds are the physical row bounds returned by
+// FieldDataIdxComputer. They differ from the logical bounds for compact
+// nullable vector payloads.
+func CreateFieldDataRangeView(
+	src []*schemapb.FieldData,
+	rowStart, rowEnd int64,
+	dataStarts, dataEnds []int64,
+) ([]*schemapb.FieldData, bool) {
+	if rowStart < 0 || rowEnd <= rowStart {
+		return nil, false
+	}
+
+	result := make([]*schemapb.FieldData, len(src))
+	for i, fieldData := range src {
+		if fieldData == nil {
+			return nil, false
+		}
+
+		validData := GetFieldDataValidData(fieldData)
+		var validDataView []bool
+		if len(validData) > 0 {
+			var ok bool
+			validDataView, ok = fieldDataRangeView(validData, rowStart, rowEnd)
+			if !ok {
+				return nil, false
+			}
+		}
+
+		view := &schemapb.FieldData{
+			Type:      fieldData.GetType(),
+			FieldName: fieldData.GetFieldName(),
+			FieldId:   fieldData.GetFieldId(),
+			IsDynamic: fieldData.GetIsDynamic(),
+		}
+
+		switch field := fieldData.GetField().(type) {
+		case *schemapb.FieldData_Scalars:
+			scalars, ok := createScalarFieldRangeView(field.Scalars, rowStart, rowEnd)
+			if !ok {
+				return nil, false
+			}
+			view.Field = &schemapb.FieldData_Scalars{Scalars: scalars}
+		case *schemapb.FieldData_Vectors:
+			dataStart, dataEnd := rowStart, rowEnd
+			if IsSupportedNullableVectorType(fieldData.GetType()) && len(validData) > 0 {
+				if i >= len(dataStarts) || i >= len(dataEnds) {
+					return nil, false
+				}
+				dataStart, dataEnd = dataStarts[i], dataEnds[i]
+			}
+			vectors, ok := createVectorFieldRangeView(field.Vectors, rowStart, rowEnd, dataStart, dataEnd)
+			if !ok {
+				return nil, false
+			}
+			view.Field = &schemapb.FieldData_Vectors{Vectors: vectors}
+		default:
+			// Keep the fast path behavior identical to AppendFieldData. Do not
+			// forward field variants that the row-wise implementation does not
+			// currently handle.
+			return nil, false
+		}
+		if len(validDataView) > 0 {
+			SetFieldDataValidData(view, validDataView)
+		}
+
+		result[i] = view
+	}
+
+	return result, true
+}
+
+func fieldDataRangeView[T any](data []T, start, end int64) ([]T, bool) {
+	if start < 0 || end < start || end > int64(len(data)) {
+		return nil, false
+	}
+	return data[int(start):int(end):int(end)], true
+}
+
+func fieldDataVectorRange(start, end, width int64, dataLen int) (int, int, bool) {
+	if start < 0 || end < start || width < 0 {
+		return 0, 0, false
+	}
+	if width == 0 {
+		return 0, 0, true
+	}
+	if end > int64(dataLen)/width {
+		return 0, 0, false
+	}
+	return int(start * width), int(end * width), true
+}
+
+func createScalarFieldRangeView(src *schemapb.ScalarField, start, end int64) (*schemapb.ScalarField, bool) {
+	if src == nil {
+		return nil, false
+	}
+
+	result := &schemapb.ScalarField{}
+	switch data := src.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		view, ok := fieldDataRangeView(data.BoolData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: view}}
+	case *schemapb.ScalarField_IntData:
+		view, ok := fieldDataRangeView(data.IntData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: view}}
+	case *schemapb.ScalarField_LongData:
+		view, ok := fieldDataRangeView(data.LongData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: view}}
+	case *schemapb.ScalarField_FloatData:
+		view, ok := fieldDataRangeView(data.FloatData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: view}}
+	case *schemapb.ScalarField_DoubleData:
+		view, ok := fieldDataRangeView(data.DoubleData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: view}}
+	case *schemapb.ScalarField_StringData:
+		view, ok := fieldDataRangeView(data.StringData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: view}}
+	case *schemapb.ScalarField_ArrayData:
+		view, ok := fieldDataRangeView(data.ArrayData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			Data:        view,
+			ElementType: data.ArrayData.GetElementType(),
+		}}
+	case *schemapb.ScalarField_JsonData:
+		view, ok := fieldDataRangeView(data.JsonData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: view}}
+	case *schemapb.ScalarField_TimestamptzData:
+		view, ok := fieldDataRangeView(data.TimestamptzData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: view}}
+	case *schemapb.ScalarField_GeometryData:
+		view, ok := fieldDataRangeView(data.GeometryData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: view}}
+	case *schemapb.ScalarField_GeometryWktData:
+		view, ok := fieldDataRangeView(data.GeometryWktData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{Data: view}}
+	case nil:
+		// AppendFieldData creates an empty ScalarField for an unset oneof.
+	default:
+		return nil, false
+	}
+
+	return result, true
+}
+
+func createVectorFieldRangeView(
+	src *schemapb.VectorField,
+	rowStart, rowEnd, dataStart, dataEnd int64,
+) (*schemapb.VectorField, bool) {
+	if src == nil || src.GetDim() < 0 || dataStart < 0 || dataEnd < dataStart {
+		return nil, false
+	}
+
+	result := &schemapb.VectorField{Dim: src.GetDim()}
+	physicalRows := dataEnd - dataStart
+	if physicalRows == 0 {
+		// AppendFieldData leaves the vector oneof unset when every selected
+		// row is null.
+		return result, true
+	}
+
+	dim := src.GetDim()
+	switch data := src.GetData().(type) {
+	case *schemapb.VectorField_BinaryVector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim/8, len(data.BinaryVector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_BinaryVector{BinaryVector: data.BinaryVector[start:end:end]}
+	case *schemapb.VectorField_FloatVector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim, len(data.FloatVector.GetData()))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: data.FloatVector.GetData()[start:end:end]},
+		}
+	case *schemapb.VectorField_Float16Vector:
+		if dim > math.MaxInt64/2 {
+			return nil, false
+		}
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim*2, len(data.Float16Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Float16Vector{Float16Vector: data.Float16Vector[start:end:end]}
+	case *schemapb.VectorField_Bfloat16Vector:
+		if dim > math.MaxInt64/2 {
+			return nil, false
+		}
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim*2, len(data.Bfloat16Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: data.Bfloat16Vector[start:end:end]}
+	case *schemapb.VectorField_SparseFloatVector:
+		contents, ok := fieldDataRangeView(data.SparseFloatVector.GetContents(), dataStart, dataEnd)
+		if !ok {
+			return nil, false
+		}
+		var selectedDim int64
+		for _, row := range contents {
+			rowDim := SparseFloatRowDim(row)
+			if rowDim > selectedDim {
+				selectedDim = rowDim
+			}
+		}
+		result.Dim = data.SparseFloatVector.GetDim()
+		result.Data = &schemapb.VectorField_SparseFloatVector{
+			SparseFloatVector: &schemapb.SparseFloatArray{
+				Contents: contents,
+				Dim:      selectedDim,
+			},
+		}
+	case *schemapb.VectorField_Int8Vector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim, len(data.Int8Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Int8Vector{Int8Vector: data.Int8Vector[start:end:end]}
+	case *schemapb.VectorField_VectorArray:
+		view, ok := fieldDataRangeView(data.VectorArray.GetData(), rowStart, rowEnd)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         data.VectorArray.GetDim(),
+			Data:        view,
+			ElementType: data.VectorArray.GetElementType(),
+		}}
+	case nil:
+		// AppendFieldData leaves the vector oneof unset for an unset source.
+	default:
+		return nil, false
+	}
+
+	return result, true
+}
+
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int64) (appendSize int64) {
 	// AppendFieldData copies a single row, so reduce loops call it once per row
 	// with the same dst. Building a FieldId index up front therefore repeats

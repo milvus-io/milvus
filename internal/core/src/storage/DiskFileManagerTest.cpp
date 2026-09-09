@@ -2031,6 +2031,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     std::vector<size_t> query_offsets(num_rows + 1, 0);
     query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                        const_cast<const size_t*>(query_offsets.data()));
+    query_dataset->Set(knowhere::meta::EMB_LIST_COUNT, num_rows);
     query_dataset->Set(knowhere::meta::NQ, num_rows);
 
     SearchInfo search_info;

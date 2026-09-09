@@ -41,25 +41,32 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize                      = 16
-	DefaultLoadTransientBudgetBytes            = 0
-	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s, for node
-	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
-	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
-	DefaultHighPriorityThreadCoreCoefficient   = 10
-	DefaultMiddlePriorityThreadCoreCoefficient = 5
-	DefaultLowPriorityThreadCoreCoefficient    = 1
-	DefaultThreadPoolMaxThreadsSize            = 16
-	DefaultStorageIopsInitialRate              = uint32(2000)
-	DefaultStorageIopsMaxRate                  = uint32(5000)
+	DefaultIndexSliceSize = 16
+	// Load admission defaults apply only when async loading is enabled and the
+	// corresponding parameter is absent. Explicit values, including 0, win.
+	DefaultLoadTransientBudgetBytes = 2 * 1024 * 1024 * 1024
+	DefaultLoadAdmissionSlotsPerCPU = 2
+	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
+	// default for the Storage V3 async read-window threshold.
+	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
+	DefaultGracefulTime                          = 5000 // ms
+	DefaultGracefulStopTimeout                   = 1800 // s, for node
+	DefaultProxyGracefulStopTimeout              = 30   // s，for proxy
+	DefaultCoordGracefulStopTimeout              = 5    // s，for coord
+	DefaultHighPriorityThreadCoreCoefficient     = 10
+	DefaultMiddlePriorityThreadCoreCoefficient   = 5
+	DefaultLowPriorityThreadCoreCoefficient      = 1
+	DefaultThreadPoolMaxThreadsSize              = 16
+	DefaultStorageIopsInitialRate                = uint32(2000)
+	DefaultStorageIopsMaxRate                    = uint32(5000)
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the aggregate serialized size budget for
-	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
-	// complex Delete request. It is deliberately below the default 256 MiB proxy
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for both the
+	// aggregate serialized size of membership-filter-bearing plans and the
+	// aggregate estimated decoded size of Roaring filters. The two totals are
+	// checked independently. It is deliberately below the default 256 MiB proxy
 	// gRPC client send limit so placeholders and the rest of the internal request
 	// retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
@@ -243,6 +250,7 @@ type commonConfig struct {
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
 	LoadTransientBudgetBytes            ParamItem `refreshable:"true"`
+	LoadAdmissionSlots                  ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -381,6 +389,20 @@ type commonConfig struct {
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
+}
+
+// ResolveLoadAdmissionLimits returns QueryNode's effective byte and slot limits.
+// The declared defaults apply only to async loading. Use the lookup's missing
+// status, not its numeric value, so explicit values (including 0) always win.
+func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetBytes, slots int64) {
+	resolve := func(item *ParamItem) int64 {
+		value, err := item.get()
+		if err != nil && !asyncEnabled {
+			return 0
+		}
+		return getAsInt64(value)
+	}
+	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -579,24 +601,52 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.LoadTransientBudgetBytes = ParamItem{
 		Key:          "common.loadTransientBudgetBytes",
 		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultLoadTransientBudgetBytes),
-		Doc: `Process-wide transient memory budget in bytes shared by scalar ` +
+		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
+		Doc: `QueryNode transient memory budget in bytes shared by scalar ` +
 			`index V3 entry streaming and storage v2/v3 field-data loading. It gates ` +
 			`in-flight transient data across concurrent load tasks. Lower ` +
 			`values reduce peak transient memory at the cost of load throughput. ` +
 			`Oversized requests are still allowed to proceed exclusively to ` +
-			`guarantee progress. Set to 0 to disable the limit.`,
-		Export: true,
+			`guarantee progress. When unset, defaults to 2 GiB with ` +
+			`queryNode.segcore.storageV2.enableAsyncLoad enabled, otherwise 0. ` +
+			`Explicit values apply regardless of that switch; 0 disables the limit.`,
+		Export: false,
 		Formatter: func(v string) string {
-			if getAsInt64(v) < 0 {
-				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using unlimited",
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using default",
 					mlog.String("configured", v))
-				return strconv.Itoa(DefaultLoadTransientBudgetBytes)
+				return strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10)
 			}
 			return v
 		},
 	}
 	p.LoadTransientBudgetBytes.Init(base.mgr)
+
+	p.LoadAdmissionSlots = ParamItem{
+		Key:          "common.loadAdmissionSlots",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
+		Doc: `QueryNode limit on admitted, unfinished load work shared by scalar ` +
+			`index V3 entry streaming and storage v2/v3 field-data loading. Each ` +
+			`window, batch, or stream slice reserves one slot together with its ` +
+			`transient bytes until its temporary data is released after consumption ` +
+			`or finalization. When unset, defaults to twice the CPU count reported ` +
+			`by Milvus at initialization with queryNode.segcore.storageV2.enableAsyncLoad ` +
+			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
+			`0 disables the slot limit. Reader opens are controlled separately.`,
+		Export: false,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				mlog.Warn(context.TODO(), "common.loadAdmissionSlots must be non-negative, using default",
+					mlog.String("configured", v))
+				return p.LoadAdmissionSlots.DefaultValue
+			}
+			return v
+		},
+	}
+	p.LoadAdmissionSlots.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -899,11 +949,11 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 		Key:          "common.diskWriteNumThreads",
 		Version:      "2.6.0",
 		DefaultValue: "0",
-		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
-It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
-For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
-The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
-In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
+Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
+The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
+For example, set this parameter to 1 to serialize these local file writes.
+The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
@@ -2351,6 +2401,9 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
+	// WAL payload chunking rollout switch.
+	SplitChunkProxy ParamItem `refreshable:"true"`
+
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
@@ -2403,6 +2456,17 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
+	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalsPerCollection     ParamItem `refreshable:"true"`
+	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
+	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
+	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
+	RLSMaxPolicyNameLength            ParamItem `refreshable:"true"`
+	RLSMaxPolicyDescriptionLength     ParamItem `refreshable:"true"`
+	RLSMaxPrincipalNameLength         ParamItem `refreshable:"true"`
+	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
+	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
+	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2419,7 +2483,27 @@ type proxyConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 }
 
+func positiveProxyLimitFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		if getAsInt64(v) <= 0 {
+			return defaultValue
+		}
+		return v
+	}
+}
+
 func (p *proxyConfig) init(base *BaseTable) {
+	p.SplitChunkProxy = ParamItem{
+		Key:          "proxy.splitChunk",
+		Version:      "3.0.2",
+		DefaultValue: "true",
+		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
+Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
+For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkProxy.Init(base.mgr)
+
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
 		Version:      "2.2.0",
@@ -2586,10 +2670,11 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The maximum aggregate serialized byte size of membership-filter-bearing expression plans " +
-			"in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans " +
-			"with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must " +
-			"be positive; invalid values fall back to 128 MiB.",
+		Doc: "The request-wide membership-filter budget in bytes. It independently limits both the aggregate " +
+			"serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded " +
+			"size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy " +
+			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
+			"filters share both totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -2999,6 +3084,127 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxSearchAggregationResultEntries.Init(base.mgr)
+
+	p.RLSMaxPoliciesPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPoliciesPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of row policies allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("100"),
+	}
+	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
+
+	p.RLSMaxPrincipalsPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPrincipalsPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of RLS principals allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1000"),
+	}
+	p.RLSMaxPrincipalsPerCollection.Init(base.mgr)
+
+	p.RLSMaxTagsPerPrincipal = ParamItem{
+		Key:          "proxy.rls.maxTagsPerPrincipal",
+		Version:      "3.0.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of tags allowed on one collection-scoped RLS principal.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("50"),
+	}
+	p.RLSMaxTagsPerPrincipal.Init(base.mgr)
+
+	p.RLSMaxExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of one RLS using_expr or check_expr in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("4096"),
+	}
+	p.RLSMaxExpressionLength.Init(base.mgr)
+
+	p.RLSMaxCombinedExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxCombinedExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "16384",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of the final combined RLS expression in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("16384"),
+	}
+	p.RLSMaxCombinedExpressionLength.Init(base.mgr)
+
+	p.RLSMaxPolicyNameLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPolicyNameLength.Init(base.mgr)
+
+	p.RLSMaxPolicyDescriptionLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyDescriptionLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy description length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxPolicyDescriptionLength.Init(base.mgr)
+
+	p.RLSMaxPrincipalNameLength = ParamItem{
+		Key:          "proxy.rls.maxPrincipalNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPrincipalNameLength.Init(base.mgr)
+
+	p.RLSMaxTagKeyLength = ParamItem{
+		Key:          "proxy.rls.maxTagKeyLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag key length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("128"),
+	}
+	p.RLSMaxTagKeyLength.Init(base.mgr)
+
+	p.RLSMaxTagValueLength = ParamItem{
+		Key:          "proxy.rls.maxTagValueLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxTagValueLength.Init(base.mgr)
+
+	p.RLSMaxArrayLiteralElements = ParamItem{
+		Key:          "proxy.rls.maxArrayLiteralElements",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxArrayLiteralElements.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -3897,7 +4103,9 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	SoPath ParamItem `refreshable:"false"`
+	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
+	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
+	SoPath                         ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -4043,6 +4251,14 @@ type queryNodeConfig struct {
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
 	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	// StorageV2EnableAsyncLoad is the historical-key rollout switch for the
+	// Storage V3 async field-data pipeline.
+	StorageV2EnableAsyncLoad ParamItem `refreshable:"true"`
+	// StorageV2AsyncLoadThreadPoolSize bounds workers in the shared async executor.
+	StorageV2AsyncLoadThreadPoolSize ParamItem `refreshable:"true"`
+	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
+	// by one Storage V3 async window.
+	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4119,6 +4335,18 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.StrictGroupAcceptanceThreshold = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
+		Version: "2.6.23", DefaultValue: "0.1", Export: true,
+		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	}
+	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
+	p.StrictGroupProbeCandidates = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
+		Version: "2.6.23", DefaultValue: "100", Export: true,
+		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	}
+	p.StrictGroupProbeCandidates.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
@@ -4302,7 +4530,12 @@ It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), 
 eviction is necessary and the amount of data to evict from memory/disk.
 - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
   until the memory/disk usage is below the low watermark.
-- The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.`,
+- Disk watermark ratios are fractions of the effective local-storage disk capacity, not fractions of
+  queryNode.maxDiskUsagePercentage. They must satisfy diskLowWatermarkRatio <= diskHighWatermarkRatio <=
+  queryNode.maxDiskUsagePercentage / 100. When lowering queryNode.maxDiskUsagePercentage, adjust the
+  disk watermarks as needed to preserve this ordering.
+- The max amount of memory/disk that can be used for cache is controlled by
+  queryCoord.overloadedMemoryThresholdPercentage and queryNode.maxDiskUsagePercentage.`,
 		Export: true,
 	}
 	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
@@ -5081,6 +5314,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			return fmt.Sprintf("%f", getAsFloat(v)/100)
 		},
+		Doc:    "Maximum disk usage as a percentage of the effective local-storage disk capacity.",
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
@@ -5341,6 +5575,58 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+
+	// TODO: Complete async loading support for data and indexes and validate
+	// the default admission limits before supporting enableAsyncLoad=true.
+	p.StorageV2EnableAsyncLoad = ParamItem{
+		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Async loading support is incomplete; enabling it is currently unsupported. Existing translators keep the mode captured at construction.",
+		Export:       false,
+	}
+	p.StorageV2EnableAsyncLoad.Init(base.mgr)
+
+	p.StorageV2AsyncLoadThreadPoolSize = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadThreadPoolSize",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(max(1, min(hardware.GetCPUNum(), DefaultThreadPoolMaxThreadsSize))),
+		Doc: `Worker count for the shared Storage V3 async-load executor. ` +
+			`Must be a positive integer; defaults to min(CPUNUM, 16). ` +
+			`Independent of admission slots and the legacy load-pool thread coefficients. ` +
+			`The executor is created on first use; updates resize the existing executor.`,
+		Export: false,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 32)
+			if err != nil || parsed <= 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadThreadPoolSize must be a positive int32, using default",
+					mlog.String("configured", v))
+				return p.StorageV2AsyncLoadThreadPoolSize.DefaultValue
+			}
+			return v
+		},
+	}
+	p.StorageV2AsyncLoadThreadPoolSize.Init(base.mgr)
+
+	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
+		Doc: `Target estimated loaded-byte threshold for one Storage V3 async read window. ` +
+			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
+			`The value must be positive. Default 16 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be positive, using default 16 MiB",
+					mlog.String("configured", v))
+				return strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes)
+			}
+			return v
+		},
+	}
+	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
@@ -7046,10 +7332,26 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.FilesPerPreImportTask.Init(base.mgr)
 
 	p.ImportTaskRetention = ParamItem{
-		Key:          "dataCoord.import.taskRetention",
-		Version:      "2.4.0",
-		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
-		DefaultValue: "10800",
+		Key:     "dataCoord.import.taskRetention",
+		Version: "2.4.0",
+		Doc: `The retention period in seconds for tasks in the Completed or Failed state.
+Nothing else bounds the terminal set -- maxImportJobNum counts only jobs that are
+neither Completed nor Failed -- so this value alone decides how many finished
+importJob entries stay in etcd, each carrying its schema, file list and options
+plus every preimport and import task under it.
+The 48h default exists for BulkImport idempotency and only for it: the idempotency
+window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+earlier than its tombstone lets an in-window retry resolve to a jobID that
+GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
+as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
+age is measured from the last StreamingCoord start: every restart extends its
+remaining life by up to another maxLifetime, while this retention keeps counting
+from the job's own completion. Equal values hold only for a window with no restart,
+which is not a property a default may assume. Raise it further if StreamingCoord
+restarts more than once inside one tombstone lifetime.
+A cluster whose clients never send an Idempotency-Key is under no such requirement
+and can lower this freely; 10800 was the default before idempotency keys existed.`,
+		DefaultValue: "172800",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -8222,6 +8524,9 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	// WAL payload chunking rollout switch.
+	SplitChunkSN ParamItem `refreshable:"true"`
+
 	// primary resource group
 	PrimaryResourceGroup ParamItem `refreshable:"true"`
 
@@ -8255,6 +8560,9 @@ type streamingConfig struct {
 	WALBroadcasterTombstoneCheckInternal ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
+
+	// idempotency
+	IdempotencyMaxKeyLength ParamItem `refreshable:"true"`
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
@@ -8320,6 +8628,17 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	p.SplitChunkSN = ParamItem{
+		Key:          "streaming.splitChunkSN",
+		Version:      "3.0.2",
+		DefaultValue: "false",
+		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
+Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
+Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkSN.Init(base.mgr)
+
 	// primary resource group
 	p.PrimaryResourceGroup = ParamItem{
 		Key:     "streaming.primaryResourceGroup",
@@ -8557,6 +8876,19 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:     "streaming.idempotency.maxKeyLength",
+		Version: "2.6.6",
+		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
+The key is stored in the message properties of every write it guards, so an
+oversized key inflates both the WAL entry and the in-memory dedup index.
+A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
+requests that carry no key are accepted at any value.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

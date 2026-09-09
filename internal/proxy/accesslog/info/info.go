@@ -64,7 +64,10 @@ type AccessInfo interface {
 	TimeNow() string
 	TimeStart() string
 	TimeEnd() string
+	// MethodName returns the method value written to the access log.
 	MethodName() string
+	// MethodNameForFormatter returns the stable key used to select a formatter.
+	MethodNameForFormatter() string
 	Address() string
 	TraceID() string
 	MethodStatus() string

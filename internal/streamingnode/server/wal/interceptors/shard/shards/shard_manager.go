@@ -46,7 +46,6 @@ var (
 	ErrWaitForNewSegment = errors.New("wait for new segment")
 	ErrNotGrowing        = errors.New("segment is not growing")
 	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
-	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.

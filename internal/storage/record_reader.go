@@ -6,6 +6,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -429,12 +430,18 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	}()
 	nonExistingFields := make([]*schemapb.FieldSchema, 0)
 	nRows := 0
+	sawRecord, sawEOF := false, false
 	for _, f := range crr.fields {
 		idx := crr.index[f.FieldID]
 		if crr.rrs[idx] != nil {
 			if ok := crr.rrs[idx].Next(); !ok {
-				return nil, io.EOF
+				if err := crr.rrs[idx].Err(); err != nil && !errors.Is(err, io.EOF) {
+					return nil, merr.WrapErrDataIntegrity(err, "read V1 insert binlog field %d", f.FieldID)
+				}
+				sawEOF = true
+				continue
 			}
+			sawRecord = true
 			r := crr.rrs[idx].Record()
 			recs[idx] = r.Column(0)
 			recs[idx].Retain()
@@ -447,6 +454,14 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		} else {
 			nonExistingFields = append(nonExistingFields, f)
 		}
+	}
+	// Inspect every present reader before declaring EOF, so a
+	// later reader's non-EOF error takes precedence regardless of map iteration.
+	if sawEOF && sawRecord {
+		return nil, merr.WrapErrDataIntegrityMsg("field readers reached EOF at different positions")
+	}
+	if sawEOF {
+		return nil, io.EOF
 	}
 	for _, f := range nonExistingFields {
 		// If the field is not in the current batch, fill with null array
