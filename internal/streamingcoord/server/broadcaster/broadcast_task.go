@@ -497,6 +497,25 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	return b.ack(ctx, msgs...)
 }
 
+// AckPartial persists the append results of a subset of the broadcast's
+// vchannels without declaring the broadcast done. The broadcaster uses it to
+// land the append-first group durably before it appends the rest, so a restart
+// in between re-appends nothing that already reached the WAL. Never contains the
+// control channel, so it never schedules the ack callback.
+func (b *broadcastTask) AckPartial(ctx context.Context, results map[string]*types.AppendResult) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	msgs := make([]message.ImmutableMessage, 0, len(results))
+	for vchannel, result := range results {
+		if funcutil.IsControlChannel(vchannel) {
+			panic("broadcast task invariant violated: the control channel is never acked partially")
+		}
+		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, result))
+	}
+	return b.ack(ctx, msgs...)
+}
+
 // DropTombstone drops the tombstone of the broadcast task.
 // It will remove the tombstone of the broadcast task in recovery storage.
 // After the tombstone is dropped, the idempotency and deduplication can not be guaranteed.
