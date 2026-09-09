@@ -25,6 +25,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Single VChannel | Yes (VChannel) | — |
+| SplitShard | Broadcast: source vchannel(s) + target vchannel(s) + CChannel, sources appended first | Yes (VChannel-exclusive per data replica) | ExclusiveCollectionName (held by the broadcast) |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
@@ -36,7 +37,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 - **CreateCollection**: Creates a new collection with its partitions and VChannels.
 - **DropCollection**: Drops a collection and all its data, indexes, and load config. Implicitly flushes all growing segments.
-- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
+- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases. When its update mask carries `shard_split_routing` and the routing post-image no longer names the VChannel a given replica landed on (`messageutil.RetiresVChannel`), that replica retires the VChannel instead of applying a collection-wide update: the shard interceptor, recovery storage, and flusher each tear down their own registration for it, and that replica is never forwarded to the data sync service either.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
@@ -45,6 +46,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
+- **SplitShard**: One broadcast carrying every replica of a shard split, dispatched to the source VChannel(s), the target VChannel(s), and the CChannel. `BroadcastHeader.append_first_vchannels` names the sources; the broadcaster appends and persists them (via a partial ack) before any other replica, and the type property `FreshTimeTick` makes every other replica take a freshly fetched TSO batch, so a target's TimeTick is always greater than the sources' `T_switch`. Each replica is read by its role (`message.SplitShardRoleOf`): on a **source**, it is the write fence — its TimeTick is `T_switch`, and after it the VChannel never accepts DML again (`STREAMING_CODE_SHARD_FENCED`); the shard interceptor seals every growing segment as of `T_switch` and embeds their ids in the header — this message is the only seal record, there is no separate ManualFlush — and the flusher's `HandleSplitShard` hands those ids to the write buffer, which is then forwarded to the data sync service like any other message. A re-fence by the same split task appends again and succeeds (the shard manager keeps the first fence, so the extra record is idempotent and harmless); a fence attempted by another task is refused with `SHARD_FENCED` carrying the recorded `T_switch`. On a **target**, the replica is the genesis of the VChannel: the body's `genesis` (schema) and the header's partition ids register it exactly as CreateCollection would; this replica is never forwarded to the data sync service, which instead spawns the target's data sync service directly from it. On the **CChannel**, the replica is a no-op in every consumer; it exists only to give the ack callback a TimeTick to order against.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **AlterRLSMetadata**: Persists a complete row-policy or principal-tag post-image in the ACK callback. CChannel-only and serialized with collection/schema DDL.
@@ -84,9 +86,25 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 - **CreateSegment** must precede any Insert referencing that segment.
 - Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
 
+### Shard Split VChannel Lifecycle
+
+```
+SplitShard(target genesis) → [Insert | Delete | CreateSegment | Flush]* → …
+SplitShard(source fence) fences the source
+AlterCollection(shard_split_routing) that delists the source retires it
+```
+
+A target VChannel and the source VChannel(s) it replaces are born and die on opposite ends of the same broadcast timeline: the target's genesis and the source's fence are two replicas of the SAME SplitShard message, and the source's later retirement is a replica of the AlterCollection that commits the shrunken routing.
+
+- A VChannel enters the WAL either through **CreateCollection** or through the **target genesis replica** of a **SplitShard** broadcast; both are exempt from the recovery storage's "vchannel not found" check because they create the VChannel they name.
+- **SplitShard**'s **source replica** moves the VChannel to `VCHANNEL_STATE_SPLITTED` and records `T_switch` in `VChannelMeta.split_time_tick`. The state is persisted: the fence must still hold after a restart. A re-fence by the same split task appends again and succeeds — the shard manager keeps the first fence, so the extra record is idempotent — while a fence from another task is refused with `SHARD_FENCED`.
+- The **retire replica** — the **AlterCollection** replica whose `shard_split_routing` commit no longer names the VChannel it landed on — moves it to `VCHANNEL_STATE_DROPPED`. It is only legal on a VChannel a split has fenced. Because the commit that delists the VChannel from `collection.VirtualChannelNames` and the teardown of that VChannel are the same broadcast, the two can never observe each other's absence: a VChannel removed from the list first, by some other path, would never receive a teardown message of any kind.
+- **One VChannel per collection per PChannel.** The shard manager's registration map is keyed by collection id, so a split target must never be allocated onto a PChannel that still holds another VChannel of the same collection; the source has to be retired first. The append path enforces this (`CheckIfVChannelCanBeCreated` → `ErrVChannelConflict`) rather than trusting the coordinator, because the failure it prevents is silent and permanent: the newcomer would skip its own registration and inherit the incumbent's state, fence included.
+- **Target and retire replicas are never forwarded to the data sync service; the CChannel replica is a no-op in every consumer.** The flusher and the shard interceptor read each replica's role (`message.SplitShardRoleOf`, `messageutil.RetiresVChannel`) directly off the WAL: a target replica spawns the new VChannel's data sync service in place of forwarding, a retire replica closes it, and the CChannel replica — which is neither a source nor a target — is skipped outright. Only the source replica falls through to the data sync service, whose flow graph seals the fenced segments and sets the flush timestamp.
+
 ### Exclusive Lock Rule
 
-DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
+DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll, SplitShard) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
 - In-flight transactions on locked VChannels are failed.
 

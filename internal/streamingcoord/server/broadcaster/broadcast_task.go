@@ -441,6 +441,7 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 		}
 		if cp := task.AckedCheckpoints[idx]; cp != nil && cp.TimeTick != 0 {
 			// after proto.Clone, the cp is always not nil, so we also need to check the time tick.
+			// TimeTick == 0 is the not-yet-acked sentinel this function relies on throughout.
 			continue
 		}
 		// the ack result is dirty, so we need to set the dirty flag to true.
@@ -493,6 +494,30 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	msgs := make([]message.ImmutableMessage, 0, len(broadcastResult))
 	for vchannel := range broadcastResult {
 		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel]))
+	}
+	return b.ack(ctx, msgs...)
+}
+
+// AckPartial persists the append results of a subset of the broadcast's
+// vchannels without declaring the broadcast done. The broadcaster uses it to
+// land the append-first group durably before it appends the rest, so a restart
+// in between re-appends nothing that already reached the WAL. Never contains the
+// control channel, so it does not schedule the ack callback as long as the
+// control channel is not among the acked vchannels.
+func (b *broadcastTask) AckPartial(ctx context.Context, results map[string]*types.AppendResult) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.header().AckSyncUp {
+		panic("broadcast task invariant violated: an AckSyncUp broadcast cannot be partially acked at append time")
+	}
+
+	msgs := make([]message.ImmutableMessage, 0, len(results))
+	for vchannel, result := range results {
+		if funcutil.IsControlChannel(vchannel) {
+			panic("broadcast task invariant violated: the control channel is never acked partially")
+		}
+		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, result))
 	}
 	return b.ack(ctx, msgs...)
 }

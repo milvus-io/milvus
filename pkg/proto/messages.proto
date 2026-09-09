@@ -10,6 +10,7 @@ import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not
 import "index_coord.proto";
 import "internal.proto";
 import "milvus.proto";
+import "msg.proto";
 import "rg.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -70,6 +71,14 @@ enum MessageType {
     RollbackImport               = 46;
     AlterRLSMetadata             = 47;
     DropRLSMetadata              = 48;
+    // SplitShard is the single WAL record of a shard split's write switch. It
+    // is broadcast to the source vchannel(s), the target vchannel(s) and the
+    // control channel; each replica plays the role its vchannel has in the
+    // header: the source replica fences the source (its time tick is T_switch),
+    // a target replica is the genesis of that target vchannel, the control
+    // channel replica only orders the ack callback.
+    SplitShard                   = 49;
+    reserved 50, 51; // CreateVChannel, DropVChannel: folded into SplitShard and AlterCollection(shard_split_routing).
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -210,6 +219,62 @@ message ManualFlushMessageHeader {
     repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
 }
 
+// SplitShardTarget describes one target shard of a shard split.
+message SplitShardTarget {
+    // the vchannel name of the target shard.
+    string vchannel = 1;
+    // the routing residues owned by the target shard after the split, taken
+    // against the routing_modulus of the message carrying this target.
+    schema.HashRouting routing = 2;
+}
+
+// SplitShardMessageHeader is the header of the split shard message, the one
+// WAL record of a shard split's write switch. One broadcast carries identical
+// replicas to every vchannel below; a consumer decides what a replica means by
+// where its own vchannel appears:
+//   - in source_vchannels: the write fence. After this message the source
+//     never accepts DML again; its time tick is T_switch.
+//   - in targets: the genesis of that target vchannel. The body carries the
+//     schema and the header the partition snapshot the target registers with.
+//   - the control channel: no effect, it orders the ack callback.
+message SplitShardMessageHeader {
+    int64 collection_id = 1;
+    // the unique split task id allocated by the coordinator,
+    // used for idempotency and split task correlation.
+    int64 split_task_id = 2;
+    // the target shards the split produces, with the residues each owns.
+    repeated SplitShardTarget targets = 3;
+    // the growing segments the source streamingnode auto-flushed while
+    // processing the SOURCE replica (embedded by the handler, the same way the
+    // AlterCollection schema-change path embeds its flushed segments). Empty on
+    // every other replica.
+    repeated int64 flushed_segment_ids = 4;
+    // the collection's routing modulus the targets' residues are taken against.
+    uint64 routing_modulus = 5;
+    // the vchannels this split fences. One for a split or a doubling, every
+    // shard of the collection for a rehash.
+    repeated string source_vchannels = 6;
+    // the collection's partitions at the time of the split, registered on every
+    // target genesis. Collection DDL is excluded from the write switch by the
+    // broadcast's ExclusiveCollectionName resource key, so this is exact.
+    repeated int64 partition_ids = 7;
+    int64 db_id = 8;
+}
+
+// SplitShardMessageBody carries what the two consumers that need more than the
+// header read from the message.
+message SplitShardMessageBody {
+    // the collection schema for the target genesis, in the shape
+    // CreateCollection already uses so the three genesis consumers share one
+    // parser (messageutil.MustGetSchemaFromCreateCollectionMessageBody).
+    msg.CreateCollectionRequest genesis = 1;
+    // the routing post-image the rootcoord ack callback commits to the
+    // collection meta once every replica has landed: the grown vchannel list,
+    // every shard's state and residues, the modulus and shard_by. Carried whole
+    // so a replay never depends on mutable meta.
+    AlterCollectionMessageUpdates routing = 2;
+}
+
 // CreateCollectionMessageHeader is the header of create collection message.
 message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
@@ -315,6 +380,21 @@ message AlterCollectionMessageUpdates {
     // Fully materialized (index id/name allocated, params validated) at DDL prepare
     // stage BEFORE broadcast; applied atomically with the schema in the ack callback.
     repeated index.FieldIndex bound_field_indexes = 9;
+    // Shard-split routing commit: the full post-split vchannel topology and routing
+    // facts, applied atomically under the shard-split routing field masks. The
+    // virtual/physical channel lists are the complete new lists (existing shards plus
+    // the split targets), and shard_infos is parallel to virtual_channel_names.
+    repeated string virtual_channel_names      = 10;
+    repeated string physical_channel_names     = 11;
+    repeated schema.CollectionShardInfo shard_infos = 12;
+    // The collection's routing modulus after the split. A split that halves a shard
+    // down to its last residue doubles it, which re-expresses every other shard's
+    // residues too — so the modulus has to be committed with shard_infos, not apart
+    // from it.
+    uint64 routing_modulus                     = 13;
+    // The routing-key expression, back-filled at the first split of a collection
+    // created before shard_by existed. Empty leaves it undeclared.
+    string shard_by                            = 14;
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.
@@ -782,6 +862,14 @@ message BroadcastHeader {
     // the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
     // e.g. if truncate collection operation want to call ack once callback after the all segment are flushed at current vchannel,
     // it should set the ack_sync_up to be true.
+
+    // append_first_vchannels are the vchannels the broadcaster appends and
+    // persists BEFORE it appends any other replica of this broadcast. Empty for
+    // every broadcast except a shard split, whose source replicas must be in
+    // the WAL before any target replica so that a fresh time tick taken on a
+    // target pchannel is greater than T_switch. The list is a subset of
+    // vchannels; the control channel is never in it.
+    repeated string append_first_vchannels = 5;
 }
 
 // ReplicateHeader is the header of replicate message.

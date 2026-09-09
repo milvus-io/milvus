@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -326,8 +327,8 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 		return
 	}
 
-	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
-		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
+	if msg.VChannel() != "" && !msg.IsPChannelLevel() && r.vchannels[msg.VChannel()] == nil &&
+		!funcutil.IsControlChannel(msg.VChannel()) && !exemptFromVChannelNotFound(msg) {
 		r.detectInconsistency(ctx, msg, "vchannel not found")
 	}
 
@@ -377,11 +378,73 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 	case message.MessageTypeTruncateCollection:
 		immutableMsg := message.MustAsImmutableTruncateCollectionMessageV2(msg)
 		r.handleTruncateCollection(ctx, immutableMsg)
+	case message.MessageTypeSplitShard:
+		immutableMsg := message.MustAsImmutableSplitShardMessageV2(msg)
+		r.handleSplitShard(ctx, immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	case message.MessageTypeAlterWAL:
 		immutableMsg := message.MustAsImmutableAlterWALMessageV2(msg)
 		r.handleAlterWAL(ctx, immutableMsg)
+	}
+}
+
+// exemptFromVChannelNotFound lists the messages that may legitimately arrive on
+// a vchannel this recovery storage does not hold: the genesis messages, and the
+// teardowns, whose replay after the meta was dropped is not an inconsistency.
+func exemptFromVChannelNotFound(msg message.ImmutableMessage) bool {
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection, message.MessageTypeDropCollection:
+		return true
+	case message.MessageTypeSplitShard:
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleTarget
+	case message.MessageTypeAlterCollection:
+		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		return messageutil.RetiresVChannel(alter.Header(), alter.MustBody().GetUpdates(), msg.VChannel())
+	}
+	return false
+}
+
+// handleSplitShard handles the split shard message.
+//
+// A SplitShard broadcast lands on more than one vchannel, and each replica's
+// role -- decided from the header, not from which switch case dispatched it --
+// says what it means here:
+//
+//   - the source replica fences the vchannel: no new DML is appended after it,
+//     so only the vchannel state flips here. The growing segments were already
+//     sealed by the interceptor while the fence was being built (there is no
+//     ManualFlush before it -- this message IS the seal record); flushing them
+//     again keeps the replay idempotent, since a replay can recreate GROWING
+//     segments after the fence was persisted.
+//
+//   - the target replica is the genesis of a new vchannel: it seeds the
+//     vchannel meta exactly as create collection does, so the new vchannel
+//     survives a streamingnode restart.
+//
+// Scoped by vchannel, not by collection: the fenced source is one shard of a
+// collection whose other shards are still taking writes, and flushing those
+// here would seal segments no message asked to seal.
+func (r *recoveryStorageImpl) handleSplitShard(ctx context.Context, msg message.ImmutableSplitShardMessageV2) {
+	switch message.SplitShardRoleOf(msg.Header(), msg.VChannel()) {
+	case message.SplitShardRoleSource:
+		r.flushAllSegmentOfVChannel(ctx, msg)
+		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+			vchannelInfo.ObserveSplitShard(msg)
+		}
+		r.Logger().Info(ctx, "split shard", mlog.FieldMessage(msg))
+	case message.SplitShardRoleTarget:
+		if _, ok := r.vchannels[msg.VChannel()]; ok {
+			return
+		}
+		r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromSplitShardMessage(msg)
+		r.Logger().Info(ctx, "create vchannel from split shard genesis", mlog.FieldMessage(msg))
+	default:
+		// A replica landing on a vchannel the header names as neither a source
+		// nor a target is a misroute, symmetric with the source and target arms
+		// above: report it instead of silently doing nothing.
+		r.detectInconsistency(ctx, msg, "split shard replica of unknown role")
 	}
 }
 
@@ -517,6 +580,26 @@ func (r *recoveryStorageImpl) handleCreateCollection(ctx context.Context, msg me
 	r.Logger().Info(ctx, "create collection", mlog.FieldMessage(msg))
 }
 
+// flushAllSegmentOfVChannel flushes every segment sitting on one vchannel.
+//
+// Scoped by InsertChannel rather than by collection: a reclaimed vchannel is
+// one shard of a collection that is still very much alive, and flushing the
+// collection's other shards here would be wrong.
+func (r *recoveryStorageImpl) flushAllSegmentOfVChannel(ctx context.Context, msg message.ImmutableMessage) {
+	segmentIDs := make([]int64, 0)
+	for _, segment := range r.segments {
+		if segment.meta.GetVchannel() != msg.VChannel() {
+			continue
+		}
+		segment.ObserveFlush(msg.TimeTick())
+		segmentIDs = append(segmentIDs, segment.meta.SegmentId)
+	}
+	if len(segmentIDs) > 0 {
+		r.Logger().Info(ctx, "flush all segments of vchannel", mlog.FieldMessage(msg),
+			mlog.Int64s("segmentIDs", segmentIDs))
+	}
+}
+
 // handleDropCollection handles the drop collection message.
 func (r *recoveryStorageImpl) handleDropCollection(ctx context.Context, msg message.ImmutableDropCollectionMessageV1) {
 	// Always flush first: during WAL replay, CreateSegment/Insert messages may have recreated
@@ -605,7 +688,26 @@ func (r *recoveryStorageImpl) handleSchemaChange(ctx context.Context, msg messag
 }
 
 // handlePutCollection handles the put collection message.
+//
+// A retiring replica -- a shard-split routing commit that delists this
+// vchannel -- tears the vchannel down the same way DropVChannel once did:
+// its recovery info moves to DROPPED and stops being rebuilt on every WAL
+// open. Segments are flushed first for the reason handleDropCollection
+// flushes them: a replay can recreate GROWING segments after the vchannel
+// was marked dropped, so flushing unconditionally is what makes the replay
+// idempotent. A retired vchannel has been fenced since long before this
+// point, so in practice there is nothing to flush -- which is why this must
+// not be an assumption.
 func (r *recoveryStorageImpl) handleAlterCollection(ctx context.Context, msg message.ImmutableAlterCollectionMessageV2) {
+	if messageutil.RetiresVChannel(msg.Header(), msg.MustBody().GetUpdates(), msg.VChannel()) {
+		r.flushAllSegmentOfVChannel(ctx, msg)
+		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			vchannelInfo.ObserveDropVChannel(msg.TimeTick())
+		}
+		r.Logger().Info(ctx, "retire vchannel", mlog.FieldMessage(msg))
+		return
+	}
+
 	// when put collection happens, we need to flush all segments in the collection.
 	segments := make(map[int64]struct{}, len(msg.Header().FlushedSegmentIds))
 	for _, segmentID := range msg.Header().FlushedSegmentIds {
