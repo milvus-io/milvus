@@ -21,6 +21,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LegacyIndexLoader.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/FileWriter.h"
 #include <yaml-cpp/yaml.h>
 
@@ -447,14 +448,59 @@ IndexFactory::IndexLoadResource(
         *use_shared_memory_overhead_group = false;
     }
     if (milvus::IsVectorDataType(field_type)) {
-        return VecIndexLoadResource(field_type,
-                                    element_type,
-                                    index_version,
-                                    index_size_in_bytes,
-                                    index_params,
-                                    mmap_enable,
-                                    num_rows,
-                                    dim);
+        auto request = VecIndexLoadResource(field_type,
+                                            element_type,
+                                            index_version,
+                                            index_size_in_bytes,
+                                            index_params,
+                                            mmap_enable,
+                                            num_rows,
+                                            dim);
+        const auto& type = index_params.at(INDEX_TYPE);
+        if (index_files.empty() || !file_manager_context.Valid() ||
+            knowhere::UseDiskLoad(type, index_version) ||
+            (mmap_enable &&
+             knowhere::KnowhereCheck::SupportMmapIndexTypeCheck(type))) {
+            return request;
+        }
+        // Estimate both modes from persisted envelopes: the global load switch
+        // may change before a cached index is loaded again. Final BinarySet
+        // buffers are request-owned, never covered by a slice admission lease.
+        auto inspect = [&]() -> folly::coro::Task<uint64_t> {
+            uint64_t retained = 0;
+            uint64_t scratch = 0;
+            for (const auto& file : index_files) {
+                auto input = storage::OpenLegacyIndexInput(
+                    file_manager_context.chunkManagerPtr,
+                    file_manager_context.fs,
+                    file);
+                const auto info = co_await storage::InspectLegacyIndexFileAsync(
+                    *input, proto::common::LoadPriority::HIGH);
+                retained =
+                    SaturatingAdd(retained, uint64_t{info.payload_bytes});
+                scratch = std::max(scratch, uint64_t{info.max_transient_bytes});
+                if (GetIndexFileBaseName(file) == INDEX_FILE_SLICE_META) {
+                    scratch = std::max(
+                        scratch,
+                        SaturatingMultiply(uint64_t{info.payload_bytes},
+                                           uint64_t{32}));
+                }
+            }
+            co_return SaturatingAdd(retained, scratch);
+        };
+        // Enabled inspection uses the same shared async executor as loading;
+        // disabled inspection stays at the synchronous planning boundary.
+        const bool use_async_load =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        const auto overhead =
+            use_async_load ? folly::coro::blockingWait(inspect().scheduleOn(
+                                 storage::ResolveAsyncLoadExecutor(
+                                     {}, proto::common::LoadPriority::HIGH)))
+                           : folly::coro::blockingWait(inspect());
+        request.max_memory_cost =
+            std::max(request.max_memory_cost,
+                     SaturatingAdd(request.final_memory_cost, overhead));
+        return request;
     }
     return ScalarIndexLoadResource(field_type,
                                    index_version,
@@ -668,7 +714,8 @@ IndexFactory::VecIndexLoadResource(
             std::max(res.memoryCost, download_buffer_size_in_bytes);
     } else {
         request.max_disk_cost = 0;
-        request.max_memory_cost = 2 * res.memoryCost;
+        request.max_memory_cost =
+            SaturatingMultiply(uint64_t{2}, res.memoryCost);
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
         const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);

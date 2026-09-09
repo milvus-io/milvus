@@ -72,6 +72,14 @@ class VectorMemIndex : public VectorIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    // Sealed memory loading uses admitted reads on the shared async executor.
+    // Deserialize runs on that caller; Knowhere owns its internal parallelism.
+    // Cancellation drains issued reads and is checked around deserialization.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override;

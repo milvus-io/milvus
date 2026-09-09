@@ -32,6 +32,8 @@
 #include "common/protobuf_utils.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
+#include "knowhere/comp/knowhere_check.h"
+#include "knowhere/utils.h"
 #include "milvus-storage/column_groups.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -1172,10 +1174,17 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            // Every scalar path now inspects persisted metadata before loading.
-            // Do not let a metadata-free cached estimate override that request.
+            // Scalar and memory vector loaders inspect persisted envelopes.
+            // Defer their byte estimates until a file context is available.
+            const auto& index_type =
+                load_index_info.index_params.at("index_type");
             const bool needs_file_context =
-                !IsVectorDataType(load_index_info.field_type);
+                !IsVectorDataType(load_index_info.field_type) ||
+                (!knowhere::UseDiskLoad(index_type,
+                                        load_index_info.index_engine_version) &&
+                 !(load_index_info.enable_mmap &&
+                   knowhere::KnowhereCheck::SupportMmapIndexTypeCheck(
+                       index_type)));
             auto request =
                 milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                     load_index_info.field_type,

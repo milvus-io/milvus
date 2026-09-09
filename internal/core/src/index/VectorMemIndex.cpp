@@ -54,6 +54,8 @@
 #include "common/VectorArray.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
 #include "glog/logging.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
@@ -73,6 +75,9 @@
 #include "pb/common.pb.h"
 #include "prometheus/histogram.h"
 #include "storage/DataCodec.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
@@ -490,6 +495,64 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LoadWithoutAssemble(binary_set, config);
     span_load_engine->End();
     LOG_INFO("load vector index done");
+}
+
+template <typename T>
+void
+VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
+                        const Config& config,
+                        milvus::OpContext* op_ctx) {
+    const bool use_async_load =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    // File-backed Knowhere loading is migrated separately.
+    if (!use_async_load || config.contains(MMAP_FILE_PATH)) {
+        Load(ctx, config);
+        return;
+    }
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    const auto token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+    auto load = [&]() -> folly::coro::Task<void> {
+        storage::ThrowIfCancelled(token, "VectorMemIndex::Load");
+        AssertInfo(file_manager_ != nullptr,
+                   "Vector load requires a file manager");
+        const auto files =
+            config.at(INDEX_FILES).get<std::vector<std::string>>();
+        BinarySet binary;
+        {
+            auto span = tracer::StartSpan("SegCoreReadIndexFile", &ctx);
+            const auto end_span = folly::makeGuard([&] { span->End(); });
+            // Admission waits suspend this async worker. Metadata inspection,
+            // decode and destination copies resume on it. Arrow performs reads
+            // on its backend; ChunkManager-only inputs read on this worker.
+            // Do not keep a thread-local active span across coroutine suspension.
+            binary = co_await file_manager_->LoadIndexBinarySetAsync(
+                files, priority, token);
+        }
+        storage::ThrowIfCancelled(token, "VectorMemIndex::Deserialize");
+        auto span = tracer::StartSpan("SegCoreEngineLoadIndex", &ctx);
+        const auto end_span = folly::makeGuard([&] { span->End(); });
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+            active_span(span);
+        const auto scope =
+            opentelemetry::trace::Tracer::WithActiveSpan(active_span);
+        // Invoke once on the same async worker, with no slice admission held.
+        // Knowhere controls any internal parallelism. Its synchronous call must
+        // finish before cancellation can release the BinarySet or the index.
+        LoadWithoutAssemble(binary, config);
+        storage::ThrowIfCancelled(token, "VectorMemIndex::Deserialize");
+    };
+    try {
+        // The synchronous sealed-load caller is the only blockingWait boundary.
+        folly::coro::blockingWait(
+            load().scheduleOn(storage::ResolveAsyncLoadExecutor({}, priority)));
+    } catch (const std::bad_alloc& error) {
+        throw SegcoreError(MemAllocateFailed, error.what());
+    } catch (const folly::OperationCancelled& error) {
+        throw SegcoreError(FollyCancel, error.what());
+    }
 }
 
 template <typename T>
