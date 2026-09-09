@@ -87,7 +87,7 @@ SortLegacyAuxBytes(int64_t num_rows) {
         return 0;
     }
     const auto rows = static_cast<uint64_t>(num_rows);
-    return SaturatingAdd(SaturatingMultiply<uint64_t>(rows, sizeof(int32_t)),
+    return SaturatingAdd(SaturatingMultiply(rows, sizeof(int32_t)),
                          BitsetBytes(num_rows));
 }
 
@@ -97,7 +97,7 @@ MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
         return 0;
     }
     const auto rows = static_cast<uint64_t>(num_rows);
-    return SaturatingMultiply<uint64_t>(
+    return SaturatingMultiply(
         SaturatingAdd(SaturatingMultiply(arrays_per_row, rows), uint64_t{1}),
         sizeof(uint32_t));
 }
