@@ -242,14 +242,9 @@ impl FilteredText {
             if let Some((matched_len, replacement)) = match_at(&self.text[cursor..]) {
                 debug_assert!(matched_len > 0);
                 debug_assert!(self.text.is_char_boundary(cursor + matched_len));
-                let output = output
-                    .get_or_insert_with(|| self.empty_output(self.correction_count() + 1));
-                self.push_original_segment(
-                    copied_until,
-                    cursor,
-                    &mut correction_index,
-                    output,
-                );
+                let output =
+                    output.get_or_insert_with(|| self.empty_output(self.correction_count() + 1));
+                self.push_original_segment(copied_until, cursor, &mut correction_index, output);
                 self.push_replacement(cursor, cursor + matched_len, replacement, output);
                 cursor += matched_len;
                 copied_until = cursor;
@@ -506,16 +501,13 @@ impl FilteredText {
         debug_assert!(corrections.last().map_or(true, |correction| {
             correction.filtered_start <= filtered_start
         }));
-        let correction = SpanOffsetCorrection::new(
-            filtered_start,
-            filtered_len,
-            original_start,
-            original_end,
-        );
+        let correction =
+            SpanOffsetCorrection::new(filtered_start, filtered_len, original_start, original_end);
         if filtered_len == 0 {
-            if let Some(last) = corrections.last_mut().filter(|last| {
-                last.filtered_start == filtered_start && last.filtered_len == 0
-            }) {
+            if let Some(last) = corrections
+                .last_mut()
+                .filter(|last| last.filtered_start == filtered_start && last.filtered_len == 0)
+            {
                 *last = correction;
                 return;
             }

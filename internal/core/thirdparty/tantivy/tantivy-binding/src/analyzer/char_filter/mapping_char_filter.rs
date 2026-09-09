@@ -76,8 +76,7 @@ impl CharFilter for MappingCharFilter {
     fn apply(&self, input: FilteredText) -> FilteredText {
         input.replace_matches(|text| {
             let next = text.chars().next().unwrap();
-            self
-                .mappings
+            self.mappings
                 .get(&next)
                 .into_iter()
                 .flatten()
