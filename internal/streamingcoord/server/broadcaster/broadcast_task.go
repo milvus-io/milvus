@@ -441,6 +441,7 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 		}
 		if cp := task.AckedCheckpoints[idx]; cp != nil && cp.TimeTick != 0 {
 			// after proto.Clone, the cp is always not nil, so we also need to check the time tick.
+			// TimeTick == 0 is the not-yet-acked sentinel this function relies on throughout.
 			continue
 		}
 		// the ack result is dirty, so we need to set the dirty flag to true.
@@ -501,7 +502,8 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 // vchannels without declaring the broadcast done. The broadcaster uses it to
 // land the append-first group durably before it appends the rest, so a restart
 // in between re-appends nothing that already reached the WAL. Never contains the
-// control channel, so it never schedules the ack callback.
+// control channel, so it does not schedule the ack callback as long as the
+// control channel is not among the acked vchannels.
 func (b *broadcastTask) AckPartial(ctx context.Context, results map[string]*types.AppendResult) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

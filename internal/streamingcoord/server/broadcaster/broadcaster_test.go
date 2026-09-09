@@ -589,6 +589,134 @@ func TestBroadcastFirstGroupPersistFailurePropagatesError(t *testing.T) {
 	assert.NotErrorIs(t, err, errBroadcastTaskIsNotDone)
 }
 
+// partialFailWAL fails only the response for failVChannel, and only the first
+// time it appears in any call; every other response — including other members
+// of the same call — succeeds. Used to simulate a multi-member append-first
+// group (e.g. a rehash with several source vchannels) where some members land
+// and others don't within the very same AppendMessages call.
+type partialFailWAL struct {
+	streaming.WALAccesser
+	failVChannel string
+
+	mu         sync.Mutex
+	calls      [][]string
+	failedOnce bool
+}
+
+func (w *partialFailWAL) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+	w.mu.Lock()
+	vchannels := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		vchannels = append(vchannels, m.VChannel())
+	}
+	w.calls = append(w.calls, vchannels)
+	callIdx := len(w.calls)
+	w.mu.Unlock()
+
+	resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+	for i, m := range msgs {
+		w.mu.Lock()
+		failThis := m.VChannel() == w.failVChannel && !w.failedOnce
+		if failThis {
+			w.failedOnce = true
+		}
+		w.mu.Unlock()
+		if failThis {
+			resps.Responses[i] = types.AppendResponse{Error: errors.New("append failed")}
+			continue
+		}
+		resps.Responses[i] = types.AppendResponse{
+			AppendResult: &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(int64(callIdx*10 + i)),
+				TimeTick:  uint64(1000 + callIdx*10 + i),
+			},
+		}
+	}
+	return resps
+}
+
+// TestBroadcastFirstGroupPartialSuccessIsPersisted covers a multi-member
+// append-first group (a rehash names several source vchannels): when the
+// group's own append call lands some members and fails others, the landed
+// subset must be persisted via AckPartial right away, not discarded until a
+// later restart recomputes it from the proto. It asserts the landed member
+// has a persisted checkpoint before the retry, the retry appends only the
+// failed member, and the final broadcast result carries every vchannel.
+func TestBroadcastFirstGroupPartialSuccessIsPersisted(t *testing.T) {
+	paramtable.Init()
+	registry.ResetRegistration()
+
+	var savedTask *streamingpb.BroadcastTask
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, broadcastID uint64, bt *streamingpb.BroadcastTask) error {
+			savedTask = proto.Clone(bt).(*streamingpb.BroadcastTask)
+			return nil
+		}).Maybe()
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	metrics := newBroadcasterMetrics()
+	ackScheduler := newAckCallbackScheduler(mlog.With())
+
+	vchannels := []string{"p0_1v0", "p0_2v0", "p1_1v1", "p1_vcchan"}
+	appendFirst := []string{"p0_1v0", "p0_2v0"}
+	msg := createNewSplitShardBroadcastMsg(vchannels, appendFirst...).WithBroadcastID(970)
+	taskProto := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, []byte{0x00, 0x00, 0x00, 0x00})
+	task := newBroadcastTaskFromProto(taskProto, metrics, ackScheduler)
+	task.SetLogger(mlog.With())
+
+	// Fails p0_2v0 once (within the first, multi-member append-first call),
+	// leaving p0_1v0 to land in that very same call.
+	wal := &partialFailWAL{failVChannel: "p0_2v0"}
+	oldWAL := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(oldWAL)
+
+	pending := newPendingBroadcastTask(task)
+	require.NotNil(t, pending)
+
+	// First Execute: the append-first group's own append call lands p0_1v0 but
+	// fails p0_2v0. The landed one must be persisted before the retry.
+	err := pending.Execute(context.Background())
+	assert.ErrorIs(t, err, errBroadcastTaskIsNotDone)
+
+	require.NotNil(t, savedTask, "the landed member of the append-first group must be persisted")
+	checkTask := newBroadcastTaskFromProto(savedTask, newBroadcasterMetrics(), newAckCallbackScheduler(mlog.With()))
+	assert.True(t, checkTask.hasLandedCheckpoint("p0_1v0"),
+		"the landed vchannel must have a persisted checkpoint before the retry")
+	assert.False(t, checkTask.hasLandedCheckpoint("p0_2v0"),
+		"the failed vchannel must not have a checkpoint yet")
+
+	wal.mu.Lock()
+	calls := wal.calls
+	wal.mu.Unlock()
+	require.Len(t, calls, 1)
+	assert.ElementsMatch(t, []string{"p0_1v0", "p0_2v0"}, calls[0])
+
+	// Second Execute: the retry appends only the failed member (p0_2v0), which
+	// now lands and is persisted; the same call then appends the rest, which
+	// also lands.
+	err = pending.Execute(context.Background())
+	assert.NoError(t, err)
+
+	wal.mu.Lock()
+	calls = wal.calls
+	wal.mu.Unlock()
+	require.Len(t, calls, 3)
+	assert.Equal(t, []string{"p0_2v0"}, calls[1])
+	assert.ElementsMatch(t, []string{"p1_1v1", "p1_vcchan"}, calls[2])
+
+	_, result := task.BroadcastResult()
+	assert.Len(t, result, 4)
+	assert.Contains(t, result, "p0_1v0")
+	assert.Contains(t, result, "p0_2v0")
+	assert.Contains(t, result, "p1_1v1")
+	assert.Contains(t, result, "p1_vcchan")
+}
+
 // TestBroadcastRestartAfterTheFirstGroupDoesNotReappendIt simulates a coordinator
 // restart right after the append-first group has landed and been persisted: it
 // builds a fresh broadcastTask from the persisted proto and asserts that the

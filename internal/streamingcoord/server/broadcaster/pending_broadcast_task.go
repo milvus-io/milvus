@@ -61,16 +61,23 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	first, rest := b.splitAppendFirst()
 	if len(first) > 0 {
 		results, pending := b.appendGroup(ctx, first)
+		// Persist whatever landed before deciding whether to retry: a rehash
+		// can name several append-first vchannels, and a partial append (some
+		// land, some fail) must not lose the landed subset — it is genuine,
+		// durable progress and `ack` is per-vchannel idempotent, so acking it
+		// now is safe even if the rest of the group is later retried.
+		if len(results) > 0 {
+			if err := b.AckPartial(ctx, results); err != nil {
+				b.Logger().Warn(ctx, "broadcast task persist the append-first group failed", mlog.Err(err))
+				return err
+			}
+			b.Logger().Info(ctx, "broadcast task landed the append-first group", mlog.Int("count", len(results)))
+		}
 		if len(pending) > 0 {
 			b.pendingMessages = append(pending, rest...)
 			b.UpdateInstantWithNextBackOff()
 			return errBroadcastTaskIsNotDone
 		}
-		if err := b.AckPartial(ctx, results); err != nil {
-			b.Logger().Warn(ctx, "broadcast task persist the append-first group failed", mlog.Err(err))
-			return err
-		}
-		b.Logger().Info(ctx, "broadcast task landed the append-first group", mlog.Int("count", len(results)))
 		b.pendingMessages = rest
 	}
 
