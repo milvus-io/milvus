@@ -5129,7 +5129,7 @@ func setupV3SegIndexGC(t *testing.T) (*meta, string, string) {
 	}))
 	m.snapshotMeta = &snapshotMeta{}
 
-	return m, packed.MarshalManifestPath(basePath, 4), "root/index/100/10/4001/4100/1/manifest-file"
+	return m, packed.MarshalManifestPath(basePath, 4), "root/index_files/4100/1/10/4001/manifest-file"
 }
 
 func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
@@ -5144,7 +5144,7 @@ func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 		NumRows:               100,
 		SerializedSize:        10,
 		MemSize:               20,
-		Path:                  "root/index/100/10/4001/4100/1",
+		Path:                  "root/index_files/4100/1/10/4001",
 		IndexFileKeys:         []string{"manifest-file"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
@@ -5168,7 +5168,7 @@ func v3GCManifestIndex(indexID, buildID int64) packed.ManifestIndexInfo {
 		NumRows:               100,
 		SerializedSize:        10,
 		MemSize:               20,
-		Path:                  fmt.Sprintf("root/index/100/10/4001/%d/1", buildID),
+		Path:                  fmt.Sprintf("root/index_files/%d/1/10/4001", buildID),
 		IndexFileKeys:         []string{"manifest-file"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}
@@ -5529,7 +5529,7 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 		NumRows:               100,
 		SerializedSize:        2000,
 		MemSize:               3000,
-		Path:                  "root/index/100/10/3101/5300/1",
+		Path:                  "/tmp/test/index_files/5300/1/10/3101",
 		IndexFileKeys:         []string{"f0"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
@@ -5599,7 +5599,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 		NumRows:               100,
 		SerializedSize:        2000,
 		MemSize:               3000,
-		Path:                  "root/index/100/10/3201/6200/1",
+		Path:                  "/tmp/test/index_files/6200/1/10/3201",
 		IndexFileKeys:         []string{"manifest-file"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
@@ -5611,7 +5611,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.TODO(), segmentID)
 	assert.Equal(t, gcNotBlocked, blocked)
 	require.Len(t, segIndexes, 1)
-	assert.Contains(t, indexFiles, "root/index/100/10/3201/6200/1/manifest-file",
+	assert.Contains(t, indexFiles, "/tmp/test/index_files/6200/1/10/3201/manifest-file",
 		"the manifest-only entry's files must be in the delete list even though records exist")
 	for file := range gc.getAllIndexFilesOfIndex(segIndexes[0]) {
 		assert.Contains(t, indexFiles, file,

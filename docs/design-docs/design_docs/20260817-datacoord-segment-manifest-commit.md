@@ -137,8 +137,9 @@ Single-writer manifest writes do not serialize and are published inline via
   an **empty** manifest path (`snapshot_manager.go`, `import_util.go`) and stays
   `Importing` — invisible to stats/index/compaction, which gate on
   `Flushed`/`Flushing` — until a single `Importing -> Flushed` finalization.  Its
-  worker returns a complete manifest pointer, DataCoord does no manifest I/O, and
-  no other writer touches it before publication.
+  worker returns a complete manifest pointer. Copy finalization reads back non-empty
+  index metadata to verify target identity and artifact paths; it creates no new
+  revision. No other writer touches the target before publication.
 
 Because these paths have no concurrent writer, `UpdateManifest` carries no
 StorageV3 guard.  A producer may write data files, but a job that publishes into
@@ -351,16 +352,14 @@ the same reason an unreadable manifest does.
 
 The cost is one object read per marked healthy non-L0 StorageV3 segment at
 startup. An all-etcd cluster has no marked segments and performs no manifest
-GETs. The remaining fan-out is pooled at
-`dataCoord.index.segmentIndexManifestLoadConcurrency` (default 4096)
-rather than `metastore.readConcurrency`: the latter is shared with the
-querycoord and rootcoord catalogs and defaults to 32, which is a sane etcd
-fan-out and a badly wrong one for object-storage GETs. At 32 in flight a
-million-segment cluster would serialize its boot into hours, and since the scan
-is fail-closed inside `newMeta` that time is downtime, not background warmup.
-Each slot holds a cgo call for the duration of one GET and so pins an OS thread,
-which is the ceiling the knob trades against; a throttling object store is the
-reason to lower it.
+GETs. Reads use `dataCoord.index.segmentIndexManifestLoadConcurrency` (default
+64, clamped to 1–256), further bounded by `minio.maxConnections`. Each active
+read blocks a native thread. Fixed-size batches retain futures only for the
+active batch, and successful records are installed before the next batch.
+Transient reads retry locally up to three times. Invalid entries are rejected
+without a validation retry; exhausted reads and invalid metadata both terminate
+startup without replaying the scan through `initMeta`'s metastore retry loop.
+The partially recovered metadata is never exposed by `newMeta`.
 
 **Lock order.** The global order is
 `segmentManifestLocks -> indexMeta.keyLock -> segMu`.
@@ -395,8 +394,8 @@ and flush, compaction, import and copy all publish `ManifestPath` atomically
 with the segment record; there is no in-place V1/V2 to V3 conversion. Nothing
 validated it, however, and a violation is silent: the segment would answer "not
 manifest-backed" and keep writing to etcd. Publication therefore declines to
-the safe etcd path, while recovery logs a durable-marker invariant error if a
-segment marked `manifest_has_index` has no pointer.
+the safe etcd path, while recovery returns a data-integrity error and aborts
+startup if a segment marked `manifest_has_index` has no pointer.
 
 The consumers that decide *whether a segment is indexed* -
 `indexMeta.GetSegmentIndexes` / `GetIndexedSegments`, read by the index

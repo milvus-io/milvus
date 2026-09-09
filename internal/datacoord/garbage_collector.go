@@ -1135,7 +1135,7 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *
 			snapshotMeta.IsBuildIDGCBlocked(segment.GetCollectionID(), manifestIndex.BuildID) {
 			return nil, true, nil
 		}
-		info, ok := manifestIndexFilePathInfo(segment.GetID(), manifestIndex)
+		info, ok := manifestIndexFilePathInfoForSegment(gc.option.cli.RootPath(), segment.SegmentInfo, manifestIndex)
 		if !ok {
 			return nil, false, errors.Wrapf(errManifestIndexEntryInvalid,
 				"segment %d index %d build %d", segment.GetID(), manifestIndex.IndexID, manifestIndex.BuildID)
@@ -1598,7 +1598,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 			legacyItems = append(legacyItems, item)
 			continue
 		}
-		info, ok := manifestIndexFilePathInfo(item.segIdx.SegmentID, entry)
+		info, ok := manifestIndexFilePathInfoForSegment(gc.option.cli.RootPath(), segment.SegmentInfo, entry)
 		if !ok {
 			mlog.Warn(ctx, "invalid segment manifest index metadata, wait to retry",
 				mlog.Int64("segmentID", item.segIdx.SegmentID),

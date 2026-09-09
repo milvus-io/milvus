@@ -369,7 +369,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// while the switch was previously on, so it must still be loaded after the
 	// switch is turned off. Unmarked clusters perform no manifest reads.
 	if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
-		return nil, err
+		// Object-store reads have already retried per segment. Re-entering
+		// initMeta's metastore retry would reread every successful manifest.
+		return nil, retry.Unrecoverable(err)
 	}
 
 	return mt, nil

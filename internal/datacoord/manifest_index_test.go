@@ -18,7 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -389,6 +391,7 @@ func setupManifestReloadMeta(t *testing.T) *meta {
 		ManifestPath:     packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5001", 3),
 		ManifestHasIndex: true,
 	})))
+	m.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-reload"))
 	// Index definitions stay in etcd regardless of the switch: a manifest
 	// cannot record "the user asked for an HNSW index on this field".
 	require.NoError(t, m.indexMeta.CreateIndex(context.TODO(), &model.Index{
@@ -412,7 +415,7 @@ func mockReloadManifestEntry(t *testing.T, buildID int64) {
 		NumRows:               100,
 		SerializedSize:        2000,
 		MemSize:               3000,
-		Path:                  "root/index/100/10/5001/5100/1",
+		Path:                  "/tmp/test-reload/index_files/5100/1/10/5001",
 		IndexFileKeys:         []string{"f0"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
@@ -589,7 +592,17 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 			if s.failReads {
 				return nil, merr.WrapErrIoFailedReason("throttled")
 			}
-			return s.revisions[manifestPath], nil
+			entries := append([]packed.ManifestIndexInfo(nil), s.revisions[manifestPath]...)
+			basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+			if err != nil {
+				return nil, err
+			}
+			for i := range entries {
+				if strings.HasPrefix(entries[i].Path, "..") {
+					entries[i].Path = path.Join(basePath, "_index", entries[i].Path)
+				}
+			}
+			return entries, nil
 		}).Build()
 	t.Cleanup(func() { read.UnPatch() })
 	return s
@@ -958,7 +971,7 @@ func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 		NumRows:               100,
 		SerializedSize:        2000,
 		MemSize:               3000,
-		Path:                  "root/index/100/10/5001/5100/1",
+		Path:                  "/tmp/test-reload/index_files/5100/1/10/5001",
 		IndexFileKeys:         []string{"../../../../meta/segment-index"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
@@ -1095,7 +1108,7 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 		BuildID:               5100,
 		IndexName:             "idx",
 		IndexType:             "HNSW",
-		Path:                  "root/index/100/10/5001/5100/1",
+		Path:                  "/tmp/test-reload/index_files/5100/1/10/5001",
 		IndexFileKeys:         []string{"0"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}

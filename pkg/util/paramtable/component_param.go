@@ -6654,22 +6654,12 @@ The value must be exactly true or false. A value that does not parse as a boolea
 	p.SegmentIndexManifestLoadConcurrency = ParamItem{
 		Key:          "dataCoord.index.segmentIndexManifestLoadConcurrency",
 		Version:      "3.0.0",
-		DefaultValue: "4096",
+		DefaultValue: "64",
 		Formatter: func(v string) string {
-			concurrency := getAsInt(v)
-			if concurrency < 1 {
-				return "1"
-			}
-			// The pool backend stores capacity as int32; a larger value wraps
-			// negative and the first Submit blocks forever.
-			if concurrency > math.MaxInt32 {
-				return strconv.Itoa(math.MaxInt32)
-			}
-			return strconv.Itoa(concurrency)
+			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
-		Doc: `Concurrency of DataCoord reads that load index metadata from StorageV3 manifests. It bounds both the startup scan that rebuilds completed SegmentIndex records from healthy manifests marked manifest_has_index and the compatibility fallback that supplements an older snapshot during restore. Both paths follow existing data independently of the current write-mode switch; unmarked segments require no manifest read.
-This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
-Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot or restore latency; lower it if the object store throttles. Restore applies the limit independently to each copy-task assembly.`,
+		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and effective concurrency is also limited by minio.maxConnections. Restore applies the limit independently to each copy-task assembly.
+Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)

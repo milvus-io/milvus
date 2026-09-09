@@ -127,8 +127,9 @@ the manifest entry disappears while the `SegmentIndex` record still reads
 
 ### Removal
 
-GC removes an index entry through the same framework, as a `DropIndexes`
-mutation, before it deletes any bytes. The drop is resolved against the exact
+GC deletes an unused artifact's bytes first, then removes its index entry through
+the same framework as a `DropIndexes` mutation. Keeping metadata until file
+deletion succeeds makes partial failures retryable for both path layouts. The drop is resolved against the exact
 revision the transaction is opened at and carries the expected build ID, so a
 drop issued from stale GC metadata cannot delete an artifact a rebuild
 republished under the same index ID. A drop for an entry that is already gone
@@ -180,10 +181,13 @@ installed. With manifest publication off DataCoord ships an empty map, so the
 worker retracts inherited entries and writes no target entries - the copied
 records go to etcd like any legacy build. With it on the map flows and the
 worker republishes. Current workers acknowledge the completed rewrite and the
-build IDs actually published, so DataCoord does not read the manifest again;
-results from older workers have no acknowledgement and retain the conservative
-read-back. A missing expected entry hard-fails before the target segment becomes
-visible. A verified entry is installed in memory without creating a redundant
+build IDs actually published. An acknowledgement of an empty index section avoids
+read-back. For artifact-bearing results, DataCoord reads the manifest and checks
+the target index ID, field, name, parameters, artifact directory, version, layout,
+and file keys. Older workers always take this read-back path. A missing or
+mismatched entry fails before the target segment becomes visible. Installation
+keeps the verified index ID even if a same-name definition is replaced after the
+check; it never rebinds a manifest artifact to that replacement. A verified entry is installed in memory without creating a redundant
 etcd row; empty-artifact records still go to etcd.
 
 On the source side, DataCoord reads a local source manifest while assembling
@@ -228,7 +232,10 @@ made complete at startup and publication updates it atomically:
   GC retracts an entry and removes its record in one catalog transaction; and
   reload rebuilds manifest-resident records from every healthy non-L0
   StorageV3 segment marked `manifest_has_index` before the server serves,
-  independently of the current write mode.
+  independently of the current write mode. A marked segment without a manifest
+  pointer fails startup. Reads run in bounded batches with per-segment retries;
+  an exhausted read fails startup without replaying all successful reads through
+  the outer metastore retry loop.
 - a finished record with no `index_file_keys` has no manifest entry either: the
   only build that records no files is a fake-finished one (a segment too small
   to train), which `publishIndexToManifest` skips.

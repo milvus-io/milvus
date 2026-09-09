@@ -43,6 +43,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1400,9 +1401,13 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTask, CopySegmentMeta, *meta, *datapb.QueryCopySegmentResponse) {
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	m.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("files"))
 	m.indexMeta = createTestIndexMeta(s.T(), 100, map[int64]*model.Index{
-		300: {CollectionID: 100, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
-	})
+		300: {
+			CollectionID: 100, FieldID: 101, IndexID: 300, IndexName: "vec_idx",
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+		},
+	}, kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", ""))
 	s.Require().NoError(m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2001,
 		CollectionID:   100,
@@ -1420,6 +1425,9 @@ func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTa
 			SegmentId:    2001,
 			Binlogs:      makeTestCopySegmentBinlogs(),
 			ManifestPath: `{"ver":3,"base_path":"files/insert_log/100/10/2001"}`,
+			IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{9001: {
+				FieldId: 101, BuildId: 9001, IndexName: "vec_idx", IndexFilePaths: []string{"index.bin"},
+			}},
 		}},
 	}
 	return task, copyMeta, m, resp
@@ -1438,7 +1446,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntry
 	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{
 		// The target's own re-derived entry may coexist with the leftover; only
 		// the foreign one is the failure.
-		{IndexID: 300, BuildID: 9001, IndexName: "vec_idx"},
+		copiedManifestReviewEntry(),
 		// Inherited from the SOURCE collection - its stored path walks back to
 		// the source's artifacts.
 		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
@@ -1469,7 +1477,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPubl
 
 	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
 	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{
-		{IndexID: 300, BuildID: 9001, IndexName: "vec_idx"},
+		copiedManifestReviewEntry(),
 	}, nil).Build().UnPatch()
 
 	err := SyncCopySegmentTask(task, resp, copyMeta, m)
@@ -1553,6 +1561,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 				FieldID:      101,
 				IndexID:      indexID,
 				IndexName:    "vec_idx",
+				IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
 			}))
 			s.Require().NoError(m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
 				ID:             segmentID,
@@ -1586,7 +1595,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 					ColumnName:            "vector",
 					IndexName:             "vec_idx",
 					IndexType:             "HNSW",
-					Path:                  "files/index/100/10/2001/9001/1",
+					Properties:            map[string]string{common.IndexTypeKey: "HNSW"},
+					Path:                  "/tmp/test-restart/index_files/9001/0/10/2001",
 					FieldID:               101,
 					IndexID:               indexID,
 					BuildID:               buildID,
@@ -1620,7 +1630,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			}
 
 			s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
-			s.Zero(store.readCount, "current-worker acknowledgement must avoid DataCoord manifest read-back")
+			if tc.enabled {
+				s.Equal(1, store.readCount, "artifact-bearing results must verify the dispatched index identity")
+			} else {
+				s.Zero(store.readCount, "acknowledged empty manifests need no read-back")
+			}
 
 			manifestEntries, err := packed.GetManifestIndexInfos(manifestPath, nil)
 			s.Require().NoError(err)
@@ -2493,7 +2507,7 @@ func TestAssembleCopySegmentRequest_UnknownMarkerFallsBackToManifestRead(t *test
 		FieldID:               100,
 		IndexName:             "vec_idx",
 		IndexType:             "HNSW",
-		Path:                  "files/index/100/10/1/3001/1",
+		Path:                  "index_files/3001/0/10/1",
 		IndexFileKeys:         []string{"index.bin"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, func(segment *datapb.SegmentDescription) {
@@ -2628,7 +2642,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackPreservesMappingOrder(t *tes
 				FieldID:               100,
 				IndexName:             "vec_idx",
 				IndexType:             "HNSW",
-				Path:                  "files/index/100/10/" + strconv.FormatInt(segmentID, 10),
+				Path:                  "index_files/" + strconv.FormatInt(3000+segmentID, 10) + "/0/10/" + strconv.FormatInt(segmentID, 10),
 				IndexFileKeys:         []string{"index.bin"},
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 			}}, nil
@@ -2812,4 +2826,69 @@ func (s *CopySegmentTaskSuite) TestValidateCopiedManifestIndexPlacement_FailsWhe
 	s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta, nil))
 	_, installed = im.segmentBuildInfo.Get(8001)
 	s.True(installed)
+}
+
+func copiedManifestReviewEntry() packed.ManifestIndexInfo {
+	return packed.ManifestIndexInfo{
+		IndexID: 300, BuildID: 9001, FieldID: 101, IndexName: "vec_idx", IndexType: "HNSW",
+		Properties: map[string]string{common.IndexTypeKey: "HNSW"},
+		Path:       "files/index_files/9001/0/10/2001", IndexFileKeys: []string{"index.bin"},
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths() {
+	for _, acknowledged := range []bool{false, true} {
+		for _, scenario := range []string{"recreated", "parameters", "foreign path", "wrong files"} {
+			s.Run(strconv.FormatBool(acknowledged)+"/"+scenario, func() {
+				task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
+				result := resp.GetSegmentResults()[0]
+				if acknowledged {
+					result.ManifestIndexRewritten = proto.Bool(true)
+					result.ManifestIndexBuildIds = []int64{9001}
+				}
+				entry := copiedManifestReviewEntry()
+				switch scenario {
+				case "recreated":
+					s.Require().NoError(m.indexMeta.MarkIndexAsDeleted(context.Background(), 100, []int64{300}))
+					s.Require().NoError(m.indexMeta.CreateIndex(context.Background(), &model.Index{
+						CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
+						IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+					}))
+				case "parameters":
+					entry.Properties["M"] = "32"
+				case "foreign path":
+					// IDs collide, but the directory still names the source segment.
+					entry.Path = "files/index_files/9001/0/10/9999"
+				case "wrong files":
+					entry.IndexFileKeys = []string{"other.bin"}
+				}
+				defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
+				s.Error(SyncCopySegmentTask(task, resp, copyMeta, m))
+				segment := m.GetSegment(context.Background(), 2001)
+				s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+				s.False(segment.GetManifestHasIndex())
+				s.Empty(m.indexMeta.GetSegmentIndexes(100, 2001))
+				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, copyMeta.GetTask(context.Background(), task.GetTaskId()).GetState())
+			})
+		}
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInstall() {
+	ctx := context.Background()
+	task, _, m, resp := s.newCopiedManifestReadBackFixture()
+	result := resp.GetSegmentResults()[0]
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{copiedManifestReviewEntry()}, nil).Build().UnPatch()
+	verified, err := verifyCopiedManifestIndexOwnership(ctx, result, task, m)
+	s.Require().NoError(err)
+	// Recreate after verification but before the in-memory record is installed.
+	s.Require().NoError(m.indexMeta.MarkIndexAsDeleted(ctx, 100, []int64{300}))
+	s.Require().NoError(m.indexMeta.CreateIndex(ctx, &model.Index{
+		CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
+	}))
+	s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, nil, verified))
+	record, ok := m.indexMeta.GetIndexJob(9001)
+	s.Require().True(ok)
+	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
+	s.NotContains(m.indexMeta.GetSegmentIndexes(100, 2001), int64(301))
 }

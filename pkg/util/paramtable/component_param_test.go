@@ -17,7 +17,6 @@
 package paramtable
 
 import (
-	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -1393,7 +1392,7 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	// borrowing metastore.readConcurrency (32, and shared with the querycoord
 	// and rootcoord catalogs) would cap a fail-closed startup scan that runs
 	// once per healthy V3 segment.
-	assert.Equal(t, 4096, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	assert.Equal(t, 64, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 	assert.NotEqual(t,
 		params.MetaStoreCfg.ReadConcurrency.Key,
 		params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key)
@@ -1404,8 +1403,7 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "-8")
 	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 
-	// Above int32 the pool backend's capacity wraps negative and the first
-	// Submit blocks forever inside the startup scan, so the top is clamped too.
+	// Excessive native concurrency is clamped independently of integer overflow.
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
-	assert.Equal(t, math.MaxInt32, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 }
