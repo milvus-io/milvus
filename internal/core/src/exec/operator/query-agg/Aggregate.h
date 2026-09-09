@@ -83,6 +83,13 @@ class Aggregate {
     virtual void
     extractValues(char** groups, int32_t numGroups, VectorPtr* result) = 0;
 
+    // Release resources owned by one accumulator before its row is freed.
+    // Rows start zero-initialized: cleanup must also accept state whose
+    // initialization or output extraction did not finish, and be idempotent.
+    virtual void
+    destroy(char* /*group*/) noexcept {
+    }
+
     template <typename T>
     T*
     value(char* group) const {

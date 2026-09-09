@@ -993,6 +993,7 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     writer.write_to_target(arrays, target);
     auto* data = target->release();
     auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+    target->TransferOwnership();
     ColumnarArrayChunk array_chunk(
         row_count,
         data,
