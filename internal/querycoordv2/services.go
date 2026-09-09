@@ -88,10 +88,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 	}
 
 	isGetAll := false
-	configs := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {
-		for collectionID := range configs {
+		// Only a request for every collection needs the full snapshot; the
+		// progress of each collection is read on its own below.
+		for collectionID := range s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap() {
 			collectionSet.Insert(collectionID)
 		}
 		isGetAll = true
