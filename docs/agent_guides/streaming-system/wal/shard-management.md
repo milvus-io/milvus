@@ -14,8 +14,8 @@ The manager's registration map is keyed by **collection id**, one entry per coll
 
 Registration admission is enforced here rather than assumed of the caller:
 
-- `CheckIfVChannelCanBeCreated` — `ErrCollectionExists` for an idempotent replay of the same VChannel; `ErrVChannelConflict` when another VChannel of the collection holds the entry, which the interceptor turns into a rejected append.
-- `CheckIfVChannelCanBeDropped` — `ErrVChannelNotFenced` when the named VChannel is registered here and no split has fenced it, so a live shard is never torn down.
+- `CheckIfVChannelCanBeCreated` — `ErrCollectionExists` for an idempotent replay of the same VChannel; `ErrVChannelConflict` when another VChannel of the collection holds the entry, which the interceptor turns into a rejected append. Consulted by the **target replica** of a SplitShard broadcast, which registers a new VChannel the way CreateCollection does.
+- `CheckIfVChannelCanBeDropped` — `ErrVChannelNotFenced` when the named VChannel is registered here and no split has fenced it, so a live shard is never torn down. Consulted by the **retire replica** — the AlterCollection replica whose `shard_split_routing` commit no longer names the VChannel it landed on — before the interceptor tears down its registration and releases its function-runner key.
 - `CheckIfVChannelCanBeWritten` — `ErrVChannelFenced` once a split has fenced the VChannel; `ErrCollectionNotFound` when this PChannel does not hold it.
 
 On WAL open the map is rebuilt from the RecoveryStorage snapshot. If that snapshot contains two VChannels of one collection (a fenced source whose teardown has not been observed yet, plus its successor), the collision is resolved deterministically — the VChannel that can still take writes wins, ties broken by name — and logged, so a restart cannot leave a live shard unwritable at random.

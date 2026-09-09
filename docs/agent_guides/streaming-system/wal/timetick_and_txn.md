@@ -10,6 +10,8 @@ See [TimeTick Message Semantic](../message/message-semantic-time-tick.md) for th
 
 Every message receives a unique TimeTick from the TSO via `AckManager.Allocate()`. Transaction sub-messages each get their own TimeTick; the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick.
 
+A message type whose `FreshTimeTick` property is set takes `AckManager.AllocateFresh()` instead: it discards the node's cached TSO batch and fetches a new one before assigning the TimeTick, so the tick is greater than every tick any node had received before that fetch. SplitShard is the only type marked `FreshTimeTick`, because its replicas land on different PChannels — the source's fence and a target's genesis are the same broadcast message, but each PChannel allocates its own TimeTick locally from whatever batch it holds cached. Without a fresh batch, a target's genesis TimeTick could be drawn from a batch fetched before the source's fence and sort at or before `T_switch`; discarding the cache on every replica (source, target, and control channel alike) makes the property hold unconditionally rather than depending on which PChannel happens to append first.
+
 ### Confirm and Sync
 
 Every TimeTick transitions: **Allocated** → **Confirmed** → **Synced**.
