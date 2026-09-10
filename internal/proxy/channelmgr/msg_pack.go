@@ -75,7 +75,7 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
 	walName message.WALName,
-) ([]msgstream.TsMsg, [][]int, error) {
+) ([]msgstream.TsMsg, error) {
 	// Keep the existing cross-WAL packing threshold separate from the
 	// backend-specific hard limit for a row that cannot be split further.
 	splitThreshold := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
@@ -111,11 +111,6 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	fieldsData := insertMsg.GetFieldsData()
 	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
 	repackedMsgs := make([]msgstream.TsMsg, 0)
-	// Which rows of the caller's request each packed message carries, in the
-	// same order. An idempotent insert replays the first attempt's primary keys
-	// back to the client in the client's own row order, so the split has to say
-	// where each row came from.
-	repackedRowOffsets := make([][]int, 0)
 	var (
 		copiedMsg         *msgstream.InsertMsg
 		firstFieldIdxs    []int64
@@ -179,9 +174,6 @@ func GenInsertMsgsByPartition(ctx context.Context,
 			copiedMsg = emitContiguousBatch(batchStart, batchEnd)
 		}
 		repackedMsgs = append(repackedMsgs, copiedMsg)
-		// Copied rather than sub-sliced: two batches would otherwise share one
-		// backing array, so appending to either would overwrite the other.
-		repackedRowOffsets = append(repackedRowOffsets, append([]int(nil), rowOffsets[batchStart:batchEnd]...))
 		copiedMsg = nil
 	}
 
@@ -191,10 +183,10 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		fieldIdxs := idxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
-			return nil, nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
 				"single row at offset %d is too large to fit in one WAL message: estimated size=%d bytes, limit=%d bytes",
 				offset, curRowMessageSize, singleRowLimit,
 			))
@@ -235,5 +227,5 @@ func GenInsertMsgsByPartition(ctx context.Context,
 		emitBatch(batchStart, len(rowOffsets))
 	}
 
-	return repackedMsgs, repackedRowOffsets, nil
+	return repackedMsgs, nil
 }

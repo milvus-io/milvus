@@ -58,7 +58,7 @@ func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
 
 	t.Run("only row", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+1024))
-		msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
 		if assert.ErrorIs(t, err, merr.ErrParameterTooLarge) {
 			assert.Contains(t, err.Error(), "single row at offset 0")
@@ -68,14 +68,14 @@ func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
 
 	t.Run("row at limit", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest))
-		msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
 	t.Run("later row", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest("small", strings.Repeat("x", minWALMessageSizeForTest+1024))
-		msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
 		if assert.ErrorIs(t, err, merr.ErrParameterTooLarge) {
 			assert.Contains(t, err.Error(), "single row at offset 1")
@@ -94,14 +94,14 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 
 	t.Run("kafka allows row above pulsar split threshold", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+minWALMessageSizeForTest/2))
-		msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
 		assert.NoError(t, err)
 		assert.Len(t, msgs, 1)
 	})
 
 	t.Run("kafka rejects row at its own limit", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2*minWALMessageSizeForTest))
-		msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
 		assert.Nil(t, msgs)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
@@ -109,7 +109,7 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
 		t.Run(walName.String()+" has no single row limit", func(t *testing.T) {
 			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+minWALMessageSizeForTest/2))
-			msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
+			msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
 			assert.NoError(t, err)
 			assert.Len(t, msgs, 1)
 		})
@@ -125,7 +125,7 @@ func TestGenInsertMsgsByPartitionSplitsMultipleRows(t *testing.T) {
 		strings.Repeat("x", 160*1024),
 		strings.Repeat("y", 160*1024),
 	)
-	msgs, _, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
+	msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 2)
 	for _, msg := range msgs {
