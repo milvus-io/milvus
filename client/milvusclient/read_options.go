@@ -390,6 +390,10 @@ func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
 // accumulated via WithFunctionReranker, and stores a copy so the caller's
 // FunctionScore is never mutated or shared with other options.
 func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
+	if fs == nil {
+		r.functionScore = nil
+		return r
+	}
 	r.functionScore = fs.Clone()
 	return r
 }
@@ -680,6 +684,10 @@ func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Fu
 // accumulated via WithFunctionRerankers, and stores a copy so the caller's
 // FunctionScore is never mutated or shared with other options.
 func (opt *hybridSearchOption) WithFunctionScore(fs *entity.FunctionScore) *hybridSearchOption {
+	if fs == nil {
+		opt.functionScore = nil
+		return opt
+	}
 	opt.functionScore = fs.Clone()
 	return opt
 }

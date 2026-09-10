@@ -214,6 +214,22 @@ func (s *SearchOptionSuite) TestFunctionScore() {
 		s.Error(err)
 		s.Contains(err.Error(), "no functions")
 	})
+
+	s.Run("nil_score_noop", func() {
+		req, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionReranker(boostFn1).
+			WithFunctionScore(nil).
+			Request()
+		s.Require().NoError(err)
+		s.Nil(req.GetFunctionScore(), "nil score must clear any accumulated functions")
+
+		hybridReq, err := NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionScore(nil).
+			HybridRequest()
+		s.Require().NoError(err)
+		s.Nil(hybridReq.GetFunctionScore())
+	})
 }
 
 func (s *SearchOptionSuite) TestWithNamespace() {
