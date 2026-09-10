@@ -84,11 +84,11 @@ LoadAdmissionController::AcquireAsync(
     }
     if (cancelled) {
         promise.trySetException(folly::OperationCancelled{});
-        return future;
+        return std::move(future);
     }
     if (admitted) {
         promise.trySetValue(LoadAdmissionLease(this, request));
-        return future;
+        return std::move(future);
     }
 
     // The returned future has not escaped yet, so only the explicit token
@@ -128,7 +128,7 @@ LoadAdmissionController::AcquireAsync(
     if (admitted) {
         FulfillAdmission(std::move(pending));
     }
-    return future;
+    return std::move(future);
 }
 
 void
