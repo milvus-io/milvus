@@ -52,9 +52,10 @@ func TestGenInsertMsgsByPartitionFallbackSingleIndexPass(t *testing.T) {
 		{"empty selection", 128, nil, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-			require.NoError(t, paramtable.Get().Save(key, strconv.Itoa(tc.threshold)))
-			t.Cleanup(func() { paramtable.Get().Reset(key) })
+			// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+			limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+			previous := limit.SwapTempValue(strconv.Itoa(tc.threshold))
+			t.Cleanup(func() { limit.SwapTempValue(previous) })
 			src := newNullableVectorInsertMsgForPackTest(12, 2, 1)
 			if tc.disableViews {
 				patch := mockey.Mock(typeutil.CreateFieldDataRangeView).Return(nil, false).Build()
@@ -143,9 +144,10 @@ func TestGenInsertMsgsByPartitionMixedSelectionKeepsContiguousBatchViews(t *test
 	threshold := max(firstPairSize, secondPairSize) + 1
 	require.GreaterOrEqual(t, firstPairSize+rowSizes[2], threshold)
 
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, strconv.Itoa(threshold)))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previous := limit.SwapTempValue(strconv.Itoa(threshold))
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
 
 	msgs, err := GenInsertMsgsByPartition(
 		context.Background(), 2, 1, "test_partition", offsets,
@@ -166,9 +168,10 @@ func TestGenInsertMsgsByPartitionMixedSelectionKeepsContiguousBatchViews(t *test
 }
 
 func TestGenInsertMsgsByPartitionGapWithinBatchCopiesContiguousPrefix(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "1024"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previous := limit.SwapTempValue("1024")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
 
 	src := newNullableVectorInsertMsgForPackTest(10, 2, 1)
 	offsets := []int{1, 2, 4, 5}
@@ -187,9 +190,10 @@ func TestGenInsertMsgsByPartitionGapWithinBatchCopiesContiguousPrefix(t *testing
 }
 
 func TestGenInsertMsgsByPartitionFallbackNullableSparseVectorSizes(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "73"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previous := limit.SwapTempValue("73")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
 	src := newNullableVectorInsertMsgForPackTest(8, 2, 1)
 	logicalContents := make([][]byte, 8)
 	var contents [][]byte
@@ -237,9 +241,10 @@ func TestGenInsertMsgsByPartitionFallbackNullableSparseVectorSizes(t *testing.T)
 }
 
 func TestGenInsertMsgsByPartitionFallbackErrorsDiscardPartialBatches(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "64"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previous := limit.SwapTempValue("64")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
 
 	for _, tc := range []struct {
 		name    string

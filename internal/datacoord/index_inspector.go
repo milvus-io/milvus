@@ -182,17 +182,29 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return false
 	}
+
+	schema := collection.Schema
+	isExternalCollection := typeutil.IsExternalCollection(schema)
+	if isExternalCollection {
+		if segment.GetSchemaVersion() != schema.GetVersion() {
+			mlog.Debug(ctx, "external segment schema version does not match collection schema, defer index build",
+				mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
+				mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", schema.GetVersion()))
+			return false
+		}
+	}
+
 	// Function outputs are materialized by schema-bump reconciliation, which
 	// advances the segment schema version. A segment behind the collection schema
 	// version may lack them, so defer the whole segment until it catches up.
-	if len(collection.Schema.GetFunctions()) > 0 &&
-		segment.GetSchemaVersion() < collection.Schema.GetVersion() {
+	if !isExternalCollection && len(schema.GetFunctions()) > 0 &&
+		segment.GetSchemaVersion() < schema.GetVersion() {
 		mlog.Debug(ctx, "segment schema behind collection, function outputs may be unmaterialized, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
-			mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", collection.Schema.GetVersion()))
+			mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", schema.GetVersion()))
 		return false
 	}
-	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
+	if typeutil.GetFieldByID(schema, index.FieldID) == nil {
 		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 		return false

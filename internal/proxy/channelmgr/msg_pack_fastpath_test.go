@@ -174,8 +174,10 @@ func TestGenInsertMsgsByPartitionNonContiguousFallback(t *testing.T) {
 }
 
 func TestGenInsertMsgsByPartitionContiguousFastPathAfterSplit(t *testing.T) {
-	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "17"))
-	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
+	// Use a test override so the production 256 KiB minimum does not mask batch boundaries.
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previous := limit.SwapTempValue("17")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
 
 	longData := []int64{10, 20, 30, 40}
 	insertMsg := &msgstream.InsertMsg{
