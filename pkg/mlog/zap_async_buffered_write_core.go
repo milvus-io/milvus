@@ -159,20 +159,55 @@ func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
 func (s *asyncTextIOCore) write(ent entryItem) {
 	length := ent.buf.Len()
 	if length == 0 {
+		ent.buf.Free()
 		return
 	}
-	var writeDroppedTimeout <-chan time.Time
-	if ent.level < s.nonDroppableLevel {
-		writeDroppedTimeout = time.After(s.writeDroppedTimeout)
+
+	if ent.level >= s.nonDroppableLevel {
+		// Logging must never block the caller indefinitely. Give important entries
+		// priority by replacing the oldest pending entry when the queue is full.
+		if s.tryEnqueue(ent) {
+			return
+		}
+		s.dropOldestPendingEntry()
+		if !s.tryEnqueue(ent) {
+			s.dropEntry(ent)
+		}
+		return
 	}
+
+	timer := time.NewTimer(s.writeDroppedTimeout)
+	defer timer.Stop()
 	select {
 	case s.pending <- ent:
 		metrics.LoggingPendingWriteTotal.Inc()
-	case <-writeDroppedTimeout:
-		metrics.LoggingDroppedWriteTotal.Inc()
-		// drop the entry if the write is dropped due to timeout
-		ent.buf.Free()
+	case <-timer.C:
+		s.dropEntry(ent)
 	}
+}
+
+func (s *asyncTextIOCore) tryEnqueue(ent entryItem) bool {
+	select {
+	case s.pending <- ent:
+		metrics.LoggingPendingWriteTotal.Inc()
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *asyncTextIOCore) dropOldestPendingEntry() {
+	select {
+	case ent := <-s.pending:
+		metrics.LoggingPendingWriteTotal.Dec()
+		s.dropEntry(ent)
+	default:
+	}
+}
+
+func (s *asyncTextIOCore) dropEntry(ent entryItem) {
+	metrics.LoggingDroppedWriteTotal.Inc()
+	ent.buf.Free()
 }
 
 type CEntryTextIOCore interface {
@@ -286,5 +321,10 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 
 func (s *asyncTextIOCore) Stop() {
 	s.notifier.Cancel()
-	s.notifier.BlockUntilFinish()
+	timer := time.NewTimer(s.stopTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.notifier.FinishChan():
+	case <-timer.C:
+	}
 }
