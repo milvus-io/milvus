@@ -43,8 +43,9 @@ func splitReplicateConfig() *replicateutil.ConfigHelper {
 }
 
 // splitShardBroadcastOnPrimary builds the SplitShard broadcast exactly as the
-// primary's DataCoord does: source p0_1v0 fenced, two targets on p1, the routing
-// post-image naming all three, and the source named append-first.
+// primary's DataCoord does: source p0_1v0 fenced, one target taking the fenced
+// source's own pchannel and one a fresh pchannel, the routing post-image naming
+// all three, and the source named append-first.
 func splitShardBroadcastOnPrimary() message.BroadcastMutableMessage {
 	param := SplitShardParam{
 		CollectionID:        1,
@@ -54,18 +55,30 @@ func splitShardBroadcastOnPrimary() message.BroadcastMutableMessage {
 		CollectionVChannels: []string{"p0_1v0"},
 		RoutingModulus:      2,
 		Targets: []*message.SplitShardTarget{
-			{Vchannel: "p1_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			{Vchannel: "p0_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
 			{Vchannel: "p1_1v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
 		},
 		Schema:       &schemapb.CollectionSchema{Name: "col"},
 		PartitionIDs: []int64{10, 11},
 		Routing: &message.AlterCollectionMessageUpdates{
-			VirtualChannelNames:  []string{"p0_1v0", "p1_1v1", "p1_1v2"},
-			PhysicalChannelNames: []string{"p0", "p1", "p1"},
+			VirtualChannelNames:  []string{"p0_1v0", "p0_1v1", "p1_1v2"},
+			PhysicalChannelNames: []string{"p0", "p0", "p1"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{VchannelName: "p0_1v0", State: schemapb.ShardState_ShardSplitting},
-				{VchannelName: "p1_1v1", State: schemapb.ShardState_ShardCreating},
-				{VchannelName: "p1_1v2", State: schemapb.ShardState_ShardCreating},
+				{
+					VchannelName: "p0_1v1",
+					State:        schemapb.ShardState_ShardCreating,
+					Routing: &schemapb.CollectionShardInfo_HashRouting{
+						HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
+					},
+				},
+				{
+					VchannelName: "p1_1v2",
+					State:        schemapb.ShardState_ShardCreating,
+					Routing: &schemapb.CollectionShardInfo_HashRouting{
+						HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
+					},
+				},
 			},
 			RoutingModulus: 2,
 		},
@@ -150,7 +163,7 @@ func TestOverwriteSplitShardMessageRemapsEveryName(t *testing.T) {
 
 	bh := msg.BroadcastHeader()
 	require.NotNil(t, bh)
-	assert.ElementsMatch(t, []string{"q0_1v0", "q1_1v1", "q1_1v2", "q0_vcchan"}, bh.VChannels)
+	assert.ElementsMatch(t, []string{"q0_1v0", "q0_1v1", "q1_1v2", "q0_vcchan"}, bh.VChannels)
 	// The append-first list is what the gate below waits on; a name left in the
 	// primary's namespace would make it wait on a vchannel that does not exist
 	// in this cluster, forever.
@@ -160,7 +173,7 @@ func TestOverwriteSplitShardMessageRemapsEveryName(t *testing.T) {
 	header := splitShardMsg.Header()
 	assert.Equal(t, []string{"q0_1v0"}, header.GetSourceVchannels())
 	require.Len(t, header.GetTargets(), 2)
-	assert.Equal(t, "q1_1v1", header.GetTargets()[0].GetVchannel())
+	assert.Equal(t, "q0_1v1", header.GetTargets()[0].GetVchannel())
 	assert.Equal(t, "q1_1v2", header.GetTargets()[1].GetVchannel())
 
 	// The facts that are the same in both clusters stay put.
@@ -174,9 +187,9 @@ func TestOverwriteSplitShardMessageRemapsEveryName(t *testing.T) {
 
 	body := splitShardMsg.MustBody()
 	routing := body.GetRouting()
-	assert.Equal(t, []string{"q0_1v0", "q1_1v1", "q1_1v2"}, routing.GetVirtualChannelNames())
-	assert.Equal(t, []string{"q0", "q1", "q1"}, routing.GetPhysicalChannelNames())
-	assert.Equal(t, []string{"q0_1v0", "q1_1v1", "q1_1v2"},
+	assert.Equal(t, []string{"q0_1v0", "q0_1v1", "q1_1v2"}, routing.GetVirtualChannelNames())
+	assert.Equal(t, []string{"q0", "q0", "q1"}, routing.GetPhysicalChannelNames())
+	assert.Equal(t, []string{"q0_1v0", "q0_1v1", "q1_1v2"},
 		shardInfoNames(routing.GetShardInfos()),
 		"a shard info naming a primary vchannel makes routing.NewTable refuse the whole table")
 	assert.EqualValues(t, 2, routing.GetRoutingModulus())
@@ -191,14 +204,14 @@ func TestOverwriteSplitShardMessageRemapsTheGenesisChannelNames(t *testing.T) {
 	rs, _ := newSplitReplicateService(t, nil)
 
 	msg := splitShardBroadcastOnPrimary()
-	replicate := replicaOf(msg, "p1_1v1")
+	replicate := replicaOf(msg, "p0_1v1")
 	// Fill in the genesis channel lists the way a CreateCollection carries them.
 	splitShardMsg := message.MustAsMutableSplitShardMessageV2(replicate)
 	body := splitShardMsg.MustBody()
 	body.Genesis = &msgpb.CreateCollectionRequest{
 		CollectionSchema:     &schemapb.CollectionSchema{Name: "col"},
-		VirtualChannelNames:  []string{"p1_1v1", "p1_1v2"},
-		PhysicalChannelNames: []string{"p1", "p1"},
+		VirtualChannelNames:  []string{"p0_1v1", "p1_1v2"},
+		PhysicalChannelNames: []string{"p0", "p1"},
 	}
 	splitShardMsg.OverwriteBody(body)
 
@@ -206,8 +219,8 @@ func TestOverwriteSplitShardMessageRemapsTheGenesisChannelNames(t *testing.T) {
 	require.NoError(t, err)
 
 	genesis := message.MustAsMutableSplitShardMessageV2(out).MustBody().GetGenesis()
-	assert.Equal(t, []string{"q1_1v1", "q1_1v2"}, genesis.GetVirtualChannelNames())
-	assert.Equal(t, []string{"q1", "q1"}, genesis.GetPhysicalChannelNames())
+	assert.Equal(t, []string{"q0_1v1", "q1_1v2"}, genesis.GetVirtualChannelNames())
+	assert.Equal(t, []string{"q0", "q1"}, genesis.GetPhysicalChannelNames())
 }
 
 // TestOverwriteRoutingAlterCollectionRemapsChannelNames asserts the split's
@@ -377,7 +390,7 @@ func TestReplicateAppendWaitsForTheAppendFirstReplicas(t *testing.T) {
 	// A target replica waits, and its append does not happen while it does.
 	done := make(chan error, 1)
 	go func() {
-		_, err := rs.Append(context.Background(), replicaOf(msg, "p1_1v1"))
+		_, err := rs.Append(context.Background(), replicaOf(msg, "p1_1v2"))
 		done <- err
 	}()
 	select {
@@ -390,7 +403,7 @@ func TestReplicateAppendWaitsForTheAppendFirstReplicas(t *testing.T) {
 	require.NoError(t, <-done)
 	select {
 	case landed := <-appended:
-		assert.Equal(t, "q1_1v1", landed.VChannel())
+		assert.Equal(t, "q1_1v2", landed.VChannel())
 	case <-time.After(time.Second):
 		t.Fatal("the gated replica was never appended after the gate opened")
 	}
@@ -411,7 +424,7 @@ func TestReplicateAppendReturnsTheGateErrorAsItStands(t *testing.T) {
 	bs.EXPECT().WaitVChannelsAcked(mock.Anything, mock.Anything, mock.Anything).
 		Return(context.Canceled).Maybe()
 
-	_, err := rs.Append(context.Background(), replicaOf(splitShardBroadcastOnPrimary(), "p1_1v1"))
+	_, err := rs.Append(context.Background(), replicaOf(splitShardBroadcastOnPrimary(), "p1_1v2"))
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, appended, "a replica whose gate failed must not be appended")
 }

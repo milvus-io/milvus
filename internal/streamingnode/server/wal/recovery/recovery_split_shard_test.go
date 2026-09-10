@@ -505,16 +505,21 @@ func TestConsumeDirtyAndGetSnapshotRewritesRetiredSplittedToDroppedForRemoval(t 
 // The vchannel starts dirty so the snapshot actually flows through
 // dropAllVirtualChannel and SaveRecoverySnapshot in both cases -- exercising
 // the real path, not a shortcut that never emits a snapshot at all.
-func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick uint64) (rs *recoveryStorageImpl, persistedVChannels *map[string]*streamingpb.VChannelMeta) {
+func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick uint64) (rs *recoveryStorageImpl, persistedVChannels *map[string]*streamingpb.VChannelMeta, saveCalls *int) {
 	persisted := make(map[string]*streamingpb.VChannelMeta)
+	// Counted, not only recorded: a snapshot carrying nothing but the
+	// checkpoint leaves `persisted` empty, so the count is the only thing that
+	// can tell "wrote nothing" apart from "did not write".
+	calls := 0
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
+			calls++
 			for k, v := range snapshot.VChannels {
 				persisted[k] = v
 			}
 			return nil
-		})
+		}).Maybe()
 
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -556,7 +561,7 @@ func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick u
 			TimeTick:  flusherCheckpointTimeTick,
 		},
 	}
-	return rs, &persisted
+	return rs, &persisted, &calls
 }
 
 // TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence: a
@@ -570,7 +575,7 @@ func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick u
 // that reason.
 func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *testing.T) {
 	t.Run("flusher checkpoint has not passed the fence yet", func(t *testing.T) {
-		rs, persisted := newRecoveryStorageForRetireGCTest(t, 1999)
+		rs, persisted, _ := newRecoveryStorageForRetireGCTest(t, 1999)
 
 		err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
 		assert.NoError(t, err)
@@ -583,7 +588,7 @@ func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *te
 	})
 
 	t.Run("flusher checkpoint has passed the fence", func(t *testing.T) {
-		rs, persisted := newRecoveryStorageForRetireGCTest(t, 2000)
+		rs, persisted, _ := newRecoveryStorageForRetireGCTest(t, 2000)
 
 		err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
 		assert.NoError(t, err)
@@ -610,7 +615,7 @@ func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *te
 // nothing else ever becomes dirty again -- the retired vchannel would sit
 // collectable, but never actually get collected.
 func TestRetiredSourceIsCollectedOnAQuietPChannel(t *testing.T) {
-	rs, persisted := newRecoveryStorageForRetireGCTest(t, 1999)
+	rs, persisted, _ := newRecoveryStorageForRetireGCTest(t, 1999)
 
 	// First persist round: the flusher checkpoint (1999) has not passed the
 	// fence (2000) yet, so the meta stays -- this also clears dirtyCounter
@@ -655,7 +660,7 @@ func TestRetiredSourceIsCollectedOnAQuietPChannel(t *testing.T) {
 // removal write that finally deletes the row from the catalog only makes it
 // out on shutdown if isDirty() counts a drained retirement as dirty.
 func TestGracefulCloseCollectsADrainedRetirement(t *testing.T) {
-	rs, persisted := newRecoveryStorageForRetireGCTest(t, 2000)
+	rs, persisted, _ := newRecoveryStorageForRetireGCTest(t, 2000)
 	// Everything else is already persisted: only the pending retirement,
 	// whose flusher checkpoint has just passed the fence, is left.
 	rs.dirtyCounter = 0
@@ -671,6 +676,41 @@ func TestGracefulCloseCollectsADrainedRetirement(t *testing.T) {
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
 	assert.True(t, (*persisted)["v0"].Retired)
 	assert.False(t, rs.isDirty(), "nothing is left to persist once the retirement is collected")
+}
+
+// TestUndrainedRetirementWritesNoSnapshotOnAQuietPChannel: the persist gate
+// and isDirty must agree on what a pending retirement is worth. A retirement
+// the flusher has not drained past is nothing consumeDirtySnapshot can act on
+// -- ConsumeDirtyAndGetSnapshot leaves it exactly where it is -- so if the
+// gate merely asked whether ANY retirement is pending, every persistInterval
+// of the whole redistribution window (hours) would write a snapshot carrying
+// nothing but the checkpoint to etcd, on a pchannel where nothing changed.
+func TestUndrainedRetirementWritesNoSnapshotOnAQuietPChannel(t *testing.T) {
+	// 1999 < the fence at 2000: retired, pending, not yet collectable.
+	rs, persisted, saveCalls := newRecoveryStorageForRetireGCTest(t, 1999)
+	// Everything else has already been persisted: this is the quiet pchannel
+	// the periodic tick keeps waking on.
+	rs.dirtyCounter = 0
+	rs.vchannels["v0"].dirty = false
+	require.False(t, rs.isDirty(), "an undrained retirement is not dirty")
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, rs.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
+	}
+
+	assert.Zero(t, *saveCalls, "an undrained retirement must not write a snapshot on every persist tick")
+	assert.Empty(t, *persisted)
+	assert.Contains(t, rs.retiredVChannels, "v0", "the retirement is still pending, only not actionable")
+	_, ok := rs.vchannels["v0"]
+	assert.True(t, ok)
+
+	// And once it drains, the very next round does write -- the gate is not
+	// simply closed for retirements.
+	rs.vchannels["v0"].flusherCheckpoint = &WALCheckpoint{MessageID: rmq.NewRmqID(2), TimeTick: 2000}
+	require.NoError(t, rs.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
+	assert.Equal(t, 1, *saveCalls)
+	require.Contains(t, *persisted, "v0")
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
 }
 
 // TestIsDirtyIgnoresAnUndrainedRetirement: only a *collectable* retirement

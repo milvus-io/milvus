@@ -336,8 +336,9 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 }
 
 // CommitShardSplitRouting commits a shard-split routing change into the
-// collection meta. Called by datacoord at the write switch and at the adoption
-// flip of a split.
+// collection meta. It carries the ADOPTION of a split's targets -- the commit
+// that delists the drained sources -- and not the write switch, whose routing
+// commit travels in the SplitShard broadcast's body instead.
 func (c *Client) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(

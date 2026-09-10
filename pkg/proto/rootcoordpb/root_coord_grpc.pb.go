@@ -182,8 +182,10 @@ type RootCoordClient interface {
 	// CommitShardSplitRouting commits a shard-split routing change into the
 	// collection meta as a DDL: it grows the vchannel list with the split
 	// targets and sets every shard's residues and lifecycle state, all in one
-	// broadcast transaction. Called by datacoord at the routing-commit and at
-	// the adoption flip of a split.
+	// broadcast transaction. It carries the ADOPTION of a split's targets --
+	// the commit that delists the drained sources. The write switch does not
+	// use it: that routing commit travels in the SplitShard broadcast's body
+	// and is applied by its own ack callback.
 	CommitShardSplitRouting(ctx context.Context, in *CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -1047,8 +1049,10 @@ type RootCoordServer interface {
 	// CommitShardSplitRouting commits a shard-split routing change into the
 	// collection meta as a DDL: it grows the vchannel list with the split
 	// targets and sets every shard's residues and lifecycle state, all in one
-	// broadcast transaction. Called by datacoord at the routing-commit and at
-	// the adoption flip of a split.
+	// broadcast transaction. It carries the ADOPTION of a split's targets --
+	// the commit that delists the drained sources. The write switch does not
+	// use it: that routing commit travels in the SplitShard broadcast's body
+	// and is applied by its own ack callback.
 	CommitShardSplitRouting(context.Context, *CommitShardSplitRoutingRequest) (*commonpb.Status, error)
 	AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)
 	AlterCollectionFunction(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)

@@ -242,12 +242,20 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot(flusherCheckpointTimeTick uint64) *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// A pending retirement keeps the gate open even when nothing else is
-	// dirty: it is the only way a retired SPLITTED vchannel, sitting on an
-	// otherwise quiet pchannel, ever gets re-evaluated once the flusher
-	// checkpoint independently catches up to its fence (see
-	// retiredVChannels and UpdateFlusherCheckpoint).
-	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil && len(r.retiredVChannels) == 0 {
+	// A retirement that has DRAINED keeps the gate open even when nothing else
+	// is dirty: it is the only way a retired SPLITTED vchannel, sitting on an
+	// otherwise quiet pchannel, ever gets removed once the flusher checkpoint
+	// independently catches up to its fence (see retiredVChannels and
+	// UpdateFlusherCheckpoint, which notifies the persist loop the moment it
+	// crosses).
+	//
+	// The predicate is the same one isDirty uses, and deliberately so: a
+	// retirement that has NOT drained is nothing this pass can act on --
+	// ConsumeDirtyAndGetSnapshot would leave it exactly where it is -- so
+	// letting it open the gate would write a snapshot carrying nothing but the
+	// checkpoint to the catalog on every persistInterval, for the whole
+	// redistribution window, which is hours.
+	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil && !r.hasCollectableRetiredVChannelLocked() {
 		return nil
 	}
 

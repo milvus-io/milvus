@@ -937,7 +937,7 @@ type SplitShardTaskState int32
 const (
 	SplitShardTaskState_SplitShardTaskUnknown        SplitShardTaskState = 0
 	SplitShardTaskState_SplitShardTaskPreparing      SplitShardTaskState = 1 // target shards allocated, before the write fence; abortable.
-	SplitShardTaskState_SplitShardTaskFencing        SplitShardTaskState = 2 // appending the ManualFlush + SplitShard messages to the source vchannel.
+	SplitShardTaskState_SplitShardTaskFencing        SplitShardTaskState = 2 // appending the SplitShard broadcast; its source replica is the fence.
 	SplitShardTaskState_SplitShardTaskRedistributing SplitShardTaskState = 3 // window: targets initialized, the source data is being moved.
 	SplitShardTaskState_SplitShardTaskAdopting       SplitShardTaskState = 4 // every segment redistributed, waiting for the adoption of the target shards.
 	SplitShardTaskState_SplitShardTaskDone           SplitShardTaskState = 5
@@ -15906,8 +15906,10 @@ type SplitShardTaskSource struct {
 	Vchannel string `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
 	// T_switch for THIS source: the time tick of its own SplitShard fence, zero
 	// until the fence lands. Each source is fenced separately, so there is no
-	// single collection-wide T_switch; the barrier of the target vchannels must
-	// exceed the MAXIMUM over all sources.
+	// single collection-wide T_switch. The targets need no barrier to clear it:
+	// every source replica is appended and persisted before any target replica
+	// is, and the targets take a fresh TSO batch, so a target's first tick is
+	// necessarily above the MAXIMUM over all sources.
 	//
 	// A non-zero value here is also the evidence the routing commit checks: a
 	// source may only be retired once its fence is recorded, which is what

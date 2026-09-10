@@ -28,7 +28,9 @@ import (
 // Changing a collection's shard count rides on AlterCollection: the user sets
 // the collection.shardNum property, and the value is DECLARATIVE — it records
 // the shard count the collection should have, and datacoord reconciles toward it
-// by running a rehash (design §10.2). AlterCollection returns as soon as the
+// by running a rehash (design §11, RootCoord; the reconciler itself lands with
+// the split manager, which §11 lists as not on this branch). AlterCollection
+// returns as soon as the
 // desired value is persisted; DescribeCollection's shards_num reports the
 // achieved count, which catches up when the rehash finishes.
 //
@@ -41,7 +43,7 @@ import (
 // response, so everything cheap and knowable here is checked here.
 //
 // Being a recorded intent also gives it a cancel: deleting the property
-// withdraws the request (design §10.2). That matters most for an intent nothing
+// withdraws the request (design §11, RootCoord). That matters most for an intent nothing
 // can satisfy — too few pchannels, say — which the reconciler would otherwise
 // retry for the life of the collection.
 
@@ -118,7 +120,7 @@ func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyV
 	// free capacity ended up holding MORE of the scarce resource than it started
 	// with) and that nothing checked the survivors could hold the merge. Both are
 	// now handled — reclamation gives the slots back, and datacoord refuses a
-	// shrink whose survivors would exceed the split thresholds (§10.5.3), which
+	// shrink whose survivors would exceed the split thresholds (§9), which
 	// it can do and rootcoord cannot because the row and byte counts live there.
 
 	// The same two caps CreateCollection enforces. Applying only one of them
@@ -153,7 +155,8 @@ func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyV
 // shards. Whichever fenced second would find the other's T_switch already
 // recorded, with two tasks then believing they own the same fence.
 //
-// The mode is per COLLECTION (§15 decision 10): its own property decides, so a
+// The mode is per COLLECTION (§9, dataCoord.shardSplit.autoTriggerEnable): its
+// own property decides, so a
 // collection sized by hand can sit beside one that is managed. The cluster
 // switch is only a kill switch over the trigger — with it off nothing can size
 // a collection automatically, so every collection is effectively manual and a

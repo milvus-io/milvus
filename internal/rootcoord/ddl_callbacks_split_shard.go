@@ -18,16 +18,13 @@ package rootcoord
 
 import (
 	"context"
-	"slices"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -77,11 +74,13 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 		}
 		return merr.Wrap(err, "load the collection for the split shard commit")
 	}
-	if err := validateSplitShardRoutingPostImage(header, postImage); err != nil {
-		// The same derivation DataCoord ran before broadcasting, plus the
-		// header-vs-body cross-check nothing else performs. Failing here is a
-		// coordinator bug; retrying cannot clear it, but neither can the
-		// broadcast be abandoned with a fenced source behind it -- surface it.
+	if err := streaming.ValidateSplitShardRoutingPostImage(header, postImage); err != nil {
+		// The very check SplitShardParam.Validate ran before the broadcast, on
+		// the same message, from the same function -- so a post-image that got
+		// here malformed did not come from a coordinator that built it through
+		// the builder. Failing here is a coordinator bug; retrying cannot clear
+		// it, but neither can the broadcast be abandoned with a fenced source
+		// behind it -- surface it.
 		logger.Error(ctx, "split shard routing post-image is malformed", mlog.Err(err))
 		return err
 	}
@@ -180,69 +179,4 @@ func (c *DDLCallback) commitShardSplitAtDataCoord(ctx context.Context, result me
 		return merr.Wrap(err, "commit the shard split at datacoord")
 	}
 	return nil
-}
-
-// validateSplitShardRoutingPostImage is the tiling check the RPC path runs on a
-// request, run on the message body instead: the arrays must be parallel and the
-// writable shards must tile the key space without gap or overlap. A gap silently
-// drops the writes of the residues nobody claims; an overlap sends one key to
-// two shards.
-//
-// It also cross-checks the header against the body, which nothing else does.
-// The message carries the residues and the modulus TWICE -- the header's copy is
-// what this callback hands datacoord, the body's copy is what it writes to the
-// collection meta -- and SplitShardParam.Validate never compares the two: it
-// checks each target's residues against the HEADER modulus and only that each
-// target vchannel appears somewhere in the post-image. A coordinator that filled
-// the two copies inconsistently would give datacoord one residue map and the
-// routing table another, silently and permanently. This is the first and only
-// place both are read together, so it is the only place the disagreement can be
-// caught.
-func validateSplitShardRoutingPostImage(header *messagespb.SplitShardMessageHeader, postImage *messagespb.AlterCollectionMessageUpdates) error {
-	vchannels := postImage.GetVirtualChannelNames()
-	if len(vchannels) == 0 ||
-		len(vchannels) != len(postImage.GetPhysicalChannelNames()) ||
-		len(vchannels) != len(postImage.GetShardInfos()) {
-		return merr.WrapErrServiceInternalMsg(
-			"split shard routing post-image: channel and shard-info arrays must be parallel and non-empty")
-	}
-	writable, err := routing.ShardsFromMeta(vchannels, postImage.GetShardInfos())
-	if err != nil {
-		return merr.Wrap(err, "split shard routing post-image")
-	}
-	if _, err := routing.Derive(postImage.GetRoutingModulus(), vchannels, writable); err != nil {
-		return merr.Wrap(err, "split shard routing post-image")
-	}
-
-	if header.GetRoutingModulus() != postImage.GetRoutingModulus() {
-		return merr.WrapErrServiceInternalMsg(
-			"split shard routing post-image: header routes at modulus %d but the post-image at %d",
-			header.GetRoutingModulus(), postImage.GetRoutingModulus())
-	}
-	postImageBuckets := make(map[string][]uint64, len(vchannels))
-	for i, vchannel := range vchannels {
-		postImageBuckets[vchannel] = postImage.GetShardInfos()[i].GetHashRouting().GetBuckets()
-	}
-	for _, target := range header.GetTargets() {
-		want, ok := postImageBuckets[target.GetVchannel()]
-		if !ok {
-			return merr.WrapErrServiceInternalMsg(
-				"split shard routing post-image: target %s is not named by the post-image", target.GetVchannel())
-		}
-		if !sameResidueSet(target.GetRouting().GetBuckets(), want) {
-			return merr.WrapErrServiceInternalMsg(
-				"split shard routing post-image: target %s owns residues %v in the header but %v in the post-image",
-				target.GetVchannel(), target.GetRouting().GetBuckets(), want)
-		}
-	}
-	return nil
-}
-
-// sameResidueSet compares two residue lists as sets: the order a target's
-// residues are listed in is not meaningful, only which ones it owns.
-func sameResidueSet(a, b []uint64) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }

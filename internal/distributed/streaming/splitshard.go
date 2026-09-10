@@ -2,15 +2,18 @@ package streaming
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -142,6 +145,7 @@ func (p *SplitShardParam) Validate() error {
 	}
 
 	vchannels := make(map[string]struct{}, len(p.SourceVChannels)+len(p.Targets))
+	sources := make(map[string]struct{}, len(p.SourceVChannels))
 	for _, source := range p.SourceVChannels {
 		if source == "" {
 			return merr.WrapErrServiceInternalMsg("source vchannel must be set")
@@ -150,12 +154,37 @@ func (p *SplitShardParam) Validate() error {
 			return merr.WrapErrServiceInternalMsg("duplicated source vchannel %s in shard split", source)
 		}
 		vchannels[source] = struct{}{}
+		sources[source] = struct{}{}
 		// A source is fenced by this split, so it must be a real, pre-existing
 		// shard of the collection -- one the coordinator listed as such --
 		// never a vchannel this split invents for the occasion.
 		if _, ok := collectionVChannels[source]; !ok {
 			return merr.WrapErrServiceInternalMsg("source vchannel %s must be one of the collection's current vchannels", source)
 		}
+	}
+	// Target PLACEMENT, checked here because it can only be refused cheaply
+	// here. A shard manager holds ONE entry per collection per pchannel, so a
+	// target placed on a pchannel the collection still occupies is refused by
+	// the target replica's own handler (ErrVChannelConflict, unrecoverable) --
+	// but that happens AFTER the source replicas have landed and been
+	// persisted by AckPartial. The broadcaster then retries that append
+	// forever, holding the collection's exclusive resource key, with the
+	// source fenced and the target never created: the residues this split
+	// moved are permanently unwritable and every later DDL of the collection
+	// queues behind it. There is no rollback from there, so the placement is
+	// refused before the fence or never.
+	//
+	// A SOURCE's pchannel is free for a target to take: the fence removes the
+	// source's collection entry in the same critical section that marks it
+	// SPLITTED, which is what lets a shard split back onto its own pchannel.
+	// Every OTHER vchannel of the collection keeps its entry for the whole
+	// split window, targets included.
+	occupiedPChannels := make(map[string]string, len(p.CollectionVChannels)+len(p.Targets))
+	for _, vchannel := range p.CollectionVChannels {
+		if _, ok := sources[vchannel]; ok {
+			continue
+		}
+		occupiedPChannels[funcutil.ToPhysicalChannel(vchannel)] = vchannel
 	}
 	routingTargets := make(map[string]struct{}, len(p.Routing.GetVirtualChannelNames()))
 	for _, vchannel := range p.Routing.GetVirtualChannelNames() {
@@ -176,6 +205,14 @@ func (p *SplitShardParam) Validate() error {
 		if _, ok := collectionVChannels[vchannel]; ok {
 			return merr.WrapErrServiceInternalMsg("target vchannel %s must not already be one of the collection's current vchannels", vchannel)
 		}
+		pchannel := funcutil.ToPhysicalChannel(vchannel)
+		if incumbent, ok := occupiedPChannels[pchannel]; ok {
+			return merr.WrapErrServiceInternalMsg(
+				"target vchannel %s and vchannel %s of the same collection are both placed on pchannel %s, "+
+					"but a collection holds at most one vchannel per pchannel",
+				vchannel, incumbent, pchannel)
+		}
+		occupiedPChannels[pchannel] = vchannel
 		// The message is a PERMANENT record -- it is what a replay derives the
 		// window's fronting assignment from -- so a target without residues, or
 		// with one that is not below the modulus they are taken against, is
@@ -194,7 +231,103 @@ func (p *SplitShardParam) Validate() error {
 			return merr.WrapErrServiceInternalMsg("routing post-image is missing target vchannel %s", vchannel)
 		}
 	}
+	// The tiling of the post-image and its agreement with the header, run on
+	// the very header this param will put on the wire. The ack callback runs
+	// the SAME function on the message body once every replica has landed --
+	// but by then the sources are fenced, so a post-image that does not tile
+	// can only be retried, never withdrawn. Running it here is what turns that
+	// wedge into a refused build.
+	return ValidateSplitShardRoutingPostImage(p.header(), p.Routing)
+}
+
+// header is the SplitShard message header this param produces. Validate and
+// the build below share it, so the header the post-image is cross-checked
+// against before the broadcast is the one the ack callback re-checks after it.
+func (p *SplitShardParam) header() *message.SplitShardMessageHeader {
+	return &message.SplitShardMessageHeader{
+		CollectionId:    p.CollectionID,
+		SplitTaskId:     p.SplitTaskID,
+		Targets:         p.Targets,
+		RoutingModulus:  p.RoutingModulus,
+		SourceVchannels: p.SourceVChannels,
+		PartitionIds:    p.PartitionIDs,
+		DbId:            p.DBID,
+	}
+}
+
+// ValidateSplitShardRoutingPostImage is the tiling check the routing-commit RPC
+// path runs on a request, run on a SplitShard broadcast's post-image instead:
+// the arrays must be parallel and the writable shards must tile the key space
+// without gap or overlap. A gap silently drops the writes of the residues
+// nobody claims; an overlap sends one key to two shards.
+//
+// It also cross-checks the header against the body, which nothing else does.
+// The message carries the residues and the modulus TWICE -- the header's copy
+// is what the ack callback hands datacoord, the body's copy is what it writes
+// to the collection meta -- and the per-target checks in Validate never compare
+// the two: they check each target's residues against the HEADER modulus and
+// only that each target vchannel appears somewhere in the post-image. A
+// coordinator that filled the two copies inconsistently would give datacoord
+// one residue map and the routing table another, silently and permanently.
+// This is the only place both are read together.
+//
+// It lives here, next to the builder, because it has two callers that must not
+// diverge: SplitShardParam.Validate runs it BEFORE the broadcast, where a
+// malformed post-image is still a refused build, and rootcoord's SplitShard ack
+// callback runs it after, where it is the last line of defense against a
+// message that reached the WAL some other way. A second copy would let the
+// pre-fence gate drift away from the post-fence one, which is exactly the drift
+// that leaves a fenced source behind a permanently retried callback.
+//
+// Every refusal is a System error: the post-image is derived by the split
+// coordinator, never by a user request, so a bad one is a Milvus bug.
+func ValidateSplitShardRoutingPostImage(header *message.SplitShardMessageHeader, postImage *message.AlterCollectionMessageUpdates) error {
+	vchannels := postImage.GetVirtualChannelNames()
+	if len(vchannels) == 0 ||
+		len(vchannels) != len(postImage.GetPhysicalChannelNames()) ||
+		len(vchannels) != len(postImage.GetShardInfos()) {
+		return merr.WrapErrServiceInternalMsg(
+			"split shard routing post-image: channel and shard-info arrays must be parallel and non-empty")
+	}
+	writable, err := routing.ShardsFromMeta(vchannels, postImage.GetShardInfos())
+	if err != nil {
+		return merr.Wrap(err, "split shard routing post-image")
+	}
+	if _, err := routing.Derive(postImage.GetRoutingModulus(), vchannels, writable); err != nil {
+		return merr.Wrap(err, "split shard routing post-image")
+	}
+
+	if header.GetRoutingModulus() != postImage.GetRoutingModulus() {
+		return merr.WrapErrServiceInternalMsg(
+			"split shard routing post-image: header routes at modulus %d but the post-image at %d",
+			header.GetRoutingModulus(), postImage.GetRoutingModulus())
+	}
+	postImageBuckets := make(map[string][]uint64, len(vchannels))
+	for i, vchannel := range vchannels {
+		postImageBuckets[vchannel] = postImage.GetShardInfos()[i].GetHashRouting().GetBuckets()
+	}
+	for _, target := range header.GetTargets() {
+		want, ok := postImageBuckets[target.GetVchannel()]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg(
+				"split shard routing post-image: target %s is not named by the post-image", target.GetVchannel())
+		}
+		if !sameResidueSet(target.GetRouting().GetBuckets(), want) {
+			return merr.WrapErrServiceInternalMsg(
+				"split shard routing post-image: target %s owns residues %v in the header but %v in the post-image",
+				target.GetVchannel(), target.GetRouting().GetBuckets(), want)
+		}
+	}
 	return nil
+}
+
+// sameResidueSet compares two residue lists as sets: the order a target's
+// residues are listed in is not meaningful, only which ones it owns.
+func sameResidueSet(a, b []uint64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }
 
 // SplitShardResult is the decoded result of the SplitShard broadcast.
@@ -249,15 +382,7 @@ func NewSplitShardBroadcastMessage(param SplitShardParam) (message.BroadcastMuta
 	addVChannel(param.ControlChannel)
 
 	msg, err := message.NewSplitShardMessageBuilderV2().
-		WithHeader(&message.SplitShardMessageHeader{
-			CollectionId:    param.CollectionID,
-			SplitTaskId:     param.SplitTaskID,
-			Targets:         param.Targets,
-			RoutingModulus:  param.RoutingModulus,
-			SourceVchannels: param.SourceVChannels,
-			PartitionIds:    param.PartitionIDs,
-			DbId:            param.DBID,
-		}).
+		WithHeader(param.header()).
 		WithBody(&message.SplitShardMessageBody{
 			Genesis: &msgpb.CreateCollectionRequest{CollectionSchema: param.Schema},
 			Routing: param.Routing,

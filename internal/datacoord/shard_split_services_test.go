@@ -638,7 +638,26 @@ func newBroadcastShardSplitParam() streaming.SplitShardParam {
 		Schema:       &schemapb.CollectionSchema{Name: "col"},
 		PartitionIDs: []int64{10, 11},
 		Routing: &message.AlterCollectionMessageUpdates{
-			VirtualChannelNames: []string{splitTestSource, splitTestTarget0, splitTestTarget1},
+			VirtualChannelNames:  []string{splitTestSource, splitTestTarget0, splitTestTarget1},
+			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{VchannelName: splitTestSource, State: schemapb.ShardState_ShardSplitting},
+				{
+					VchannelName: splitTestTarget0,
+					State:        schemapb.ShardState_ShardCreating,
+					Routing: &schemapb.CollectionShardInfo_HashRouting{
+						HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
+					},
+				},
+				{
+					VchannelName: splitTestTarget1,
+					State:        schemapb.ShardState_ShardCreating,
+					Routing: &schemapb.CollectionShardInfo_HashRouting{
+						HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
+					},
+				},
+			},
+			RoutingModulus: 2,
 		},
 		ControlChannel: "by-dev-rootcoord-dml_99_1v99",
 	}
