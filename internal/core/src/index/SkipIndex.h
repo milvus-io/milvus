@@ -212,11 +212,12 @@ class SkipIndex {
  public:
     template <typename T>
     bool
-    CanSkipUnaryRange(FieldId field_id,
+    CanSkipUnaryRange(milvus::OpContext* op_ctx,
+                      FieldId field_id,
                       int64_t chunk_id,
                       OpType op_type,
                       const T& val) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        auto pw = GetFieldChunkMetrics(op_ctx, field_id, chunk_id);
         auto field_chunk_metrics = pw.get();
         if (MinMaxUnaryFilter<T>(field_chunk_metrics, op_type, val)) {
             return true;
@@ -227,13 +228,14 @@ class SkipIndex {
 
     template <typename T>
     bool
-    CanSkipBinaryRange(FieldId field_id,
+    CanSkipBinaryRange(milvus::OpContext* op_ctx,
+                       FieldId field_id,
                        int64_t chunk_id,
                        const T& lower_val,
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        auto pw = GetFieldChunkMetrics(op_ctx, field_id, chunk_id);
         auto field_chunk_metrics = pw.get();
         if (MinMaxBinaryFilter<T>(field_chunk_metrics,
                                   lower_val,
@@ -262,7 +264,9 @@ class SkipIndex {
 
  private:
     const cachinglayer::PinWrapper<const FieldChunkMetrics*>
-    GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
+    GetFieldChunkMetrics(milvus::OpContext* op_ctx,
+                         FieldId field_id,
+                         int chunk_id) const;
 
     template <typename T>
     struct IsAllowedType {
