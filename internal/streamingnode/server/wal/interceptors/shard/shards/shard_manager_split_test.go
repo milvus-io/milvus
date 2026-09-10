@@ -23,11 +23,15 @@ import (
 )
 
 func newTestSplitShardImmutableMessage(vchannel string, collectionID int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
+	return newTestSplitShardImmutableMessageOfTask(vchannel, collectionID, 100, timetick)
+}
+
+func newTestSplitShardImmutableMessageOfTask(vchannel string, collectionID int64, splitTaskID int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
 	msg := message.NewSplitShardMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.SplitShardMessageHeader{
 			CollectionId: collectionID,
-			SplitTaskId:  100,
+			SplitTaskId:  splitTaskID,
 			Targets: []*message.SplitShardTarget{
 				{Vchannel: vchannel + "-target1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
 				{Vchannel: vchannel + "-target2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
@@ -41,6 +45,30 @@ func newTestSplitShardImmutableMessage(vchannel string, collectionID int64, time
 }
 
 func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChannelState, splitTimeTick uint64) ShardManager {
+	return newTestShardManagerFromSnapshot(t,
+		map[string]*streamingpb.VChannelMeta{
+			"v1": newTestVChannelMeta("v1", 1, state, splitTimeTick),
+		}, nil)
+}
+
+// newTestVChannelMeta is one vchannel of collection `collectionID` holding a
+// single partition, as the recovery snapshot carries it.
+func newTestVChannelMeta(vchannel string, collectionID int64, state streamingpb.VChannelState, splitTimeTick uint64) *streamingpb.VChannelMeta {
+	return &streamingpb.VChannelMeta{
+		Vchannel:      vchannel,
+		State:         state,
+		SplitTimeTick: splitTimeTick,
+		SplitTaskId:   100,
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: collectionID,
+			Partitions: []*streamingpb.PartitionInfoOfVChannel{
+				{PartitionId: 2},
+			},
+		},
+	}
+}
+
+func newTestShardManagerFromSnapshot(t *testing.T, vchannels map[string]*streamingpb.VChannelMeta, segments map[int64]*streamingpb.SegmentAssignmentMeta) ShardManager {
 	paramtable.Init()
 	resource.InitForTest(t)
 	w := mock_wal.NewMockWAL(t)
@@ -58,20 +86,9 @@ func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChann
 		ChannelInfo: types.PChannelInfo{Name: "test_channel", Term: 1},
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v1": {
-					Vchannel:      "v1",
-					State:         state,
-					SplitTimeTick: splitTimeTick,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 1,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 2},
-						},
-					},
-				},
-			},
-			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
+			VChannels:          vchannels,
+			SegmentAssignments: segments,
+			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
 		},
 		TxnManager: &mockedTxnManager{},
 	})
@@ -102,19 +119,6 @@ func TestShardManagerSplitShard(t *testing.T) {
 
 	// the split message fences the vchannel and records T_switch.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
-
-	// the fence is idempotent and T_switch stays at the first fence.
-	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 3000))
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
-}
-
-func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
-	// a vchannel recovered in SPLITTED state keeps rejecting DML and restores
-	// T_switch, so an already-fenced re-fence can return it after a crash.
-	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000)
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
 	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
 }
@@ -234,50 +238,10 @@ func TestShardManagerVChannelAdmissionChecks(t *testing.T) {
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(1, "v1"), ErrCollectionExists)
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(1, "v1-successor"), ErrVChannelConflict)
 
-	// teardown: a live shard must never be torn down...
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeDropped(1, "v1"), ErrVChannelNotFenced)
-	// ...while a teardown for a vchannel this pchannel does not hold is a
-	// replay and must still be allowed through, because the recovery storage
-	// and the flusher are keyed by vchannel and still have work to do.
-	assert.NoError(t, m.CheckIfVChannelCanBeDropped(1, "v1-successor"))
-	assert.NoError(t, m.CheckIfVChannelCanBeDropped(999, "v999"))
-
-	// once fenced, the teardown is admitted.
+	// once the incumbent is fenced its slot is free, so the newcomer that was
+	// refused a moment ago is admitted -- no teardown message in between.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
-	assert.NoError(t, m.CheckIfVChannelCanBeDropped(1, "v1"))
-}
-
-// TestResolveVChannelCollision pins the recovery-time tie-break.
-//
-// The registration map holds one entry per collection per pchannel. If two
-// vchannels of one collection are recovered onto the same pchannel -- a fenced
-// source whose teardown has not been observed yet, plus its successor -- the
-// winner used to be whichever the map iteration reached last, so a restart
-// could leave the live shard unwritable at random and leave it that way.
-func TestResolveVChannelCollision(t *testing.T) {
-	normal := func(vchannel string) *CollectionInfo {
-		return &CollectionInfo{VChannel: vchannel, State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL}
-	}
-	splitted := func(vchannel string) *CollectionInfo {
-		return &CollectionInfo{VChannel: vchannel, State: streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED}
-	}
-
-	// The shard that can still take writes wins, whichever order they arrive in.
-	winner, loser := resolveVChannelCollision(splitted("v0"), normal("v7"))
-	assert.Equal(t, "v7", winner.VChannel)
-	assert.Equal(t, "v0", loser.VChannel)
-	winner, loser = resolveVChannelCollision(normal("v7"), splitted("v0"))
-	assert.Equal(t, "v7", winner.VChannel)
-	assert.Equal(t, "v0", loser.VChannel)
-
-	// When the state does not separate them the name does, so the answer does
-	// not depend on the order the snapshot happened to be walked in.
-	winner, _ = resolveVChannelCollision(normal("v7"), normal("v0"))
-	assert.Equal(t, "v0", winner.VChannel)
-	winner, _ = resolveVChannelCollision(normal("v0"), normal("v7"))
-	assert.Equal(t, "v0", winner.VChannel)
-	winner, _ = resolveVChannelCollision(splitted("v7"), splitted("v0"))
-	assert.Equal(t, "v0", winner.VChannel)
+	assert.NoError(t, m.CheckIfVChannelCanBeCreated(1, "v1-successor"))
 }
 
 func newTestSplitShardGenesisImmutableMessageNoSchema(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
@@ -285,24 +249,28 @@ func newTestSplitShardGenesisImmutableMessageNoSchema(vchannel string, collectio
 		&message.CreateCollectionRequest{})
 }
 
-// A retired source must keep answering "fenced", because that is the only signal
-// the proxy acts on: invalidate the routing cache, refetch, re-resolve, retry.
-// Answering terminally instead fails a write that one refresh would complete.
-func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
+// TestShardManagerSplitShardFreesTheSlot pins what the fence does to this
+// pchannel's single registration slot.
+//
+// The fence is the last thing that happens on the source: no DML follows it,
+// its growing segments were sealed while the message was being built, and the
+// only reader left is a proxy holding a stale route. So the registration goes
+// at the fence -- every partition manager dropped, the entry removed -- and the
+// slot is free for the next vchannel of the collection immediately, without
+// waiting for a routing commit to come back and reclaim it. What survives is
+// the name-keyed tombstone, which is all a stale route needs: SHARD_FENCED,
+// refresh, retry.
+func TestShardManagerSplitShardFreesTheSlot(t *testing.T) {
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
 
-	// fence, then retire.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 4000))
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
 
-	m.DropVChannel(newTestRetireImmutableMessage("v1", 1, []string{"v1-successor"}, 5000))
-	// the registration is gone...
+	// the registration is gone, so the slot is free.
 	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
-	// ...but the name is still fenced, and T_switch still recoverable.
+	assert.NoError(t, m.CheckIfVChannelCanBeCreated(1, "v1-successor"))
+	// ...and the tombstone still answers, both questions.
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
-
+	assert.Equal(t, SplitFence{TimeTick: 4000, TaskID: 100}, m.GetSplitFence(1, "v1"))
 	// a vchannel this pchannel never held stays terminal: no refresh sends the
 	// write anywhere.
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v-never"), ErrCollectionNotFound)
@@ -312,4 +280,106 @@ func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
 	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("v1-successor", 1, []int64{2}, 6000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
+}
+
+// TestShardManagerSplitShardAgainRaisesTheFenceTick pins T_switch's definition:
+// the tick of the LATEST fence record of the task, not the first.
+//
+// The broadcaster re-drives a split whose source replica landed but whose task
+// was not yet persisted, so one task can place several fence records. Every one
+// of them seals the same data -- the vchannel took no DML after the first --
+// so the interval between them is empty and taking the larger tick is safe.
+// Taking the larger one is also necessary: DataCoord records the tick of the
+// last record it saw acked, and a shard manager that kept the first would
+// disagree with it about T_switch.
+func TestShardManagerSplitShardAgainRaisesTheFenceTick(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
+
+	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
+	assert.Equal(t, SplitFence{TimeTick: 2000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+
+	// the same task fences again: T_switch moves up.
+	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 3000))
+	assert.Equal(t, SplitFence{TimeTick: 3000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+
+	// a replay of an older record never moves it back.
+	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2500))
+	assert.Equal(t, SplitFence{TimeTick: 3000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+
+	// another task's fence is refused on the append path (one active task per
+	// source); should one ever get this far it must not move a fence it did
+	// not place, or the two tasks would carve the source at different ticks.
+	m.SplitShard(newTestSplitShardImmutableMessageOfTask("v1", 1, 101, 4000))
+	assert.Equal(t, SplitFence{TimeTick: 3000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+}
+
+// TestShardManagerRecoverSplittedVChannelSeedsOnlyTheTombstone: a restart must
+// land on the same state the fence left behind, or the slot a live successor
+// took would be claimed back by a source that has nothing left to do.
+func TestShardManagerRecoverSplittedVChannelSeedsOnlyTheTombstone(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000)
+
+	// no registration is rebuilt for a fenced vchannel...
+	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
+	assert.NoError(t, m.CheckIfVChannelCanBeCreated(1, "v1-successor"))
+	// ...only the tombstone, which keeps answering both questions.
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, SplitFence{TimeTick: 2000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+}
+
+// TestShardManagerRecoverSkipsSegmentsOfAFencedVChannel: the fence flushes
+// every segment of the source in the same message, so a growing one still in
+// the snapshot means the meta was persisted in parts. It cannot be rebuilt --
+// a fenced vchannel keeps no registration to attach it to -- and it must not be
+// attached to whatever entry sits under its collection id, which would hand a
+// successor a segment that is not its own. Skipping it is also what keeps the
+// recovery from panicking on a collection it can no longer find.
+func TestShardManagerRecoverSkipsSegmentsOfAFencedVChannel(t *testing.T) {
+	m := newTestShardManagerFromSnapshot(t,
+		map[string]*streamingpb.VChannelMeta{
+			"v1": newTestVChannelMeta("v1", 1, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000),
+		},
+		map[int64]*streamingpb.SegmentAssignmentMeta{
+			1001: {
+				CollectionId: 1,
+				PartitionId:  2,
+				SegmentId:    1001,
+				Vchannel:     "v1",
+				State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+				Stat: &streamingpb.SegmentAssignmentStat{
+					MaxBinarySize:         100,
+					ModifiedBinarySize:    50,
+					CreateSegmentTimeTick: 101,
+				},
+			},
+		})
+
+	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	// the segment was not rebuilt anywhere: there is no partition manager left
+	// on this pchannel that could hold it.
+	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}, 1001), ErrCollectionNotFound)
+}
+
+// TestShardManagerRecoverTwoLiveVChannelsOfOneCollection: the registration map
+// holds one entry per collection per pchannel, and a split's source no longer
+// competes for it (it is fenced, so it is not rebuilt at all). Two LIVE
+// vchannels of one collection are therefore a placement that should not exist
+// -- but if the snapshot carries one, which of them keeps the entry must not
+// depend on the order the map happened to be walked in, or a restart would
+// leave a different shard unwritable each time.
+func TestShardManagerRecoverTwoLiveVChannelsOfOneCollection(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		m := newTestShardManagerFromSnapshot(t,
+			map[string]*streamingpb.VChannelMeta{
+				"v0": newTestVChannelMeta("v0", 1, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0),
+				"v1": newTestVChannelMeta("v1", 1, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0),
+			}, nil)
+		assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v0"))
+		// the loser is not fenced, only unregistered: a route to it is a wrong
+		// route, and stays terminal.
+		assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrCollectionNotFound)
+	}
 }

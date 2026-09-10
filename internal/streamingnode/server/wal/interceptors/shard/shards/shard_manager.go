@@ -46,9 +46,6 @@ var (
 	// because another vchannel of the same collection already holds this
 	// pchannel's entry. See CheckIfVChannelCanBeCreated.
 	ErrVChannelConflict = errors.New("another vchannel of the collection is registered on this pchannel")
-	// ErrVChannelNotFenced is returned when a teardown names a vchannel that a
-	// shard split has not fenced. See CheckIfVChannelCanBeDropped.
-	ErrVChannelNotFenced = errors.New("vchannel is not fenced by shard split")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -70,7 +67,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
 	fenced := newFencedVChannels(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
-	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
+	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections, fenced)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("shard-manager")).With(mlog.Stringer("pchannel", param.ChannelInfo))
@@ -134,7 +131,12 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 }
 
 // newSegmentAllocManagersFromRecovery creates new segment alloc managers from the recovery snapshot.
-func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInfos *recovery.RecoverySnapshot, collections map[int64]*CollectionInfo) (
+func newSegmentAllocManagersFromRecovery(
+	pchannel types.PChannelInfo,
+	recoverInfos *recovery.RecoverySnapshot,
+	collections map[int64]*CollectionInfo,
+	fenced map[string]SplitFence,
+) (
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
@@ -143,6 +145,20 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
 	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
 	for _, rawMeta := range recoverInfos.SegmentAssignments {
+		if _, isFenced := fenced[rawMeta.GetVchannel()]; isFenced {
+			// A fenced vchannel keeps no registration to attach a segment to.
+			// The fence flushes every segment of the source in the same
+			// message, so a growing one surviving here means the meta was
+			// persisted in parts; the alternative -- attaching it to whatever
+			// entry sits under its collection id -- would hand a successor
+			// vchannel a segment that is not its own.
+			mlog.Warn(context.TODO(), "segment assignment meta of a fenced vchannel is skipped on recovery",
+				mlog.FieldCollectionID(rawMeta.GetCollectionId()),
+				mlog.FieldVChannel(rawMeta.GetVchannel()),
+				mlog.Int64("segmentID", rawMeta.GetSegmentId()),
+				mlog.Stringer("state", rawMeta.GetState()))
+			continue
+		}
 		coll, ok := collections[rawMeta.GetCollectionId()]
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
@@ -203,10 +219,21 @@ func newFencedVChannels(recoverInfos *recovery.RecoverySnapshot) map[string]Spli
 }
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
+//
+// A vchannel the snapshot reports as SPLITTED is skipped: the fence tears its
+// registration down as it is placed (see SplitShard), and a restart has to land
+// on the same state. Rebuilding one would take back a pchannel slot a live
+// successor may already hold -- m.collections keeps a single entry per
+// collection -- and hand that successor's writes to a shard that is fenced.
+// newFencedVChannels seeds the tombstone for it, which is all that a fenced
+// vchannel is remembered by.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
 	// collectionMap is a map from collectionID to collectionInfo.
 	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
 	for _, vchannelInfo := range recoverInfos.VChannels {
+		if vchannelInfo.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+			continue
+		}
 		currentPartition := make(map[int64]struct{}, len(vchannelInfo.CollectionInfo.Partitions))
 		for _, partition := range vchannelInfo.CollectionInfo.Partitions {
 			currentPartition[partition.PartitionId] = struct{}{}
@@ -219,56 +246,29 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
 		}
 		collectionInfo := &CollectionInfo{
-			VChannel:      vchannelInfo.Vchannel,
-			PartitionIDs:  currentPartition,
-			State:         vchannelInfo.State,
-			SplitTimeTick: vchannelInfo.GetSplitTimeTick(),
-			SplitTaskID:   vchannelInfo.GetSplitTaskId(),
+			VChannel:     vchannelInfo.Vchannel,
+			PartitionIDs: currentPartition,
 		}
 		collectionInfo.setSchema(latestSchema)
 		collectionID := vchannelInfo.CollectionInfo.CollectionId
 		if incumbent, ok := collectionInfoMap[collectionID]; ok {
-			// Two vchannels of one collection on one pchannel: the map holds a
-			// single entry per collection, so one of them is about to lose its
-			// registration. Which one used to depend on map iteration order,
-			// i.e. a restart could leave a live shard unwritable at random and
-			// leave it that way. Resolve it deterministically instead, and keep
-			// the shard that can still take writes -- a fenced source accepts no
-			// DML anyway and only waits to be retired.
-			winner, loser := resolveVChannelCollision(incumbent, collectionInfo)
-			mlog.Error(context.TODO(), "two vchannels of one collection recovered on one pchannel",
+			// Two LIVE vchannels of one collection on one pchannel, which the
+			// map cannot hold: it keeps a single entry per collection. The
+			// split's own source no longer collides here (it is skipped above),
+			// so this is a placement the coordinator should never have made.
+			// Keep the entry deterministically -- by name, so every replay of
+			// this snapshot answers the same -- and report it.
+			mlog.Error(context.TODO(), "two live vchannels of one collection recovered on one pchannel",
 				mlog.FieldCollectionID(collectionID),
-				mlog.String("kept", winner.VChannel),
-				mlog.String("dropped", loser.VChannel),
-				mlog.Stringer("keptState", winner.State),
-				mlog.Stringer("droppedState", loser.State))
-			collectionInfoMap[collectionID] = winner
-			continue
+				mlog.String("registered", incumbent.VChannel),
+				mlog.String("conflicting", collectionInfo.VChannel))
+			if incumbent.VChannel <= collectionInfo.VChannel {
+				continue
+			}
 		}
 		collectionInfoMap[collectionID] = collectionInfo
 	}
 	return collectionInfoMap
-}
-
-// resolveVChannelCollision picks, deterministically, which of two vchannels of
-// the same collection keeps this pchannel's single registration.
-//
-// A vchannel that still accepts DML wins over a fenced one; if that does not
-// separate them, the vchannel name does, so every replica of this recovery
-// reaches the same answer.
-func resolveVChannelCollision(a *CollectionInfo, b *CollectionInfo) (winner *CollectionInfo, loser *CollectionInfo) {
-	aFenced := a.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
-	bFenced := b.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
-	switch {
-	case aFenced && !bFenced:
-		return b, a
-	case bFenced && !aFenced:
-		return a, b
-	case a.VChannel <= b.VChannel:
-		return a, b
-	default:
-		return b, a
-	}
 }
 
 // shardManagerImpl manages the all shard info of collection on current pchannel.
@@ -285,12 +285,12 @@ type shardManagerImpl struct {
 	partitionManagers map[PartitionUniqueKey]*partitionManager // map partitionID to partition manager
 	collections       map[int64]*CollectionInfo                // map collectionID to collectionInfo
 	// fencedVChannels remembers, by name, every vchannel this pchannel has
-	// fenced by shard split, together with its T_switch. It OUTLIVES the entry
-	// in collections: a retired source loses its registration to the retire, or
-	// to a successor taking this pchannel's single slot, and a write that
-	// still routes to it has to be answered SHARD_FENCED so the proxy refreshes
-	// -- an unrecoverable error instead fails a write that one refresh would
-	// have completed.
+	// fenced by shard split, together with its T_switch. It REPLACES the entry
+	// in collections: the fence removes the registration as it is placed, so
+	// this is the only record a fenced vchannel leaves, and it is what a write
+	// still routing to it is answered from -- SHARD_FENCED, so the proxy
+	// refreshes; an unrecoverable error instead fails a write that one refresh
+	// would have completed.
 	//
 	// Best effort across a restart: a vchannel already dropped before the
 	// restart leaves nothing in the snapshot to seed from, and a write to it
@@ -300,22 +300,15 @@ type shardManagerImpl struct {
 	txnManager      TxnManager
 }
 
+// CollectionInfo is one collection's LIVE registration on this pchannel: the
+// vchannel that holds the slot, its partitions and its current schema. A vchannel
+// fenced by a shard split has no CollectionInfo -- the fence removes it and
+// leaves a SplitFence tombstone in its place.
 type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
-	// State is the vchannel state of the collection on this pchannel.
-	// VCHANNEL_STATE_SPLITTED means the vchannel is fenced by shard split
-	// and never accepts new DML again.
-	State streamingpb.VChannelState
-	// SplitTimeTick is T_switch: the time tick the vchannel was fenced at,
-	// set when State becomes SPLITTED. It is returned on an already-fenced
-	// re-fence so the split coordinator can recover T_switch after a crash.
-	SplitTimeTick uint64
-	// SplitTaskID is the split task that placed the fence, recorded with
-	// SplitTimeTick and returned on a re-fence.
-	SplitTaskID int64
 }
 
 // SplitFence is what a fenced vchannel is remembered by after its registration
@@ -514,7 +507,6 @@ func newCollectionInfo(vchannel string, partitionIDs []int64) *CollectionInfo {
 		VChannel:     vchannel,
 		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
 		Schema:       nil, // Schema will be set when collection is created or altered
-		State:        streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 	}
 	for _, partitionID := range partitionIDs {
 		info.PartitionIDs[partitionID] = struct{}{}

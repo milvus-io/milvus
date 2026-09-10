@@ -28,20 +28,19 @@ type ShardManager interface {
 	// another vchannel of the same collection already holds the entry.
 	CheckIfVChannelCanBeCreated(collectionID int64, vchannel string) error
 
-	// CheckIfVChannelCanBeDropped checks if the named vchannel may be retired.
-	// It returns ErrVChannelNotFenced when this pchannel holds the vchannel and
-	// no shard split has fenced it, so a live shard is never torn down.
-	CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error
-
 	// GetSplitFence returns the fence recorded for the named vchannel: T_switch
 	// and the split task that placed it. Zero values when the vchannel is
 	// unknown or not fenced. The task id is what lets a caller tell its own
 	// retry from a concurrent task's fence.
 	GetSplitFence(collectionID int64, vchannel string) SplitFence
 
-	// SplitShard marks the vchannel of the collection as splitted (fenced)
-	// when a SplitShard message is written into the wal. After it is called,
-	// any new DML on the vchannel is rejected forever.
+	// SplitShard fences the source vchannel of a split when a SplitShard
+	// message is written into the wal, and releases its registration on this
+	// pchannel: any new DML on the vchannel is rejected forever, and the slot
+	// is free for a successor vchannel of the same collection. The fence is
+	// kept as a name-keyed tombstone, which is what answers a stale route
+	// afterwards. A second fence record of the same task only raises the
+	// recorded T_switch.
 	SplitShard(msg message.ImmutableSplitShardMessageV2)
 
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
@@ -50,14 +49,6 @@ type ShardManager interface {
 	// assignment. The message is the TARGET replica of the split broadcast: the
 	// genesis of the new vchannel, carrying the collection schema in its body.
 	CreateVChannel(msg message.ImmutableSplitShardMessageV2)
-
-	// DropVChannel retires one vchannel of a collection on this pchannel, the
-	// inverse of CreateVChannel. The message is the AlterCollection replica whose
-	// routing commit delists this vchannel. Guarded by the vchannel name: after
-	// the coordinator reclaims a retired source's slot, another vchannel of the
-	// same collection may hold this pchannel's entry, and it must not be torn
-	// down.
-	DropVChannel(msg message.ImmutableAlterCollectionMessageV2)
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 

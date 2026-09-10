@@ -181,31 +181,25 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 }
 
 // retireVChannel handles the AlterCollection replica whose routing commit
-// delists the vchannel it landed on: the inverse of handleSplitShardOnTarget.
-// It tears down the vchannel's registration on this pchannel and releases the
-// function-runner key that creation took, so a later vchannel of the same
-// collection can be registered here.
+// delists the vchannel it landed on.
+//
+// The shard manager has nothing left to do here: the source's registration was
+// torn down at the FENCE (SplitShard), which is the point where the vchannel
+// stopped taking DML and its slot became reusable -- waiting for this commit
+// would only hold the slot for a shard that no longer does anything. So the
+// retire is a pass-through plus one piece of bookkeeping: give back the WAL
+// function-runner key creation took per VCHANNEL, exactly the one this replica
+// names and no other, mirroring handleDropCollection.
+//
+// There is no guard, and there is nothing left for one to protect: a replica on
+// a live shard cannot reach here (RetiresVChannel is false while the vchannel is
+// still listed), and a replay finds the key already released.
 func (impl *shardInterceptor) retireVChannel(ctx context.Context, msg message.MutableMessage, putCollectionMsg message.MutableAlterCollectionMessageV2, appendOp interceptors.Append) (message.MessageID, error) {
-	header := putCollectionMsg.Header()
-	if err := impl.shardManager.CheckIfVChannelCanBeDropped(header.GetCollectionId(), msg.VChannel()); err != nil {
-		// Only a vchannel a shard split has fenced may be retired. Tearing down
-		// a live one removes its segment assignment with no way back, so a
-		// teardown that names one is refused instead of applied. A teardown for
-		// a vchannel this pchannel no longer holds is not refused: it is a
-		// replay, and the recovery storage and flusher -- keyed by vchannel --
-		// still need it.
-		impl.shardManager.Logger().Warn(ctx, "cannot drop vchannel", mlog.Err(err))
-		return nil, status.NewUnrecoverableError("%s", err.Error())
-	}
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {
 		return msgID, err
 	}
-	impl.shardManager.DropVChannel(message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID)))
-	// Mirrors handleDropCollection. Creation took this key per VCHANNEL
-	// (walFunctionRunnerKey(vchannel)), so retiring one vchannel must release
-	// exactly that one and no other.
-	function.GetManager().Release(header.GetCollectionId(), walFunctionRunnerKey(msg.VChannel()))
+	function.GetManager().Release(putCollectionMsg.Header().GetCollectionId(), walFunctionRunnerKey(msg.VChannel()))
 	return msgID, nil
 }
 

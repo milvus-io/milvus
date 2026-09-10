@@ -646,53 +646,6 @@ func (_c *MockShardManager_CheckIfVChannelCanBeCreated_Call) RunAndReturn(run fu
 	return _c
 }
 
-// CheckIfVChannelCanBeDropped provides a mock function with given fields: collectionID, vchannel
-func (_m *MockShardManager) CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error {
-	ret := _m.Called(collectionID, vchannel)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CheckIfVChannelCanBeDropped")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, string) error); ok {
-		r0 = rf(collectionID, vchannel)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_CheckIfVChannelCanBeDropped_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfVChannelCanBeDropped'
-type MockShardManager_CheckIfVChannelCanBeDropped_Call struct {
-	*mock.Call
-}
-
-// CheckIfVChannelCanBeDropped is a helper method to define mock.On call
-//   - collectionID int64
-//   - vchannel string
-func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeDropped(collectionID interface{}, vchannel interface{}) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
-	return &MockShardManager_CheckIfVChannelCanBeDropped_Call{Call: _e.mock.On("CheckIfVChannelCanBeDropped", collectionID, vchannel)}
-}
-
-func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) Return(_a0 error) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) RunAndReturn(run func(int64, string) error) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CheckIfVChannelCanBeWritten provides a mock function with given fields: collectionID, vchannel
 func (_m *MockShardManager) CheckIfVChannelCanBeWritten(collectionID int64, vchannel string) error {
 	ret := _m.Called(collectionID, vchannel)
@@ -966,39 +919,6 @@ func (_c *MockShardManager_DropPartition_Call) Return() *MockShardManager_DropPa
 }
 
 func (_c *MockShardManager_DropPartition_Call) RunAndReturn(run func(message.ImmutableDropPartitionMessageV1)) *MockShardManager_DropPartition_Call {
-	_c.Run(run)
-	return _c
-}
-
-// DropVChannel provides a mock function with given fields: msg
-func (_m *MockShardManager) DropVChannel(msg message.ImmutableAlterCollectionMessageV2) {
-	_m.Called(msg)
-}
-
-// MockShardManager_DropVChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropVChannel'
-type MockShardManager_DropVChannel_Call struct {
-	*mock.Call
-}
-
-// DropVChannel is a helper method to define mock.On call
-//   - msg message.ImmutableAlterCollectionMessageV2
-func (_e *MockShardManager_Expecter) DropVChannel(msg interface{}) *MockShardManager_DropVChannel_Call {
-	return &MockShardManager_DropVChannel_Call{Call: _e.mock.On("DropVChannel", msg)}
-}
-
-func (_c *MockShardManager_DropVChannel_Call) Run(run func(msg message.ImmutableAlterCollectionMessageV2)) *MockShardManager_DropVChannel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableAlterCollectionMessageV2))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_DropVChannel_Call) Return() *MockShardManager_DropVChannel_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardManager_DropVChannel_Call) RunAndReturn(run func(message.ImmutableAlterCollectionMessageV2)) *MockShardManager_DropVChannel_Call {
 	_c.Run(run)
 	return _c
 }

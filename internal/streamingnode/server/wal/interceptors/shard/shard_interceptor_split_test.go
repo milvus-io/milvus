@@ -449,19 +449,17 @@ func TestSplitShardOnSourceAppendFailure(t *testing.T) {
 }
 
 // TestAlterCollectionRetiresADelistedFencedVChannel: the routing commit that
-// drops a vchannel from the collection's vchannel list IS the teardown of that
-// vchannel on this pchannel -- there is no separate DropVChannel message any
-// more. The collection-wide AlterCollection apply must not run for it: this
-// replica is about one retired shard, not about the collection's state.
+// drops a vchannel from the collection's vchannel list retires that vchannel on
+// this pchannel -- there is no separate DropVChannel message any more. The
+// collection-wide AlterCollection apply must not run for it: this replica is
+// about one retired shard, not about the collection's state.
 func TestAlterCollectionRetiresADelistedFencedVChannel(t *testing.T) {
 	collectionID := int64(99201)
 	vchannel := "by-dev-rootcoord-dml_9_99201v0"
 
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeDropped(collectionID, vchannel).Return(nil).Once()
-	shardManager.EXPECT().DropVChannel(mock.Anything).Once()
 
-	// Creation took the WAL function-runner key per vchannel; the teardown must
+	// Creation took the WAL function-runner key per vchannel; the retire must
 	// give back exactly that one, or the key outlives the shard it belongs to.
 	key := walFunctionRunnerKey(vchannel)
 	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
@@ -484,28 +482,40 @@ func TestAlterCollectionRetiresADelistedFencedVChannel(t *testing.T) {
 	assert.Error(t, err, "the retired vchannel's function runner key must be released")
 }
 
-// TestAlterCollectionRetireRefusesALiveShard: a retire may only tear down a
-// vchannel a shard split has fenced. Applying one to a live shard deletes its
-// segment assignment with no way back -- every later DML on it fails with
-// collection-not-found and nothing recreates the registration.
-func TestAlterCollectionRetireRefusesALiveShard(t *testing.T) {
-	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeDropped(int64(1), "v0").
-		Return(errors.Wrap(shards.ErrVChannelNotFenced, "state NORMAL")).Once()
+// TestAlterCollectionRetireReleasesTheRunnerKeyOnly: the shard manager has
+// nothing left to do at a retire. The source's registration was torn down at
+// the fence, long before this routing commit, so the retire replica only gives
+// back the WAL function-runner key the vchannel took when it was created --
+// and, unlike a teardown, it can never be wrong to apply: there is no live
+// shard left for it to remove.
+func TestAlterCollectionRetireReleasesTheRunnerKeyOnly(t *testing.T) {
+	collectionID := int64(99203)
+	vchannel := "by-dev-rootcoord-dml_9_99203v0"
 
+	// no expectation is set on the shard manager: ANY call to it fails the test.
+	i, shardManager := newTestShardInterceptor(t)
+	key := walFunctionRunnerKey(vchannel)
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
+
+	appended := false
 	msgID, err := i.DoAppend(context.Background(),
-		newTestRetireAlterCollectionMutableMessage("v0", 1, []string{"v1", "v2"}),
+		newTestRetireAlterCollectionMutableMessage(vchannel, collectionID, []string{"v1", "v2"}),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-			assert.Fail(t, "a live shard must never be torn down")
-			return nil, nil
+			appended = true
+			return rmq.NewRmqID(1), nil
 		})
-	assert.Nil(t, msgID)
-	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	shardManager.AssertNotCalled(t, "AlterCollection", mock.Anything)
+
+	_, err = function.GetManager().Materialize(context.Background(), collectionID, key, 0,
+		&stubInsertMessage{body: &msgpb.InsertRequest{}})
+	assert.Error(t, err, "the retired vchannel's function runner key must be released")
 }
 
 func TestAlterCollectionRetireAppendFailure(t *testing.T) {
-	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeDropped(int64(1), "v0").Return(nil).Once()
+	i, _ := newTestShardInterceptor(t)
 
 	_, err := i.DoAppend(context.Background(),
 		newTestRetireAlterCollectionMutableMessage("v0", 1, []string{"v1", "v2"}),
@@ -532,8 +542,6 @@ func TestAlterCollectionOnAListedVChannelIsUnchanged(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, appended)
 	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
-	shardManager.AssertNotCalled(t, "CheckIfVChannelCanBeDropped", mock.Anything, mock.Anything)
-	shardManager.AssertNotCalled(t, "DropVChannel", mock.Anything)
 }
 
 func TestShardInterceptorInsertOnFencedVChannel(t *testing.T) {
