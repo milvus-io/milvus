@@ -677,6 +677,75 @@ TEST(JsonIndexTest, LargeInt64LiteralFallsBackToPreciseRawComparison) {
     EXPECT_TRUE(singleton[1]);
 }
 
+TEST(JsonIndexTest, UnrepresentableRawDoubleIsUnknown) {
+    ExprBatchSizeGuard batch_size_guard(2);
+    const std::vector<std::string> json_strs = {
+        R"({"a": 1e400})",
+        R"({"a": 18446744073709551616})",
+        R"({"a": 1.5})",
+        R"({"a": 7})",
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto segment = CreateSealedSegment(schema);
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_strs.size());
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    auto chunk_manager =
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, chunk_manager);
+    segment->LoadFieldData(load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP);
+    };
+    auto expect = [](const ColumnVectorPtr& result,
+                     const std::vector<bool>& expected_result) {
+        TargetBitmapView values(result->GetRawData(), result->size());
+        TargetBitmapView validity(result->GetValidRawData(), result->size());
+        ASSERT_EQ(result->size(), expected_result.size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(validity[i], i >= 2) << "row " << i;
+            EXPECT_EQ(values[i], expected_result[i]) << "row " << i;
+        }
+    };
+
+    proto::plan::GenericValue one_point_five;
+    one_point_five.set_float_val(1.5);
+    auto column = expr::ColumnInfo(json_fid, DataType::JSON, {"a"});
+    expect(evaluate(std::make_shared<expr::TermFilterExpr>(
+               column,
+               std::vector<proto::plan::GenericValue>{one_point_five},
+               false)),
+           {false, false, true, false});
+
+    proto::plan::GenericValue one;
+    one.set_float_val(1.0);
+    expect(evaluate(std::make_shared<expr::UnaryRangeFilterExpr>(
+               column,
+               proto::plan::OpType::GreaterThan,
+               one,
+               std::vector<proto::plan::GenericValue>())),
+           {false, false, true, true});
+
+    proto::plan::GenericValue two;
+    two.set_float_val(2.0);
+    expect(evaluate(std::make_shared<expr::BinaryRangeFilterExpr>(
+               column, one, two, true, true)),
+           {false, false, true, false});
+}
+
 class JsonIndexExistsTest : public ::testing::TestWithParam<std::string> {};
 
 INSTANTIATE_TEST_SUITE_P(JsonIndexExistsTestParams,

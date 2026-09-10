@@ -93,10 +93,10 @@ struct BinaryRangeElementFunc {
     }
 };
 
-// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
-// number in a single parse.  Branches on actual type to preserve int64
-// precision; uint64 and double values fall back to double comparison,
-// consistent with the Tantivy index and JSON-stats paths.
+// Numeric GetType uses at_numeric() (get_number()) so unrepresentable JSON
+// numbers stay UNKNOWN.  The int64_t branch preserves integer precision;
+// uint64 and double values fall back to double comparison, consistent with
+// the Tantivy index and JSON-stats paths.
 // 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
 #define BinaryRangeJSONCompare(cmp)                                    \
     do {                                                               \
@@ -123,6 +123,14 @@ struct BinaryRangeElementFunc {
                                  : n.get_double();                     \
                 res[i] = (cmp);                                        \
             }                                                          \
+        } else if constexpr (std::is_same_v<GetType, double>) {        \
+            auto x = src[offset].at_numeric(pointer);                  \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value().as_double();                        \
+            res[i] = (cmp);                                            \
         } else {                                                       \
             auto x = src[offset].template at<GetType>(pointer);        \
             if (x.error()) {                                           \

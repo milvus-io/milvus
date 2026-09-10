@@ -1,4 +1,7 @@
 #include "common/JsonCastFunction.h"
+
+#include <simdjson.h>
+#include <cstdint>
 #include <string>
 #include "common/EasyAssert.h"
 
@@ -21,11 +24,25 @@ JsonCastFunction::FromString(const std::string& str) {
 template <>
 std::optional<double>
 JsonCastFunction::cast<double, std::string>(const std::string& t) const {
-    try {
-        return std::stod(t);
-    } catch (const std::exception&) {
+    // Parse the string as a complete JSON number document. Besides avoiding
+    // platform-dependent std::stod behavior, this accepts representable
+    // subnormals and underflow-to-zero while rejecting overflow and trailing
+    // non-whitespace content.
+    simdjson::padded_string number_token(t);
+    thread_local simdjson::ondemand::parser parser;
+    auto document = parser.iterate(number_token);
+    if (document.error() != simdjson::SUCCESS) {
         return std::nullopt;
     }
+
+    // get_number() preserves simdjson's integer-domain validation. Calling
+    // document.get_double() directly would approximate integers larger than
+    // uint64_t even though the regular raw-JSON path rejects them.
+    auto number = document.get_number();
+    if (number.error() != simdjson::SUCCESS) {
+        return std::nullopt;
+    }
+    return number.value().as_double();
 }
 
 template <>
@@ -54,30 +71,41 @@ JsonCastFunction::CastJsonValue(const JsonCastFunction& cast_function,
     AssertInfo(cast_function.match<T>(), "Type mismatch");
 
     auto json_type = json.type(pointer);
+    if (json_type.error() != simdjson::SUCCESS) {
+        return std::nullopt;
+    }
+
     std::optional<T> res;
 
     switch (json_type.value()) {
         case simdjson::ondemand::json_type::string: {
             auto json_value = json.at<std::string_view>(pointer);
+            if (json_value.error() != simdjson::SUCCESS) {
+                return std::nullopt;
+            }
             res = cast_function.cast<T, std::string>(
                 std::string(json_value.value()));
             break;
         }
 
         case simdjson::ondemand::json_type::number: {
-            if (json.get_number_type(pointer) ==
-                simdjson::ondemand::number_type::floating_point_number) {
-                auto json_value = json.at<double>(pointer);
-                res = cast_function.cast<T, double>(json_value.value());
-            } else {
-                auto json_value = json.at<int64_t>(pointer);
-                res = cast_function.cast<T, int64_t>(json_value.value());
+            // STRING_TO_DOUBLE accepts numeric JSON values as identity casts.
+            // Parse into simdjson's tagged number first so integers outside the
+            // uint64_t domain remain invalid instead of being approximated by
+            // get_double().
+            auto json_value = json.at_numeric(pointer);
+            if (json_value.error() != simdjson::SUCCESS) {
+                return std::nullopt;
             }
+            res = cast_function.cast<T, double>(json_value.value().as_double());
             break;
         }
 
         case simdjson::ondemand::json_type::boolean: {
             auto json_value = json.at<bool>(pointer);
+            if (json_value.error() != simdjson::SUCCESS) {
+                return std::nullopt;
+            }
             res = cast_function.cast<T, bool>(json_value.value());
             break;
         }
