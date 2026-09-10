@@ -323,7 +323,45 @@ func TestPartialUpdateStateStoresTxnCASProofAndScope(t *testing.T) {
 func newTestAdmissionState(channel types.PChannelInfo) *partialUpdateState {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
+	state.historyStartTs = 1
 	return state
+}
+
+func TestValidateCommitChecksWALLifecycleHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		floor         uint64
+		readTS        uint64
+		conflictTS    uint64
+		unrecoverable bool
+		retryable     bool
+	}{
+		{name: "old snapshot with matching term and empty history", floor: 90, readTS: 70, retryable: true},
+		{name: "snapshot at first timetick", floor: 90, readTS: 90},
+		{name: "snapshot after first timetick", floor: 90, readTS: 100},
+		{name: "missing initialization", readTS: 100, unrecoverable: true},
+		{name: "current lifecycle conflict", floor: 90, readTS: 100, conflictTS: 110, retryable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
+			state.historyStartTs = tc.floor
+			state.recordTxnBegin(1)
+			require.NoError(t, state.recordTxnCAS(1, validCASMeta(tc.readTS, 2), validCASScope()))
+			state.recordTxnWrites(1, []any{int64(10)})
+			if tc.conflictTS != 0 {
+				state.pkVersions.UpdateAll("v1", []any{int64(10)}, tc.conflictTS)
+			}
+			_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 120), 1)
+			switch {
+			case tc.unrecoverable:
+				requireUnrecoverable(t, err)
+			case tc.retryable:
+				requirePartialUpdateRetryable(t, err)
+			default:
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func newCommitTxnMessage(vchannel string, txnID message.TxnID, timetick uint64) message.MutableMessage {

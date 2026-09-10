@@ -13,9 +13,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
-// partialUpdateState owns write tracking and CAS admission for one WAL term.
+// partialUpdateState owns write tracking and CAS admission for one WAL lifecycle.
 type partialUpdateState struct {
-	channel             types.PChannelInfo
+	channel types.PChannelInfo
+	// Immutable lower bound for proofs backed by this WAL lifecycle's state.
+	historyStartTs      uint64
 	pkVersions          *pkVersionIndex
 	fences              *collectionFenceIndex
 	incompleteTxnFences *vchannelFenceIndex
@@ -115,6 +117,15 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 			"partial update observed term %d, current term %d",
 			txnState.meta.GetObservedPchannelTerm(),
 			s.channel.Term,
+		)
+	}
+	if s.historyStartTs == 0 {
+		return nil, status.NewUnrecoverableError("partial update WAL history start timestamp is unavailable")
+	}
+	if txnState.meta.GetReadTs() < s.historyStartTs {
+		return nil, status.NewPartialUpdateRetryable(
+			"partial update read ts %d is older than WAL history start ts %d, vchannel: %s",
+			txnState.meta.GetReadTs(), s.historyStartTs, msg.VChannel(),
 		)
 	}
 	if err := s.incompleteTxnFences.Verify(msg.VChannel(), txnState.meta.GetReadTs()); err != nil {
