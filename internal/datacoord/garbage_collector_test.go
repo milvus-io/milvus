@@ -4216,51 +4216,67 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 		"JSON stats files should not be removed when segment is referenced by snapshot")
 }
 
-func TestGarbageCollector_recycleUnusedJSONStatsFiles_GlobalFormatPrefixOnce(t *testing.T) {
+// A V4 segment must never cause recycleUnusedJSONStatsFiles to walk or remove
+// the global V3 prefix: another live segment can still reference those files.
+func TestGarbageCollector_recycleUnusedJSONStatsFiles_DoesNotDeleteLiveV3FormatPrefix(t *testing.T) {
 	ctx := context.Background()
-	segments := make(map[int64]*SegmentInfo)
-	for segmentID := int64(1); segmentID <= 2; segmentID++ {
-		segments[segmentID] = &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           segmentID,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				JsonKeyStats: map[int64]*datapb.JsonKeyStats{
-					102: {
-						FieldID:                102,
-						Version:                1,
-						JsonKeyStatsDataFormat: 3,
-					},
-				},
-			},
-		}
+	const rootPath = "gc"
+	makeSegment := func(id int64, format int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{102: {
+				FieldID:                102,
+				Version:                1,
+				BuildID:                id + 400,
+				Files:                  []string{"meta.json"},
+				JsonKeyStatsDataFormat: format,
+			}},
+		}}
 	}
 
 	meta := &meta{
-		catalog:    &datacoord.Catalog{},
-		segments:   &SegmentsInfo{segments: segments},
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{
+			1002: makeSegment(1002, common.JSONStatsDataFormatV4),
+			1003: makeSegment(1003, common.JSONStatsDataFormatV3),
+		}},
 		channelCPs: newChannelCps(),
 	}
-	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
-	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{cli: cli})
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              storage.NewLocalChunkManager(objectstorage.RootPath(rootPath)),
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour,
+	})
 
-	walkCalls := make(map[string]int)
+	var walkedPrefixes, removedFiles []string
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
-		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
-			recursive bool, fn storage.ChunkObjectWalkFunc,
-		) error {
-			walkCalls[prefix]++
+		func(_ *storage.LocalChunkManager, _ context.Context, prefix string, _ bool, _ storage.ChunkObjectWalkFunc) error {
+			walkedPrefixes = append(walkedPrefixes, prefix)
 			return nil
 		}).Build()
 	defer mockWalk.UnPatch()
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(_ *storage.LocalChunkManager, _ context.Context, file string) error {
+			removedFiles = append(removedFiles, file)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
 
 	gc.recycleUnusedJSONStatsFiles(ctx, nil)
 
-	assert.Equal(t, map[string]int{
-		"gc/json_stats/1": 1,
-		"gc/json_stats/2": 1,
-	}, walkCalls)
+	for _, prefix := range walkedPrefixes {
+		assert.NotEqual(t, rootPath+"/"+common.JSONStatsPath+"/3", prefix,
+			"a V4 segment must not trigger global V3 JSON-stats cleanup")
+	}
+	assert.Empty(t, removedFiles)
 }
 
 func Test_parseV3SegmentID(t *testing.T) {

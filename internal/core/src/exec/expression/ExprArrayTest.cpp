@@ -39,6 +39,7 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprCache.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -54,6 +55,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -64,6 +66,20 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+template <typename T>
+class CountingArrayBitmapIndex : public index::BitmapIndex<T> {
+ public:
+    using index::BitmapIndex<T>::BitmapIndex;
+
+    const TargetBitmap
+    In(size_t n, const T* values) override {
+        batch_sizes.push_back(n);
+        return index::BitmapIndex<T>::In(n, values);
+    }
+
+    std::vector<size_t> batch_sizes;
+};
 
 proto::plan::GenericValue
 Int64Value(int64_t value) {
@@ -783,6 +799,158 @@ TEST(Expr, TestArrayNullExpr) {
             ASSERT_EQ(ans, ref);
         }
     }
+}
+
+template <typename T>
+class ArrayContainsOverflowTest : public testing::Test {
+ protected:
+    void
+    SetUp() override {
+        cache_enabled_ = exec::ExprResCacheManager::IsEnabled();
+        exec::ExprResCacheManager::SetEnabled(false);
+    }
+
+    void
+    TearDown() override {
+        exec::ExprResCacheManager::SetEnabled(cache_enabled_);
+    }
+
+ private:
+    bool cache_enabled_ = false;
+};
+using ArrayContainsOverflowTypes = testing::Types<int8_t, int16_t, int32_t>;
+TYPED_TEST_SUITE(ArrayContainsOverflowTest, ArrayContainsOverflowTypes);
+
+TYPED_TEST(ArrayContainsOverflowTest, AllRequiresEveryCandidate) {
+    using T = TypeParam;
+    const auto dtype = sizeof(T) == 1   ? DataType::INT8
+                       : sizeof(T) == 2 ? DataType::INT16
+                                        : DataType::INT32;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField("a", DataType::ARRAY, dtype, false);
+    schema->set_primary_field_id(pk);
+    constexpr size_t count = 4;
+    auto raw = DataGen(schema, count, 42, 0, 1, 2);
+    for (auto& field : *raw.raw_->mutable_fields_data()) {
+        if (field.field_id() != fid.get())
+            continue;
+        auto* arrays =
+            field.mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& values : {std::vector<int>{1},
+                                   std::vector<int>{1, 2},
+                                   std::vector<int>{},
+                                   std::vector<int>{}}) {
+            auto* array = arrays->Add();
+            for (int v : values) array->mutable_int_data()->add_data(v);
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    FixedVector<Array> arrays;
+    for (const auto& value : raw.get_col<ScalarFieldProto>(fid))
+        arrays.emplace_back(value);
+    auto field = storage::CreateFieldData(DataType::ARRAY, dtype, false);
+    field->FillFieldData(arrays.data(), count);
+    storage::FileManagerContext ctx(
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager());
+    ASSERT_TRUE(ctx.Valid());
+    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4000, 4000};
+    ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+    ctx.fieldDataMeta.field_schema.set_element_type(
+        static_cast<proto::schema::DataType>(dtype));
+    ctx.fieldDataMeta.field_schema.set_nullable(false);
+    ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+    ctx.fieldDataMeta.field_id = fid.get();
+    auto idx = std::make_unique<CountingArrayBitmapIndex<T>>(ctx, false);
+    auto* counting_index = idx.get();
+    idx->BuildWithFieldData({field});
+    // BuildWithFieldData prepares the writer's roaring data. Loading the
+    // artifact initializes the reader's bitmap representation and build mode.
+    idx->Load(idx->Serialize({}));
+    LoadIndexInfo load;
+    load.field_id = fid.get();
+    load.field_type = DataType::ARRAY;
+    load.element_type = dtype;
+    load.index_params = GenIndexParams(idx.get());
+    load.cache_index = CreateTestCacheIndex(
+        "array_overflow_" + std::to_string(sizeof(T)), std::move(idx));
+    segment->LoadIndex(load);
+    const int64_t overflow = int64_t(std::numeric_limits<T>::max()) + 1;
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (int candidate_count : {0, 1, 2}) {
+            std::vector<proto::plan::GenericValue> values{Int64Value(overflow)};
+            if (candidate_count > 0)
+                values.push_back(Int64Value(1));
+            if (candidate_count == 2) {
+                values.push_back(Int64Value(2));
+                values.push_back(Int64Value(2));
+            }
+            auto predicate = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(fid, DataType::ARRAY, dtype),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, predicate);
+            counting_index->batch_sizes.clear();
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), count, MAX_TIMESTAMP);
+            const bool match =
+                candidate_count > 0 &&
+                op == proto::plan::JSONContainsExpr_JSONOp_ContainsAny;
+            const auto expected_batches =
+                match ? std::vector<size_t>{size_t(candidate_count)}
+                      : std::vector<size_t>{};
+            EXPECT_EQ(counting_index->batch_sizes, expected_batches);
+            AssertColumnVector(result,
+                               {match, match, false, false},
+                               {true, true, true, true},
+                               "overflow candidates");
+            exec::OffsetVector offsets{1, 0, 1, 2, 3};
+            counting_index->batch_sizes.clear();
+            auto offset_result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), count, MAX_TIMESTAMP, &offsets);
+            AssertColumnVector(offset_result,
+                               {match, match, match, false, false},
+                               {true, true, true, true, true},
+                               "overflow candidates with offsets");
+            // Array offsets are currently evaluated from row data; the
+            // scalar index returns row-level bitmaps and is not used for this
+            // path.  The result assertions above cover the offset semantics.
+            EXPECT_TRUE(counting_index->batch_sizes.empty());
+            auto negated = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, predicate);
+            auto not_plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, negated);
+            auto not_result =
+                ExecuteQueryExpr(not_plan, segment.get(), count, MAX_TIMESTAMP);
+            EXPECT_EQ(not_result[0], !match);
+            EXPECT_EQ(not_result[1], !match);
+            EXPECT_TRUE(not_result[2]);
+            EXPECT_TRUE(not_result[3]);
+        }
+    }
+
+    // With no overflow, ALL still intersects one query per distinct candidate.
+    auto predicate = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(fid, DataType::ARRAY, dtype),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+        true,
+        std::vector<proto::plan::GenericValue>{
+            Int64Value(2), Int64Value(1), Int64Value(2)});
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, predicate);
+    counting_index->batch_sizes.clear();
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), count, MAX_TIMESTAMP);
+    AssertColumnVector(result,
+                       {false, true, false, false},
+                       {true, true, true, true},
+                       "all distinct candidates");
+    EXPECT_EQ(counting_index->batch_sizes, (std::vector<size_t>{1, 1}));
 }
 
 TEST(Expr, TestArrayNullExprWithBitmapIndex) {

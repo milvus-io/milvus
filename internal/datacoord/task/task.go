@@ -38,6 +38,12 @@ type Task interface {
 	DropTaskOnWorker(cluster session.Cluster)
 }
 
+// NodeFilter is optional: tasks with artifact capability requirements can
+// exclude workers without changing the scheduling contract of other tasks.
+type NodeFilter interface {
+	CanRunOnNode(nodeID int64) bool
+}
+
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.Int64("ID", task.GetTaskID()),

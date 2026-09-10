@@ -304,10 +304,35 @@ TEST(ConjunctExprTest, OffsetInputErasesUnmaterializedReservedLikeSlot) {
     EXPECT_FALSE(data[0]);
     EXPECT_TRUE(valid[0]);
     // The definite-FALSE first input early-exits: the second expression is
-    // skipped via MoveCursor and the erased reserved slot is never touched.
+    // skipped without moving its cursor, and the reserved slot is never touched.
     EXPECT_EQ(first->eval_count_, 1);
     EXPECT_EQ(second->eval_count_, 0);
-    EXPECT_EQ(second->move_count_, 1);
+    EXPECT_EQ(second->move_count_, 0);
+}
+
+TEST(ConjunctExprTest, OffsetShortCircuitDoesNotAdvanceUnevaluatedChild) {
+    for (bool is_and : {true, false}) {
+        auto first = FixedBool(!is_and, true);
+        auto second = FixedBool(true, true);
+        std::vector<ExprPtr> inputs{first, second};
+        PhyConjunctFilterExpr conjunct(std::move(inputs), is_and, nullptr);
+        QueryContext query_context("offset_short_circuit", nullptr, 1, 0);
+        ExecContext exec_context(&query_context);
+        EvalCtx eval_context(&exec_context);
+        OffsetVector offsets{0};
+        eval_context.set_offset_input(&offsets);
+        VectorPtr result;
+        for (int i = 0; i < 2; ++i) {
+            conjunct.Eval(eval_context, result);
+            EXPECT_EQ(second->eval_count_, 0);
+            EXPECT_EQ(second->move_count_, 0);
+        }
+        // Sequential short-circuiting still advances the skipped child once.
+        eval_context.set_offset_input(nullptr);
+        conjunct.Eval(eval_context, result);
+        EXPECT_EQ(second->eval_count_, 0);
+        EXPECT_EQ(second->move_count_, 1);
+    }
 }
 
 TEST(ConjunctExprTest, MarkNullRejectingStopsAtNonConjunctNodes) {

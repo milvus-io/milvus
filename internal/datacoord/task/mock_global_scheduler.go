@@ -50,9 +50,9 @@ func (_c *MockGlobalScheduler_AbortAndRemoveTask_Call) RunAndReturn(run func(int
 	return _c
 }
 
-// Enqueue provides a mock function with given fields: _a0
-func (_m *MockGlobalScheduler) Enqueue(_a0 Task) {
-	_m.Called(_a0)
+// Enqueue provides a mock function with given fields: task
+func (_m *MockGlobalScheduler) Enqueue(task Task) {
+	_m.Called(task)
 }
 
 // MockGlobalScheduler_Enqueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Enqueue'
@@ -61,12 +61,12 @@ type MockGlobalScheduler_Enqueue_Call struct {
 }
 
 // Enqueue is a helper method to define mock.On call
-//   - _a0 Task
-func (_e *MockGlobalScheduler_Expecter) Enqueue(_a0 interface{}) *MockGlobalScheduler_Enqueue_Call {
-	return &MockGlobalScheduler_Enqueue_Call{Call: _e.mock.On("Enqueue", _a0)}
+//   - task Task
+func (_e *MockGlobalScheduler_Expecter) Enqueue(task interface{}) *MockGlobalScheduler_Enqueue_Call {
+	return &MockGlobalScheduler_Enqueue_Call{Call: _e.mock.On("Enqueue", task)}
 }
 
-func (_c *MockGlobalScheduler_Enqueue_Call) Run(run func(_a0 Task)) *MockGlobalScheduler_Enqueue_Call {
+func (_c *MockGlobalScheduler_Enqueue_Call) Run(run func(task Task)) *MockGlobalScheduler_Enqueue_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(Task))
 	})
@@ -83,17 +83,24 @@ func (_c *MockGlobalScheduler_Enqueue_Call) RunAndReturn(run func(Task)) *MockGl
 	return _c
 }
 
-// GetPendingTaskCount provides a mock function with given fields: taskType
-func (_m *MockGlobalScheduler) GetPendingTaskCount(taskType string) int {
-	ret := _m.Called(taskType)
+// GetPendingTaskCount provides a mock function with given fields: taskType, filters
+func (_m *MockGlobalScheduler) GetPendingTaskCount(taskType string, filters ...func(Task) bool) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, taskType)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPendingTaskCount")
 	}
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func(string) int); ok {
-		r0 = rf(taskType)
+	if rf, ok := ret.Get(0).(func(string, ...func(Task) bool) int); ok {
+		r0 = rf(taskType, filters...)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
@@ -108,13 +115,21 @@ type MockGlobalScheduler_GetPendingTaskCount_Call struct {
 
 // GetPendingTaskCount is a helper method to define mock.On call
 //   - taskType string
-func (_e *MockGlobalScheduler_Expecter) GetPendingTaskCount(taskType interface{}) *MockGlobalScheduler_GetPendingTaskCount_Call {
-	return &MockGlobalScheduler_GetPendingTaskCount_Call{Call: _e.mock.On("GetPendingTaskCount", taskType)}
+//   - filters ...func(Task) bool
+func (_e *MockGlobalScheduler_Expecter) GetPendingTaskCount(taskType interface{}, filters ...interface{}) *MockGlobalScheduler_GetPendingTaskCount_Call {
+	return &MockGlobalScheduler_GetPendingTaskCount_Call{Call: _e.mock.On("GetPendingTaskCount",
+		append([]interface{}{taskType}, filters...)...)}
 }
 
-func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Run(run func(taskType string)) *MockGlobalScheduler_GetPendingTaskCount_Call {
+func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Run(run func(taskType string, filters ...func(Task) bool)) *MockGlobalScheduler_GetPendingTaskCount_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		variadicArgs := make([]func(Task) bool, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(func(Task) bool)
+			}
+		}
+		run(args[0].(string), variadicArgs...)
 	})
 	return _c
 }
@@ -124,7 +139,7 @@ func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Return(_a0 int) *MockGlo
 	return _c
 }
 
-func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) RunAndReturn(run func(string) int) *MockGlobalScheduler_GetPendingTaskCount_Call {
+func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) RunAndReturn(run func(string, ...func(Task) bool) int) *MockGlobalScheduler_GetPendingTaskCount_Call {
 	_c.Call.Return(run)
 	return _c
 }

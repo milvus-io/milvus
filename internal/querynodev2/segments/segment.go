@@ -1251,14 +1251,15 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 		if stats == nil {
 			continue
 		}
-		if stats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
+		if !common.IsSupportedJSONStatsDataFormat(stats.GetJsonKeyStatsDataFormat()) {
 			mlog.Warn(ctx, "skip sync json key stats, data format invalid",
 				mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 				mlog.FieldFieldID(fieldID),
 				mlog.FieldBuildID(stats.GetBuildID()),
 				mlog.Int64("version", stats.GetVersion()),
 				mlog.Int64("dataFormat", stats.GetJsonKeyStatsDataFormat()),
-				mlog.Int64("expectedDataFormat", common.JSONStatsDataFormatVersion))
+				mlog.Int64("minSupportedDataFormat", common.JSONStatsDataFormatV3),
+				mlog.Int64("maxSupportedDataFormat", common.JSONStatsDataFormatV4))
 			continue
 		}
 		jsonStatsInfo[fieldID] = &querypb.JsonStatsInfo{

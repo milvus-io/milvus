@@ -1729,7 +1729,8 @@ DiskFileManagerImpl::GetRemoteJsonStatsLogPrefix() {
                                         field_meta_.collection_id,
                                         field_meta_.partition_id,
                                         field_meta_.segment_id,
-                                        field_meta_.field_id);
+                                        field_meta_.field_id,
+                                        JSON_STATS_DATA_FORMAT_V3);
 }
 
 std::string

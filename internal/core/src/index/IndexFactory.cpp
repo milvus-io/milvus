@@ -1082,6 +1082,9 @@ IndexFactory::CreateJsonIndex(
     // Sort index
     if (index_type == ASCENDING_SORT) {
         switch (cast_dtype.element_type()) {
+            case JsonCastType::DataType::INT64:
+                return MakeJsonWrapped<int64_t, ScalarIndexSort<int64_t>>(
+                    create_index_info, file_manager_context);
             case JsonCastType::DataType::DOUBLE:
                 return MakeJsonWrapped<double, ScalarIndexSort<double>>(
                     create_index_info, file_manager_context);
@@ -1101,6 +1104,9 @@ IndexFactory::CreateJsonIndex(
             case JsonCastType::DataType::BOOL:
                 return MakeJsonWrapped<bool, BitmapIndex<bool>>(
                     create_index_info, file_manager_context);
+            case JsonCastType::DataType::INT64:
+                return MakeJsonWrapped<int64_t, BitmapIndex<int64_t>>(
+                    create_index_info, file_manager_context);
             case JsonCastType::DataType::VARCHAR:
                 return MakeJsonWrapped<std::string, BitmapIndex<std::string>>(
                     create_index_info, file_manager_context);
@@ -1117,6 +1123,9 @@ IndexFactory::CreateJsonIndex(
             case JsonCastType::DataType::BOOL:
                 return MakeJsonHybrid<bool>(create_index_info,
                                             file_manager_context);
+            case JsonCastType::DataType::INT64:
+                return MakeJsonHybrid<int64_t>(create_index_info,
+                                               file_manager_context);
             case JsonCastType::DataType::DOUBLE:
                 return MakeJsonHybrid<double>(create_index_info,
                                               file_manager_context);
@@ -1143,6 +1152,9 @@ IndexFactory::CreateJsonIndex(
     switch (cast_dtype.element_type()) {
         case JsonCastType::DataType::BOOL:
             return MakeJsonWrapped<bool, InvertedIndexTantivy<bool>>(
+                create_index_info, file_manager_context, tantivy_ver);
+        case JsonCastType::DataType::INT64:
+            return MakeJsonWrapped<int64_t, InvertedIndexTantivy<int64_t>>(
                 create_index_info, file_manager_context, tantivy_ver);
         case JsonCastType::DataType::DOUBLE:
             return MakeJsonWrapped<double, InvertedIndexTantivy<double>>(

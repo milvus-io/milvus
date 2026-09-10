@@ -459,6 +459,160 @@ func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
 	assert.True(t, exists, "node 3 should exist in sessionVersion map")
 }
 
+func scalarVersionSession(nodeID int64, current int32) *sessionutil.Session {
+	return &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
+		ServerID: nodeID,
+		ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+			CurrentIndexVersion: current,
+			MaximumIndexVersion: current,
+		},
+	}}
+}
+
+func dataNodeVersionSession(nodeID int64, scalarCurrent, vectorMinimum, vectorCurrent, vectorMaximum int32) *sessionutil.Session {
+	session := scalarVersionSession(nodeID, scalarCurrent)
+	session.IndexEngineVersion = sessionutil.IndexEngineVersion{
+		MinimalIndexVersion: vectorMinimum,
+		CurrentIndexVersion: vectorCurrent,
+		MaximumIndexVersion: vectorMaximum,
+	}
+	return session
+}
+
+func Test_IndexEngineVersionManager_SupportsScalarIndexVersionAcrossQueryAndDataNodes(t *testing.T) {
+	manager := newIndexEngineVersionManager()
+	gate := manager.(ScalarIndexMigrationVersionManager)
+	target := common.MinScalarIndexVersionForJsonPathPresence
+
+	// Both node classes are required; an empty class fails closed.
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	manager.Startup(map[string]*sessionutil.Session{
+		"qn-1": scalarVersionSession(1, target),
+	})
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+
+	// A legacy DataNode can still rebuild the old artifact.
+	gate.StartupDataNodes(map[string]*sessionutil.Session{
+		"dn-1": scalarVersionSession(2, target-1),
+	})
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	gate.UpdateDataNode(scalarVersionSession(2, target))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	missingCurrent := scalarVersionSession(2, target)
+	missingCurrent.ScalarIndexEngineVersion.CurrentIndexVersion = 0
+	gate.UpdateDataNode(missingCurrent)
+	assert.False(t, gate.SupportsScalarIndexVersion(target), "maximum without current is not a complete capability range")
+	missingMaximum := scalarVersionSession(2, target)
+	missingMaximum.ScalarIndexEngineVersion.MaximumIndexVersion = 0
+	gate.UpdateDataNode(missingMaximum)
+	assert.False(t, gate.SupportsScalarIndexVersion(target), "current without maximum is not a complete capability range")
+	currentAboveMaximum := scalarVersionSession(2, target)
+	currentAboveMaximum.ScalarIndexEngineVersion.MaximumIndexVersion = target - 1
+	gate.UpdateDataNode(currentAboveMaximum)
+	assert.False(t, gate.SupportsScalarIndexVersion(target), "current above maximum is a malformed capability range")
+	minimumAboveCurrent := scalarVersionSession(2, target)
+	minimumAboveCurrent.ScalarIndexEngineVersion.MinimalIndexVersion = target + 1
+	gate.UpdateDataNode(minimumAboveCurrent)
+	assert.False(t, gate.SupportsScalarIndexVersion(target), "minimum above current is a malformed capability range")
+	gate.UpdateDataNode(scalarVersionSession(2, target))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	// A legacy QueryNode cannot consume the new presence semantics.
+	manager.AddNode(scalarVersionSession(3, target-1))
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	manager.Update(scalarVersionSession(3, target))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	// A future reader whose minimum is above the migration target cannot read
+	// the V6 artifact, even though its current/maximum versions are newer.
+	futureQueryNode := scalarVersionSession(3, target+1)
+	futureQueryNode.ScalarIndexEngineVersion.MinimalIndexVersion = target + 1
+	manager.Update(futureQueryNode)
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	manager.Update(scalarVersionSession(3, target))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	// The same range rule applies to DataNode writers.
+	futureDataNode := scalarVersionSession(2, target+1)
+	futureDataNode.ScalarIndexEngineVersion.MinimalIndexVersion = target + 1
+	gate.UpdateDataNode(futureDataNode)
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	gate.UpdateDataNode(scalarVersionSession(2, target))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	// DataNode add/remove events update the same gate.
+	gate.AddDataNode(scalarVersionSession(4, target-1))
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+	gate.RemoveDataNode(scalarVersionSession(4, 0))
+	assert.True(t, gate.SupportsScalarIndexVersion(target))
+
+	manager.Startup(map[string]*sessionutil.Session{})
+	assert.False(t, gate.SupportsScalarIndexVersion(target))
+}
+
+func Test_IndexEngineVersionManager_DataNodeVectorWriterVersionRangeLifecycle(t *testing.T) {
+	manager := newIndexEngineVersionManager()
+	gate := manager.(ScalarIndexMigrationVersionManager)
+
+	minimum, maximum, ok := gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok)
+	assert.Zero(t, minimum)
+	assert.Zero(t, maximum)
+
+	gate.StartupDataNodes(map[string]*sessionutil.Session{
+		"dn-1": dataNodeVersionSession(1, 6, 3, 10, 20),
+		"dn-2": dataNodeVersionSession(2, 6, 8, 12, 15),
+	})
+	minimum, maximum, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.True(t, ok)
+	assert.Equal(t, int32(8), minimum)
+	assert.Equal(t, int32(15), maximum)
+
+	gate.UpdateDataNode(dataNodeVersionSession(2, 6, 5, 15, 25))
+	minimum, maximum, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.True(t, ok)
+	assert.Equal(t, int32(5), minimum)
+	assert.Equal(t, int32(20), maximum)
+
+	// A legacy session may report a current version but no maximum. Do not
+	// infer a writer ceiling from it.
+	gate.AddDataNode(dataNodeVersionSession(3, 6, 0, 30, 0))
+	_, _, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok)
+	gate.RemoveDataNode(dataNodeVersionSession(3, 0, 0, 0, 0))
+
+	// Current is part of the advertised capability range. Missing or malformed
+	// current values fail closed even when a maximum is present.
+	for _, malformed := range []*sessionutil.Session{
+		dataNodeVersionSession(3, 6, 0, 0, 20),
+		dataNodeVersionSession(3, 6, 0, 21, 20),
+		dataNodeVersionSession(3, 6, 11, 10, 20),
+	} {
+		gate.AddDataNode(malformed)
+		_, _, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+		assert.False(t, ok)
+		gate.RemoveDataNode(malformed)
+	}
+
+	// Startup replaces stale lifecycle state rather than retaining departed DNs.
+	gate.StartupDataNodes(map[string]*sessionutil.Session{
+		"dn-4": dataNodeVersionSession(4, 6, 9, 10, 12),
+	})
+	minimum, maximum, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.True(t, ok)
+	assert.Equal(t, int32(9), minimum)
+	assert.Equal(t, int32(12), maximum)
+
+	gate.AddDataNode(dataNodeVersionSession(5, 6, 13, 14, 20))
+	_, _, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok, "disjoint DataNode writer ranges fail closed")
+
+	gate.StartupDataNodes(nil)
+	_, _, ok = gate.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok)
+}
+
 func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 

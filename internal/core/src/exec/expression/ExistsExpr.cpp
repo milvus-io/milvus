@@ -69,8 +69,8 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     switch (data_type) {
         case DataType::JSON: {
             span.SetAttribute("json_filter_expr_type", "exists");
-            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                result = EvalJsonExistsForIndex();
+            if (exec_path_ == ExprExecPath::ScalarIndex) {
+                result = EvalJsonExistsForIndex(input);
             } else {
                 result = EvalJsonExistsForDataSegment(context);
             }
@@ -82,8 +82,9 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 VectorPtr
-PhyExistsFilterExpr::EvalJsonExistsForIndex() {
-    auto real_batch_size = GetNextBatchSize();
+PhyExistsFilterExpr::EvalJsonExistsForIndex(const OffsetVector* input) {
+    auto real_batch_size =
+        input != nullptr ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -108,8 +109,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     // JsonFlatIndex needs special handling via executor.
                     auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
                         dynamic_cast<const index::JsonFlatIndex*>(index));
-                    auto executor =
-                        json_flat_index->create_executor<double>(pointer);
+                    auto index_path = json_flat_index->GetNestedPath();
+                    auto executor = json_flat_index->create_executor<double>(
+                        pointer.substr(index_path.size()));
                     res = executor->Exists();
                 } else {
                     // All other JSON path indexes (Inverted, Sort, Bitmap,
@@ -121,6 +123,11 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 return {std::move(res), std::move(valid)};
             });
         cached_index_chunk_res_ = cached.result;
+        cached_index_chunk_valid_res_ = cached.valid;
+    }
+    if (input != nullptr) {
+        return GatherCachedResultByOffsets(
+            *cached_index_chunk_res_, *cached_index_chunk_valid_res_, *input);
     }
     auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_index_chunk_pos_, real_batch_size);
@@ -248,6 +255,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
+                        // A valid typed value is present. ARRAY columns keep
+                        // empty arrays and [null] as valid BSON operands, so no
+                        // recursive content inspection is needed here.
                         index->ExecutorForGettingValid(
                             op_ctx_, field, temp_valid_view);
                         res_view |= temp_valid_view;
@@ -265,7 +275,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         bson_index_,
                         pointer,
                         [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                            res_view[row_id] |=
+                                bson.IsBsonValuePresentForExists(offset);
                         });
                 }
 

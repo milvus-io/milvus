@@ -59,6 +59,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
+        // This direct/test-only entry point has no build-version config, so it
+        // retains the current semantics. Production builds use Build(config).
         auto result = ConvertJsonToTypedFieldData<T>(field_datas,
                                                      json_schema_,
                                                      nested_path_,
@@ -118,7 +120,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                                                      json_schema_,
                                                      nested_path_,
                                                      cast_type_,
-                                                     cast_function_);
+                                                     cast_function_,
+                                                     scalar_index_version);
 
         non_exist_offsets_ = std::move(result.non_exist_offsets);
 

@@ -183,7 +183,8 @@ GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
                              int64_t collection_id,
                              int64_t partition_id,
                              int64_t segment_id,
-                             int64_t field_id);
+                             int64_t field_id,
+                             int64_t json_stats_data_format);
 
 std::string
 GenNgramIndexPrefix(ChunkManagerPtr cm,

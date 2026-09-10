@@ -42,7 +42,9 @@ type GlobalScheduler interface {
 	// backlog starves them. Tasks waiting on a retry backoff deadline ARE counted:
 	// they still occupy queue depth, and excluding them would let a worker-side
 	// failure storm silently disable the caller's admission gate.
-	GetPendingTaskCount(taskType taskcommon.Type) int
+	// Optional filters further scope admission, e.g. to a stats subjob. Filters
+	// run under the queue read lock and must only inspect immutable task fields.
+	GetPendingTaskCount(taskType taskcommon.Type, filters ...func(Task) bool) int
 
 	Start()
 	Stop()
@@ -130,9 +132,17 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
 }
 
-func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int {
+func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type, filters ...func(Task) bool) int {
 	return s.pendingTasks.TaskCountBy(func(task Task) bool {
-		return task.GetTaskType() == taskType
+		if task.GetTaskType() != taskType {
+			return false
+		}
+		for _, filter := range filters {
+			if !filter(task) {
+				return false
+			}
+		}
+		return true
 	})
 }
 
@@ -240,24 +250,51 @@ func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], t
 	// Pop the most-available node, mutate its slots, then push it back. An element
 	// must not be mutated while it stays in the heap, or the heap order breaks.
 	entry := slotHeap.Pop()
+	return assignNode(slotHeap, entry, taskSlot)
+}
+
+// assignNode consumes slots on an entry already removed from the heap. Keep
+// the selected entry instead of picking again after a capability check.
+func assignNode(slotHeap typeutil.Heap[*nodeSlotEntry], entry *nodeSlotEntry, taskSlot int64) int64 {
+	defer slotHeap.Push(entry)
 	if taskSlot <= 0 {
-		slotHeap.Push(entry)
 		return entry.nodeID
 	}
 	if entry.slots.AvailableSlots <= 0 {
-		// The most-available node has no slot, so neither does any other node.
-		slotHeap.Push(entry)
 		return NullNodeID
 	}
 	if entry.slots.AvailableSlots >= taskSlot {
 		entry.slots.AvailableSlots -= taskSlot
 	} else {
-		// No node can fully satisfy the request; assign to the most-available
-		// node on a best-effort basis and drain its slots.
+		// The selected node cannot fully satisfy the request; assign on a
+		// best-effort basis and drain its slots.
 		entry.slots.AvailableSlots = 0
 	}
-	slotHeap.Push(entry)
 	return entry.nodeID
+}
+
+// Temporarily remove incompatible nodes without consuming their slots. Other
+// tasks in the same round can still use them.
+func (s *globalTaskScheduler) pickNodeForTask(slotHeap typeutil.Heap[*nodeSlotEntry], task Task) int64 {
+	filter, ok := task.(NodeFilter)
+	if !ok {
+		return s.pickNode(slotHeap, task.GetTaskSlot())
+	}
+	var skipped []*nodeSlotEntry
+	defer func() {
+		for _, entry := range skipped {
+			slotHeap.Push(entry)
+		}
+	}()
+	for slotHeap.Len() > 0 {
+		entry := slotHeap.Pop()
+		if !filter.CanRunOnNode(entry.nodeID) {
+			skipped = append(skipped, entry)
+			continue
+		}
+		return assignNode(slotHeap, entry, task.GetTaskSlot())
+	}
+	return NullNodeID
 }
 
 func (s *globalTaskScheduler) schedule() {
@@ -285,11 +322,11 @@ func (s *globalTaskScheduler) schedule() {
 			delayed = append(delayed, task)
 			continue
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		nodeID := s.pickNodeForTask(slotHeap, task)
 		if nodeID == NullNodeID {
-			s.pendingTasks.Push(task)
-			break
+			// A capability-blocked task must not block unrelated pending work.
+			delayed = append(delayed, task)
+			continue
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())

@@ -302,18 +302,28 @@ func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 				FieldID:                102,
 				BuildID:                5001,
 				Version:                3,
-				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3,
+			},
+			103: {
+				FieldID:                103,
+				BuildID:                5002,
+				Version:                4,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4,
 			},
 		},
 	}
 	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), loadInfo)
 
 	stats := segment.GetFieldJSONIndexStats()
-	suite.Require().Len(stats, 1)
+	suite.Require().Len(stats, 2)
 	suite.EqualValues(102, stats[102].GetFieldID())
 	suite.EqualValues(5001, stats[102].GetBuildID())
 	suite.EqualValues(3, stats[102].GetVersionID())
-	suite.EqualValues(common.JSONStatsDataFormatVersion, stats[102].GetDataFormatVersion())
+	suite.EqualValues(common.JSONStatsDataFormatV3, stats[102].GetDataFormatVersion())
+	suite.EqualValues(103, stats[103].GetFieldID())
+	suite.EqualValues(5002, stats[103].GetBuildID())
+	suite.EqualValues(4, stats[103].GetVersionID())
+	suite.EqualValues(common.JSONStatsDataFormatV4, stats[103].GetDataFormatVersion())
 
 	stats[102].BuildID = 9999
 	suite.EqualValues(5001, segment.GetFieldJSONIndexStats()[102].GetBuildID())
@@ -325,9 +335,15 @@ func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 			102: {
 				FieldID:                102,
-				BuildID:                5002,
+				BuildID:                5003,
 				Version:                4,
-				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion - 1,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3 - 1,
+			},
+			103: {
+				FieldID:                103,
+				BuildID:                5004,
+				Version:                5,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4 + 1,
 			},
 		},
 	}
@@ -339,11 +355,11 @@ func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 		CollectionID: suite.collectionID,
 		PartitionID:  suite.partitionID,
 		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
-			103: {
-				FieldID:                103,
+			104: {
+				FieldID:                104,
 				BuildID:                6001,
 				Version:                1,
-				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4,
 			},
 		},
 	}
@@ -351,7 +367,8 @@ func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 	stats = segment.GetFieldJSONIndexStats()
 	suite.Require().Len(stats, 1)
 	suite.Nil(stats[102])
-	suite.EqualValues(6001, stats[103].GetBuildID())
+	suite.Nil(stats[103])
+	suite.EqualValues(6001, stats[104].GetBuildID())
 }
 
 func (suite *SegmentSuite) TestResourceUsageEstimate() {

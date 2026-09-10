@@ -66,12 +66,12 @@ ConvertValue<int64_t>(const std::string& value) {
 template <>
 inline float
 ConvertValue<float>(const std::string& value) {
-    return std::stof(value);
+    return static_cast<float>(ParseJsonDoubleValue(value));
 }
 template <>
 inline double
 ConvertValue<double>(const std::string& value) {
-    return std::stod(value);
+    return ParseJsonDoubleValue(value);
 }
 template <>
 inline bool
@@ -191,6 +191,12 @@ class JsonStatsParquetWriter {
 
     void
     AppendValue(const std::string& key, const std::string& value);
+
+    void
+    AppendNull(const std::string& key);
+
+    void
+    AppendDouble(const std::string& key, double value);
 
     void
     AppendRow(const std::map<std::string, std::string>& row_data);

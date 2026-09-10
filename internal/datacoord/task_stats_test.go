@@ -1162,6 +1162,17 @@ func (s *statsTaskSuite) newTextStatsTask() *statsTask {
 	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }
 
+func (s *statsTaskSuite) TestJSONStatsDataFormatCompatibility() {
+	st := newStatsTask(&indexpb.StatsTask{}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	s.Equal(common.JSONStatsDataFormatV3, st.getJSONStatsDataFormat(),
+		"legacy persisted tasks with no format field must remain V3")
+
+	st.JsonStatsDataFormat = common.JSONStatsDataFormatV3
+	s.Equal(common.JSONStatsDataFormatV3, st.getJSONStatsDataFormat())
+	st.JsonStatsDataFormat = common.JSONStatsDataFormatV4
+	s.Equal(common.JSONStatsDataFormatV4, st.getJSONStatsDataFormat())
+}
+
 // TestPrepareJobRequest tests edge cases of prepareJobRequest
 func (s *statsTaskSuite) TestPrepareJobRequest() {
 	st := newStatsTask(&indexpb.StatsTask{
@@ -1280,5 +1291,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		s.Equal(startID, req.StartLogID)
 		s.Equal(endID, req.EndLogID)
 		s.Equal(int64(1000), req.NumRows)
+		s.Equal(common.JSONStatsDataFormatV3, req.JsonKeyStatsDataFormat,
+			"the legacy zero-valued task must dispatch as V3")
 	})
 }

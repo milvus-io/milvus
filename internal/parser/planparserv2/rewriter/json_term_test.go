@@ -159,6 +159,54 @@ func TestRewriteJSONArrayInUsesEqualityBranches(t *testing.T) {
 	require.Equal(t, map[string]int{"array": 2}, collectMembershipKinds(expr))
 }
 
+func TestRewriteJSONMixedNumericSplitsWithAndWithoutOptimization(t *testing.T) {
+	for _, optimize := range []bool{false, true} {
+		for _, reverse := range []bool{false, true} {
+			for _, negate := range []bool{false, true} {
+				values := []*planpb.GenericValue{
+					{Val: &planpb.GenericValue_Int64Val{Int64Val: 9007199254740993}},
+					{Val: &planpb.GenericValue_FloatVal{FloatVal: 1.5}},
+					{Val: &planpb.GenericValue_Int64Val{Int64Val: 2}},
+					{Val: &planpb.GenericValue_FloatVal{FloatVal: 2.0}},
+				}
+				if reverse {
+					for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
+						values[i], values[j] = values[j], values[i]
+					}
+				}
+				input := &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+					ColumnInfo: &planpb.ColumnInfo{
+						FieldId: 102, DataType: schemapb.DataType_JSON, NestedPath: []string{"v"},
+					},
+					Values: values,
+				}}}
+				if negate {
+					input = &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+						Op: planpb.UnaryExpr_Not, Child: input,
+					}}}
+				}
+				result := rewriter.RewriteExprWithConfig(input, optimize)
+				membership := result
+				if negate {
+					require.NotNil(t, result.GetUnaryExpr())
+					require.Equal(t, planpb.UnaryExpr_Not, result.GetUnaryExpr().GetOp())
+					membership = result.GetUnaryExpr().GetChild()
+				}
+				split := membership.GetBinaryExpr()
+				require.NotNil(t, split)
+				require.Equal(t, planpb.BinaryExpr_LogicalOr, split.GetOp())
+				require.NotNil(t, split.GetLeft().GetTermExpr())
+				require.NotNil(t, split.GetRight().GetTermExpr())
+				assertHomogeneousTerms(t, membership)
+				require.Equal(t, map[string]int{"int64": 2, "float": 2}, collectMembershipKinds(membership))
+				integers := split.GetLeft().GetTermExpr().GetValues()
+				require.Equal(t, int64(2), integers[0].GetInt64Val())
+				require.Equal(t, int64(9007199254740993), integers[1].GetInt64Val())
+			}
+		}
+	}
+}
+
 func assertHomogeneousTerms(t *testing.T, expr *planpb.Expr) {
 	t.Helper()
 	walkExpr(expr, func(current *planpb.Expr) {

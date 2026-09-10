@@ -38,6 +38,14 @@ func Test_BitmapIndexChecker(t *testing.T) {
 	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
 		"json_cast_type": "VARCHAR", "json_path": "/status",
 	}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "INT64", "json_path": "/count",
+	}))
+	for _, castType := range []string{"INT8", "INT16", "INT32"} {
+		assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+			"json_cast_type": castType, "json_path": "/count",
+		}))
+	}
 	// unsupported cast type for BITMAP
 	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
 		"json_cast_type": "DOUBLE", "json_path": "/price",
