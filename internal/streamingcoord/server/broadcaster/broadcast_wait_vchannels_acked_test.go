@@ -194,7 +194,7 @@ func TestBlockUntilVChannelAckedOnARecoveredTask(t *testing.T) {
 
 	msg := createNewSplitShardBroadcastMsg([]string{"p0_1v0", "p1_1v1"}, "p0_1v0").WithBroadcastID(904)
 	proto := createNewWaitAckBroadcastTaskFromMessage(
-		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0x01, 0x00})
+		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, bitmapAcking(msg, "p0_1v0"))
 	task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 
 	assert.NoError(t, task.BlockUntilVChannelAcked(context.Background(), "p0_1v0", nil))
@@ -303,7 +303,7 @@ func TestIsVChannelAckedAcceptsALegacyBitmapOnlyTask(t *testing.T) {
 
 	msg := createNewSplitShardBroadcastMsg([]string{"p0_1v0", "p1_1v1"}, "p0_1v0").WithBroadcastID(908)
 	proto := createNewWaitAckBroadcastTaskFromMessage(
-		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0x01, 0x00})
+		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, bitmapAcking(msg, "p0_1v0"))
 	// Strip the checkpoints, leaving only the bitmap: the legacy shape.
 	proto.AckedCheckpoints = nil
 	task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
@@ -381,4 +381,22 @@ func TestWaitVChannelsAckedReportsASlowWait(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the reported wait was never released")
 	}
+}
+
+// bitmapAcking builds the positional ack bitmap for the vchannels named, in the
+// order the broadcast header actually carries them. WithBroadcast deduplicates
+// the vchannels through a set, so the header's order is not the order the test
+// listed them in; a bitmap written by list position marks a random vchannel and
+// a wait on the intended one never returns.
+func bitmapAcking(msg message.BroadcastMutableMessage, acked ...string) []byte {
+	header := msg.BroadcastHeader().VChannels
+	bitmap := make([]byte, len(header))
+	for _, vchannel := range acked {
+		idx := findIdxOfVChannel(vchannel, header)
+		if idx < 0 {
+			panic("vchannel " + vchannel + " is not in the broadcast header")
+		}
+		bitmap[idx] = 0x01
+	}
+	return bitmap
 }
