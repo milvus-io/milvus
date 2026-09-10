@@ -903,6 +903,14 @@ func (s *mockMixCoord) WatchChannels(ctx context.Context, req *datapb.WatchChann
 	panic("implement me")
 }
 
+func (s *mockMixCoord) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	panic("implement me")
 }

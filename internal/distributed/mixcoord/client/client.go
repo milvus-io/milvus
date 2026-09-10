@@ -1262,6 +1262,20 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	})
 }
 
+// CommitShardSplit records a committed shard split in datacoord.
+func (c *Client) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitShardSplit(ctx, req)
+	})
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources are drained.
+func (c *Client) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.CheckShardSplitDrainedResponse, error) {
+		return client.CheckShardSplitDrained(ctx, req)
+	})
+}
+
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (c *Client) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetFlushStateResponse, error) {

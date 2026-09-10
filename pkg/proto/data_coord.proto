@@ -132,6 +132,12 @@ service DataCoord {
   rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
   rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
   rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
+
+  // Shard split RPCs -- internal only. CommitShardSplit is the datacoord half
+  // of the SplitShard broadcast ack callback; CheckShardSplitDrained answers
+  // whether the split's sources still hold data the targets have not taken.
+  rpc CommitShardSplit(CommitShardSplitRequest) returns (common.Status) {}
+  rpc CheckShardSplitDrained(CheckShardSplitDrainedRequest) returns (CheckShardSplitDrainedResponse) {}
 }
 
 service DataNode {
@@ -2203,3 +2209,37 @@ message SplitShardTask {
   uint64 routing_modulus = 14;
 }
 
+// CommitShardSplitRequest is the datacoord half of the SplitShard broadcast ack
+// callback. Every replica's coordinator receives it, so it must be idempotent
+// by split_task_id: the primary already holds the task, a secondary does not
+// and creates it here.
+message CommitShardSplitRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  int64 split_task_id = 3;
+  // The source shards with the T_switch each one's fence actually landed on,
+  // taken from the broadcast append result. The request's value is the
+  // authority: it is what the write path fenced on.
+  repeated SplitShardTaskSource sources = 4;
+  // The target shards with the residues they own.
+  repeated SplitShardTaskTarget targets = 5;
+  // Each target vchannel's genesis position, parallel to nothing -- matched to
+  // its target by ChannelName. Seeded as the target's first channel checkpoint
+  // unless the target already has one.
+  repeated msg.MsgPosition target_start_positions = 6;
+  // The collection's routing modulus AFTER this split.
+  uint64 routing_modulus = 7;
+}
+
+// CheckShardSplitDrainedRequest asks whether the split's sources still hold
+// anything the targets have not taken.
+message CheckShardSplitDrainedRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  int64 split_task_id = 3;
+}
+
+message CheckShardSplitDrainedResponse {
+  common.Status status = 1;
+  bool drained = 2;
+}

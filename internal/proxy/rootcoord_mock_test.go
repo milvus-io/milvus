@@ -1388,6 +1388,14 @@ func (coord *MixCoordMock) WatchChannels(ctx context.Context, req *datapb.WatchC
 	return &datapb.WatchChannelsResponse{}, nil
 }
 
+func (coord *MixCoordMock) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return &datapb.CheckShardSplitDrainedResponse{Status: merr.Success()}, nil
+}
+
 func (coord *MixCoordMock) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{}, nil
 }
