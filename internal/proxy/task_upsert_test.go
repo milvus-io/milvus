@@ -2775,7 +2775,6 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testing.T) {
-
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
@@ -3027,7 +3026,8 @@ func partialUpdateAutoIDInsertTestTask(t *testing.T, stringPK bool) *upsertTask 
 		ctx:      context.Background(), schema: schema, idAllocator: &allocator.IDAllocator{}, collectionID: 100,
 		req: &milvuspb.UpsertRequest{Base: commonpbutil.NewMsgBase(), FieldsData: fields, NumRows: 2, PartialUpdate: true, CollectionName: schema.GetName()},
 		upsertMsg: &msgstream.UpsertMsg{
-			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{Base: commonpbutil.NewMsgBase(),
+			InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+				Base:           commonpbutil.NewMsgBase(),
 				CollectionName: schema.GetName(), CollectionID: 100, PartitionName: "_default",
 				FieldsData: fields, NumRows: 2, Version: msgpb.InsertDataVersion_ColumnBased,
 			}},
