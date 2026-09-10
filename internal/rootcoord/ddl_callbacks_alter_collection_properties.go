@@ -483,15 +483,26 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	// A shard split's adoption rides in as an ordinary AlterCollection, and it
 	// is the only alter whose apply is conditional: it retires a source, so it
 	// waits until this cluster has moved that source's data.
-	if err := c.checkShardSplitAdoptionDrained(ctx, result); err != nil {
+	//
+	// It is also the only alter whose apply can be skipped outright. A
+	// redelivery the collection has already absorbed, or one a later routing
+	// commit has overtaken, has nothing left to write -- and writing it anyway
+	// would put the retired source back. Skipped, not failed: this callback is
+	// retried until it returns nil while it holds the collection's exclusive
+	// key, so a permanent refusal here queues every later DDL of the collection
+	// behind it with no way out.
+	skipRouting, err := c.checkShardSplitAdoptionDrained(ctx, result)
+	if err != nil {
 		return err
 	}
-	if err := c.meta.AlterCollection(ctx, result); err != nil {
-		if errors.Is(err, errAlterCollectionNotFound) {
-			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
-			return nil
+	if !skipRouting {
+		if err := c.meta.AlterCollection(ctx, result); err != nil {
+			if errors.Is(err, errAlterCollectionNotFound) {
+				mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
+				return nil
+			}
+			return merr.Wrap(err, "failed to alter collection")
 		}
-		return merr.Wrap(err, "failed to alter collection")
 	}
 	// Refresh datacoord's cached collection schema BEFORE the bound index meta
 	// becomes visible: creating the index signals the index inspector, whose

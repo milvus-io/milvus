@@ -5059,4 +5059,103 @@ func TestApplyShardSplitRouting(t *testing.T) {
 		err := mt.ApplyShardSplitRouting(context.Background(), 424242, postImage(), 100)
 		require.ErrorIs(t, err, errAlterCollectionNotFound)
 	})
+
+	// The three no-write outcomes, decided here rather than by the caller: the
+	// caller cannot hold ddLock across its own datacoord call, so a decision it
+	// made on an earlier snapshot could be stale by the time the write lands.
+	t.Run("a post-image the collection already carries is reported, not rewritten", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 200)
+		require.ErrorIs(t, err, errShardSplitRoutingAlreadyApplied)
+		// No second catalog write, and the first apply's timestamp stands.
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a post-image a later commit overtook is reported, not applied", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		// The adoption: source delisted, both targets adopted.
+		adoption := &messagespb.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{v1, v2},
+			PhysicalChannelNames: []string{p1, p2},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				pbShard(schemapb.ShardState_ShardNormal, 0),
+				pbShard(schemapb.ShardState_ShardNormal, 1),
+			},
+			RoutingModulus: 2,
+			ShardBy:        "hash(pk)",
+		}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, adoption, 200))
+
+		// The write switch redelivered after the adoption. Writing it would put
+		// the retired source back and un-adopt both targets.
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 300)
+		require.ErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.Equal(t, []string{v1, v2}, mt.collID2Meta[collectionID].VirtualChannelNames)
+		require.EqualValues(t, 200, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a sideways post-image is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		// The source released, the targets not yet adopted.
+		released := postImage()
+		released.ShardInfos[0] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardDropped}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, released, 200))
+
+		// Incoherent in BOTH directions at once: it wants the released source
+		// back to fenced (the meta is ahead there) while adopting a target the
+		// meta has not adopted (the post-image is ahead there). Neither "already
+		// done" nor "overtaken" -- a coordinator bug, and it must stay loud.
+		sideways := postImage()
+		sideways.ShardInfos[0] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardSplitting}
+		sideways.ShardInfos[1] = pbShard(schemapb.ShardState_ShardNormal, 0)
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, sideways, 300)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.EqualValues(t, 200, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	// The namespace routing key is valid only for a collection whose rows have
+	// ALWAYS been placed by it; back-filling it onto a primary-key placed
+	// collection would send a namespace's new rows to one shard while its
+	// existing rows stay everywhere. Refused before any write.
+	t.Run("the namespace routing key on a primary-key placed collection", func(t *testing.T) {
+		mt, _ := newMeta()
+		mt.collID2Meta[collectionID].Properties = []*commonpb.KeyValuePair{
+			{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+		}
+		namespaced := postImage()
+		namespaced.ShardBy = namespaceShardBy
+
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, namespaced, 100)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "placed by primary key")
+		require.Equal(t, []string{v0}, mt.collID2Meta[collectionID].VirtualChannelNames)
+	})
+
+	// A shard_by back-fill leaves every state equal, so the collection is
+	// trivially "at or beyond" the post-image -- yet the commit still has work to
+	// do. Asking supersession before forward-legality would drop it silently.
+	t.Run("a shard_by back-fill on an otherwise identical topology still applies", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		noShardBy := postImage()
+		noShardBy.ShardBy = ""
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, noShardBy, 100))
+		require.Empty(t, mt.collID2Meta[collectionID].ShardBy)
+
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 200))
+		require.Equal(t, "hash(pk)", mt.collID2Meta[collectionID].ShardBy)
+	})
 }

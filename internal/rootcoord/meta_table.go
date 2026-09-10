@@ -71,6 +71,15 @@ var (
 	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
 
 	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
+
+	// The two outcomes of a shard-split routing commit that must NOT be reported
+	// as failures. A routing commit arrives from an ack callback the broadcaster
+	// retries forever, holding the collection's resource keys while it does, so
+	// "there is nothing left to write" has to be distinguishable from "this
+	// post-image is wrong" -- otherwise a redelivery after the split finished
+	// wedges every later DDL of the collection.
+	errShardSplitRoutingAlreadyApplied = errors.New("shard split routing already applied") // the collection already carries exactly this post-image.
+	errShardSplitRoutingSuperseded     = errors.New("shard split routing superseded")      // a later commit already moved the collection past this post-image.
 )
 
 const rlsRecoveryConcurrency = 32
@@ -1216,8 +1225,25 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 // rename/migrate/file-resource branches are all skipped, and the name index is
 // left alone.
 //
-// Idempotent: re-applying the same post-image writes the same collection, which
-// is what lets the ack callback be retried at any point.
+// Idempotent, and it decides for itself whether there is anything to write. The
+// three no-write outcomes are reported as sentinels rather than as failures:
+//
+//   - errAlterCollectionNotFound: the collection is gone;
+//   - errShardSplitRoutingAlreadyApplied: the meta already IS this post-image;
+//   - errShardSplitRoutingSuperseded: a later commit already moved the meta
+//     past this post-image, so writing it would UNDO that commit.
+//
+// The decision is made here, under ddLock, rather than by the caller on a
+// snapshot it read earlier: the caller cannot hold the lock across its own
+// datacoord call, so a check it ran outside the lock could be stale by the time
+// the write lands. The check and the write must see the same meta.
+//
+// The order matters. Already-applied is asked first, then whether the
+// transition is legal FORWARD, and only then whether the meta has overtaken the
+// post-image. Asking supersession before forward-legality would be wrong: when
+// every shard state is equal but something else still differs -- a shard_by
+// back-fill, a changed vchannel list -- the meta is trivially "at or beyond"
+// every state, yet the commit still has work to do.
 func (mt *MetaTable) ApplyShardSplitRouting(ctx context.Context, collectionID UniqueID, updates *messagespb.AlterCollectionMessageUpdates, timetick Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -1228,6 +1254,19 @@ func (mt *MetaTable) ApplyShardSplitRouting(ctx context.Context, collectionID Un
 		// rather than created: a split cannot resurrect a dropped collection,
 		// and the caller turns this into a warn-and-stop.
 		return errAlterCollectionNotFound
+	}
+	if routingCommitAlreadyApplied(coll, updates) {
+		return errShardSplitRoutingAlreadyApplied
+	}
+	if err := checkRoutingCommitAgainstMeta(coll, updates); err != nil {
+		// The forward transition is refused. Two very different things look the
+		// same from here, and only one of them is a bug: a post-image a LATER
+		// commit has already overtaken has nothing left to write and must not be
+		// retried, while a genuinely incoherent one must stay loud.
+		if shardSplitRoutingSuperseded(coll, updates) {
+			return errShardSplitRoutingSuperseded
+		}
+		return err
 	}
 	oldColl := coll.Clone()
 	newColl := coll.Clone()

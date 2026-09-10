@@ -311,7 +311,8 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardCreating, 1),
 		},
 	}
-	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(stale)), merr.ErrParameterInvalid)
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(stale)), merr.ErrServiceInternal,
+		"a planning bug, not the content of a user request")
 
 	// Routing is not revocable: a commit cannot take a split collection back to
 	// no modulus, which would make it read as never-split and route by position
@@ -325,9 +326,11 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardNormal),
 		},
 	}
-	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(revoke)), merr.ErrParameterInvalid)
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(revoke)), merr.ErrServiceInternal)
 
-	// Forward is fine: retire the source's vchannel and keep the two targets.
+	// Forward is fine: retire the FENCED source's vchannel and keep the two
+	// targets. The source must still be Splitting to be delisted -- see below.
+	coll.ShardInfos["v0"] = &model.ShardInfo{VChannelName: "v0", State: schemapb.ShardState_ShardSplitting}
 	forward := &rootcoordpb.CommitShardSplitRoutingRequest{
 		CollectionName:      "c",
 		VirtualChannelNames: []string{"v1", "v2"},
@@ -355,6 +358,58 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 	// A collection that has never been split may of course start at zero.
 	fresh := &model.Collection{Name: "c", VirtualChannelNames: []string{"v0"}}
 	require.NoError(t, checkRoutingCommitAgainstMeta(fresh, routingUpdatesFromRequest(revoke)))
+
+	// A vchannel the post-image DROPS is checked by no state transition at all --
+	// it simply ceases to exist. That is the one way this DDL can retire a live
+	// shard silently: its residues would have no owner, its unmoved data would be
+	// unreachable, and no later message could reach it to say so. Only a fenced
+	// shard may be delisted.
+	delistLive := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v0", "v1"},
+		RoutingModulus:      2,
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardSplitting),
+			pbShard(schemapb.ShardState_ShardNormal, 0, 1),
+		},
+	}
+	err := checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(delistLive))
+	require.ErrorIs(t, err, merr.ErrServiceInternal, "v2 is Normal and still owns residue 1")
+	assert.Contains(t, err.Error(), "only a fenced shard may be delisted")
+
+	// Already retired by an earlier commit is not a licence to drop it either:
+	// nothing then records that it ever stopped taking writes.
+	dropped := &model.Collection{
+		Name:                "c",
+		VirtualChannelNames: []string{"v0", "v1"},
+		RoutingModulus:      2,
+		ShardInfos: map[string]*model.ShardInfo{
+			"v0": {VChannelName: "v0", State: schemapb.ShardState_ShardDropped},
+			"v1": {VChannelName: "v1", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0, 1}},
+		},
+	}
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(dropped, routingUpdatesFromRequest(&rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v1"},
+		RoutingModulus:      2,
+		ShardInfos:          []*schemapb.CollectionShardInfo{pbShard(schemapb.ShardState_ShardNormal, 0, 1)},
+	})), merr.ErrServiceInternal)
+
+	// And a vchannel the collection carries no shard info for at all.
+	noInfo := &model.Collection{
+		Name:                "c",
+		VirtualChannelNames: []string{"v0", "v1"},
+		RoutingModulus:      2,
+		ShardInfos:          map[string]*model.ShardInfo{"v1": {VChannelName: "v1", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0, 1}}},
+	}
+	err = checkRoutingCommitAgainstMeta(noInfo, routingUpdatesFromRequest(&rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v1"},
+		RoutingModulus:      2,
+		ShardInfos:          []*schemapb.CollectionShardInfo{pbShard(schemapb.ShardState_ShardNormal, 0, 1)},
+	}))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Contains(t, err.Error(), "no shard info")
 }
 
 // The namespace routing key is valid only for a collection whose rows have
@@ -635,21 +690,83 @@ func TestAdoptionCallbackWaitsForTheLocalDrain(t *testing.T) {
 // TestAdoptionCallbackSkipsTheDrainOnARedeliveredCommit: a redelivery after
 // datacoord reclaimed the task must never ask about a task id datacoord no
 // longer knows -- that answer is a System error, and the collection's DDL
-// callback queue would wedge behind it forever. A post-image the collection
-// already carries is therefore applied without asking.
+// callback queue would wedge behind it forever. Neither the gate nor the apply
+// runs: there is nothing left to write, and for a post-image a LATER commit has
+// overtaken, writing it would undo that commit.
 func TestAdoptionCallbackSkipsTheDrainOnARedeliveredCommit(t *testing.T) {
-	coll := splitTestCollectionMeta(
+	t.Run("already applied", func(t *testing.T) {
+		coll := splitTestCollectionMeta(
+			[]string{splitTestTarget1, splitTestTarget2},
+			map[string]*model.ShardInfo{
+				splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
+				splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
+			}, 2)
+		coll.ShardBy = "hash(pk)"
+		h := newSplitCallbackHarness(t, coll)
+
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+		require.Empty(t, h.calls, "neither the drain gate nor the meta apply runs")
+		require.Equal(t, 1, h.broadcasts)
+	})
+
+	t.Run("superseded by a later commit", func(t *testing.T) {
+		// A second split has since fenced one adopted target and published its
+		// own targets: the collection is BEYOND this adoption's post-image, so
+		// re-applying it would un-fence the source of the second split.
+		coll := splitTestCollectionMeta(
+			[]string{splitTestTarget1, splitTestTarget2, "by-dev-rootcoord-dml_3_100v3"},
+			map[string]*model.ShardInfo{
+				splitTestTarget1:               {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardSplitting},
+				splitTestTarget2:               {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1, 3}},
+				"by-dev-rootcoord-dml_3_100v3": {VChannelName: "by-dev-rootcoord-dml_3_100v3", State: schemapb.ShardState_ShardCreating, Buckets: []uint64{0, 2}},
+			}, 4)
+		coll.ShardBy = "hash(pk)"
+		h := newSplitCallbackHarness(t, coll)
+
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+		require.Empty(t, h.calls, "neither the drain gate nor the meta apply runs")
+		require.Equal(t, 1, h.broadcasts)
+	})
+}
+
+// TestShardSplitRoutingSuperseded pins the predicate that separates "a later
+// commit already did this" -- which must end a retrying ack callback rather than
+// fail it -- from "this post-image is incoherent", which must stay loud.
+func TestShardSplitRoutingSuperseded(t *testing.T) {
+	writeSwitch := splitTestPostImage()
+
+	// The forward case: the collection has never been split, so nothing has
+	// overtaken the write switch.
+	fresh := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
+		splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
+	}, 0)
+	require.False(t, shardSplitRoutingSuperseded(fresh, writeSwitch))
+
+	// Mid-split: the write switch IS the meta, which the caller reports as
+	// already-applied before ever asking this.
+	require.True(t, shardSplitRoutingSuperseded(splitTestMidSplitCollection(), writeSwitch))
+
+	// After adoption: source retired, targets adopted. Strictly beyond.
+	adopted := splitTestCollectionMeta(
 		[]string{splitTestTarget1, splitTestTarget2},
 		map[string]*model.ShardInfo{
 			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
 			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
 		}, 2)
-	coll.ShardBy = "hash(pk)"
-	h := newSplitCallbackHarness(t, coll)
-	h.expectAlterCollection(nil).Once()
+	require.True(t, shardSplitRoutingSuperseded(adopted, writeSwitch),
+		"the source is gone and both targets are adopted")
 
-	require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
-	require.Equal(t, []string{"AlterCollection"}, h.calls)
+	// A collection at a smaller modulus has not overtaken anything, whatever its
+	// states say: the modulus only ever grows.
+	behind := splitTestMidSplitCollection()
+	behind.RoutingModulus = 1
+	require.False(t, shardSplitRoutingSuperseded(behind, writeSwitch))
+
+	// Sideways: one shard ahead, another behind. Not superseded, so the caller
+	// reports the refusal instead of swallowing it.
+	sideways := splitTestMidSplitCollection()
+	sideways.ShardInfos[splitTestSource] = &model.ShardInfo{VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal}
+	require.False(t, shardSplitRoutingSuperseded(sideways, writeSwitch))
 }
 
 // TestAdoptionCallbackAppliesANonSplitRoutingCommitImmediately: the drain gate

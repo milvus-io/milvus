@@ -226,6 +226,42 @@ func routingCommitAlreadyApplied(coll *model.Collection, updates *messagespb.Alt
 	return true
 }
 
+// shardSplitRoutingSuperseded reports whether the collection has already moved
+// AT OR BEYOND the topology this post-image commits, so that applying it would
+// move the collection BACKWARDS rather than forward.
+//
+// It is the predicate that separates the one refusal a retrying ack callback
+// must not make from every other one. A routing commit is delivered by a
+// callback the broadcaster retries until it returns nil, holding the
+// collection's resource keys the whole time; a redelivery that arrives after a
+// LATER commit finished the split therefore has to end the callback, not fail
+// it. Reported as "nothing left to do", never as an error.
+//
+// "At or beyond" per shard: a vchannel the collection does not carry is not
+// behind the post-image (it is either a target this commit would create or one a
+// later commit already retired), and a vchannel it does carry must be at a state
+// the post-image's own state could legally have advanced TO -- equal included,
+// since the lifecycle allows staying put. The modulus only ever grows, so a
+// collection at a smaller modulus has not overtaken anything.
+//
+// Callers must ask routingCommitAlreadyApplied and the forward check first; see
+// MetaTable.ApplyShardSplitRouting for why the order is not free.
+func shardSplitRoutingSuperseded(coll *model.Collection, updates *messagespb.AlterCollectionMessageUpdates) bool {
+	if coll.RoutingModulus < updates.GetRoutingModulus() {
+		return false
+	}
+	for i, vchannel := range updates.GetVirtualChannelNames() {
+		current, ok := coll.ShardInfos[vchannel]
+		if !ok {
+			continue
+		}
+		if !shardStateMayAdvance(updates.GetShardInfos()[i].GetState(), current.State) {
+			return false
+		}
+	}
+	return true
+}
+
 // routingCommitDelistsAVChannel reports whether the post-image drops a vchannel
 // the collection has today -- the signature of a split's adoption, which retires
 // the source it drops.
@@ -257,8 +293,13 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.A
 	// position over a channel list that now contains retired sources -- writes
 	// landing on shards that do not own them, and on fenced ones that reject
 	// them. A modulus may grow (a doubling) or stay, never return to zero.
+	//
+	// System, not input, in both callers: the RPC's caller is datacoord's split
+	// manager and the callback's input is a WAL message that same manager wrote,
+	// so a revocation is a planning bug and never a user request's content --
+	// the same reasoning the namespace branch below already spells out.
 	if coll.RoutingModulus != 0 && updates.GetRoutingModulus() == 0 {
-		return merr.WrapErrParameterInvalidMsg(
+		return merr.WrapErrServiceInternalMsg(
 			"commit shard split routing failed, collection %q routes at modulus %d and a commit cannot take it back to none",
 			coll.Name, coll.RoutingModulus)
 	}
@@ -302,9 +343,42 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.A
 		}
 		to := updates.GetShardInfos()[i].GetState()
 		if !shardStateMayAdvance(current.State, to) {
-			return merr.WrapErrParameterInvalidMsg(
+			// System for the same reason as above. Note what this does NOT
+			// distinguish: a post-image a later commit has overtaken looks
+			// exactly like an incoherent one from here. The callback separates
+			// the two with shardSplitRoutingSuperseded; the RPC does not need
+			// to, because its caller can act on the refusal.
+			return merr.WrapErrServiceInternalMsg(
 				"commit shard split routing failed, shard %q cannot go from %s back to %s",
 				vchannel, current.State.String(), to.String())
+		}
+	}
+
+	// The loop above only sees vchannels the post-image NAMES. A vchannel it
+	// drops is checked by no state transition at all -- it simply ceases to
+	// exist -- which is the one way this DDL can retire a live shard silently:
+	// its residues would have no owner, its unmoved data would be unreachable,
+	// and there is no later message that could reach it to say so, because a
+	// vchannel the collection no longer names receives nothing.
+	//
+	// A shard may therefore only be delisted from the one state that means "this
+	// shard has stopped taking writes and its data is being moved": Splitting.
+	// Anything else -- Normal, Creating, or a shard already retired by an
+	// earlier commit -- is a planning bug.
+	for _, vchannel := range coll.VirtualChannelNames {
+		if slices.Contains(updates.GetVirtualChannelNames(), vchannel) {
+			continue
+		}
+		current, ok := coll.ShardInfos[vchannel]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg(
+				"commit shard split routing failed, shard %q cannot be retired: the collection carries no shard info for it, "+
+					"so nothing records that it has stopped taking writes", vchannel)
+		}
+		if current.State != schemapb.ShardState_ShardSplitting {
+			return merr.WrapErrServiceInternalMsg(
+				"commit shard split routing failed, shard %q cannot be retired from %s: only a fenced shard may be delisted",
+				vchannel, current.State.String())
 		}
 	}
 	return nil
@@ -357,22 +431,31 @@ func shardStateMayAdvance(from, to schemapb.ShardState) bool {
 // datacoord, and refuses the commit until the answer is yes; the broadcaster
 // retries the callback with backoff.
 //
-// Two things are deliberately NOT gated:
+// Two redeliveries are deliberately NOT gated, and for them the gate reports
+// skip=true: the caller must then apply NOTHING, not merely skip the drain
+// question.
 //
-//   - a routing commit that delists nothing (the write switch, which publishes
-//     the targets while the source keeps serving) -- there is nothing to drain;
-//   - a redelivery of a post-image the collection already carries. datacoord
-//     reclaims a split's task record once the split is done, so a late
-//     redelivery would ask about a task id nobody knows any more -- an answer
-//     that is a System error by design, and one this callback would then retry
-//     forever, wedging every later DDL of the collection behind it.
-func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+//   - a post-image the collection already carries;
+//   - a post-image a LATER routing commit has already overtaken.
+//
+// datacoord reclaims a split's task record once the split is done, so either
+// redelivery would ask about a task id nobody knows any more -- an answer that
+// is a System error by design, and one this callback would then retry forever,
+// wedging every later DDL of the collection behind it. And a superseded
+// post-image must not be WRITTEN either: applying it would put the retired
+// source back and un-adopt the targets the later commit adopted. That is why
+// this returns a skip flag rather than nil -- nil would let the apply run.
+//
+// A routing commit that delists nothing -- the write switch, which publishes the
+// targets while the source keeps serving -- has nothing to drain and nothing to
+// skip.
+func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) (skip bool, err error) {
 	header := result.Message.Header()
 	updates := result.Message.MustBody().GetUpdates()
 	if !slices.ContainsFunc(result.Message.BroadcastHeader().VChannels, func(vchannel string) bool {
 		return messageutil.RetiresVChannel(header, updates, vchannel)
 	}) {
-		return nil
+		return false, nil
 	}
 
 	// allowUnavailable: a collection mid-split is available anyway, and one that
@@ -380,12 +463,19 @@ func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result
 	coll, err := c.meta.GetCollectionByID(ctx, "", header.GetCollectionId(), typeutil.MaxTimestamp, true)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
-			return nil
+			return false, nil
 		}
-		return merr.Wrap(err, "load the collection for the shard split adoption")
+		return false, merr.Wrap(err, "load the collection for the shard split adoption")
 	}
 	if routingCommitAlreadyApplied(coll, updates) {
-		return nil
+		mlog.Info(ctx, "shard split adoption already applied, skipping the drain gate and the meta apply",
+			mlog.FieldMessage(result.Message))
+		return true, nil
+	}
+	if shardSplitRoutingSuperseded(coll, updates) {
+		mlog.Warn(ctx, "shard split adoption superseded by a later routing commit, skipping the drain gate and the meta apply",
+			mlog.FieldMessage(result.Message))
+		return true, nil
 	}
 
 	resp, err := c.mixCoord.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{
@@ -393,14 +483,14 @@ func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result
 		SplitTaskId:  updates.GetSplitTaskId(),
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return merr.Wrap(err, "ask this cluster's datacoord whether the shard split has drained")
+		return false, merr.Wrap(err, "ask this cluster's datacoord whether the shard split has drained")
 	}
 	if !resp.GetDrained() {
 		mlog.Info(ctx, "shard split adoption is waiting for this cluster to drain the source",
 			mlog.FieldCollectionID(header.GetCollectionId()),
 			mlog.Int64("splitTaskID", updates.GetSplitTaskId()))
-		return merr.WrapErrServiceInternalMsg("shard split %d of collection %d not drained on this cluster yet",
+		return false, merr.WrapErrServiceInternalMsg("shard split %d of collection %d not drained on this cluster yet",
 			updates.GetSplitTaskId(), header.GetCollectionId())
 	}
-	return nil
+	return false, nil
 }

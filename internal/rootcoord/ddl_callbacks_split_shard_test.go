@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -73,20 +72,28 @@ func splitTestPostImage() *messagespb.AlterCollectionMessageUpdates {
 
 // splitTestResult builds the broadcast result the ack callback receives: one
 // append result per replica, the sources' ticks strictly below the targets'.
-func splitTestResult(postImage *messagespb.AlterCollectionMessageUpdates) message.BroadcastResultSplitShardMessageV2 {
+// The optional mutators corrupt the HEADER's copy of the residues and the
+// modulus, which is how a header-vs-body disagreement is staged.
+func splitTestResult(postImage *messagespb.AlterCollectionMessageUpdates, headerOpts ...func(*message.SplitShardMessageHeader)) message.BroadcastResultSplitShardMessageV2 {
+	header := &message.SplitShardMessageHeader{
+		CollectionId:    splitTestCollID,
+		SplitTaskId:     7,
+		DbId:            1,
+		RoutingModulus:  2,
+		SourceVchannels: []string{splitTestSource},
+		PartitionIds:    []int64{10},
+		Targets: []*message.SplitShardTarget{
+			{Vchannel: splitTestTarget1, Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			{Vchannel: splitTestTarget2, Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
+		},
+	}
+	for _, opt := range headerOpts {
+		if opt != nil {
+			opt(header)
+		}
+	}
 	raw := message.NewSplitShardMessageBuilderV2().
-		WithHeader(&message.SplitShardMessageHeader{
-			CollectionId:    splitTestCollID,
-			SplitTaskId:     7,
-			DbId:            1,
-			RoutingModulus:  2,
-			SourceVchannels: []string{splitTestSource},
-			PartitionIds:    []int64{10},
-			Targets: []*message.SplitShardTarget{
-				{Vchannel: splitTestTarget1, Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
-				{Vchannel: splitTestTarget2, Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
-			},
-		}).
+		WithHeader(header).
 		WithBody(&message.SplitShardMessageBody{
 			Genesis: &msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: splitTestCollection}},
 			Routing: postImage,
@@ -291,23 +298,54 @@ func TestSplitShardAckCallbackRetriesWhenDataCoordFails(t *testing.T) {
 }
 
 // TestSplitShardAckCallbackIsIdempotent: a redelivered callback on a collection
-// that already carries the post-image writes no meta but still tells datacoord
-// and still expires the caches, because neither is known to have happened.
+// that already carries the post-image writes no meta -- the meta table reports
+// that under its own lock -- but still tells datacoord and still expires the
+// caches, because neither is known to have happened.
 func TestSplitShardAckCallbackIsIdempotent(t *testing.T) {
-	coll := splitTestCollectionMeta(
-		[]string{splitTestSource, splitTestTarget1, splitTestTarget2},
-		map[string]*model.ShardInfo{
-			splitTestSource:  {VChannelName: splitTestSource, State: schemapb.ShardState_ShardSplitting},
-			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardCreating, Buckets: []uint64{0}},
-			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardCreating, Buckets: []uint64{1}},
-		}, 2)
-	coll.ShardBy = "hash(pk)"
-	h := newSplitCallbackHarness(t, coll)
+	h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
 	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(errShardSplitRoutingAlreadyApplied).Once()
 
 	require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
-	require.Equal(t, []string{"CommitShardSplit"}, h.calls)
+	require.Equal(t, []string{"CommitShardSplit", "ApplyShardSplitRouting"}, h.calls)
 	require.Equal(t, 1, h.broadcasts)
+}
+
+// TestSplitShardAckCallbackSkipsASupersededPostImage is the failure this
+// callback must never have. The broadcaster retries an ack callback until it
+// returns nil, holding the collection's resource keys while it does; a
+// redelivery that arrives after the adoption commit finished the split is
+// therefore not a bug to report but a job already done. Reporting it would
+// queue every later DDL of the collection -- DropCollection included -- behind a
+// refusal that can never clear.
+func TestSplitShardAckCallbackSkipsASupersededPostImage(t *testing.T) {
+	adopted := splitTestCollectionMeta(
+		[]string{splitTestTarget1, splitTestTarget2},
+		map[string]*model.ShardInfo{
+			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
+			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
+		}, 2)
+	adopted.ShardBy = "hash(pk)"
+	h := newSplitCallbackHarness(t, adopted)
+	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(errShardSplitRoutingSuperseded).Once()
+
+	require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
+	require.Equal(t, []string{"CommitShardSplit", "ApplyShardSplitRouting"}, h.calls)
+	// The caches are still expired: the callback ends here, so nothing else will.
+	require.Equal(t, 1, h.broadcasts)
+}
+
+// TestSplitShardAckCallbackReportsASidewaysPostImage: a transition that is
+// neither forward nor overtaken is a genuine coordinator bug and stays loud.
+func TestSplitShardAckCallbackReportsASidewaysPostImage(t *testing.T) {
+	h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(merr.WrapErrServiceInternalMsg("shard cannot go from Dropped back to Splitting")).Once()
+
+	err := h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage()))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, 0, h.broadcasts)
 }
 
 // TestSplitShardAckCallbackIgnoresADroppedCollection: a collection dropped while
@@ -354,6 +392,7 @@ func TestSplitShardAckCallbackRefusesAPostImageThatDoesNotTile(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		postImage func() *messagespb.AlterCollectionMessageUpdates
+		header    func(*message.SplitShardMessageHeader)
 	}{
 		{
 			name: "overlapping residues",
@@ -391,6 +430,38 @@ func TestSplitShardAckCallbackRefusesAPostImageThatDoesNotTile(t *testing.T) {
 			},
 		},
 		{
+			name: "header and post-image disagree on the modulus",
+			postImage: func() *messagespb.AlterCollectionMessageUpdates {
+				p := splitTestPostImage()
+				// Still a valid tiling on its own -- 4 residues over 4 shards is
+				// not what this post-image has, so make it one the tiling check
+				// accepts while the header still says 2.
+				p.RoutingModulus = 2
+				p.ShardInfos[1] = pbShard(schemapb.ShardState_ShardCreating, 0)
+				p.ShardInfos[2] = pbShard(schemapb.ShardState_ShardCreating, 1)
+				return p
+			},
+			header: func(h *message.SplitShardMessageHeader) { h.RoutingModulus = 4 },
+		},
+		{
+			name: "header and post-image disagree on a target's residues",
+			header: func(h *message.SplitShardMessageHeader) {
+				h.Targets[1].Routing = &schemapb.HashRouting{Buckets: []uint64{0}}
+			},
+		},
+		{
+			name: "a header target claims more residues than the post-image gives it",
+			header: func(h *message.SplitShardMessageHeader) {
+				h.Targets[1].Routing = &schemapb.HashRouting{Buckets: []uint64{0, 1}}
+			},
+		},
+		{
+			name: "a header target the post-image does not name",
+			header: func(h *message.SplitShardMessageHeader) {
+				h.Targets[1].Vchannel = "by-dev-rootcoord-dml_9_100v9"
+			},
+		},
+		{
 			name: "no vchannels at all",
 			postImage: func() *messagespb.AlterCollectionMessageUpdates {
 				return &messagespb.AlterCollectionMessageUpdates{RoutingModulus: 2}
@@ -403,34 +474,15 @@ func TestSplitShardAckCallbackRefusesAPostImageThatDoesNotTile(t *testing.T) {
 			}, 0)
 			h := newSplitCallbackHarness(t, coll)
 
-			err := h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(tc.postImage()))
+			postImage := splitTestPostImage()
+			if tc.postImage != nil {
+				postImage = tc.postImage()
+			}
+			err := h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(postImage, tc.header))
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Empty(t, h.calls)
 		})
 	}
-}
-
-// TestSplitShardAckCallbackRefusesTheNamespaceKeyForAPkPlacedCollection: the
-// namespace routing key is valid only for a collection whose rows have ALWAYS
-// been placed by it. Back-filling it onto a primary-key placed collection would
-// send a namespace's new rows to one shard while its existing rows stay
-// everywhere.
-func TestSplitShardAckCallbackRefusesTheNamespaceKeyForAPkPlacedCollection(t *testing.T) {
-	coll := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
-		splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
-	}, 0)
-	coll.Properties = []*commonpb.KeyValuePair{
-		{Key: common.NamespaceShardingEnabledKey, Value: "false"},
-		{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
-	}
-	h := newSplitCallbackHarness(t, coll)
-
-	postImage := splitTestPostImage()
-	postImage.ShardBy = namespaceShardBy
-	err := h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(postImage))
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.ErrorContains(t, err, "placed by primary key")
-	require.Empty(t, h.calls)
 }
 
 // TestSplitShardAckCallbackRefusesAResultMissingAReplica: the broadcaster acks
@@ -491,6 +543,26 @@ func TestSplitShardAckCallbackReportsACacheExpirationFailure(t *testing.T) {
 	require.Equal(t, 1, h.broadcasts)
 }
 
+// TestSplitShardAckCallbackStopsOnADroppingCollection: a collection that entered
+// Dropping still resolves by id but no longer by name, so the cache-expiry
+// lookup reports it missing. Its caches are about to be invalidated by the drop
+// itself, so there is nothing left to expire -- and retrying would spin against
+// a held resource key until the drop finishes.
+func TestSplitShardAckCallbackStopsOnADroppingCollection(t *testing.T) {
+	coll := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
+		splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
+	}, 0)
+	h := newSplitCallbackHarness(t, coll)
+	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(nil).Once()
+	cacheMocker := mockey.Mock((*Core).getCacheExpireForCollection).
+		Return(nil, merr.WrapErrCollectionNotFound(splitTestCollection)).Build()
+	defer cacheMocker.UnPatch()
+
+	require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
+	require.Equal(t, 1, h.broadcasts)
+}
+
 // TestSplitShardAckCallbackReportsAMetaFailure: an apply that fails for anything
 // other than a vanished collection is retried, not swallowed.
 func TestSplitShardAckCallbackReportsAMetaFailure(t *testing.T) {
@@ -503,22 +575,6 @@ func TestSplitShardAckCallbackReportsAMetaFailure(t *testing.T) {
 
 	require.Error(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
 	require.Equal(t, 0, h.broadcasts)
-}
-
-// TestSplitShardAckCallbackRefusesABackwardsPostImage: a replayed write-switch
-// commit arriving after the adoption commit would un-adopt the split.
-func TestSplitShardAckCallbackRefusesABackwardsPostImage(t *testing.T) {
-	coll := splitTestCollectionMeta(
-		[]string{splitTestSource, splitTestTarget1, splitTestTarget2},
-		map[string]*model.ShardInfo{
-			splitTestSource:  {VChannelName: splitTestSource, State: schemapb.ShardState_ShardDropped},
-			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
-			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
-		}, 2)
-	h := newSplitCallbackHarness(t, coll)
-
-	require.Error(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
-	require.Empty(t, h.calls)
 }
 
 // TestRoutingUpdatesFromRequest pins the shape the RPC path converts into, so

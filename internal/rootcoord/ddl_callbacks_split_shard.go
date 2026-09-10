@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 
@@ -76,15 +77,12 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 		}
 		return merr.Wrap(err, "load the collection for the split shard commit")
 	}
-	if err := validateSplitShardRoutingPostImage(postImage); err != nil {
-		// The same derivation DataCoord ran before broadcasting. Failing here is
-		// a coordinator bug; retrying cannot clear it, but neither can the
+	if err := validateSplitShardRoutingPostImage(header, postImage); err != nil {
+		// The same derivation DataCoord ran before broadcasting, plus the
+		// header-vs-body cross-check nothing else performs. Failing here is a
+		// coordinator bug; retrying cannot clear it, but neither can the
 		// broadcast be abandoned with a fenced source behind it -- surface it.
-		logger.Error(ctx, "split shard routing post-image does not tile the key space", mlog.Err(err))
-		return err
-	}
-	if err := checkRoutingCommitAgainstMeta(coll, postImage); err != nil {
-		logger.Error(ctx, "split shard routing post-image is refused against the collection meta", mlog.Err(err))
+		logger.Error(ctx, "split shard routing post-image is malformed", mlog.Err(err))
 		return err
 	}
 
@@ -92,13 +90,25 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 		return err
 	}
 
-	if routingCommitAlreadyApplied(coll, postImage) {
+	// Whether there is anything left to write is decided inside the meta table,
+	// under its lock: this callback cannot hold that lock across the datacoord
+	// call above, so any answer it computed out here could be stale by the time
+	// the write lands.
+	switch err := c.meta.ApplyShardSplitRouting(ctx, header.GetCollectionId(), postImage, result.GetControlChannelResult().TimeTick); {
+	case err == nil:
+	case errors.Is(err, errShardSplitRoutingAlreadyApplied):
 		logger.Info(ctx, "split shard routing already applied, only expiring caches")
-	} else if err := c.meta.ApplyShardSplitRouting(ctx, header.GetCollectionId(), postImage, result.GetControlChannelResult().TimeTick); err != nil {
-		if errors.Is(err, errAlterCollectionNotFound) {
-			logger.Warn(ctx, "collection vanished while committing the split shard routing, ignore it")
-			return nil
-		}
+	case errors.Is(err, errShardSplitRoutingSuperseded):
+		// The split finished and a later commit moved the collection on while
+		// this callback was still retrying. Writing the post-image now would put
+		// the released source back to fenced and un-adopt the targets; failing
+		// would retry that refusal forever, holding the collection's resource
+		// keys and queueing every later DDL of the collection behind it.
+		logger.Warn(ctx, "split shard routing post-image superseded by a later commit, skipping the meta apply")
+	case errors.Is(err, errAlterCollectionNotFound):
+		logger.Warn(ctx, "collection vanished while committing the split shard routing, ignore it")
+		return nil
+	default:
 		return merr.Wrap(err, "apply the split shard routing")
 	}
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.GetCollectionId()); err != nil {
@@ -106,6 +116,14 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, coll.DBName, coll.Name)
 	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			// The collection entered Dropping between the lookup above and here:
+			// it resolves by id but no longer by name. Its caches are about to be
+			// invalidated by the drop itself, so there is nothing left to expire
+			// and nothing a retry could achieve.
+			logger.Warn(ctx, "collection is being dropped, skipping the cache expiry after the split shard commit")
+			return nil
+		}
 		return merr.Wrap(err, "collect the cache expirations after the split shard commit")
 	}
 	return c.ExpireCaches(ctx, cacheExpirations)
@@ -169,7 +187,18 @@ func (c *DDLCallback) commitShardSplitAtDataCoord(ctx context.Context, result me
 // writable shards must tile the key space without gap or overlap. A gap silently
 // drops the writes of the residues nobody claims; an overlap sends one key to
 // two shards.
-func validateSplitShardRoutingPostImage(postImage *messagespb.AlterCollectionMessageUpdates) error {
+//
+// It also cross-checks the header against the body, which nothing else does.
+// The message carries the residues and the modulus TWICE -- the header's copy is
+// what this callback hands datacoord, the body's copy is what it writes to the
+// collection meta -- and SplitShardParam.Validate never compares the two: it
+// checks each target's residues against the HEADER modulus and only that each
+// target vchannel appears somewhere in the post-image. A coordinator that filled
+// the two copies inconsistently would give datacoord one residue map and the
+// routing table another, silently and permanently. This is the first and only
+// place both are read together, so it is the only place the disagreement can be
+// caught.
+func validateSplitShardRoutingPostImage(header *messagespb.SplitShardMessageHeader, postImage *messagespb.AlterCollectionMessageUpdates) error {
 	vchannels := postImage.GetVirtualChannelNames()
 	if len(vchannels) == 0 ||
 		len(vchannels) != len(postImage.GetPhysicalChannelNames()) ||
@@ -184,5 +213,36 @@ func validateSplitShardRoutingPostImage(postImage *messagespb.AlterCollectionMes
 	if _, err := routing.Derive(postImage.GetRoutingModulus(), vchannels, writable); err != nil {
 		return merr.Wrap(err, "split shard routing post-image")
 	}
+
+	if header.GetRoutingModulus() != postImage.GetRoutingModulus() {
+		return merr.WrapErrServiceInternalMsg(
+			"split shard routing post-image: header routes at modulus %d but the post-image at %d",
+			header.GetRoutingModulus(), postImage.GetRoutingModulus())
+	}
+	postImageBuckets := make(map[string][]uint64, len(vchannels))
+	for i, vchannel := range vchannels {
+		postImageBuckets[vchannel] = postImage.GetShardInfos()[i].GetHashRouting().GetBuckets()
+	}
+	for _, target := range header.GetTargets() {
+		want, ok := postImageBuckets[target.GetVchannel()]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg(
+				"split shard routing post-image: target %s is not named by the post-image", target.GetVchannel())
+		}
+		if !sameResidueSet(target.GetRouting().GetBuckets(), want) {
+			return merr.WrapErrServiceInternalMsg(
+				"split shard routing post-image: target %s owns residues %v in the header but %v in the post-image",
+				target.GetVchannel(), target.GetRouting().GetBuckets(), want)
+		}
+	}
 	return nil
+}
+
+// sameResidueSet compares two residue lists as sets: the order a target's
+// residues are listed in is not meaningful, only which ones it owns.
+func sameResidueSet(a, b []uint64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }
