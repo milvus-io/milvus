@@ -80,3 +80,38 @@ func TestFunctionWithParamSliceHandling(t *testing.T) {
 	f = NewFunction().WithParam("string_key", "string_value")
 	assert.Equal(t, "string_value", f.Params["string_key"])
 }
+
+func TestFunctionScoreSchema(t *testing.T) {
+	boostFn := NewFunction().
+		WithName("title_boost").
+		WithType(FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("filter", "text_match(title, \"ai\")").
+		WithParam("weight", 2.0)
+	weightedFn := NewFunction().
+		WithName("recency_boost").
+		WithType(FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("weight", 1.5)
+
+	fs := NewFunctionScore().
+		AddFunction(boostFn).
+		AddFunction(weightedFn).
+		WithParam("boost_mode", "sum").
+		WithParam("function_mode", "multiply")
+
+	proto := fs.ProtoMessage()
+	assert.Len(t, proto.GetFunctions(), 2)
+	assert.Equal(t, map[string]string{"boost_mode": "sum", "function_mode": "multiply"}, KvPairsMap(proto.GetParams()))
+	assert.Equal(t, boostFn.Params, KvPairsMap(proto.GetFunctions()[0].GetParams()))
+	assert.Equal(t, weightedFn.Params, KvPairsMap(proto.GetFunctions()[1].GetParams()))
+
+	nf := NewFunctionScore().ReadProto(proto)
+	assert.Equal(t, fs.Params, nf.Params)
+	assert.Len(t, nf.Functions, 2)
+	for i, fn := range fs.Functions {
+		assert.Equal(t, fn.Name, nf.Functions[i].Name)
+		assert.Equal(t, fn.Type, nf.Functions[i].Type)
+		assert.Equal(t, fn.Params, nf.Functions[i].Params)
+	}
+}

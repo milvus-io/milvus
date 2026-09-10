@@ -84,7 +84,7 @@ type AnnRequest struct {
 	offset          int
 	templateParams  map[string]any
 
-	functionRerankers []*entity.Function
+	functionScore *entity.FunctionScore
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -173,11 +173,8 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 		request.ExprTemplateValues[key] = tmplVal
 	}
 
-	if len(r.functionRerankers) > 0 {
-		request.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range r.functionRerankers {
-			request.FunctionScore.Functions = append(request.FunctionScore.Functions, fr.ProtoMessage())
-		}
+	if r.functionScore != nil {
+		request.FunctionScore = r.functionScore.ProtoMessage()
 	}
 
 	return request, nil
@@ -372,7 +369,18 @@ func (r *AnnRequest) WithIgnoreGrowing(ignoreGrowing bool) *AnnRequest {
 }
 
 func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
-	r.functionRerankers = append(r.functionRerankers, fr)
+	if r.functionScore == nil {
+		r.functionScore = entity.NewFunctionScore()
+	}
+	r.functionScore.AddFunction(fr)
+	return r
+}
+
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / boost_function_mode). It replaces any
+// functions accumulated via WithFunctionReranker.
+func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
+	r.functionScore = fs
 	return r
 }
 
@@ -508,6 +516,11 @@ func (opt *searchOption) WithFunctionReranker(fr *entity.Function) *searchOption
 	return opt
 }
 
+func (opt *searchOption) WithFunctionScore(fs *entity.FunctionScore) *searchOption {
+	opt.annRequest.WithFunctionScore(fs)
+	return opt
+}
+
 // NewSearchOption creates a new search option for traditional vector search.
 // Provide the query vectors to search for similar vectors in the collection.
 // For search by primary key IDs, use NewSearchByIDsOption instead.
@@ -606,7 +619,7 @@ type hybridSearchOption struct {
 	limit             int
 	offset            int
 	reranker          Reranker
-	functionRerankers []*entity.Function
+	functionScore     *entity.FunctionScore
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -641,7 +654,18 @@ func (opt *hybridSearchOption) WithReranker(reranker Reranker) *hybridSearchOpti
 }
 
 func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Function) *hybridSearchOption {
-	opt.functionRerankers = append(opt.functionRerankers, functionReranker)
+	if opt.functionScore == nil {
+		opt.functionScore = entity.NewFunctionScore()
+	}
+	opt.functionScore.AddFunction(functionReranker)
+	return opt
+}
+
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / boost_function_mode). It replaces any
+// functions accumulated via WithFunctionRerankers.
+func (opt *hybridSearchOption) WithFunctionScore(fs *entity.FunctionScore) *hybridSearchOption {
+	opt.functionScore = fs
 	return opt
 }
 
@@ -680,11 +704,8 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		RankParams:            params,
 	}
 
-	if len(opt.functionRerankers) > 0 {
-		r.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range opt.functionRerankers {
-			r.FunctionScore.Functions = append(r.FunctionScore.Functions, fr.ProtoMessage())
-		}
+	if opt.functionScore != nil {
+		r.FunctionScore = opt.functionScore.ProtoMessage()
 	}
 
 	return r, nil
