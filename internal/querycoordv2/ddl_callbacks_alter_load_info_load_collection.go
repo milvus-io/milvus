@@ -80,6 +80,17 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
+	// The delegator capacity is judged over the collection's whole layout -
+	// the replicas it already holds in other groups plus this request -
+	// grouped into the pools of streaming query nodes the assignment will
+	// serve them from. A form's scoped expansion adds replicas across
+	// requests, and no single request sees them all; a stock binary returns
+	// from this at once.
+	if checkNodeNum {
+		if err := utils.CheckDelegatorCapacity(ctx, s.meta, req.GetCollectionID(), expectedReplicasNumber, len(scopedResourceGroups) > 0); err != nil {
+			return err
+		}
+	}
 	// With a form installed, a request that names resource groups speaks only
 	// for those and leaves the placement of the others alone; a request that
 	// names none - and every request on a stock binary - states the whole
