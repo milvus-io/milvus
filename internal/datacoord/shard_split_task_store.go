@@ -65,6 +65,14 @@ func (s *shardSplitTasks) get(taskID int64) (*datapb.SplitShardTask, bool) {
 // disappears on the next restart while its sources have already been treated as
 // splitting, whereas a task persisted but not cached is read back by load. So
 // the catalog goes first and a failed save leaves the cache untouched.
+//
+// That leaves one narrow window: an etcd put that actually landed but whose
+// response timed out returns an error here, so the catalog holds the new task
+// while the cache still holds the old one --- which for a freshly fenced source
+// means a stale zero T_switch. Both exits close it: the callback is retried to
+// success and the retry merges onto the same id, and a restart's load reads the
+// catalog's copy. Nothing acts on the stale record in between, because the drain
+// check refuses a source whose T_switch is zero.
 func (s *shardSplitTasks) upsert(ctx context.Context, catalog metastore.DataCoordCatalog, task *datapb.SplitShardTask) error {
 	if err := catalog.SaveSplitShardTask(ctx, task); err != nil {
 		return err

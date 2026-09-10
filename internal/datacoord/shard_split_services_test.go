@@ -271,6 +271,146 @@ func TestCommitShardSplitSeedFailureIsSystemError(t *testing.T) {
 	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
 }
 
+func TestCommitShardSplitRefusesAMalformedRequest(t *testing.T) {
+	// The sender is another coordinator, so anything wrong here is a Milvus
+	// bug -- but a bug that would leave a durable record nothing can act on.
+	// Nothing is written on any of these paths.
+	assertRefused := func(t *testing.T, svr *Server, req *datapb.CommitShardSplitRequest) {
+		t.Helper()
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+		persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
+		require.NoError(t, err)
+		assert.Empty(t, persisted)
+	}
+
+	t.Run("task id zero is the fence's no-task sentinel", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		req.SplitTaskId = 0
+		assertRefused(t, svr, req)
+		_, ok := svr.shardSplitTasks.get(0)
+		assert.False(t, ok)
+	})
+
+	t.Run("no source shard would report drained immediately", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		req.Sources = nil
+		assertRefused(t, svr, req)
+	})
+
+	t.Run("a collection id that disagrees with the stored task", func(t *testing.T) {
+		// mergeCommittedShardSplit never overwrites CollectionId, so without
+		// this check the two coordinators would carry different records under
+		// the same task id and never notice.
+		svr := newShardSplitTestServer(t)
+		require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+			TaskId:       200,
+			CollectionId: 100,
+			State:        datapb.SplitShardTaskState_SplitShardTaskFencing,
+			Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		}))
+		req := splitTestCommitRequest()
+		req.CollectionId = 999
+
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+		task, _ := svr.shardSplitTasks.get(200)
+		assert.Equal(t, int64(100), task.GetCollectionId())
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, task.GetState())
+	})
+}
+
+func TestCommitShardSplitRefusesAMalformedGenesisPosition(t *testing.T) {
+	// meta.UpdateChannelCheckpoints filters these out, logs a warning and
+	// returns nil -- so without the up-front check the target is left unseeded
+	// while the callback reports success, which is exactly the state seeding
+	// exists to prevent.
+	t.Run("a nil message id on a non-WoodPecker WAL", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		req.TargetStartPositions[0].MsgID = nil
+
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+
+		// Nothing was written: not the task, not the other target's checkpoint.
+		persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
+		require.NoError(t, err)
+		assert.Empty(t, persisted)
+		_, ok := svr.shardSplitTasks.get(200)
+		assert.False(t, ok)
+		assert.Nil(t, svr.meta.GetChannelCheckpoint(splitTestTarget0))
+		assert.Nil(t, svr.meta.GetChannelCheckpoint(splitTestTarget1))
+	})
+
+	t.Run("a position with no channel name", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		req.TargetStartPositions[0].ChannelName = ""
+
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+		_, ok := svr.shardSplitTasks.get(200)
+		assert.False(t, ok)
+	})
+
+	t.Run("a nil message id is fine on WoodPecker", func(t *testing.T) {
+		// WoodPecker serializes a zero message id to nil, and
+		// UpdateChannelCheckpoints accepts it, so refusing it would refuse a
+		// legitimate genesis.
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		for _, position := range req.TargetStartPositions {
+			position.MsgID = nil
+			position.WALName = commonpb.WALName_WoodPecker
+		}
+
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		assert.Equal(t, uint64(3000), svr.meta.GetChannelCheckpoint(splitTestTarget0).GetTimestamp())
+	})
+
+	t.Run("a malformed position for a channel this split does not own is ignored", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		req := splitTestCommitRequest()
+		req.TargetStartPositions = append(req.TargetStartPositions,
+			&msgpb.MsgPosition{ChannelName: "by-dev-rootcoord-dml_8_1v8", Timestamp: 3000})
+
+		status, err := svr.CommitShardSplit(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+	})
+}
+
+func TestCommitShardSplitDoesNotDoubleAppendADuplicateSource(t *testing.T) {
+	// A request that names one vchannel twice must not grow two entries for it:
+	// the drain would then wait on it twice and the two copies would drift
+	// apart on the next merge.
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskFencing,
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: "by-dev-rootcoord-dml_9_1v9"}},
+	}))
+	req := splitTestCommitRequest()
+	req.Sources = append(req.Sources, &datapb.SplitShardTaskSource{Vchannel: splitTestSource, SwitchTimeTick: 2000})
+
+	status, err := svr.CommitShardSplit(context.Background(), req)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, []string{"by-dev-rootcoord-dml_9_1v9", splitTestSource}, splitSourceVChannels(task))
+}
+
 func TestCommitShardSplitRejectsAnUnhealthyServer(t *testing.T) {
 	svr := newShardSplitTestServer(t)
 	svr.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -381,6 +521,30 @@ func TestCheckShardSplitDrainedThreeConjuncts(t *testing.T) {
 			CollectionId: 100, SplitTaskId: 200,
 		})
 		require.NoError(t, err)
+		assert.False(t, resp.GetDrained())
+	})
+
+	t.Run("a source whose fence was never recorded is never drained", func(t *testing.T) {
+		// T_switch zero means the fence is not on record, so the source may
+		// still be accepting writes. Comparing a checkpoint against zero passes
+		// vacuously and would collapse the predicate to the empty scan the
+		// conjunct exists to close.
+		svr := newShardSplitTestServer(t)
+		require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+			TaskId:       200,
+			CollectionId: 100,
+			State:        datapb.SplitShardTaskState_SplitShardTaskFencing,
+			Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		}))
+		svr.importMeta = idleImportMeta(t)
+		// Everything else is clear: a checkpoint exists, no segment, no import.
+		require.NoError(t, svr.meta.UpdateChannelCheckpoints(context.Background(), drainedCheckpoint))
+
+		resp, err := svr.CheckShardSplitDrained(context.Background(), &datapb.CheckShardSplitDrainedRequest{
+			CollectionId: 100, SplitTaskId: 200,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
 		assert.False(t, resp.GetDrained())
 	})
 

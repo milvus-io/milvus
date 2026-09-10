@@ -48,9 +48,13 @@ import (
 // and a task already Adopting or beyond is left where it is, because a
 // redelivered callback must not drag a split back into a window it has left.
 //
-// Errors are System (merr.WrapErrServiceInternal*): the caller is a coordinator
-// callback with nothing to fix in its request, and every failure here --- a
-// catalog write, a checkpoint write --- is transient and must stay retriable.
+// Errors are System (merr.WrapErrServiceInternal*): the blame for a catalog
+// write failure, a checkpoint write failure or a malformed callback never lies
+// with the request's content, and the caller is a coordinator callback that has
+// nothing to fix in it either way. Note what "System" buys and what it does not:
+// pkg/util/retry retries these because they are NOT InputError, but
+// ErrServiceInternal is declared non-retriable, so the wire Status.Retriable bit
+// is false. Callers must gate on the error class, never on Status.GetRetriable().
 func (s *Server) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -58,6 +62,11 @@ func (s *Server) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSp
 	logger := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionId()),
 		mlog.Int64("splitTaskID", req.GetSplitTaskId()))
+
+	if err := s.validateCommitShardSplit(req); err != nil {
+		logger.Warn(ctx, "refused a malformed shard split commit", mlog.Err(err))
+		return merr.Status(err), nil
+	}
 
 	task := s.mergeCommittedShardSplit(req)
 	if err := s.shardSplitTasks.upsert(ctx, s.meta.catalog, task); err != nil {
@@ -74,6 +83,69 @@ func (s *Server) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSp
 		mlog.Strings("sources", splitSourceVChannels(task)),
 		mlog.Any("state", task.GetState()))
 	return merr.Success(), nil
+}
+
+// validateCommitShardSplit refuses a callback that cannot be acted on, before
+// anything is written.
+//
+// This is the only malformed-input check either RPC has, and it is deliberately
+// minimal: the sender is another coordinator, so anything wrong here is a Milvus
+// bug rather than a user's, and the class stays System. What it refuses:
+//
+//   - task id zero, which §03 uses as the "no split task" sentinel of the fence.
+//     Recording it would persist a real task under that id and make every later
+//     "is there a task" question answer yes;
+//   - no sources, which would create a task that reports drained the moment it
+//     is asked, retiring shards on the strength of an empty loop;
+//   - a collection id that disagrees with a task already stored under this id.
+//     mergeCommittedShardSplit never overwrites CollectionId, so this would
+//     otherwise be silently ignored and the two coordinators would carry
+//     different records under the same id;
+//   - a genesis position that meta.UpdateChannelCheckpoints would drop on the
+//     floor. That filter logs a warning and returns nil, so without this check
+//     the target is left unseeded while the callback reports success --- and an
+//     unseeded target is exactly the state the seeding exists to prevent.
+func (s *Server) validateCommitShardSplit(req *datapb.CommitShardSplitRequest) error {
+	if req.GetSplitTaskId() == 0 {
+		return merr.WrapErrServiceInternalMsg("shard split commit carries no split task id")
+	}
+	if len(req.GetSources()) == 0 {
+		return merr.WrapErrServiceInternalMsg("shard split commit for task %d names no source shard", req.GetSplitTaskId())
+	}
+	if existing, ok := s.shardSplitTasks.get(req.GetSplitTaskId()); ok &&
+		existing.GetCollectionId() != req.GetCollectionId() {
+		return merr.WrapErrServiceInternalMsg(
+			"shard split commit for task %d claims collection %d, but the recorded task belongs to collection %d",
+			req.GetSplitTaskId(), req.GetCollectionId(), existing.GetCollectionId())
+	}
+	targets := splitTargetVChannels(req.GetTargets())
+	for _, position := range req.GetTargetStartPositions() {
+		if position.GetChannelName() == "" {
+			return merr.WrapErrServiceInternalMsg(
+				"shard split commit for task %d carries a genesis position with no channel name", req.GetSplitTaskId())
+		}
+		if !targets.Contain(position.GetChannelName()) {
+			// Not this split's business to seed; ignored, not refused.
+			continue
+		}
+		// Mirrors meta.UpdateChannelCheckpoints' own filter: WoodPecker
+		// serializes a zero message id to nil, every other WAL does not.
+		if position.GetMsgID() == nil && position.GetWALName() != commonpb.WALName_WoodPecker {
+			return merr.WrapErrServiceInternalMsg(
+				"shard split commit for task %d carries a genesis position with no message id for channel %s",
+				req.GetSplitTaskId(), position.GetChannelName())
+		}
+	}
+	return nil
+}
+
+// splitTargetVChannels is the set of vchannel names the targets name.
+func splitTargetVChannels(targets []*datapb.SplitShardTaskTarget) typeutil.Set[string] {
+	out := typeutil.NewSet[string]()
+	for _, target := range targets {
+		out.Insert(target.GetVchannel())
+	}
+	return out
 }
 
 // mergeCommittedShardSplit produces the task record the request implies,
@@ -113,6 +185,10 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 	for _, source := range req.GetSources() {
 		if !known.Contain(source.GetVchannel()) {
 			task.Sources = append(task.Sources, proto.Clone(source).(*datapb.SplitShardTaskSource))
+			// Marked known immediately: a request that names one vchannel twice
+			// must not grow two entries for it, which would then be waited on
+			// twice and drift apart on the next merge.
+			known.Insert(source.GetVchannel())
 		}
 	}
 	if len(task.GetTargets()) == 0 {
@@ -138,10 +214,7 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 // checkpoint has been consuming for a while, and writing the genesis position
 // over it would rewind every reader of that shard to the start of its WAL.
 func (s *Server) seedSplitTargetCheckpoints(ctx context.Context, req *datapb.CommitShardSplitRequest) error {
-	targets := typeutil.NewSet[string]()
-	for _, target := range req.GetTargets() {
-		targets.Insert(target.GetVchannel())
-	}
+	targets := splitTargetVChannels(req.GetTargets())
 	unseeded := make([]*msgpb.MsgPosition, 0, len(req.GetTargetStartPositions()))
 	for _, position := range req.GetTargetStartPositions() {
 		if !targets.Contain(position.GetChannelName()) {
@@ -169,7 +242,9 @@ func (s *Server) seedSplitTargetCheckpoints(ctx context.Context, req *datapb.Com
 //     only appends a message; the streamingnode seals and reports the sealed
 //     segments asynchronously afterwards, so below T_switch an empty segment
 //     scan proves nothing and those segments would land on a retired shard as
-//     orphans. A source with no checkpoint at all is not drained;
+//     orphans. A source with no checkpoint at all is not drained, and neither is
+//     one whose T_switch is still zero --- that is a source whose fence has not
+//     been recorded, i.e. one that may still be accepting writes;
 //   - no unfinished import job names the source. A job still in
 //     Pending/PreImporting has registered no segment in meta, so the scan
 //     cannot see it, and it could allocate onto the retired shard after the
@@ -199,6 +274,14 @@ func (s *Server) splitSourcesDrained(ctx context.Context, task *datapb.SplitShar
 	for _, source := range task.GetSources() {
 		vchannel := source.GetVchannel()
 		if s.hasLiveSegmentOnVChannel(vchannel) {
+			return false
+		}
+		if source.GetSwitchTimeTick() == 0 {
+			// The fence has not been recorded for this source, so there is no
+			// tick to have caught up to and conjunct (b) below would compare
+			// against zero and pass vacuously --- collapsing the predicate to
+			// the empty scan it exists to close. A source that still accepts
+			// writes is never drained.
 			return false
 		}
 		cp := s.meta.GetChannelCheckpoint(vchannel)

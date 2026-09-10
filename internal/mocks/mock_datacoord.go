@@ -442,6 +442,65 @@ func (_c *MockDataCoord_CheckHealth_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CheckShardSplitDrained provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) CheckShardSplitDrained(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckShardSplitDrained")
+	}
+
+	var r0 *datapb.CheckShardSplitDrainedResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) *datapb.CheckShardSplitDrainedResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CheckShardSplitDrainedResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_CheckShardSplitDrained_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckShardSplitDrained'
+type MockDataCoord_CheckShardSplitDrained_Call struct {
+	*mock.Call
+}
+
+// CheckShardSplitDrained is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CheckShardSplitDrainedRequest
+func (_e *MockDataCoord_Expecter) CheckShardSplitDrained(_a0 interface{}, _a1 interface{}) *MockDataCoord_CheckShardSplitDrained_Call {
+	return &MockDataCoord_CheckShardSplitDrained_Call{Call: _e.mock.On("CheckShardSplitDrained", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_CheckShardSplitDrained_Call) Run(run func(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest)) *MockDataCoord_CheckShardSplitDrained_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CheckShardSplitDrainedRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_CheckShardSplitDrained_Call) Return(_a0 *datapb.CheckShardSplitDrainedResponse, _a1 error) *MockDataCoord_CheckShardSplitDrained_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_CheckShardSplitDrained_Call) RunAndReturn(run func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)) *MockDataCoord_CheckShardSplitDrained_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CommitBackfillResult provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) CommitBackfillResult(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -556,6 +615,65 @@ func (_c *MockDataCoord_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MockDataCoord_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)) *MockDataCoord_CommitImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitShardSplit provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) CommitShardSplit(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitShardSplit")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitShardSplitRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_CommitShardSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitShardSplit'
+type MockDataCoord_CommitShardSplit_Call struct {
+	*mock.Call
+}
+
+// CommitShardSplit is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitShardSplitRequest
+func (_e *MockDataCoord_Expecter) CommitShardSplit(_a0 interface{}, _a1 interface{}) *MockDataCoord_CommitShardSplit_Call {
+	return &MockDataCoord_CommitShardSplit_Call{Call: _e.mock.On("CommitShardSplit", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_CommitShardSplit_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest)) *MockDataCoord_CommitShardSplit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitShardSplitRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_CommitShardSplit_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_CommitShardSplit_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_CommitShardSplit_Call) RunAndReturn(run func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)) *MockDataCoord_CommitShardSplit_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4264,124 +4382,6 @@ func (_c *MockDataCoord_WatchChannels_Call) Return(_a0 *datapb.WatchChannelsResp
 }
 
 func (_c *MockDataCoord_WatchChannels_Call) RunAndReturn(run func(context.Context, *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)) *MockDataCoord_WatchChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CommitShardSplit provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) CommitShardSplit(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CommitShardSplit")
-	}
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitShardSplitRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataCoord_CommitShardSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitShardSplit'
-type MockDataCoord_CommitShardSplit_Call struct {
-	*mock.Call
-}
-
-// CommitShardSplit is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.CommitShardSplitRequest
-func (_e *MockDataCoord_Expecter) CommitShardSplit(_a0 interface{}, _a1 interface{}) *MockDataCoord_CommitShardSplit_Call {
-	return &MockDataCoord_CommitShardSplit_Call{Call: _e.mock.On("CommitShardSplit", _a0, _a1)}
-}
-
-func (_c *MockDataCoord_CommitShardSplit_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest)) *MockDataCoord_CommitShardSplit_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CommitShardSplitRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataCoord_CommitShardSplit_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_CommitShardSplit_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataCoord_CommitShardSplit_Call) RunAndReturn(run func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)) *MockDataCoord_CommitShardSplit_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CheckShardSplitDrained provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) CheckShardSplitDrained(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CheckShardSplitDrained")
-	}
-
-	var r0 *datapb.CheckShardSplitDrainedResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) *datapb.CheckShardSplitDrainedResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.CheckShardSplitDrainedResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataCoord_CheckShardSplitDrained_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckShardSplitDrained'
-type MockDataCoord_CheckShardSplitDrained_Call struct {
-	*mock.Call
-}
-
-// CheckShardSplitDrained is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.CheckShardSplitDrainedRequest
-func (_e *MockDataCoord_Expecter) CheckShardSplitDrained(_a0 interface{}, _a1 interface{}) *MockDataCoord_CheckShardSplitDrained_Call {
-	return &MockDataCoord_CheckShardSplitDrained_Call{Call: _e.mock.On("CheckShardSplitDrained", _a0, _a1)}
-}
-
-func (_c *MockDataCoord_CheckShardSplitDrained_Call) Run(run func(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest)) *MockDataCoord_CheckShardSplitDrained_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CheckShardSplitDrainedRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataCoord_CheckShardSplitDrained_Call) Return(_a0 *datapb.CheckShardSplitDrainedResponse, _a1 error) *MockDataCoord_CheckShardSplitDrained_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataCoord_CheckShardSplitDrained_Call) RunAndReturn(run func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)) *MockDataCoord_CheckShardSplitDrained_Call {
 	_c.Call.Return(run)
 	return _c
 }
