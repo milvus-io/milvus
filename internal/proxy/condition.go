@@ -28,7 +28,7 @@ type Condition interface {
 	WaitToFinish() error
 	Notify(err error)
 	Ctx() context.Context
-	SetOnWaitError(handler func())
+	SetOnContextDone(handler func())
 }
 
 // make sure interface implementation
@@ -39,17 +39,17 @@ type TaskCondition struct {
 	done chan error
 	ctx  context.Context
 
-	onWaitErrorMu sync.RWMutex
-	onWaitError   func()
+	onContextDoneMu sync.RWMutex
+	onContextDone   func()
 }
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
 	select {
 	case <-tc.ctx.Done():
-		tc.onWaitErrorMu.RLock()
-		handler := tc.onWaitError
-		tc.onWaitErrorMu.RUnlock()
+		tc.onContextDoneMu.RLock()
+		handler := tc.onContextDone
+		tc.onContextDoneMu.RUnlock()
 		if handler != nil {
 			handler()
 		}
@@ -69,11 +69,11 @@ func (tc *TaskCondition) Ctx() context.Context {
 	return tc.ctx
 }
 
-// SetOnWaitError registers a handler invoked when WaitToFinish returns because its context is done.
-func (tc *TaskCondition) SetOnWaitError(handler func()) {
-	tc.onWaitErrorMu.Lock()
-	defer tc.onWaitErrorMu.Unlock()
-	tc.onWaitError = handler
+// SetOnContextDone registers a handler invoked when WaitToFinish returns because its context is done.
+func (tc *TaskCondition) SetOnContextDone(handler func()) {
+	tc.onContextDoneMu.Lock()
+	defer tc.onContextDoneMu.Unlock()
+	tc.onContextDone = handler
 }
 
 // NewTaskCondition creates a TaskCondition with provided context

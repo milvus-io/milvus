@@ -434,7 +434,7 @@ func (queue *dqTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
-	t.SetOnWaitError(func() {
+	t.SetOnContextDone(func() {
 		queue.removeUnissuedTask(element)
 	})
 	return nil
@@ -666,6 +666,11 @@ func (sched *taskScheduler) queryLoop() {
 					p = subTaskPool
 				}
 				p.Submit(func() (struct{}, error) {
+					// Submit may wait for a worker after the task has left the queue.
+					if err := task.TraceCtx().Err(); err != nil {
+						task.Notify(err)
+						return struct{}{}, nil
+					}
 					sched.processTask(task, sched.dqQueue)
 					return struct{}{}, nil
 				})
