@@ -12,7 +12,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -38,7 +40,8 @@ class SealedIndexTranslator : public IndexReaderTranslator {
         const milvus::segcore::LoadIndexInfo* load_index_info,
         milvus::tracer::TraceContext ctx,
         milvus::storage::FileManagerContext file_manager_context,
-        Config config);
+        Config config,
+        std::function<const void*(size_t)> vector_data_view = {});
     ~SealedIndexTranslator() override = default;
     size_t
     num_cells() const override;
@@ -92,6 +95,7 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     milvus::tracer::TraceContext ctx_;
     milvus::storage::FileManagerContext file_manager_context_;
     Config config_;
+    std::function<const void*(size_t)> vector_data_view_;
     milvus::index::IndexFamily source_family_;
     std::string index_key_;
     IndexLoadInfo index_load_info_;

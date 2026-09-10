@@ -1324,7 +1324,8 @@ getCellDataType(bool is_vector, bool is_index) {
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx) {
+              milvus::OpContext* op_ctx,
+              std::function<const void*(size_t)> vector_data_view) {
     auto& index_params = load_index_info->index_params;
     auto field_type = load_index_info->field_type;
     auto engine_version = load_index_info->index_engine_version;
@@ -1430,7 +1431,11 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     // use cache layer to load vector/scalar index
     auto translator = std::make_unique<
         milvus::segcore::storagev1translator::SealedIndexTranslator>(
-        load_index_info, ctx, file_manager_context, config);
+        load_index_info,
+        ctx,
+        file_manager_context,
+        config,
+        std::move(vector_data_view));
     load_index_info->index_family = translator->Family();
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();

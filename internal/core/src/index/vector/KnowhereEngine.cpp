@@ -24,6 +24,7 @@
 #include "common/FastMem.h"
 #include "common/Utils.h"
 #include "knowhere/index/index_factory.h"
+#include "knowhere/index/mrl_index_node.h"
 
 namespace milvus::index {
 
@@ -347,6 +348,53 @@ bool
 KnowhereMmapSupported(const IndexType& index_type) {
     return knowhere::IndexFactory::Instance().FeatureCheck(
         index_type, knowhere::feature::MMAP);
+}
+
+bool
+ConfigureMRL(KnowhereEngine& engine,
+             int64_t source_dim,
+             const Config& params,
+             knowhere::ViewDataOp view_data) {
+    const auto mrl_dim = GetValueFromConfig<int64_t>(params, MRL_DIM_KEY);
+    const auto with_refine =
+        GetValueFromConfig<bool>(params, WITH_MRL_REFINE_KEY).value_or(false);
+    if (!mrl_dim.has_value() || *mrl_dim == -1) {
+        AssertInfo(!with_refine,
+                   "{} requires a valid {}",
+                   WITH_MRL_REFINE_KEY,
+                   MRL_DIM_KEY);
+        return false;
+    }
+    AssertInfo(*mrl_dim > 0 && *mrl_dim < source_dim,
+               "{} must satisfy 0 < {} < source dimension {}",
+               MRL_DIM_KEY,
+               MRL_DIM_KEY,
+               source_dim);
+
+    knowhere::DataFormatEnum data_type;
+    switch (engine.PhysicalType()) {
+        case DataType::VECTOR_FLOAT:
+            data_type = knowhere::DataFormatEnum::fp32;
+            break;
+        case DataType::VECTOR_FLOAT16:
+            data_type = knowhere::DataFormatEnum::fp16;
+            break;
+        case DataType::VECTOR_BFLOAT16:
+            data_type = knowhere::DataFormatEnum::bf16;
+            break;
+        default:
+            ThrowInfo(Unsupported,
+                      "MRL does not support vector type {}",
+                      engine.PhysicalType());
+    }
+    engine.native_index = knowhere::CreateMRLIndex(std::move(engine.native_index),
+                                                    source_dim,
+                                                    *mrl_dim,
+                                                    data_type,
+                                                    with_refine,
+                                                    std::move(view_data));
+    engine.SetDim(source_dim);
+    return true;
 }
 
 template <typename T>

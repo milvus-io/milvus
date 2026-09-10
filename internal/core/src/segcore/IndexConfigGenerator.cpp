@@ -34,6 +34,14 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
       is_sparse_(is_sparse) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
+    const auto& index_params = index_meta_.GetIndexParams();
+    if (auto it = index_params.find(MRL_DIM_KEY); it != index_params.end()) {
+        build_params_[MRL_DIM_KEY] = it->second;
+    }
+    if (auto it = index_params.find(WITH_MRL_REFINE_KEY);
+        it != index_params.end()) {
+        build_params_[WITH_MRL_REFINE_KEY] = it->second;
+    }
     // For Dense vector, use IVFFLAT_CC/SCANN_with_data_view_refiner(DVR) as the growing and temp index type.
     //
     // For Sparse vector, use SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use

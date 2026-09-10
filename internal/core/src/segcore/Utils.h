@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <cstdlib>
 #include <optional>
@@ -196,7 +198,8 @@ getCellDataType(bool is_vector, bool is_index);
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx = nullptr);
+              milvus::OpContext* op_ctx = nullptr,
+              std::function<const void*(size_t)> vector_data_view = {});
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.

@@ -62,6 +62,9 @@ using vector_load_params::ValidateLoadedShape;
 
 constexpr const char* kEnableDiskMmap = "enable_disk_mmap";
 constexpr uint32_t kDefaultBeamwidth = 8;
+constexpr std::string_view kMRLMeta = "MRL_META";
+constexpr std::string_view kMRLBasePrefix = "MRL_BASE__";
+constexpr std::string_view kMRLRefinePrefix = "MRL_REFINE__";
 
 // Range-check a normalized integer before narrowing to a disk-backend option.
 uint32_t
@@ -137,6 +140,7 @@ ParseRuntimeParams(const Config& params) {
 struct EntryPlan {
     ArtifactState state{ArtifactState::Normal};
     std::vector<std::string> engine_names;
+    std::vector<std::string> sidecar_names;
     bool has_validity{false};
     bool has_empty_offsets{false};
 };
@@ -160,6 +164,9 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
                       "disk vector artifact contains memory-format validity");
         } else if (name == EMPTY_EMB_LIST_OFFSETS_KEY) {
             plan.has_empty_offsets = true;
+        } else if (name == kMRLMeta || name.starts_with(kMRLBasePrefix) ||
+                   name.starts_with(kMRLRefinePrefix)) {
+            plan.sidecar_names.push_back(name);
         } else {
             plan.engine_names.push_back(name);
         }
@@ -180,6 +187,26 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
         plan.state = ArtifactState::AllNull;
     }
     return plan;
+}
+
+folly::coro::Task<knowhere::BinarySet>
+ReadSidecars(bool use_async,
+             storage::FileSource& source,
+             const std::vector<std::string>& names) {
+    knowhere::BinarySet entries;
+    for (const auto& name : names) {
+        auto bytes = co_await source.ReadEntryAsync(name, use_async);
+        AssertInfo(bytes.size() <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "disk vector sidecar {} exceeds BinarySet size",
+                   name);
+        const auto size = static_cast<int64_t>(bytes.size());
+        auto owner =
+            std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+        std::shared_ptr<uint8_t[]> data(owner, owner->data());
+        entries.Append(name, std::move(data), size);
+    }
+    co_return entries;
 }
 
 // Disk artifacts store the count header and the bitmap in one entry. The
@@ -323,10 +350,11 @@ ThrowDeserializeError(knowhere::Status status) {
 // owner.
 KnowhereEngine
 MakeEngine(const RuntimeParams& params,
-           const std::shared_ptr<storage::DiskEngineFileHandle>& handle) {
+           const std::shared_ptr<storage::DiskEngineFileHandle>& handle,
+           const storage::LoadOptions& opts) {
     auto manager = handle->Manager();
     auto pack = knowhere::Pack(std::move(manager));
-    return KnowhereEngine(params.physical_type,
+    KnowhereEngine engine(params.physical_type,
                           params.elem_type,
                           params.index_type,
                           params.metric_type,
@@ -334,6 +362,16 @@ MakeEngine(const RuntimeParams& params,
                           handle,
                           pack,
                           true);
+    if (params.knowhere_config.contains(MRL_DIM_KEY)) {
+        AssertInfo(params.runtime_dim.has_value(),
+                   "MRL disk vector load requires runtime dim");
+        engine.SetDim(*params.runtime_dim);
+        ConfigureMRL(engine,
+                     *params.runtime_dim,
+                     params.knowhere_config,
+                     opts.vector_data_view);
+    }
+    return engine;
 }
 
 // Select streaming or materialized engine input, restore sidecars and
@@ -360,7 +398,7 @@ OpenIndex(bool use_async,
             local_handle = source.OpenDiskEngineFiles(
                 storage::DiskEngineFileMode::LocalFiles, plan.engine_names);
             selected_handle = local_handle;
-            owned_engine.emplace(MakeEngine(params, local_handle));
+            owned_engine.emplace(MakeEngine(params, local_handle, opts));
             auto& engine = *owned_engine;
             stream_backend = plan.state == ArtifactState::Normal &&
                              engine.native_index.LoadIndexWithStream();
@@ -368,7 +406,7 @@ OpenIndex(bool use_async,
                 stream_handle = source.OpenDiskEngineFiles(
                     storage::DiskEngineFileMode::RemoteStreams,
                     plan.engine_names);
-                auto stream_engine = MakeEngine(params, stream_handle);
+                auto stream_engine = MakeEngine(params, stream_handle, opts);
                 AssertInfo(
                     stream_engine.native_index.LoadIndexWithStream(),
                     "disk vector stream capability changed while opening");
@@ -472,12 +510,14 @@ OpenIndex(bool use_async,
         }
 
         auto config = params.knowhere_config;
+        auto sidecars = co_await ReadSidecars(
+            use_async, source, plan.sidecar_names);
         PrepareCommonLoadConfig(
             config, params, open_options, prefix, stream_backend, enable_mmap);
         {
             auto local_io = [&] {
-                const auto status = engine.native_index.Deserialize(
-                    knowhere::BinarySet{}, config);
+                const auto status =
+                    engine.native_index.Deserialize(sidecars, config);
                 selected_handle->RethrowFirstFailure();
                 // The knowhere deserialize API has no OpContext entrance. FileSource
                 // observes its captured cancellation/priority while materializing
@@ -560,7 +600,7 @@ VectorDiskLoader::AsyncEntryNames(storage::FileSource& source,
     if (plan.state == ArtifactState::Normal) {
         auto handle = source.OpenDiskEngineFiles(
             storage::DiskEngineFileMode::LocalFiles, plan.engine_names);
-        auto engine = MakeEngine(params, handle);
+        auto engine = MakeEngine(params, handle, opts);
         if (!engine.native_index.LoadIndexWithStream()) {
             return source.EntryNames();
         }
@@ -572,6 +612,8 @@ VectorDiskLoader::AsyncEntryNames(storage::FileSource& source,
     if (plan.has_empty_offsets) {
         names.emplace_back(EMPTY_EMB_LIST_OFFSETS_KEY);
     }
+    names.insert(
+        names.end(), plan.sidecar_names.begin(), plan.sidecar_names.end());
     return names;
 }
 

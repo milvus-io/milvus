@@ -107,6 +107,14 @@ VecIndexLoadResource(DataType field_type,
                      int64_t num_rows,
                      int64_t dim) {
     auto config = ParseConfigFromIndexParams(index_params);
+    bool mrl_enabled = false;
+    if (const auto mrl_dim =
+            GetValueFromConfig<int64_t>(config, MRL_DIM_KEY);
+        mrl_dim.has_value() && *mrl_dim > 0 && *mrl_dim < dim) {
+        dim = *mrl_dim;
+        mmap_enable = false;
+        mrl_enabled = true;
+    }
     auto type = index_params.find(INDEX_TYPE);
     AssertInfo(type != index_params.end(), "index type is empty");
     const auto& index_type = type->second;
@@ -163,7 +171,8 @@ VecIndexLoadResource(DataType field_type,
 
     const auto& estimated = resource.value();
     LoadResourceRequest request{};
-    request.has_raw_data = CanUseIndexRawDataForField(field_type, has_raw_data);
+    request.has_raw_data =
+        !mrl_enabled && CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = estimated.diskCost;
     request.final_memory_cost = estimated.memoryCost;
     if (VectorUsesDiskLoad(index_type, index_version) || mmaped) {

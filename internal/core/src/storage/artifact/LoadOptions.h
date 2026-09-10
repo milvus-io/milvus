@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -52,6 +54,11 @@ struct LoadOptions {
     // persist this bag; the selected family's static open function immediately
     // parses its own typed settings from it.
     nlohmann::json params = nlohmann::json::object();
+
+    // Optional runtime access to raw vector rows. Vector loaders pass this to
+    // wrappers that refine search results against segment-owned data. The
+    // callback and the referenced rows are never persisted by the artifact.
+    std::function<const void*(size_t)> vector_data_view;
 
     // Per-operation context: cancellation token, runtime load priority, cold-byte
     // accounting. Borrowed, never owned; may be null.

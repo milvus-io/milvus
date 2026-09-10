@@ -375,7 +375,7 @@ VectorMemBuilder<T>::VectorMemBuilder(
                                    std::move(index_type),
                                    std::move(metric_type),
                                    version,
-                                   std::move(*view_data),
+                                   *view_data,
                                    use_knowhere_build_pool)
                   : KnowhereEngine(PhysicalVectorDataType<T>(),
                                    elem_type,
@@ -396,6 +396,11 @@ VectorMemBuilder<T>::VectorMemBuilder(
                    dim);
     }
     engine_.SetDim(dim);
+    ConfigureMRL(engine_,
+                 dim,
+                 build_params_,
+                 view_data.has_value() ? std::move(*view_data)
+                                       : knowhere::ViewDataOp{});
 
     expected_rows_ =
         GetValueFromConfig<int64_t>(build_params_, INDEX_NUM_ROWS_KEY);

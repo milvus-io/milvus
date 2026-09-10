@@ -175,6 +175,15 @@ PrepareVectorSearchParams(const VectorSearchParams& params);
 bool
 KnowhereMmapSupported(const IndexType& index_type);
 
+// Wrap a dense vector engine with MRL when the runtime parameters contain a
+// valid mrl_dim. The engine keeps source_dim as its public query dimension;
+// the wrapper applies the prefix dimension internally.
+bool
+ConfigureMRL(KnowhereEngine& engine,
+             int64_t source_dim,
+             const Config& params,
+             knowhere::ViewDataOp view_data = {});
+
 // Decode owning raw-vector results from knowhere datasets. These helpers need
 // no reader state and are shared across vector query implementations.
 template <typename T>
