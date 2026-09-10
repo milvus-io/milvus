@@ -142,10 +142,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 		case metastore.SegmentChangeGroupEntry:
 			switch action.Type {
 			case metastore.ActionUpdate:
-				// Same encoding as catalog.SaveSegmentChangeGroup. CommitSave
-				// marks the group record as the visibility point: in a batch
-				// publish txn the group's COMMITTED state must land after every
-				// segment/DataView action on the ordered fallback path.
+				// Same encoding as catalog.SaveSegmentChangeGroup.
 				if e.Group == nil {
 					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
 				}
@@ -153,7 +150,22 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				if err != nil {
 					return err
 				}
-				b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				if e.Group.IsTerminal() {
+					// Terminal states (COMMITTED/FAILED/ABORTED) are the
+					// visibility marker of the composite write: CommitSave lands
+					// the record LAST in the chunked-fallback flush, so a visible
+					// terminal record implies every non-commit op (member flips,
+					// superseded retirement) already landed.
+					b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				} else {
+					// ALIVE states (STAGED/READY) are NOT a commit marker (C13):
+					// for STAGED creation the group record must land BEFORE its
+					// staged members in the fallback flush, otherwise a crash
+					// between the two leaves invisible members with no group
+					// record — unrecoverable without SegmentInfo.change_group_id.
+					// Plain in-order Save lets the caller control that ordering.
+					b.Save(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				}
 			case metastore.ActionDelete:
 				// CommitRemove marks the group removal as the visibility point:
 				// the group must land last when its members/superseded

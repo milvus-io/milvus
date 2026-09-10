@@ -57,8 +57,13 @@ func (m *meta) loadSegmentChangeGroups(ctx context.Context) (map[int64]*model.Se
 	superseded := make(map[int64]int64)
 	for _, group := range groups {
 		if group == nil || group.GroupID == 0 {
-			mlog.Warn(ctx, "skip invalid segment change group during recovery", mlog.Any("group", group))
-			continue
+			// C14: a record that decodes to a zero-valued group (e.g. persisted
+			// "null" or "{}") is a data-integrity violation, not a skip: silently
+			// dropping it orphans its staged members (IsInvisible=true with no
+			// owner, never published or reclaimed). This matches the kv-catalog
+			// contract that a malformed record fails the walk.
+			return nil, nil, nil, merr.WrapErrDataIntegrityMsg(
+				"persisted segment change group with missing or invalid group ID")
 		}
 		// C9: a duplicate groupID (across collections) is a data-integrity
 		// violation, not a "keep the first" case — keep-first can resurrect a
@@ -645,6 +650,18 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	})
 
 	actions := make([]metastore.UpdateAction, 0, len(updatePack.segments)+len(groupActions))
+	// C13: ALIVE group actions (STAGED creation / READY transition) come FIRST,
+	// before the member actions. In the chunked-fallback flush the group record
+	// must land before its staged members, so a crash can leave at worst an
+	// orphan group (recoverable as FAILED), never invisible members with no
+	// owner.
+	for _, action := range groupActions {
+		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil || entry.Group.IsTerminal() {
+			continue
+		}
+		actions = append(actions, action)
+	}
 	for _, segment := range orderedSegments {
 		var binlogs []metastore.BinlogsIncrement
 		if inc, ok := updatePack.increments[segment.GetID()]; ok {
@@ -655,7 +672,24 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 			Entry: metastore.SegmentEntry{Segment: segment.SegmentInfo, Binlogs: binlogs, AlterEncoding: true},
 		})
 	}
-	actions = append(actions, groupActions...)
+	// TERMINAL group actions (COMMITTED publish / FAILED / ABORTED) come LAST:
+	// the kv dispatch commit-marks them, so the fallback flush lands them after
+	// every non-commit op as the visibility marker.
+	for _, action := range groupActions {
+		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil || !entry.Group.IsTerminal() {
+			continue
+		}
+		actions = append(actions, action)
+	}
+	// Deletes are commit-marked removals; append them last for a deterministic
+	// recorded order.
+	for _, action := range groupActions {
+		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok || action.Type != metastore.ActionDelete {
+			continue
+		}
+		actions = append(actions, action)
+	}
 
 	if err := m.catalog.Update(ctx, actions...); err != nil {
 		mlog.Error(ctx, "meta update: update segments info and segment change groups failed",

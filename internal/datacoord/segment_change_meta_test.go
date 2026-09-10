@@ -436,6 +436,26 @@ func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
 	require.Empty(t, superseded, "L0-exempt superseded parents are never indexed")
 }
 
+// TestMeta_LoadSegmentChangeGroups_ZeroGroupFailsClosed verifies C14: a
+// persisted record that decodes to a zero-valued group (e.g. "{}" or "null")
+// must fail recovery, not be silently dropped — dropping it would orphan its
+// staged members with no owner.
+func TestMeta_LoadSegmentChangeGroups_ZeroGroupFailsClosed(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	g1 := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, g1))
+
+	// Forge a zero-valued group record, simulating a persisted "{}" that
+	// unmarshals without error but carries no identity.
+	require.NoError(t, m.catalog.Update(ctx, metastore.SaveSegmentChangeGroup(&model.SegmentChangeGroup{})))
+
+	_, _, _, err = m.loadSegmentChangeGroups(ctx)
+	require.Error(t, err, "a zero-valued persisted group must fail recovery, not be skipped")
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_OneTxnConflictingCreates verifies
 // N1: two conflicting new groups in the SAME composite txn are rejected —
 // sibling group actions must see each other's claims, not only the in-memory
