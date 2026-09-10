@@ -541,6 +541,33 @@ func TestMeta_UpdateSegmentChangeGroup_PreservesL0Exemption(t *testing.T) {
 	require.Equal(t, []int64{4001}, got.SupersededL0SegmentIDs, "stored decision must be preserved")
 }
 
+// TestMeta_UpdateSegmentsInfoAndChangeGroups_DuplicateGroupID verifies C18: two
+// ActionUpdate actions with the same groupID (differing collectionID and
+// members) in ONE composite write are rejected — otherwise both persist under
+// two collection prefixes and recovery bricks on duplicate group IDs.
+func TestMeta_UpdateSegmentsInfoAndChangeGroups_DuplicateGroupID(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	g1 := newTestGroup()
+	g2 := g1.Clone()
+	g2.GroupID = 1 // same groupID
+	g2.CollectionID = 11
+	g2.NewSegmentIDs = []int64{3001}
+	g2.SupersededSegmentIDs = []int64{4002}
+
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{
+			metastore.SaveSegmentChangeGroup(g1),
+			metastore.SaveSegmentChangeGroup(g2),
+		},
+	)
+	require.Error(t, err, "duplicate groupID in one composite write must be rejected")
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 1))
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 11, 1))
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_OneTxnConflictingCreates verifies
 // N1: two conflicting new groups in the SAME composite txn are rejected —
 // sibling group actions must see each other's claims, not only the in-memory

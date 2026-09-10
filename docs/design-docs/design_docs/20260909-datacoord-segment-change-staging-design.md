@@ -1000,12 +1000,23 @@ DataView entity (PR #52537) as prerequisite/parallel:
    visible (treated as group-less, already committed); new changes all go
    through groups. The new QueryView path (PR #52653) already reads DataView
    snapshots and agrees with the legacy view.
-3. **Phase 3 — unify and clean up**: backfill, copy segment, CDC onboard;
+ 3. **Phase 3 — unify and clean up**: backfill, copy segment, CDC onboard;
    `IsImporting` converges to an alias of `IsInvisible`; delete the per-segment
    flip logic in compaction tasks and the `Recompute` default publication path
    (keep only recovery/bootstrap fallback); merge the `CompactionTask` and group
    state machines into a single "task = data + publication" model; the
    DataCoord-side view is uniformly provided by DataView snapshots.
+
+> **Group record encoding migration (C19)**: the group record is persisted as
+> JSON today, with the model intended to become a `datapb` message (§1.1).
+> Because `ListSegmentChangeGroups` propagates every decode error into a
+> `newMeta` failure, a bare codec switch would brick every DataCoord on upgrade
+> once live group records exist. Phase 3 must therefore carry an explicit
+> encoding migration step — e.g. a `codec_version` field on the record that the
+> loader uses to dispatch between encodings for one upgrade window (tolerating
+> both, migrating on write), or keeping JSON as the stable on-disk format with
+> the proto message used only in memory. This is declared here so it is not
+> discovered at upgrade time like F4's `change_group_id` gap.
 
 ## Risks and Trade-offs
 
