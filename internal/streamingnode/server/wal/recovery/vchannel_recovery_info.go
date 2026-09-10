@@ -193,6 +193,11 @@ func (info *vchannelRecoveryInfo) ObserveDropCollection(msg message.ImmutableDro
 	}
 	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	info.meta.CheckpointTimeTick = msg.TimeTick()
+	// A genuine DropCollection reaching a vchannel that a shard split had
+	// already retired must still be a real drop: clear Retired so
+	// dropAllVirtualChannel does not mistake this DROPPED meta for a split
+	// source being locally collected and skip notifying DataCoord about it.
+	info.meta.Retired = false
 	info.dirty = true
 }
 

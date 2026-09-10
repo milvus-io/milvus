@@ -75,6 +75,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		persistNotifier:        make(chan struct{}, 1),
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
+		retiredVChannels:       make(map[string]struct{}),
 	}
 }
 
@@ -102,6 +103,20 @@ type recoveryStorageImpl struct {
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
+	// retiredVChannels is the set of vchannel names that are SPLITTED and
+	// Retired but not yet removed from vchannels -- still waiting for the
+	// flusher checkpoint to drain past their fence (see
+	// ConsumeDirtyAndGetSnapshot). Populated when ObserveRetire is applied
+	// and on reload from the catalog; an entry is deleted the moment its
+	// vchannel is actually removed from vchannels. Set under r.mu.
+	//
+	// Its sole purpose is to keep the persist gate (see consumeDirtySnapshot)
+	// from staying shut on an otherwise quiet pchannel: UpdateFlusherCheckpoint
+	// is the only signal that the flusher has passed a fence, and it neither
+	// bumps dirtyCounter nor is itself a WAL message, so without this a
+	// retired vchannel could sit collectable forever if nothing else ever
+	// touched the pchannel again.
+	retiredVChannels map[string]struct{}
 }
 
 // Metrics gets the metrics of the wal.
@@ -119,15 +134,38 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
-		if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
-			r.Logger().Warn(context.TODO(), "failed to update flush checkpoint", mlog.Err(err))
-			return
-		}
-		r.Logger().Info(context.TODO(), "update flush checkpoint", mlog.String("vchannel", vchannel), mlog.String("messageID", checkpoint.MessageID.String()), mlog.Uint64("timeTick", checkpoint.TimeTick))
+	vchannelInfo, ok := r.vchannels[vchannel]
+	if !ok {
+		r.Logger().Warn(context.TODO(), "vchannel not found", mlog.String("vchannel", vchannel))
 		return
 	}
-	r.Logger().Warn(context.TODO(), "vchannel not found", mlog.String("vchannel", vchannel))
+	if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
+		r.Logger().Warn(context.TODO(), "failed to update flush checkpoint", mlog.Err(err))
+		return
+	}
+	r.Logger().Info(context.TODO(), "update flush checkpoint", mlog.String("vchannel", vchannel), mlog.String("messageID", checkpoint.MessageID.String()), mlog.Uint64("timeTick", checkpoint.TimeTick))
+
+	// A retired SPLITTED vchannel only becomes collectable once the
+	// pchannel-wide minimum flusher checkpoint -- not just this one
+	// vchannel's own -- passes its fence, because that minimum is exactly
+	// what persistDirtySnapshot hands to ConsumeDirtyAndGetSnapshot. This is
+	// the only place that signal ever advances, so wake the persist loop the
+	// moment that minimum crosses any pending retirement's SplitTimeTick,
+	// instead of waiting on unrelated traffic to bump dirtyCounter or on the
+	// next periodic tick.
+	if len(r.retiredVChannels) == 0 {
+		return
+	}
+	minimumCheckpoint := r.getFlusherCheckpointLocked()
+	if minimumCheckpoint == nil {
+		return
+	}
+	for retiredVChannel := range r.retiredVChannels {
+		if info, ok := r.vchannels[retiredVChannel]; ok && minimumCheckpoint.TimeTick >= info.meta.SplitTimeTick {
+			r.notifyPersist()
+			return
+		}
+	}
 }
 
 // GetSchema gets the schema of the collection at the given timetick.
@@ -189,7 +227,12 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot(flusherCheckpointTimeTick uint64) *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
+	// A pending retirement keeps the gate open even when nothing else is
+	// dirty: it is the only way a retired SPLITTED vchannel, sitting on an
+	// otherwise quiet pchannel, ever gets re-evaluated once the flusher
+	// checkpoint independently catches up to its fence (see
+	// retiredVChannels and UpdateFlusherCheckpoint).
+	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil && len(r.retiredVChannels) == 0 {
 		return nil
 	}
 
@@ -208,6 +251,9 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot(flusherCheckpointTimeTick uin
 		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot(flusherCheckpointTimeTick)
 		if shouldBeRemoved {
 			delete(r.vchannels, vchannel.meta.Vchannel)
+			// No-op (and safe) if this vchannel was never a pending
+			// retirement -- e.g. a genuine DROPPED vchannel.
+			delete(r.retiredVChannels, vchannel.meta.Vchannel)
 		}
 		if dirtySnapshot != nil {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
@@ -713,6 +759,12 @@ func (r *recoveryStorageImpl) handleAlterCollection(ctx context.Context, msg mes
 	if messageutil.RetiresVChannel(msg.Header(), msg.MustBody().GetUpdates(), msg.VChannel()) {
 		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
 			vchannelInfo.ObserveRetire(msg.TimeTick())
+			if vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED && vchannelInfo.meta.Retired {
+				// Track it so the persist gate (consumeDirtySnapshot) keeps
+				// re-checking removability even if nothing else ever
+				// touches this pchannel again -- see retiredVChannels.
+				r.retiredVChannels[msg.VChannel()] = struct{}{}
+			}
 		}
 		r.Logger().Info(ctx, "retire vchannel", mlog.FieldMessage(msg))
 		return
@@ -781,7 +833,12 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.getFlusherCheckpointLocked()
+}
 
+// getFlusherCheckpointLocked is the lock-free core of getFlusherCheckpoint.
+// The caller must already hold r.mu.
+func (r *recoveryStorageImpl) getFlusherCheckpointLocked() *WALCheckpoint {
 	var minimumCheckpoint *WALCheckpoint
 	for _, vchannel := range r.vchannels {
 		if vchannel.GetFlushCheckpoint() == nil {

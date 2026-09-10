@@ -335,6 +335,28 @@ func TestVChannelRecoveryInfoRetireMarksASplittedVChannel(t *testing.T) {
 	assert.False(t, dropped.dirty)
 }
 
+// TestObserveDropCollectionClearsRetired: a genuine DropCollection reaching a
+// vchannel that a shard split had already retired must still be a real drop
+// -- clearing Retired is what keeps dropAllVirtualChannel from mistaking the
+// resulting DROPPED meta for a split source being locally collected, and
+// wrongly skipping the DataCoord notification a real drop needs.
+func TestObserveDropCollectionClearsRetired(t *testing.T) {
+	info := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel:      "v1",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			Retired:       true,
+			SplitTimeTick: 100,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}
+	info.ObserveDropCollection(buildDropCollectionMsg("v1", 1, 200, 200))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, info.meta.State)
+	assert.False(t, info.meta.Retired)
+}
+
 // TestObserveSplitShardRaisesTheFenceTick: the shard manager's own T_switch
 // bookkeeping treats the latest fence record of the task as authoritative, so
 // a re-fence on an already-SPLITTED vchannel must raise SplitTimeTick to a
@@ -510,11 +532,13 @@ func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick u
 			MessageID: rmq.NewRmqID(10),
 			TimeTick:  10,
 		},
-		segments:     map[int64]*segmentRecoveryInfo{},
-		vchannels:    map[string]*vchannelRecoveryInfo{},
-		dirtyCounter: 1, // force consumeDirtySnapshot to actually run.
-		metrics:      newRecoveryStorageMetrics(channel),
-		truncator:    truncator,
+		segments:         map[int64]*segmentRecoveryInfo{},
+		vchannels:        map[string]*vchannelRecoveryInfo{},
+		dirtyCounter:     1, // force consumeDirtySnapshot to actually run.
+		metrics:          newRecoveryStorageMetrics(channel),
+		truncator:        truncator,
+		persistNotifier:  make(chan struct{}, 1),
+		retiredVChannels: map[string]struct{}{"v0": {}},
 	}
 	rs.vchannels["v0"] = &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
@@ -575,6 +599,133 @@ func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *te
 		require.Contains(t, *persisted, "v0")
 		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
 		assert.True(t, (*persisted)["v0"].Retired)
+	})
+}
+
+// TestRetiredSourceIsCollectedOnAQuietPChannel: UpdateFlusherCheckpoint is the
+// only signal that the flusher has passed a fence, and it is neither a WAL
+// message (so it never bumps dirtyCounter) nor does it call notifyPersist on
+// its own. Without retiredVChannels keeping the persist gate open,
+// consumeDirtySnapshot would short-circuit forever on a pchannel where
+// nothing else ever becomes dirty again -- the retired vchannel would sit
+// collectable, but never actually get collected.
+func TestRetiredSourceIsCollectedOnAQuietPChannel(t *testing.T) {
+	rs, persisted := newRecoveryStorageForRetireGCTest(t, 1999)
+
+	// First persist round: the flusher checkpoint (1999) has not passed the
+	// fence (2000) yet, so the meta stays -- this also clears dirtyCounter
+	// and consumes the vchannel's own dirty flag, exactly like the previous
+	// round in TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence.
+	err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
+	require.NoError(t, err)
+	_, ok := rs.vchannels["v0"]
+	require.True(t, ok)
+	require.Equal(t, 0, rs.dirtyCounter)
+
+	// No further WAL message ever arrives on this pchannel: dirtyCounter
+	// stays at 0. UpdateFlusherCheckpoint is the only thing that moves, and
+	// it must wake the persist loop on its own once the new checkpoint
+	// crosses the fence.
+	rs.UpdateFlusherCheckpoint("v0", &WALCheckpoint{
+		MessageID: rmq.NewRmqID(2),
+		TimeTick:  2000,
+	})
+	assert.Equal(t, 0, rs.dirtyCounter, "no WAL message was ever observed on this pchannel")
+	select {
+	case <-rs.persistNotifier:
+	default:
+		t.Fatal("UpdateFlusherCheckpoint must notifyPersist once a pending retirement's fence is passed")
+	}
+
+	// The next persist round -- reached because the gate now also considers
+	// the pending retirement, not because of dirtyCounter -- collects it.
+	err = rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
+	assert.NoError(t, err)
+	_, ok = rs.vchannels["v0"]
+	assert.False(t, ok, "a retired source must be collected on an otherwise quiet pchannel too")
+	require.Contains(t, *persisted, "v0")
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
+	assert.True(t, (*persisted)["v0"].Retired)
+	assert.Empty(t, rs.retiredVChannels, "the pending-retirement tracking must be cleaned up once collected")
+}
+
+// TestUpdateFlusherCheckpointNotifiesOnlyWhenAPendingRetirementIsPastItsFence
+// pins down every reason UpdateFlusherCheckpoint must NOT wake the persist
+// loop, complementing TestRetiredSourceIsCollectedOnAQuietPChannel's positive
+// case.
+func TestUpdateFlusherCheckpointNotifiesOnlyWhenAPendingRetirementIsPastItsFence(t *testing.T) {
+	newRS := func() *recoveryStorageImpl {
+		rs := &recoveryStorageImpl{
+			vchannels:        map[string]*vchannelRecoveryInfo{},
+			persistNotifier:  make(chan struct{}, 1),
+			retiredVChannels: map[string]struct{}{},
+		}
+		rs.vchannels["v0"] = &vchannelRecoveryInfo{
+			meta: &streamingpb.VChannelMeta{
+				Vchannel:      "v0",
+				State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+				Retired:       true,
+				SplitTimeTick: 2000,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 1,
+				},
+			},
+		}
+		rs.retiredVChannels["v0"] = struct{}{}
+		return rs
+	}
+	assertNoNotify := func(t *testing.T, rs *recoveryStorageImpl) {
+		t.Helper()
+		select {
+		case <-rs.persistNotifier:
+			t.Fatal("must not wake the persist loop")
+		default:
+		}
+	}
+
+	t.Run("unknown vchannel", func(t *testing.T) {
+		rs := newRS()
+		assert.NotPanics(t, func() {
+			rs.UpdateFlusherCheckpoint("v-unknown", &WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 100})
+		})
+		assertNoNotify(t, rs)
+	})
+
+	t.Run("an out-of-order checkpoint is rejected", func(t *testing.T) {
+		rs := newRS()
+		rs.vchannels["v0"].flusherCheckpoint = &WALCheckpoint{MessageID: rmq.NewRmqID(5), TimeTick: 5000}
+		rs.UpdateFlusherCheckpoint("v0", &WALCheckpoint{MessageID: rmq.NewRmqID(3), TimeTick: 2000})
+		assertNoNotify(t, rs)
+	})
+
+	t.Run("no pending retirement at all", func(t *testing.T) {
+		rs := newRS()
+		delete(rs.retiredVChannels, "v0")
+		rs.UpdateFlusherCheckpoint("v0", &WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 2000})
+		assertNoNotify(t, rs)
+	})
+
+	t.Run("pchannel-wide minimum is still unknown", func(t *testing.T) {
+		rs := newRS()
+		// A second vchannel with no flusher checkpoint at all yet makes the
+		// pchannel-wide minimum nil, per getFlusherCheckpointLocked's contract.
+		rs.vchannels["v1"] = &vchannelRecoveryInfo{
+			meta: &streamingpb.VChannelMeta{
+				Vchannel: "v1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 1,
+				},
+			},
+		}
+		rs.UpdateFlusherCheckpoint("v0", &WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 2000})
+		assertNoNotify(t, rs)
+	})
+
+	t.Run("pending retirement has not reached its fence yet", func(t *testing.T) {
+		rs := newRS()
+		rs.UpdateFlusherCheckpoint("v0", &WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 1999})
+		assertNoNotify(t, rs)
 	})
 }
 
