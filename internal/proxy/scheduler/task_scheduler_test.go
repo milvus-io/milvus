@@ -124,7 +124,7 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestDqTaskQueue_RemoveUnissuedTaskOnWaitError(t *testing.T) {
+func TestDqTaskQueue_RemoveUnissuedTaskOnContextDone(t *testing.T) {
 	t.Run("remove queued task", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		queue := newDqTaskQueue(newMockTsoAllocator())

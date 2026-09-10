@@ -122,11 +122,11 @@ func TestTaskCondition_Notify(t *testing.T) {
 	wg.Wait()
 }
 
-func TestTaskCondition_OnWaitError(t *testing.T) {
+func TestTaskCondition_OnContextDone(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		condition := NewTaskCondition(context.Background())
 		var calls atomic.Int32
-		condition.SetOnWaitError(func() {
+		condition.SetOnContextDone(func() {
 			calls.Add(1)
 		})
 
@@ -138,7 +138,7 @@ func TestTaskCondition_OnWaitError(t *testing.T) {
 	t.Run("task error", func(t *testing.T) {
 		condition := NewTaskCondition(context.Background())
 		var calls atomic.Int32
-		condition.SetOnWaitError(func() {
+		condition.SetOnContextDone(func() {
 			calls.Add(1)
 		})
 
@@ -151,7 +151,7 @@ func TestTaskCondition_OnWaitError(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		condition := NewTaskCondition(ctx)
 		var calls atomic.Int32
-		condition.SetOnWaitError(func() {
+		condition.SetOnContextDone(func() {
 			calls.Add(1)
 		})
 
