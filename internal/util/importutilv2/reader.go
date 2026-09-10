@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -45,6 +46,8 @@ type Reader interface {
 	Close()
 }
 
+// NewReader requires the caller's reserved positive delete budget for typed
+// snapshot sources. Other inputs do not use that budget and pass zero.
 func NewReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
@@ -52,18 +55,55 @@ func NewReader(ctx context.Context,
 	options Options,
 	bufferSize int,
 	storageConfig *indexpb.StorageConfig,
+	snapshotDeleteBudget int64,
 ) (Reader, error) {
+	if err := ValidateSnapshotSourceOptions(options); err != nil {
+		return nil, err
+	}
+	source := importFile.GetSnapshotSource()
+	if source != nil || HasExternalSource(options) {
+		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{importFile}, options); err != nil {
+			return nil, err
+		}
+	}
+	if HasExternalSource(options) {
+		uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
+		var err error
+		cm, storageConfig, err = ResolveSnapshotImportStorage(ctx, cm, storageConfig, uri, options)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
 			return nil, err
 		}
 		paths := importFile.GetPaths()
+		importEz, _ := GetEZK(options)
+		if IsSnapshotSource(options) {
+			if source != nil {
+				return binlog.NewStorageV3ManifestReader(
+					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, importEz, source, snapshotDeleteBudget,
+				)
+			}
+			// DataCoord replaces the snapshot metadata source with one exact,
+			// versioned StorageV3 manifest per ImportFile before broadcasting.
+			// Do not consult storage_version: snapshot metadata is the source of
+			// truth and ValidateSnapshotSourceOptions rejects that ambiguity.
+			if len(paths) != 1 {
+				return nil, merr.WrapErrImportFailedMsg(
+					"snapshot-source import file requires exactly one manifest path",
+				)
+			}
+			return binlog.NewStorageV3ManifestReader(
+				ctx, cm, schema, storageConfig, paths[0], tsStart, tsEnd, bufferSize, importEz, nil, 0,
+			)
+		}
 		storageVersion, err := GetStorageVersion(options)
 		if err != nil {
 			return nil, err
 		}
-		importEz, _ := GetEZK(options)
 		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
 	}
 

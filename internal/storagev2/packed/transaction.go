@@ -25,6 +25,7 @@ import "C"
 import (
 	"context"
 	"math"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -164,7 +165,11 @@ func GetDeltaLogPathsFromManifest(
 	var paths []string
 	for _, deltaLog := range deltaLogs {
 		for _, binlog := range deltaLog.GetBinlogs() {
-			if binlog.GetEntriesNum() <= 0 {
+			entriesNum := binlog.GetEntriesNum()
+			if err := validateDeltaLogMetadata(manifestPath, binlog.GetLogPath(), entriesNum); err != nil {
+				return nil, err
+			}
+			if entriesNum == 0 {
 				continue
 			}
 			paths = append(paths, binlog.GetLogPath())
@@ -174,6 +179,29 @@ func GetDeltaLogPathsFromManifest(
 		return nil, nil
 	}
 	return paths, nil
+}
+
+// validateDeltaLogMetadata distinguishes a legitimate zero-entry marker from
+// corrupt persisted metadata. A zero-entry marker is allowed to omit its path
+// because there is no deltalog file to read. Once entries are declared, the
+// path is mandatory; otherwise silently skipping the entry would resurrect
+// rows that the source segment had deleted.
+func validateDeltaLogMetadata(manifestPath, logPath string, entriesNum int64) error {
+	if entriesNum < 0 {
+		return merr.WrapErrDataIntegrityMsg(
+			"manifest %s has a deltalog with negative entries_num %d",
+			manifestPath,
+			entriesNum,
+		)
+	}
+	if entriesNum > 0 && strings.TrimSpace(logPath) == "" {
+		return merr.WrapErrDataIntegrityMsg(
+			"manifest %s has a deltalog with entries_num %d but no path",
+			manifestPath,
+			entriesNum,
+		)
+	}
+	return nil
 }
 
 // GetDeltaLogsFromManifestWithExtfs extracts delta log entries from a StorageV3
@@ -224,28 +252,40 @@ func GetDeltaLogsFromManifestWithExtfs(
 	// (prepending basePath/_delta/ and normalizing). The returned paths are
 	// already absolute and can be used directly.
 	if cManifest.delta_logs.delta_log_paths == nil || cManifest.delta_logs.delta_log_num_entries == nil {
-		return nil, merr.WrapErrServiceInternalMsg("manifest %s has malformed delta log metadata", manifestPath)
+		return nil, merr.WrapErrDataIntegrityMsg("manifest %s has malformed delta log metadata", manifestPath)
 	}
 	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(cManifest.delta_logs.delta_log_num_entries, numDeltaLogs)
 	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
 	pathsForLog := make([]string, 0, numDeltaLogs)
 	for i, cPath := range cPaths {
-		if cPath == nil {
+		entriesNum := int64(cNumEntries[i])
+		path := ""
+		if cPath != nil {
+			path = C.GoString(cPath)
+		}
+		if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
+			// Only a zero-entry marker may reach this branch. It has no file
+			// identity to preserve and no deltalog that a caller can open.
 			continue
 		}
-		path := C.GoString(cPath)
 		if extfs.Source != "" {
 			var err error
 			path, err = externalFilesystemFilePath(path, cProperties, extfs)
 			if err != nil {
 				return nil, err
 			}
+			if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+				return nil, err
+			}
 		}
 		pathsForLog = append(pathsForLog, path)
 		binlogs = append(binlogs, &datapb.Binlog{
 			LogPath:    path,
-			EntriesNum: int64(cNumEntries[i]),
+			EntriesNum: entriesNum,
 		})
 	}
 
