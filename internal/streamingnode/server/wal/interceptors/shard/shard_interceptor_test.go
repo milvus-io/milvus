@@ -304,6 +304,7 @@ func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *
 	defer function.GetManager().Release(collectionID, key)
 
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(collectionID, vchannel).Return(nil).Once()
 	shardManager.EXPECT().AlterCollection(mock.Anything).Return(nil, nil)
 	impl := &shardInterceptor{shardManager: shardManager}
 	msg := message.NewAlterCollectionMessageBuilderV2().

@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -148,24 +147,6 @@ func newTestSplitShardGenesisImmutableMessageWithBody(vchannel string, collectio
 		WithTimeTick(timetick).
 		WithLastConfirmedUseMessageID()
 	return message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(3)))
-}
-
-// newTestRetireImmutableMessage builds the routing commit that retires a
-// vchannel: the shard-split routing mask plus a vchannel list without it.
-func newTestRetireImmutableMessage(vchannel string, collectionID int64, kept []string, timetick uint64) message.ImmutableAlterCollectionMessageV2 {
-	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithVChannel(vchannel).
-		WithHeader(&message.AlterCollectionMessageHeader{
-			CollectionId: collectionID,
-			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
-		}).
-		WithBody(&message.AlterCollectionMessageBody{
-			Updates: &message.AlterCollectionMessageUpdates{VirtualChannelNames: kept},
-		}).
-		MustBuildMutable().
-		WithTimeTick(timetick).
-		WithLastConfirmedUseMessageID()
-	return message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(2)))
 }
 
 func TestShardManagerCreateVChannel(t *testing.T) {

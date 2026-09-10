@@ -32,6 +32,11 @@ type ShardManager interface {
 	// and the split task that placed it. Zero values when the vchannel is
 	// unknown or not fenced. The task id is what lets a caller tell its own
 	// retry from a concurrent task's fence.
+	//
+	// Answered by VCHANNEL NAME alone -- the collection id only says which
+	// collection is asking. A fenced vchannel keeps no registration to read
+	// from, and the entry that may sit under its collection id belongs to a
+	// successor whose fence state is not this vchannel's.
 	GetSplitFence(collectionID int64, vchannel string) SplitFence
 
 	// SplitShard fences the source vchannel of a split when a SplitShard

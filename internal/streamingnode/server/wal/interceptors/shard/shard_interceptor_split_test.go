@@ -87,14 +87,25 @@ func newTestShardInterceptor(t *testing.T) (interceptors.Interceptor, *mock_shar
 }
 
 func TestSplitShardOnSourceFencesAndSealsGrowing(t *testing.T) {
+	collectionID := int64(99301)
+	vchannel := "by-dev-rootcoord-dml_9_99301v0"
+
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(nil).Once()
-	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return([]int64{7, 8}, nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(collectionID, vchannel).Return(nil).Once()
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(collectionID, uint64(100)).Return([]int64{7, 8}, nil).Once()
 	shardManager.EXPECT().SplitShard(mock.Anything).Once()
+
+	// The vchannel took the WAL function-runner key when it was created; the
+	// fence is where it stops taking writes and loses its registration, so it
+	// is also where the key has to go back. Waiting for the retire would leak
+	// it across a WAL close in between: Close releases by REGISTERED vchannel,
+	// and this one no longer has a registration to be found under.
+	key := walFunctionRunnerKey(vchannel)
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
 
 	var appendedMsg message.MutableMessage
 	msgID, err := i.DoAppend(context.Background(),
-		newTestSplitShardMutableMessage("v0", newTestSplitShardHeader(1, 42, "v0", "v1", "v2"), nil),
+		newTestSplitShardMutableMessage(vchannel, newTestSplitShardHeader(collectionID, 42, vchannel, "v1", "v2"), nil),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			appendedMsg = msg
 			return rmq.NewRmqID(1), nil
@@ -106,20 +117,25 @@ func TestSplitShardOnSourceFencesAndSealsGrowing(t *testing.T) {
 	// the single seal record for T_switch.
 	header := message.MustAsMutableSplitShardMessageV2(appendedMsg).Header()
 	assert.Equal(t, []int64{7, 8}, header.GetFlushedSegmentIds())
+
+	_, err = function.GetManager().Materialize(context.Background(), collectionID, key, 0,
+		&stubInsertMessage{body: &msgpb.InsertRequest{}})
+	assert.Error(t, err, "the fenced source's function runner key must be released at the fence")
 }
 
-// TestSplitShardOnSourceAlreadyFencedByThisTaskAppendsIdempotently pins the
+// TestSplitShardOnSourceAlreadyFencedByThisTaskAppendsAndRaisesTheTick pins the
 // property that lets the broadcaster re-drive a split.
 //
 // A split whose source replica landed but whose task was not yet persisted is
 // re-driven from the beginning, so the fence arrives at an already-fenced
-// source. Refusing it there would spin forever; appending it again is harmless
-// (SplitShard keeps the first fence and every consumer is idempotent). The
-// re-fence must NOT re-seal: the growing segments were sealed by the first
-// attempt, and sealing again at this tick would flush whatever the source has
-// accumulated since -- which is nothing, because the vchannel is fenced, but
-// asking for it is what would make the second append disagree with the first.
-func TestSplitShardOnSourceAlreadyFencedByThisTaskAppendsIdempotently(t *testing.T) {
+// source. Refusing it there would spin forever; appending it again is what the
+// re-drive needs, and the apply that follows only raises the recorded fence
+// tick to this record's -- T_switch is the tick of the task's LATEST fence
+// record, the value DataCoord recorded, and the two records seal the same data
+// because the vchannel took no DML in between. The re-fence must NOT re-seal:
+// the growing segments were sealed by the first attempt, and asking for a seal
+// at this tick is what would make the second append disagree with the first.
+func TestSplitShardOnSourceAlreadyFencedByThisTaskAppendsAndRaisesTheTick(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
 	shardManager.EXPECT().GetSplitFence(int64(1), "v0").
@@ -448,47 +464,12 @@ func TestSplitShardOnSourceAppendFailure(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestAlterCollectionRetiresADelistedFencedVChannel: the routing commit that
-// drops a vchannel from the collection's vchannel list retires that vchannel on
-// this pchannel -- there is no separate DropVChannel message any more. The
-// collection-wide AlterCollection apply must not run for it: this replica is
-// about one retired shard, not about the collection's state.
-func TestAlterCollectionRetiresADelistedFencedVChannel(t *testing.T) {
-	collectionID := int64(99201)
-	vchannel := "by-dev-rootcoord-dml_9_99201v0"
-
-	i, shardManager := newTestShardInterceptor(t)
-
-	// Creation took the WAL function-runner key per vchannel; the retire must
-	// give back exactly that one, or the key outlives the shard it belongs to.
-	key := walFunctionRunnerKey(vchannel)
-	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
-
-	appended := false
-	msgID, err := i.DoAppend(context.Background(),
-		newTestRetireAlterCollectionMutableMessage(vchannel, collectionID,
-			[]string{"by-dev-rootcoord-dml_9_99201v1", "by-dev-rootcoord-dml_9_99201v2"}),
-		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-			appended = true
-			return rmq.NewRmqID(1), nil
-		})
-	assert.NoError(t, err)
-	assert.True(t, appended)
-	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
-	shardManager.AssertNotCalled(t, "AlterCollection", mock.Anything)
-
-	_, err = function.GetManager().Materialize(context.Background(), collectionID, key, 0,
-		&stubInsertMessage{body: &msgpb.InsertRequest{}})
-	assert.Error(t, err, "the retired vchannel's function runner key must be released")
-}
-
-// TestAlterCollectionRetireReleasesTheRunnerKeyOnly: the shard manager has
-// nothing left to do at a retire. The source's registration was torn down at
-// the fence, long before this routing commit, so the retire replica only gives
-// back the WAL function-runner key the vchannel took when it was created --
-// and, unlike a teardown, it can never be wrong to apply: there is no live
-// shard left for it to remove.
-func TestAlterCollectionRetireReleasesTheRunnerKeyOnly(t *testing.T) {
+// TestAlterCollectionRetireIsAppendedWithoutEffect: nothing at all is left for
+// the retire to do. The source's registration went at the fence and so did its
+// function-runner key, so this replica is appended and that is all -- it must
+// not go through the collection-wide alter path, which is keyed by collection
+// id and would flush and re-schema whichever vchannel now holds the entry.
+func TestAlterCollectionRetireIsAppendedWithoutEffect(t *testing.T) {
 	collectionID := int64(99203)
 	vchannel := "by-dev-rootcoord-dml_9_99203v0"
 
@@ -496,6 +477,7 @@ func TestAlterCollectionRetireReleasesTheRunnerKeyOnly(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	key := walFunctionRunnerKey(vchannel)
 	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
+	defer function.GetManager().Release(collectionID, key)
 
 	appended := false
 	msgID, err := i.DoAppend(context.Background(),
@@ -509,9 +491,11 @@ func TestAlterCollectionRetireReleasesTheRunnerKeyOnly(t *testing.T) {
 	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
 	shardManager.AssertNotCalled(t, "AlterCollection", mock.Anything)
 
+	// the retire releases nothing: a key still allocated here is one the fence
+	// has not passed yet, and it belongs to whoever holds it.
 	_, err = function.GetManager().Materialize(context.Background(), collectionID, key, 0,
 		&stubInsertMessage{body: &msgpb.InsertRequest{}})
-	assert.Error(t, err, "the retired vchannel's function runner key must be released")
+	assert.NoError(t, err)
 }
 
 func TestAlterCollectionRetireAppendFailure(t *testing.T) {
@@ -530,6 +514,9 @@ func TestAlterCollectionRetireAppendFailure(t *testing.T) {
 // ordinary AlterCollection.
 func TestAlterCollectionOnAListedVChannelIsUnchanged(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
+	// this pchannel holds the vchannel the replica names, so the collection-wide
+	// apply runs as it always did.
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(nil).Once()
 	shardManager.EXPECT().AlterCollection(mock.Anything).Return(nil, nil).Once()
 
 	appended := false
@@ -656,3 +643,120 @@ type stubInsertMessage struct{ body *msgpb.InsertRequest }
 func (s *stubInsertMessage) MustBody() *msgpb.InsertRequest { return s.body }
 
 func (s *stubInsertMessage) OverwriteBody(body *msgpb.InsertRequest) { s.body = body }
+
+// newTestSchemaChangeAlterCollectionMutableMessage builds an ordinary
+// collection update -- a schema change, the alter that does the most work on a
+// shard -- addressed to one vchannel of the collection.
+func newTestSchemaChangeAlterCollectionMutableMessage(vchannel string, collectionID int64) message.MutableMessage {
+	return message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{Name: "col", Version: 4},
+			},
+		}).
+		MustBuildMutable().
+		WithTimeTick(200).
+		WithLastConfirmedUseMessageID()
+}
+
+// A collection-wide DDL broadcast reaches EVERY vchannel of the collection, and
+// a fenced source stays on that list until adoption retires it -- hours later.
+// Its replica has nothing to do here (the registration went at the fence), but
+// it must still be appended: refusing it is unrecoverable, and the broadcaster
+// retries an unrecoverable replica forever while holding the collection's
+// exclusive key, so one schema change during a split would wedge every later
+// DDL on the collection.
+func TestSchemaChangeOnAFencedSourceIsAppendedWithoutEffect(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
+
+	msg := message.NewSchemaChangeMessageBuilderV2().
+		WithVChannel("v0").
+		WithHeader(&messagespb.SchemaChangeMessageHeader{CollectionId: 1}).
+		WithBody(&messagespb.SchemaChangeMessageBody{}).
+		MustBuildMutable().WithTimeTick(200)
+
+	var appendedMsg message.MutableMessage
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appendedMsg = msg
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	require.NotNil(t, appendedMsg)
+	shardManager.AssertNotCalled(t, "FlushAndFenceSegmentAllocUntil", mock.Anything, mock.Anything)
+	assert.Empty(t, message.MustAsMutableSchemaChangeMessageV2(appendedMsg).Header().GetFlushedSegmentIds())
+}
+
+func TestAlterCollectionOnAFencedSourceIsAppendedWithoutEffect(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
+
+	var appendedMsg message.MutableMessage
+	msgID, err := i.DoAppend(context.Background(),
+		newTestSchemaChangeAlterCollectionMutableMessage("v0", 1),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appendedMsg = msg
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	require.NotNil(t, appendedMsg)
+	shardManager.AssertNotCalled(t, "AlterCollection", mock.Anything)
+	assert.Empty(t, message.MustAsMutableAlterCollectionMessageV2(appendedMsg).Header().GetFlushedSegmentIds())
+}
+
+func TestTruncateOnAFencedSourceIsAppendedWithoutEffect(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
+
+	msg := message.NewTruncateCollectionMessageBuilderV2().
+		WithVChannel("v0").
+		WithHeader(&messagespb.TruncateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&messagespb.TruncateCollectionMessageBody{}).
+		MustBuildMutable().WithTimeTick(200)
+
+	var appendedMsg message.MutableMessage
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appendedMsg = msg
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	require.NotNil(t, appendedMsg)
+	shardManager.AssertNotCalled(t, "FlushAndFenceSegmentAllocUntil", mock.Anything, mock.Anything)
+	assert.Empty(t, message.MustAsMutableTruncateCollectionMessageV2(appendedMsg).Header().GetSegmentIds())
+}
+
+// TestSourceAddressedAlterCollectionDoesNotTouchTheSuccessor: the fence frees
+// the pchannel slot, so a successor vchannel of the SAME collection can already
+// hold this pchannel's entry when a replica addressed to the old source
+// arrives. Every remaining action in these handlers is keyed by collection id
+// alone -- FlushAndFenceSegmentAllocUntil and AlterCollection both are -- so
+// acting on a source-addressed replica would seal the successor's growing
+// segments and overwrite its schema.
+func TestSourceAddressedAlterCollectionDoesNotTouchTheSuccessor(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	// the entry names "v1-successor", so the manager does not hold "v1".
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrCollectionNotFound).Once()
+
+	appended := false
+	msgID, err := i.DoAppend(context.Background(),
+		newTestSchemaChangeAlterCollectionMutableMessage("v1", 1),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	shardManager.AssertNotCalled(t, "AlterCollection", mock.Anything)
+	shardManager.AssertNotCalled(t, "FlushAndFenceSegmentAllocUntil", mock.Anything, mock.Anything)
+}

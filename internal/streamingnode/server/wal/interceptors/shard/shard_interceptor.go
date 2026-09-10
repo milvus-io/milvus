@@ -180,27 +180,32 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 	return msgID, nil
 }
 
-// retireVChannel handles the AlterCollection replica whose routing commit
-// delists the vchannel it landed on.
+// holdsAddressedVChannel answers whether this pchannel still holds the vchannel a
+// collection-wide DDL replica is addressed to, and logs the reason when it does
+// not. It is the gate every handler whose remaining work is keyed by COLLECTION
+// id must pass before doing that work.
 //
-// The shard manager has nothing left to do here: the source's registration was
-// torn down at the FENCE (SplitShard), which is the point where the vchannel
-// stopped taking DML and its slot became reusable -- waiting for this commit
-// would only hold the slot for a shard that no longer does anything. So the
-// retire is a pass-through plus one piece of bookkeeping: give back the WAL
-// function-runner key creation took per VCHANNEL, exactly the one this replica
-// names and no other, mirroring handleDropCollection.
+// Two ways a replica arrives at a pchannel that does not hold its vchannel, both
+// created by the split fence releasing the source's registration on the spot:
+// the fenced source itself, which stays on the collection's vchannel list until
+// adoption retires it hours later, and a successor vchannel that has since taken
+// over this pchannel's single slot for the collection. Acting on either would
+// take the collection-keyed action -- FlushAndFenceSegmentAllocUntil, or the
+// schema update inside AlterCollection -- against whatever vchannel does hold
+// the entry, sealing a live shard's growing segments and overwriting its schema
+// on behalf of a shard that no longer exists.
 //
-// There is no guard, and there is nothing left for one to protect: a replica on
-// a live shard cannot reach here (RetiresVChannel is false while the vchannel is
-// still listed), and a replay finds the key already released.
-func (impl *shardInterceptor) retireVChannel(ctx context.Context, msg message.MutableMessage, putCollectionMsg message.MutableAlterCollectionMessageV2, appendOp interceptors.Append) (message.MessageID, error) {
-	msgID, err := appendOp(ctx, msg)
-	if err != nil {
-		return msgID, err
+// Answered by CheckIfVChannelCanBeWritten because it is exactly this question:
+// it returns nil only when the entry exists AND names this vchannel, and both of
+// its errors (fenced by name, or no entry of this collection here) mean the same
+// thing to a DDL replica -- there is nothing here to change.
+func (impl *shardInterceptor) holdsAddressedVChannel(ctx context.Context, collectionID int64, vchannel string) bool {
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, vchannel); err != nil {
+		impl.shardManager.Logger().Warn(ctx, "collection ddl replica landed on a vchannel this pchannel does not hold, appending without effect",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel), mlog.Err(err))
+		return false
 	}
-	function.GetManager().Release(putCollectionMsg.Header().GetCollectionId(), walFunctionRunnerKey(msg.VChannel()))
-	return msgID, nil
+	return true
 }
 
 // handleCreatePartition handles the create partition message.
@@ -431,10 +436,13 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 		}
 		// Already fenced. The broadcaster re-drives a split whose source
 		// landed but was not yet persisted, so this task's own fence must
-		// append again and succeed: the shard manager keeps the first fence
-		// (SplitShard is idempotent) and the extra record is harmless to every
-		// consumer. A fence recorded by any other task -- including one whose
-		// TaskID reads zero -- is a coordinator invariant violation (one
+		// append again and succeed. The apply that follows raises the recorded
+		// fence tick to THIS record's: T_switch is the tick of the task's
+		// latest fence record, which is the one DataCoord recorded, and every
+		// fence record of one task seals the same data because the vchannel
+		// took no DML in between. A fence recorded by any other task --
+		// including one whose TaskID reads zero -- is a coordinator invariant
+		// violation (one
 		// active task per source; every fence SplitShard places carries the
 		// placing task's id, so zero is a coordinator bug, not a legacy
 		// fence); refusing it is what keeps two splits from carving one
@@ -450,6 +458,7 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 			return nil, err
 		}
 		impl.shardManager.SplitShard(message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(msgID)))
+		function.GetManager().Release(collectionID, walFunctionRunnerKey(msg.VChannel()))
 		return msgID, nil
 	}
 	// Auto-flush every growing segment of the vchannel as of the fence time
@@ -477,6 +486,15 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 		return nil, err
 	}
 	impl.shardManager.SplitShard(message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(msgID)))
+	// The fence is where the vchannel stops taking writes and loses its
+	// registration, so it is where the WAL function-runner key creation took per
+	// VCHANNEL goes back -- releasing exactly this one and no other, as
+	// handleDropCollection does. Leaving it for the retire (hours later, at
+	// adoption) would leak it across any WAL close in between: Close releases by
+	// REGISTERED vchannel, and a fenced source has no registration left to be
+	// found under. Release is idempotent, so a re-driven fence releasing again
+	// costs nothing.
+	function.GetManager().Release(collectionID, walFunctionRunnerKey(msg.VChannel()))
 	return msgID, nil
 }
 
@@ -503,6 +521,15 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	schemaChangeMsg := message.MustAsMutableSchemaChangeMessageV2(msg)
 	header := schemaChangeMsg.Header()
+	if !impl.holdsAddressedVChannel(ctx, header.GetCollectionId(), msg.VChannel()) {
+		// Appended with no effect and an empty flushed-segment set, the way an
+		// unheld vchannel is treated everywhere else here. Refusing instead
+		// would be unrecoverable, and the broadcaster retries an unrecoverable
+		// replica forever while holding the collection's exclusive key: one
+		// schema change during a split would wedge the collection's DDL until
+		// adoption.
+		return appendOp(ctx, msg)
+	}
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
 		return nil, status.NewUnrecoverableError(err.Error())
@@ -520,11 +547,24 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 	header := putCollectionMsg.Header()
 
 	// A routing commit that no longer names this vchannel retires it: the same
-	// broadcast that grows the collection's vchannel list is what tears the
-	// retired source down here, so this replica is a teardown, not a collection
-	// update. The collection-wide apply below must not run for it.
+	// broadcast that grows the collection's vchannel list is what delists the
+	// spent source, so this replica is about one retired shard, not about the
+	// collection's state. The collection-wide apply below must not run for it.
 	if messageutil.RetiresVChannel(header, putCollectionMsg.MustBody().GetUpdates(), msg.VChannel()) {
-		return impl.retireVChannel(ctx, msg, putCollectionMsg, appendOp)
+		// Nothing is left to do: the registration went at the fence and so did
+		// the vchannel's function-runner key. The replica is still appended --
+		// the recovery storage and the flusher, both keyed by vchannel, finish
+		// their own teardown from it -- but it must not fall through to the
+		// collection-wide apply below, which is keyed by collection id and
+		// would flush and re-schema whichever vchannel now holds the entry.
+		return appendOp(ctx, msg)
+	}
+
+	if !impl.holdsAddressedVChannel(ctx, header.GetCollectionId(), msg.VChannel()) {
+		// See handleSchemaChange: appended with no effect, no flush, no schema
+		// update, and no function-runner update either -- the runners are keyed
+		// by vchannel and this one's are gone.
+		return appendOp(ctx, msg)
 	}
 
 	// AlterCollection atomically flushes+fences segments (if schema change) and updates
@@ -604,6 +644,10 @@ func (impl *shardInterceptor) handleFlushAllMessage(ctx context.Context, msg mes
 func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	truncateCollectionMsg := message.MustAsMutableTruncateCollectionMessageV2(msg)
 	header := truncateCollectionMsg.Header()
+	if !impl.holdsAddressedVChannel(ctx, header.GetCollectionId(), msg.VChannel()) {
+		// See handleSchemaChange: appended with no effect, empty segment set.
+		return appendOp(ctx, msg)
+	}
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
 		return nil, status.NewUnrecoverableError(err.Error())
