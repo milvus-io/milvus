@@ -504,7 +504,14 @@ interceptor chain.
    crash between them is repaired by the retry. A post-image the collection
    already carries is a no-op; one that a later commit has already overtaken
    is skipped with a warning rather than failed, because failing it forever
-   would queue every later DDL of the collection behind it.
+   would queue every later DDL of the collection behind it. Only **one**
+   refusal may be re-read that way — a shard whose state the post-image would
+   move backwards, which is exactly what an earlier commit redelivered after a
+   later one looks like, and which the refusal marks as such. Every other
+   refusal (an unroutable namespace key, a revoked or shrinking modulus, a
+   shard delisted from a state that never stopped taking writes) says the
+   post-image is incoherent, something no later commit could have made true,
+   and stays loud.
 5. On rejection the proxy refreshes the routing table. A write to the fenced
    source vchannel is rejected with `SHARD_FENCED`; the proxy invalidates its
    cached collection meta, refetches it, re-resolves to the new owning shard
@@ -649,10 +656,11 @@ sequenceDiagram
    visible at that time. The source shard is "drained" only when **all
    three** DataCoord-local conditions hold, per source
    (`CheckShardSplitDrained`): no segment in a non-`Dropped` state remains on
-   the source vchannel; the source channel checkpoint has advanced to
-   `≥ that source's own T_switch`, and a source whose recorded `T_switch` is
-   still zero is never drained (its fence has not been recorded, so it may
-   still be accepting writes); **and** no unfinished import job has any
+   the source vchannel; the source channel checkpoint exists and has advanced
+   to `≥ that source's own T_switch` — a source with no channel checkpoint at
+   all is not drained, and neither is one whose recorded `T_switch` is still
+   zero (its fence has not been recorded, so it may still be accepting
+   writes); **and** no unfinished import job has any
    source vchannel in its `Vchannels`. The predicate is answered
    independently by each cluster's own DataCoord — see §6.5.
 
@@ -693,7 +701,11 @@ sequenceDiagram
    because the source's own replica is what retires it and a vchannel the
    collection no longer names can receive nothing later. A commit that
    delists a vchannel without naming a split task is refused outright, as is
-   one that would delist a shard not in state `Splitting`. QueryCoord picks
+   one that would delist a shard not in state `Splitting`, one that would move
+   a shard's state backwards, and one that would take the routing modulus back
+   to zero or shrink it (the modulus is the divisor every residue the shards
+   already own was computed against; only growth keeps those residues meaning
+   what they meant). QueryCoord picks
    the targets up, issues `WatchDmChannel`, and — because the child delegators
    already exist on that QueryNode with all segments loaded — converts
    them in place rather than building fresh ones:
@@ -844,7 +856,7 @@ of the same broadcast has been acked in this cluster.** The gate sits in the
 secondary proxy's `replicateService.Append`, after the remap and before the
 append, and waits on the streamingcoord RPC
 `StreamingCoordBroadcastService.WaitVChannelsAcked(broadcast_id, vchannels)`,
-which blocks until those vchannels have a recorded checkpoint here — including
+which blocks until those vchannels have a recorded **ack** here — including
 waiting for the broadcast task itself to be created, since a secondary learns
 of a broadcast only from whichever replica arrives first.
 
@@ -891,9 +903,12 @@ primary is drained when it sends, so it passes immediately; a secondary refuses
 with a System error and the broadcaster retries with backoff, which queues the
 same collection's later DDL callbacks behind it and leaves other collections
 untouched. Two redeliveries are exempted and apply *nothing*: a post-image the
-collection already carries, and one a later commit has overtaken — DataCoord
-reclaims a finished split's task record, so asking about it would be an error
-retried forever.
+collection already carries, and one a later commit has overtaken — once
+DataCoord reclaims a finished split's task record (the reaper lands with the
+split manager, §11), asking about it would be an error retried forever. A
+retiring post-image that names no split task at all cannot be answered by any
+DataCoord: the RPC refuses such a request outright, and if one is somehow
+already in the WAL the callback logs an Error naming the wedge it causes.
 
 **Retiring the source's WAL-side state.** When the adoption replica reaches the
 source's StreamingNode there is nothing left for the shard manager to do (the
@@ -951,11 +966,13 @@ landed on — and each cluster's DataCoord only ever reads its own.
   from the fence's own append result — because the redistribution drain (§6.3)
   gates on `channelCheckpoint(source) ≥ T_switch`.
 - **No loss, no duplication.** Writes go directly to their final WAL with
-  unchanged ack semantics. The fence rejects in the lock interceptor,
-  which runs before TimeTick allocation and the backend append
+  unchanged ack semantics. The fence rejects in the **shard** interceptor,
+  which runs after TimeTick allocation but before the backend append
   (interceptor order: redo → lock → replicate → timetick → shard), so a rejected
-  write was never sequenced nor persisted and the retry after refresh
-  cannot double-write. A transaction force-failed by the fence never
+  write is never appended to the WAL — it is never persisted and never visible
+  to any consumer, and the retry after refresh cannot double-write. (The
+  allocated tick is acked with the error, so a rejection does not hold the
+  watermark back either.) A transaction force-failed by the fence never
   committed — its body messages already in WAL0 are dropped by the
   consumer-side TxnBuffer — so retrying it as a whole on the new vchannel
   cannot duplicate either. The split's own appends are idempotent against the
@@ -1070,13 +1087,17 @@ landed on — and each cluster's DataCoord only ever reads its own.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `dataCoord.shardSplit.enable` | `false` | Master switch, refreshable. Gates the trigger (automatic and manual); disabling stops new tasks but never interrupts a task already past the fence. |
+| `dataCoord.shardSplit.enable` | `false` | Master switch, refreshable. Gates both ways of starting a split — the size trigger and a hand-set shard count; with it off, a request to change `collection.shardNum` is refused outright. It never interrupts a task already past the fence. |
+| `dataCoord.shardSplit.autoTriggerEnable` | `true` | Selects which of the two mutually exclusive sizing modes the cluster uses, and has no effect unless `enable` is on. `true`: the size trigger splits over-loaded shards on its own, and a hand-set `collection.shardNum` is **rejected** — letting both act would have them fence the same shards from two directions. `false`: the size trigger is off and the shard count is the user's to set. The mode is also settable per collection through `collection.shardSplitMode` (`auto` / `manual`), so one collection can be sized by hand beside a managed one; the cluster switch is the kill switch over the trigger. |
 | `dataCoord.shardSplit.checkInterval` | 3600s | Interval at which the trigger inspects the per-shard statistics. |
 | `dataCoord.shardSplit.maxShardSize` | 2048 (GB) | Per-shard data size that triggers a split. |
 | `dataCoord.shardSplit.maxShardRows` | 500M | Per-shard row count that triggers a split. |
 | `dataCoord.shardSplit.maxNamespaceCount` | 100K | Per-shard namespace count that triggers a split. |
 | `dataCoord.shardSplit.maxConcurrentTasks` | 1 | Cluster-wide concurrent split tasks. |
 | `dataCoord.shardSplit.relabelBatchSize` | 256 | Segments relabeled to the target shards per redistribution round. |
+| `dataCoord.shardSplit.rehashMaxCollectionSize` | 0 (GB, disabled) | The largest collection whose shard count may be changed by hand. A rehash rewrites every shard at once and cannot drop a source until the rewrite is adopted — until then it is the only readable copy — so the collection is resident twice for the length of the rewrite. An automatic doubling costs one shard's worth of that; a rehash costs the whole collection. Set it to the largest collection the query nodes can hold twice. |
+| `dataCoord.shardSplit.taskRetention` | 1800s | How long a terminal (Done/Aborted) split task record is kept before it is reaped from meta. Declared but not yet consumed — the reaper lands with the split manager (§11). |
+| `dataCoord.shardSplit.minSiblingRatio` | 0.05 (not exported) | Guard against re-doubling a shard a previous doubling did not relieve: a doubling cuts on the next hash bit, so its halves should end up comparable, which they do not when one primary key dominates the shard. The trigger refuses to double a shard whose sibling half is smaller than this fraction of it, and warns instead. 0 disables. |
 
 Even with the switch on, split stays disabled on WAL backends that cannot host
 additional topics. The thresholds never trigger on a shard holding a single
@@ -1108,9 +1129,11 @@ callbacks (§6.5).
 - **Shard states advance monotonically.** `Normal → Splitting → Dropped` for
   a source, `Creating → Normal` for a target; staying put is always legal,
   which is what makes a redelivered commit a no-op rather than a rejection.
-  A commit that would move a shard backwards is refused; one a *later*
-  commit has already overtaken is skipped rather than refused, so a retrying
-  callback cannot wedge the collection's DDL queue.
+  A commit that would move a shard backwards is refused — and that refusal
+  alone, because it is the one a correct system also produces, may be re-read
+  as "a later commit already overtook this one" and skipped, so a retrying
+  callback cannot wedge the collection's DDL queue. Every other refusal names
+  an incoherent post-image and stays an error.
 
 | Crash point | Behaviour |
 |---|---|
@@ -1138,17 +1161,26 @@ callbacks (§6.5).
 
 | Component | Work |
 |-----------|------|
-| Common | The `SplitShard` message type (`ExclusiveRequired` + `FreshTimeTick`, replicable, on the delegator whitelist), its header (collection/task id, sources, targets with residues, modulus, partition ids, flushed segment ids) and body (target genesis schema + routing post-image); `message.SplitShardRoleOf` — the one place a replica's role is decided; `BroadcastHeader.append_first_vchannels`; `AlterCollectionMessageUpdates.split_task_id` and `messageutil.RetiresVChannel`; no `CreateVChannel`, `DropVChannel`, `Activate` or `ManualFlush` message (message-type numbers 50 and 51 are reserved for the two that were folded in); `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable; `SHARD_FENCED` carries the recorded `T_switch` and the task that placed it); `schemapb` shard routing fields (`CollectionShardInfo`, `HashRouting`, `ShardState`, `routing_modulus`, `shard_by`); residue routing table derived from collection meta (`internal/util/routing`) |
+| Common | The `SplitShard` message type (`ExclusiveRequired` + `FreshTimeTick`, replicable, passed by the delegator msgstream's message-type filter, `delegatorMessageTypes` in `internal/distributed/streaming/msgstream_adaptor.go` — the querynode filter node still drops it, so the read-path handling lands separately), its header (collection/task id, sources, targets with residues, modulus, partition ids, flushed segment ids) and body (target genesis schema + routing post-image); `message.SplitShardRoleOf` — the one place a replica's role is decided; `BroadcastHeader.append_first_vchannels`; `AlterCollectionMessageUpdates.split_task_id` and `messageutil.RetiresVChannel`; no `CreateVChannel`, `DropVChannel`, `Activate` or `ManualFlush` message (message-type numbers 50 and 51 are reserved for the two that were folded in); the `SHARD_FENCED` error code (unrecoverable; it carries the recorded `T_switch` and the task that placed it **only on a re-fence** — the DML rejection path passes zeros, since a write client refreshes routing and never reads them) and `ROUTING_STALE` (defined and reserved, no producer emits it today, §3.3); `schemapb` shard routing fields (`CollectionShardInfo`, `HashRouting`, `ShardState`, `routing_modulus`, `shard_by`); residue routing table derived from collection meta (`internal/util/routing`) |
 | DataCoord | Issue the one `SplitShard` broadcast and nothing else on the write switch (`broadcastShardSplit` reads nothing back from it); `CommitShardSplit` (idempotent upsert of the split task by task id, per-source `T_switch`, target genesis checkpoints) and `CheckShardSplitDrained` (no live source segment / checkpoint ≥ that source's `T_switch` / no unfinished import job) as internal RPCs; the persisted `SplitShardTask` record and its store; trigger and split-point selection; batched relabel (segments + L0, skipping `IsImporting`); multi-round redistribution; source-shard freeze; issuing the adoption `AlterCollection` once drained |
-| RootCoord | The `SplitShard` ack callback (validate the post-image and cross-check it against the header → `CommitShardSplit` → `MetaTable.ApplyShardSplitRouting` → `BroadcastAlteredCollection` → expire caches), the drain gate on an `AlterCollection` that delists a vchannel, `CommitShardSplitRouting` (the adoption broadcast, over CChannel ∪ the current vchannels ∪ the post-image's, taking the collection's own resource keys), and the topology bookkeeping an alter that changes the vchannel list must now do (`generalCnt`, pchannel stats) |
+| RootCoord | The `SplitShard` ack callback (validate the post-image and cross-check it against the header → `CommitShardSplit` → `MetaTable.ApplyShardSplitRouting` → `BroadcastAlteredCollection` → expire caches), the drain gate on an `AlterCollection` that delists a vchannel, `CommitShardSplitRouting` (the adoption broadcast, over CChannel ∪ the current vchannels ∪ the post-image's, taking the collection's own resource keys), the topology bookkeeping an alter that changes the vchannel list must now do (`generalCnt`, pchannel stats), and the **user-facing entry point** in `internal/rootcoord/alter_collection_shard_num.go`: the declarative `collection.shardNum` property (recorded as an intent that DataCoord reconciles toward by rehashing; deleting the property withdraws it), the per-collection `collection.shardSplitMode` (`auto`/`manual`), and the checks rootcoord can answer in the caller's own response — shard split disabled, auto mode forbidding a hand-set count, minimum of 2, the `proxy.maxShardNum` cap, and pchannel headroom for a rehash (which holds sources and targets at once, so it needs `len(current vchannels) + desired`) |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion; the broadcaster's two-phase append with `AckPartial`; `WaitVChannelsAcked` and its shutdown release |
 | StreamingNode | Source side: the source replica auto-flushes growing segments (embedding their IDs), fences the vchannel and tears its registration down leaving a named `SplitFence` tombstone; recovery meta `VCHANNEL_STATE_SPLITTED` with `split_time_tick`, later `retired` and collected locally; the data sync service closes itself when its checkpoint passes the fence. Target side: the target replica runs the three genesis paths (shard manager / RecoveryStorage / flusher) from the body's `CreateCollection`-shaped schema, with no barrier and no `Creating`/`Activate` state. Bystander replicas are a deliberate no-op in all three; an unknown-role replica is refused |
 | Proxy | Residue routing lookup, reject-and-refetch loop, cache invalidation on adoption; on a secondary, the replicate service's name remap for `SplitShard` and for `AlterCollection(shard_split_routing)`, and the append gate |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
 
-Two pieces the design assumes are **not** on this branch and land with the
-split manager's rebase: the primary-only trigger, and deriving a task's
-`redistribution` mode (relabel vs. rewrite) from the collection's routing mode
-— the ack callback deliberately does not set it, and a task left `Unknown`
-must be refused rather than guessed.
+Three pieces the design assumes are **not** on this branch and land with the
+split manager's rebase:
+
+- the primary-only trigger, and with it the size trigger and the reconciler
+  that acts on a declared `collection.shardNum`;
+- deriving a task's `redistribution` mode (relabel vs. rewrite) from the
+  collection's routing mode — the ack callback deliberately does not set it,
+  and a task left `Unknown` must be refused rather than guessed;
+- reclaiming a terminal split task record. The catalog can delete one
+  (`DropSplitShardTask`) and `dataCoord.shardSplit.taskRetention` declares how
+  long to keep it, but nothing calls either yet, so today a finished split's
+  record stays in meta. Every place this document says a redelivered adoption
+  would ask about a reclaimed task describes the behaviour once the reaper
+  exists.
