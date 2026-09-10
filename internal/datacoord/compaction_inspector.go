@@ -538,6 +538,7 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 		return false
 	})
 
+	var removed []CompactionTask
 	c.executingGuard.Lock()
 	for id, task := range c.executingTasks {
 		mlog.Info(context.TODO(), "Compaction inspector removing tasks by channel",
@@ -548,12 +549,17 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 				mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
 				mlog.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
-			c.scheduler.AbortAndRemoveTask(id)
 			delete(c.executingTasks, id)
-			c.meta.GetCompactionTaskMeta().removeTaskMetric(task.GetTaskProto())
+			removed = append(removed, task)
 		}
 	}
 	c.executingGuard.Unlock()
+	// Stop inspector processing first, then wait for scheduler callbacks without
+	// holding executingGuard across worker RPCs. Account for their final state.
+	for _, task := range removed {
+		c.scheduler.AbortAndRemoveTask(task.GetTaskProto().GetPlanID())
+		c.meta.GetCompactionTaskMeta().removeTaskMetric(task.GetTaskProto())
+	}
 }
 
 func (c *compactionInspector) submitTask(t CompactionTask) error {

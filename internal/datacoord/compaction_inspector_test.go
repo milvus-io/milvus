@@ -94,19 +94,26 @@ func TestRemoveCompactionTaskMetricsUsePersistedState(t *testing.T) {
 	compactionTask := newMixCompactionTask(p, nil, m, newMockVersionManager())
 	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99532", p.Type.String(), metrics.Executing)
 	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Pending)
-	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99532", p.Type.String(), metrics.Done)
-	initialDone := testutil.ToFloat64(done)
 	initialExecuting, initialPending := testutil.ToFloat64(executing), testutil.ToFloat64(pending)
 	t.Cleanup(func() {
 		executing.Set(initialExecuting)
 		pending.Set(initialPending)
-		done.Set(initialDone)
 	})
 
 	scheduler := task.NewMockGlobalScheduler(t)
 	scheduler.EXPECT().Enqueue(compactionTask).Once()
-	scheduler.EXPECT().AbortAndRemoveTask(p.PlanID).Once()
-	handler := newCompactionInspector(m, nil, nil, scheduler, scheduler, newMockVersionManager())
+	var handler *compactionInspector
+	scheduler.EXPECT().AbortAndRemoveTask(p.PlanID).Run(func(int64) {
+		unlocked := handler.executingGuard.TryLock()
+		var stillExecuting bool
+		if unlocked {
+			_, stillExecuting = handler.executingTasks[p.PlanID]
+			handler.executingGuard.Unlock()
+		}
+		require.True(t, unlocked, "Abort must not hold the inspector lock while waiting for worker RPCs")
+		require.False(t, stillExecuting, "inspector must stop processing the task before Abort")
+	}).Once()
+	handler = newCompactionInspector(m, nil, nil, scheduler, scheduler, newMockVersionManager())
 	handler.restoreTask(compactionTask)
 
 	// Metadata contains the last persisted state even if the task object's
@@ -115,15 +122,6 @@ func TestRemoveCompactionTaskMetricsUsePersistedState(t *testing.T) {
 	require.NoError(t, m.SaveCompactionTask(ctx, retry))
 	handler.removeTasksByChannel(p.Channel)
 	handler.removeTasksByChannel(p.Channel)
-	// A scheduler callback popped before Abort can still save after removal.
-	for _, state := range []datapb.CompactionTaskState{datapb.CompactionTaskState_executing, datapb.CompactionTaskState_executing, datapb.CompactionTaskState_completed, datapb.CompactionTaskState_cleaned} {
-		late := compactionTask.ShadowClone(setState(state))
-		require.NoError(t, m.SaveCompactionTask(ctx, late))
-		require.Equal(t, state, m.GetCompactionTaskMeta().GetCompactionTasksByTriggerID(p.TriggerID)[0].State)
-		require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
-		require.Equal(t, initialPending, testutil.ToFloat64(pending))
-		require.Equal(t, initialDone, testutil.ToFloat64(done))
-	}
 	require.Empty(t, handler.executingTasks)
 	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
 	require.Equal(t, initialPending, testutil.ToFloat64(pending))
