@@ -161,10 +161,15 @@ type ReplicaKeyEntry struct {
 // SegmentChangeGroupEntry targets a segment change group record.
 //
 // For ActionUpdate, Group is the full already-mutated group and its record is
-// persisted; compose it as the commit marker of a batch publish txn so a
-// visible DataView snapshot implies its SegmentMeta and the group's COMMITTED
-// state are durable together. For ActionDelete, CollectionID/GroupID identify
-// the record to remove (a COMMITTED group cleanup or a collection drop).
+// persisted. The commit-marker semantics are STATE-qualified (C13): a TERMINAL
+// group (COMMITTED/FAILED/ABORTED) is the visibility marker of a batch publish
+// txn — compose it AFTER the segment/DataView actions so a visible terminal
+// record implies they landed — while an ALIVE group (STAGED/READY) must land
+// BEFORE its staged members (the kv dispatch emits a plain in-order Save for
+// it, and the composite write orders it ahead of the member actions), so a
+// chunked-fallback crash can never leave invisible members with no group
+// record. For ActionDelete, CollectionID/GroupID identify the record to remove
+// (a COMMITTED group cleanup or a collection drop).
 type SegmentChangeGroupEntry struct {
 	Group        *model.SegmentChangeGroup
 	CollectionID int64
@@ -307,8 +312,13 @@ func ReleaseReplica(collectionID, replicaID int64) UpdateAction {
 
 // SaveSegmentChangeGroup returns an UpdateAction that persists g as a segment
 // change group upsert (full-value replace). It is the write used both for a
-// standalone state transition and — composed after the segment/DataView
-// actions — as the commit marker of a batch publish txn.
+// standalone state transition and for composing into a batch write. The kv
+// dispatch makes the commit-marker semantics STATE-qualified (C13): a TERMINAL
+// group (COMMITTED/FAILED/ABORTED) is commit-marked and must be composed AFTER
+// the segment/DataView actions as the visibility marker; an ALIVE group
+// (STAGED/READY) is persisted as a plain in-order Save and must be composed
+// BEFORE its staged member actions so a fallback crash cannot orphan invisible
+// members.
 func SaveSegmentChangeGroup(g *model.SegmentChangeGroup) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentChangeGroupEntry{Group: g}}
 }

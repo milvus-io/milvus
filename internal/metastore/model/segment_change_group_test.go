@@ -134,6 +134,18 @@ func TestSegmentChangeGroup_Validate(t *testing.T) {
 		g.SupersededSegmentIDs = []int64{1001}
 		require.Error(t, g.Validate())
 	})
+	t.Run("out-of-range state", func(t *testing.T) {
+		g := testGroup()
+		g.State = SegmentChangeState(99)
+		require.Error(t, g.Validate())
+	})
+	t.Run("out-of-range source", func(t *testing.T) {
+		g := testGroup()
+		g.Source = SegmentChangeSource(0)
+		require.Error(t, g.Validate())
+		g.Source = SegmentChangeSource(99)
+		require.Error(t, g.Validate())
+	})
 }
 
 func TestSegmentChangeGroup_MarshalRoundTrip(t *testing.T) {

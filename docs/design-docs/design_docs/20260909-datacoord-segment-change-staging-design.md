@@ -467,10 +467,16 @@ Per-term definition and edge cases:
   `statsTaskMeta` `StatsSubJob` to have converged (text/JSON-key stats written
   back or already present in the V3 manifest).
 - **schemaReady**: `segment.SchemaVersion >= collection.SchemaVersion`
-  (including the function-field materialization constraint). **Edge case**:
-  while a schema bump is unfinished, `index_inspector.go:188` defers index
-  build, so the group stays STAGED until the bump compaction converges; if the
-  bump fails → the group eventually ABORTED (see edge case E08, §6).
+  (including the function-field materialization constraint). **Edge case (C23)**:
+  a schema bump landing while a group is staged is UNCONVERGEABLE, not a wait —
+  the schema-bump materialization only targets visible segments
+  (`isSchemaBumpDataSegment` requires `!IsInvisible`, invariant R8), and staged
+  members are invisible by construction, so nothing can advance their
+  SchemaVersion. The readiness evaluation must therefore treat "member
+  SchemaVersion < collection SchemaVersion while staged" as a FAILED/ABORTED
+  condition (bounded by the staging timeout), not wait for a bump that can
+  never target the staged members; otherwise the whole batch burns its timeout
+  and is silently redone.
 
 Excluded from readiness evaluation:
 
@@ -803,19 +809,22 @@ output splits into multiple sequentially published groups (the previous subgroup
 COMMITTED before the next publishes). `source_job_id` is shared;
 `publish_epoch` is globally monotonic.
 
-> **Superseded retirement across subgroups (C6)**: superseded retirement is
-> NOT per-subgroup when an M:N change shares one input set. Every output of a
-> compaction carries the FULL input set as `CompactionFrom`
-> (`meta.go:2748`), so if the first subgroup retires the shared superseded
-> parents while a later subgroup's outputs are still `IsInvisible=true`, rows
-> that live only in the later outputs vanish for the whole publication window —
-> and permanently if that subgroup never publishes. Instead, a superseded
-> parent is retired only by the LAST covering subgroup (all subgroups of the
-> same `source_job_id` that list it must be COMMITTED first), i.e. superseded
-> retirement is reference-counted across subgroups of one change. Splitting the
-> output set of a single M:N compaction into subgroups therefore requires the
-> subgroup planner to respect this rule; a subgroup that is not the last owner
-> of any superseded parent retires nothing.
+> **Subgroup splitting and superseded retirement (C6, C20)**: subgroup
+> splitting applies ONLY to independent task outputs that own DISJOINT
+> superseded sets. It NEVER splits the output set of a single M:N compaction,
+> because every output of a compaction carries the FULL input set as
+> `CompactionFrom` (`meta.go:2748`) — sharing that input set across subgroups
+> is impossible under the anti-duplication invariant (a parent may be listed by
+> at most one ALIVE group), and even if it were allowed it would create either
+> a duplication window (earlier subgroups' members visible while the parent is
+> not yet retired, and the read-time lineage fallback that used to hide a child
+> whose parents are all present is deleted in §7) or permanent duplication
+> (a later subgroup fails → the parent is never retired). A compaction is
+> therefore exactly one group, and its superseded parents are retired
+> atomically at that single group's publish; each subgroup publishes and
+> retires only its own disjoint parents. The earlier "reference-counted
+> retirement by last covering subgroup" formulation is withdrawn: it contradicts
+> the anti-duplication invariant and cannot be implemented.
 
 ## Crash Recovery and Replay
 
