@@ -482,7 +482,7 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 	}
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndex() {
+func (suite *SegmentLoaderSuite) TestLoadIndexSkipsFlatWithoutIndexFiles() {
 	ctx := context.Background()
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
@@ -490,7 +490,14 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		CollectionID: suite.collectionID,
 		IndexInfos: []*querypb.FieldIndexInfo{
 			{
+				FieldID:        107,
 				IndexFilePaths: []string{},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: mock_segcore.IndexFaissIDMap,
+					},
+				},
 			},
 		},
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
@@ -502,10 +509,10 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 	}
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.ErrorIs(err, merr.ErrIndexNotFound)
+	suite.NoError(err)
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+func (suite *SegmentLoaderSuite) TestLoadIndexWithoutIndexFilesSkipsResourceCheck() {
 	ctx := context.Background()
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
@@ -544,7 +551,7 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.Error(err)
+	suite.NoError(err)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
