@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -117,15 +118,22 @@ func UpdateArrowIOThreadPoolCapacity(threads int) {
 	C.SetArrowIOThreadPoolCapacity(C.int(threads))
 }
 
+// defaultArrowIOThreadPoolCapacity is the pool size used when
+// common.arrow.ioThreadPoolCoefficient is 0.
+const defaultArrowIOThreadPoolCapacity = 8
+
 // ResolveArrowIOThreadPoolCapacity returns the effective arrow IO thread pool
-// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. Returns 0
-// when the coefficient is unset, which signals the C++ side to keep arrow's
-// built-in default (8).
-func ResolveArrowIOThreadPoolCapacity() int {
+// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. A zero
+// coefficient returns defaultArrowIOThreadPoolCapacity. A negative coefficient
+// returns an error.
+func ResolveArrowIOThreadPoolCapacity() (int, error) {
 	cfg := &paramtable.Get().CommonCfg
 	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
-	if coef <= 0 {
-		return 0
+	if coef < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid %s %v: must be >= 0", cfg.ArrowIOThreadPoolCoefficient.Key, coef)
+	}
+	if coef == 0 {
+		return defaultArrowIOThreadPoolCapacity, nil
 	}
 	threads := int(coef * float64(hardware.GetCPUNum()))
 	if threads < 1 {
@@ -134,26 +142,37 @@ func ResolveArrowIOThreadPoolCapacity() int {
 	if maxCap := cfg.ArrowIOThreadPoolMaxCapacity.GetAsInt(); maxCap > 0 && threads > maxCap {
 		threads = maxCap
 	}
-	return threads
+	return threads, nil
+}
+
+// ApplyArrowIOThreadPoolCapacity resolves the configured capacity and applies
+// it to arrow's IO thread pool. Invalid config is logged and the pool is left
+// unchanged. `source` and `trigger` are included in the log entry.
+func ApplyArrowIOThreadPoolCapacity(source, trigger string) {
+	threads, err := ResolveArrowIOThreadPoolCapacity()
+	if err != nil {
+		mlog.Warn(context.TODO(), "ignore invalid arrow io thread pool config",
+			mlog.String("source", source),
+			mlog.String("trigger", trigger),
+			mlog.String("error", err.Error()))
+		return
+	}
+	UpdateArrowIOThreadPoolCapacity(threads)
+	mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
+		mlog.String("source", source),
+		mlog.String("trigger", trigger),
+		mlog.Int("threads", threads))
 }
 
 // RegisterArrowIOThreadPoolWatchers wires hot-reload of arrow IO pool capacity
-// to paramtable updates on the two coefficient/maxCapacity keys. `source` is
-// included in the log entry so log lines from different components (e.g.
-// "querynode" vs "datanode" in standalone, where both register the same keys)
-// remain distinguishable.
+// to paramtable updates on the two coefficient/maxCapacity keys.
 func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source string) {
 	handler := func(key string) func(*config.Event) {
 		return func(evt *config.Event) {
 			if !evt.HasUpdated {
 				return
 			}
-			newThreads := ResolveArrowIOThreadPoolCapacity()
-			UpdateArrowIOThreadPoolCapacity(newThreads)
-			mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
-				mlog.String("source", source),
-				mlog.String("trigger", key),
-				mlog.Int("threads", newThreads))
+			ApplyArrowIOThreadPoolCapacity(source, key)
 		}
 	}
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
