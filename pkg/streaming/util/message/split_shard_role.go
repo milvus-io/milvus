@@ -19,6 +19,12 @@ const (
 	SplitShardRoleTarget
 	// SplitShardRoleControl: the control channel replica, orders the ack callback.
 	SplitShardRoleControl
+	// SplitShardRoleBystander: a vchannel of the SAME collection that this
+	// split neither fences nor creates. The broadcast now covers every
+	// vchannel of the collection (not just the ones the split acts on), so
+	// this replica must land and pass through every consumer without effect,
+	// exactly as a bystander watches an event that does not concern it.
+	SplitShardRoleBystander
 )
 
 // SplitShardRoleOf decides the role of a replica from the header it carries
@@ -34,6 +40,13 @@ func SplitShardRoleOf(header *messagespb.SplitShardMessageHeader, vchannel strin
 	}
 	if SplitShardTargetOf(header, vchannel) != nil {
 		return SplitShardRoleTarget
+	}
+	// Neither a source, a target nor the control channel: a replica on
+	// another vchannel of the SAME collection is a bystander, exactly what
+	// the broadcast-to-the-whole-collection redesign puts there on purpose. A
+	// vchannel of a different collection is a genuine misroute.
+	if funcutil.GetCollectionIDFromVChannel(vchannel) == header.GetCollectionId() {
+		return SplitShardRoleBystander
 	}
 	return SplitShardRoleUnknown
 }

@@ -45,6 +45,13 @@ type SplitShardParam struct {
 	// doubling, every shard of the collection for a rehash. They are appended
 	// (and therefore persisted) before any other replica of the broadcast.
 	SourceVChannels []string
+	// CollectionVChannels is the collection's current vchannel list -- every
+	// shard it has BEFORE this split, sources included. The broadcast reaches
+	// every one of them (not only the sources, the targets and the control
+	// channel), so that a shard the split does not act on -- a bystander --
+	// still observes it: every source must be one of these, and no target may
+	// already be one, since a target is a NEW shard this split creates.
+	CollectionVChannels []string
 	// Targets are the target shards the sources split into, each with its
 	// vchannel and the residues it owns. Their residues must be disjoint and
 	// exactly cover the sources' residues, which is guaranteed by the
@@ -115,6 +122,11 @@ func (p *SplitShardParam) Validate() error {
 	// least two shards" is a property of the task and is checked where the
 	// task is prepared; this parameter cannot see the other sources' shares to
 	// check it here.
+	collectionVChannels := make(map[string]struct{}, len(p.CollectionVChannels))
+	for _, vchannel := range p.CollectionVChannels {
+		collectionVChannels[vchannel] = struct{}{}
+	}
+
 	vchannels := make(map[string]struct{}, len(p.SourceVChannels)+len(p.Targets))
 	for _, source := range p.SourceVChannels {
 		if source == "" {
@@ -124,6 +136,12 @@ func (p *SplitShardParam) Validate() error {
 			return merr.WrapErrServiceInternalMsg("duplicated source vchannel %s in shard split", source)
 		}
 		vchannels[source] = struct{}{}
+		// A source is fenced by this split, so it must be a real, pre-existing
+		// shard of the collection -- one the coordinator listed as such --
+		// never a vchannel this split invents for the occasion.
+		if _, ok := collectionVChannels[source]; !ok {
+			return merr.WrapErrServiceInternalMsg("source vchannel %s must be one of the collection's current vchannels", source)
+		}
 	}
 	routingTargets := make(map[string]struct{}, len(p.Routing.GetVirtualChannelNames()))
 	for _, vchannel := range p.Routing.GetVirtualChannelNames() {
@@ -138,6 +156,12 @@ func (p *SplitShardParam) Validate() error {
 			return merr.WrapErrServiceInternalMsg("duplicated vchannel %s in shard split", vchannel)
 		}
 		vchannels[vchannel] = struct{}{}
+		// A target is a NEW shard this split creates, so it must not already
+		// be one of the collection's current vchannels -- that would make the
+		// broadcast overwrite a live shard's genesis with another one's.
+		if _, ok := collectionVChannels[vchannel]; ok {
+			return merr.WrapErrServiceInternalMsg("target vchannel %s must not already be one of the collection's current vchannels", vchannel)
+		}
 		// The message is a PERMANENT record -- it is what a replay derives the
 		// window's fronting assignment from -- so a target without residues, or
 		// with one that is not below the modulus they are taken against, is
@@ -186,12 +210,29 @@ func NewSplitShardBroadcastMessage(param SplitShardParam) (message.BroadcastMuta
 	if err := param.Validate(); err != nil {
 		return nil, err
 	}
-	vchannels := make([]string, 0, len(param.SourceVChannels)+len(param.Targets)+1)
-	vchannels = append(vchannels, param.SourceVChannels...)
-	for _, target := range param.Targets {
-		vchannels = append(vchannels, target.GetVchannel())
+	// The broadcast reaches every vchannel of the collection, so that a
+	// bystander shard -- one this split neither fences nor creates -- still
+	// observes it: the union of CollectionVChannels, SourceVChannels, the
+	// targets and the control channel, deduplicated.
+	seen := make(map[string]struct{}, len(param.CollectionVChannels)+len(param.SourceVChannels)+len(param.Targets)+1)
+	vchannels := make([]string, 0, len(param.CollectionVChannels)+len(param.Targets)+1)
+	addVChannel := func(vchannel string) {
+		if _, ok := seen[vchannel]; ok {
+			return
+		}
+		seen[vchannel] = struct{}{}
+		vchannels = append(vchannels, vchannel)
 	}
-	vchannels = append(vchannels, param.ControlChannel)
+	for _, vchannel := range param.CollectionVChannels {
+		addVChannel(vchannel)
+	}
+	for _, source := range param.SourceVChannels {
+		addVChannel(source)
+	}
+	for _, target := range param.Targets {
+		addVChannel(target.GetVchannel())
+	}
+	addVChannel(param.ControlChannel)
 
 	msg, err := message.NewSplitShardMessageBuilderV2().
 		WithHeader(&message.SplitShardMessageHeader{

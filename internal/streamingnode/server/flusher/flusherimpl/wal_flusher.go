@@ -325,11 +325,20 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		case message.SplitShardRoleSource:
 			// The source replica falls through to the data sync service, whose
 			// dd_node seals the fenced segments and sets the flush timestamp.
+		case message.SplitShardRoleBystander:
+			// The broadcast now covers every vchannel of the collection, so a
+			// bystander shard -- neither fenced nor created by this split --
+			// is expected to receive a replica here. There is nothing to
+			// spawn and nothing for the dd_node to seal, so it is not
+			// forwarded either; unlike the unknown-role case below, this is
+			// routine, not worth a warning.
+			return nil
 		default:
-			// A replica landing on a vchannel that is neither a source nor a
-			// target has no data sync service action to take here, symmetric
-			// with the target arm above: there is nothing to spawn and nothing
-			// for the dd_node to seal, so it must not be forwarded either.
+			// A replica landing on a vchannel that is neither a source, a
+			// target nor even the same collection has no data sync service
+			// action to take here, symmetric with the target arm above: there
+			// is nothing to spawn and nothing for the dd_node to seal, so it
+			// must not be forwarded either.
 			impl.logger.Warn(ctx, "split shard replica of unknown role, not forwarded", mlog.FieldMessage(msg))
 			return nil
 		}

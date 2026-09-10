@@ -153,6 +153,30 @@ func TestRecoveryStorageSplitShardOfUnknownRoleOnARegisteredVChannelIsAnInconsis
 	assert.Equal(t, []string{"split shard replica of unknown role"}, reasons)
 }
 
+// TestRecoveryStorageSplitShardOnBystanderIsIgnored: the broadcast now covers
+// every vchannel of the collection, so a replica landing on a vchannel that
+// is registered but is neither the source nor one of the targets -- a
+// bystander shard of the same collection -- must be ignored: no state change
+// on the bystander's own vchannel meta, and (unlike a genuine misroute) no
+// inconsistency reported.
+func TestRecoveryStorageSplitShardOnBystanderIsIgnored(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+	addActiveVChannel(rs, "p0_1v3", 1, []int64{2})
+
+	reasons := make([]string, 0)
+	mockDetect := mockey.Mock((*recoveryStorageImpl).detectInconsistency).To(
+		func(r *recoveryStorageImpl, ctx context.Context, msg message.ImmutableMessage, reason string, extra ...mlog.Field) {
+			reasons = append(reasons, reason)
+		}).Build()
+	defer mockDetect.UnPatch()
+
+	// "p0_1v3" is collection 1's third shard: neither "p0_1v0" (the source)
+	// nor "p0_1v1"/"p0_1v2" (the targets).
+	rs.handleMessage(context.Background(), newSplitShardMessage("p0_1v3", "p0_1v0", []string{"p0_1v1", "p0_1v2"}, 1, []int64{2}, 100))
+	assert.Empty(t, reasons)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, rs.vchannels["p0_1v3"].meta.State)
+}
+
 func TestVChannelRecoveryInfoObserveSplitShard(t *testing.T) {
 	info := &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{

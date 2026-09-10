@@ -409,9 +409,16 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 		return impl.handleSplitShardOnSource(ctx, msg, splitShardMsg, appendOp)
 	case message.SplitShardRoleTarget:
 		return impl.handleSplitShardOnTarget(ctx, msg, splitShardMsg, appendOp)
+	case message.SplitShardRoleBystander:
+		// The broadcast now covers every vchannel of the collection, so a
+		// bystander shard -- neither fenced nor created by this split -- must
+		// still see the message land, but takes no shard-manager action here:
+		// there is nothing on this vchannel for the split to fence or register.
+		return appendOp(ctx, msg)
 	default:
-		// A replica on a vchannel the split neither fences nor creates is a
-		// coordinator bug; refuse it rather than fence or register a stranger.
+		// A replica on a vchannel that is neither a source, a target, the
+		// control channel nor even the same collection is a coordinator bug;
+		// refuse it rather than fence or register a stranger.
 		return nil, status.NewUnrecoverableError("split shard replica landed on vchannel %s, which is neither a source nor a target of task %d",
 			msg.VChannel(), splitShardMsg.Header().GetSplitTaskId())
 	}

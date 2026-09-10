@@ -23,11 +23,12 @@ import (
 // grown vchannel list covers every target.
 func newSplitShardParam() streaming.SplitShardParam {
 	return streaming.SplitShardParam{
-		CollectionID:    1,
-		DBID:            2,
-		SplitTaskID:     100,
-		SourceVChannels: []string{"p0_1v0"},
-		RoutingModulus:  2,
+		CollectionID:        1,
+		DBID:                2,
+		SplitTaskID:         100,
+		SourceVChannels:     []string{"p0_1v0"},
+		CollectionVChannels: []string{"p0_1v0"},
+		RoutingModulus:      2,
 		Targets: []*message.SplitShardTarget{
 			{Vchannel: "p0_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
 			{Vchannel: "p0_1v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
@@ -77,6 +78,31 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 		assert.Equal(t, "col", body.GetGenesis().GetCollectionSchema().GetName())
 		assert.Equal(t, param.Routing.GetVirtualChannelNames(), body.GetRouting().GetVirtualChannelNames())
 	}
+}
+
+// TestNewSplitShardBroadcastMessageCoversTheCollection pins the broadcast
+// redesign: it must reach every vchannel of the collection, not only the
+// sources, the targets and the control channel. A vchannel that is none of
+// those -- a bystander shard the split neither fences nor creates -- still
+// needs the message so it can observe the split; the vchannel set is the
+// union of CollectionVChannels, SourceVChannels, the targets and the control
+// channel, and only the sources are appended (and therefore persisted) first.
+func TestNewSplitShardBroadcastMessageCoversTheCollection(t *testing.T) {
+	param := newSplitShardParam()
+	// "p1_1v0" is a bystander shard of the same collection: neither a source
+	// nor a target of this split, but still listed among the collection's
+	// current vchannels.
+	param.CollectionVChannels = []string{"p0_1v0", "p1_1v0"}
+
+	msg, err := streaming.NewSplitShardBroadcastMessage(param)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+
+	bh := msg.BroadcastHeader()
+	assert.ElementsMatch(t,
+		[]string{"p0_1v0", "p1_1v0", "p0_1v1", "p0_1v2", "p0_vcchan"},
+		bh.VChannels)
+	assert.ElementsMatch(t, param.SourceVChannels, bh.AppendFirstVChannels)
 }
 
 // assertSplitShardParamInvalid asserts that Validate reports the caller of
@@ -188,6 +214,19 @@ func TestSplitShardParamValidate(t *testing.T) {
 	// the routing post-image must cover every target.
 	param = newSplitShardParam()
 	param.Routing = &message.AlterCollectionMessageUpdates{VirtualChannelNames: []string{"p0_1v0", "p0_1v1"}}
+	assertSplitShardParamInvalid(t, param)
+
+	// every source must be one of the collection's current vchannels: a
+	// source the coordinator did not list there cannot be a real shard of
+	// the collection this split claims to act on.
+	param = newSplitShardParam()
+	param.CollectionVChannels = []string{"p9_9v9"}
+	assertSplitShardParamInvalid(t, param)
+
+	// no target may already be one of the collection's current vchannels: a
+	// target is a NEW shard, so it cannot also be a pre-existing one.
+	param = newSplitShardParam()
+	param.CollectionVChannels = append(param.CollectionVChannels, param.Targets[0].Vchannel)
 	assertSplitShardParamInvalid(t, param)
 
 	// validation failure happens before any message is built.

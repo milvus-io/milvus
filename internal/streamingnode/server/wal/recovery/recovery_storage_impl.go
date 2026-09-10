@@ -440,10 +440,17 @@ func (r *recoveryStorageImpl) handleSplitShard(ctx context.Context, msg message.
 		}
 		r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromSplitShardMessage(msg)
 		r.Logger().Info(ctx, "create vchannel from split shard genesis", mlog.FieldMessage(msg))
+	case message.SplitShardRoleBystander:
+		// The broadcast now covers every vchannel of the collection, so a
+		// bystander shard -- neither fenced nor created by this split -- is
+		// expected to receive a replica. It takes no recovery-storage action:
+		// nothing about its own vchannel meta changes, and this is not a
+		// misroute worth reporting.
 	default:
-		// A replica landing on a vchannel the header names as neither a source
-		// nor a target is a misroute, symmetric with the source and target arms
-		// above: report it instead of silently doing nothing.
+		// A replica landing on a vchannel that is neither a source, a target
+		// nor even the same collection is a misroute, symmetric with the
+		// source and target arms above: report it instead of silently doing
+		// nothing.
 		r.detectInconsistency(ctx, msg, "split shard replica of unknown role")
 	}
 }

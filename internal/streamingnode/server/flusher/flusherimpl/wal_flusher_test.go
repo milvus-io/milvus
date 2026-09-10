@@ -964,6 +964,45 @@ func TestWALFlusher_DispatchSplitShardUnknownRoleDoesNotForward(t *testing.T) {
 	assert.Equal(t, 0, handled)
 }
 
+// TestWALFlusher_DispatchSplitShardBystanderDoesNotForward: the broadcast now
+// covers every vchannel of the collection, so a replica can land on a
+// vchannel that is registered as belonging to the same collection but is
+// neither the source nor one of the targets -- a bystander shard. It must not
+// be forwarded to flusherComponents.HandleMessage (there is no dd_node action
+// to take for it) and must not spawn a data sync service either (it is not a
+// genesis).
+func TestWALFlusher_DispatchSplitShardBystanderDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "p0_7v9" is collection 7's own shard, but neither the source
+	// "v1" nor one of the targets "v2"/"v3": a bystander.
+	msg := newFlusherSplitShardMessage(t, "p0_7v9", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 0, handled)
+}
+
 // TestWALFlusher_DispatchRetireDoesNotForward: an AlterCollection replica that
 // retires this vchannel (a shard-split routing commit whose new vchannel list
 // omits it) must close the data sync service the genesis spawned

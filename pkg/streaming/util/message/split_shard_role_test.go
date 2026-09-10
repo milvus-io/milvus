@@ -22,10 +22,33 @@ func TestSplitShardRoleOf(t *testing.T) {
 	assert.Equal(t, SplitShardRoleTarget, SplitShardRoleOf(header, "p1_1v1"))
 	assert.Equal(t, SplitShardRoleTarget, SplitShardRoleOf(header, "p2_1v2"))
 	assert.Equal(t, SplitShardRoleControl, SplitShardRoleOf(header, "p0_vcchan"))
-	assert.Equal(t, SplitShardRoleUnknown, SplitShardRoleOf(header, "p9_1v9"))
+	// "p9_2v9" belongs to a different collection (2, not 1): unrouted and unknown.
+	assert.Equal(t, SplitShardRoleUnknown, SplitShardRoleOf(header, "p9_2v9"))
 
 	assert.Equal(t, []uint64{1}, SplitShardTargetOf(header, "p2_1v2").GetRouting().GetBuckets())
 	assert.Nil(t, SplitShardTargetOf(header, "p0_1v0"))
+}
+
+// TestSplitShardRoleOfBystander pins the role a replica plays when it lands on
+// a vchannel that the split neither fences nor creates, but which still
+// belongs to the same collection: it is a BYSTANDER, not a misroute, because
+// the broadcast now covers every vchannel of the collection so that every
+// replica can observe the split (even the ones it does not act on). A
+// vchannel of a DIFFERENT collection stays Unknown -- that is genuinely a
+// misroute.
+func TestSplitShardRoleOfBystander(t *testing.T) {
+	header := &messagespb.SplitShardMessageHeader{
+		CollectionId:    1,
+		SourceVchannels: []string{"p0_1v0"},
+		Targets: []*messagespb.SplitShardTarget{
+			{Vchannel: "p1_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+		},
+	}
+	// "p2_1v2" is neither the source nor a target, but it is collection 1's
+	// third shard: a bystander that must pass through without effect.
+	assert.Equal(t, SplitShardRoleBystander, SplitShardRoleOf(header, "p2_1v2"))
+	// "p2_9v2" carries the same shard index but belongs to collection 9: unknown.
+	assert.Equal(t, SplitShardRoleUnknown, SplitShardRoleOf(header, "p2_9v2"))
 }
 
 func TestSplitShardTypeIsFreshTimeTickAndExclusive(t *testing.T) {

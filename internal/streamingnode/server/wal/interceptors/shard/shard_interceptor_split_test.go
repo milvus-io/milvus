@@ -359,6 +359,30 @@ func TestSplitShardOnUnknownVChannelIsRefused(t *testing.T) {
 	assert.False(t, streamErr.IsShardFenced())
 }
 
+// TestSplitShardOnBystanderAppendsWithoutEffect: the broadcast now covers
+// every vchannel of the collection, so a replica landing on a vchannel that
+// is neither a source, a target nor the control channel -- but still belongs
+// to the same collection -- is a BYSTANDER, not a misroute. It must be
+// appended so every replica of the broadcast is observable, but it must take
+// no shard-manager action: there is nothing here to fence or register.
+func TestSplitShardOnBystanderAppendsWithoutEffect(t *testing.T) {
+	i, _ := newTestShardInterceptor(t)
+
+	// "p0_1v3" is collection 1's third shard: neither the source "p0_1v0" nor
+	// one of the targets "p0_1v1"/"p0_1v2", but the same collection.
+	appended := false
+	msgID, err := i.DoAppend(context.Background(),
+		newTestSplitShardMutableMessage("p0_1v3", newTestSplitShardHeader(1, 42, "p0_1v0", "p0_1v1", "p0_1v2"), nil),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	// no mock expectation was set on shardManager: any call would fail the test.
+}
+
 // TestSplitShardOnControlChannelIsPassedThrough pins the assumption the
 // refusal above rests on: the control-channel replica of the broadcast, which
 // only orders the ack callback, is skipped by DoAppend before the role
