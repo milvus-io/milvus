@@ -131,6 +131,26 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	}
 }
 
+// admit runs the admission the DDL callbacks run for a request that states
+// the whole placement: AssignReplica's per-group rule, then the delegator
+// capacity over the collection's whole layout. The two are one decision to
+// a caller, and most tests here are about that decision, not about which of
+// the two took it.
+func admit(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32) (map[string]int, error) {
+	assignment, err := AssignReplica(ctx, m, resourceGroups, replicaNumber, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckDelegatorCapacity(ctx, m, admittedCollection, assignment, false); err != nil {
+		return nil, err
+	}
+	return assignment, nil
+}
+
+// admittedCollection is the collection every admit call speaks for; nothing
+// puts a replica of it into meta, so its layout is the request alone.
+const admittedCollection = int64(1)
+
 // A resource group whose compute is a streaming node has no node in the
 // resource manager - milvus keeps the query node embedded in a streaming node
 // out of it deliberately, and hands it to a replica through the streaming node
@@ -192,20 +212,20 @@ func TestAFormCountsTheStreamingNodesOfAMixedResourceGroup(t *testing.T) {
 		"rg_mixed": typeutil.NewUniqueSet(101, 102),
 	})()
 
-	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	assignment, err := admit(ctx, m, []string{"rg_mixed"}, 2)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_mixed": 2}, assignment)
 }
 
 // The reviewer's failure: one query node and ONE streaming node in the
 // group, asked for two replicas. With the streaming service on, every replica
-// needs a streaming node of its own group for its delegator - the channel
-// checker places delegators on the replica's streaming nodes only, and those
-// are handed out without overlap between the replicas of a group - so the
-// group's capacity is the larger of its regular and streaming node counts,
-// never their sum. Summed, the second replica is admitted, never receives a
-// streaming node, is marked unplaced by the channel checker every tick, and
-// a scoped expansion waiting on it never completes and never times out.
+// needs a streaming node for its delegator - the channel checker places
+// delegators on the replica's streaming nodes only, and those are handed out
+// without overlap between the replicas of a pool - so a group served from
+// its own streaming node holds one replica, never one per node of either
+// kind. Summed, the second replica is admitted, never receives a streaming
+// node, is marked unplaced by the channel checker every tick, and a scoped
+// expansion waiting on it never completes and never times out.
 func TestAFormDoesNotSumRegularAndStreamingNodesOfAMixedResourceGroup(t *testing.T) {
 	installForm(t)
 	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1)
@@ -217,10 +237,54 @@ func TestAFormDoesNotSumRegularAndStreamingNodesOfAMixedResourceGroup(t *testing
 		"rg_elsewhere": typeutil.NewUniqueSet(202),
 	})()
 
-	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	_, err := admit(ctx, m, []string{"rg_mixed"}, 2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
 		"one streaming node gives one replica a delegator; the regular node beside it does not give a second")
+}
+
+// The per-group rule of AssignReplica is master's regular-node bound, with
+// one waiver: a group that has streaming nodes passes it, since it may have
+// no regular node at all and still serve a replica. The delegator capacity
+// is not its business - that is judged over the collection's whole layout
+// by CheckDelegatorCapacity, with the pooling the assignment uses - so the
+// same two-replica request passes AssignReplica alone and is refused by the
+// pool check.
+func TestAssignReplicaWaivesTheRegularBoundForAGroupWithStreamingNodes(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_mixed", 1)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_mixed":     typeutil.NewUniqueSet(101),
+		"rg_elsewhere": typeutil.NewUniqueSet(202),
+	})()
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	require.NoError(t, err, "the regular bound is waived for a group with streaming nodes")
+	assert.Equal(t, map[string]int{"rg_mixed": 2}, assignment)
+
+	err = CheckDelegatorCapacity(ctx, m, admittedCollection, assignment, false)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "and the pool check refuses the second replica")
+}
+
+// The waiver is only for a group that has streaming nodes. One that has none
+// keeps master's bound exactly, form or not: its regular nodes are its
+// compute, and the delegators come from a pool the pool check bounds.
+func TestAssignReplicaKeepsMastersBoundForAGroupWithoutStreamingNodes(t *testing.T) {
+	installForm(t)
+	ctx, m := metaWithResourceGroup(t, "rg_regular", 1)
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(201, 202),
+	})()
+
+	_, err := AssignReplica(ctx, m, []string{"rg_regular"}, 2, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "two replicas on one regular node, as master refuses")
+
+	assignment, err := AssignReplica(ctx, m, []string{"rg_regular"}, 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"rg_regular": 1}, assignment)
 }
 
 // A group whose only compute is streaming nodes admits as many replicas as it
@@ -234,7 +298,7 @@ func TestAFormAdmitsAsManyReplicasAsAStreamingOnlyGroupHasStreamingNodes(t *test
 		"rg_streaming": typeutil.NewUniqueSet(101, 102),
 	})()
 
-	assignment, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	assignment, err := admit(ctx, m, []string{"rg_streaming"}, 2)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_streaming": 2}, assignment)
 }
@@ -249,7 +313,7 @@ func TestAFormRefusesMoreReplicasThanAStreamingOnlyGroupHasStreamingNodes(t *tes
 		"rg_elsewhere": typeutil.NewUniqueSet(202),
 	})()
 
-	_, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	_, err := admit(ctx, m, []string{"rg_streaming"}, 2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 }
@@ -328,7 +392,7 @@ func TestUnderStrictIsolationAFormBoundsAGroupByItsOwnStreamingNodes(t *testing.
 		"rg_elsewhere": typeutil.NewUniqueSet(202),
 	})()
 
-	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	_, err := admit(ctx, m, []string{"rg_mixed"}, 2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
 		"two regular nodes do not give a second replica a delegator when only its own group's streaming nodes may")
@@ -344,7 +408,7 @@ func TestUnderStrictIsolationAMixedGroupAdmitsAsManyReplicasAsItsStreamingNodes(
 		"rg_mixed": typeutil.NewUniqueSet(101),
 	})()
 
-	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 1, true)
+	assignment, err := admit(ctx, m, []string{"rg_mixed"}, 1)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_mixed": 1}, assignment)
 }
@@ -377,7 +441,7 @@ func TestUnderStrictIsolationAStreamingOnlyGroupAdmitsOneReplicaPerStreamingNode
 		"rg_streaming": typeutil.NewUniqueSet(101, 102),
 	})()
 
-	assignment, err := AssignReplica(ctx, m, []string{"rg_streaming"}, 2, true)
+	assignment, err := admit(ctx, m, []string{"rg_streaming"}, 2)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_streaming": 2}, assignment)
 }
@@ -385,10 +449,10 @@ func TestUnderStrictIsolationAStreamingOnlyGroupAdmitsOneReplicaPerStreamingNode
 // The flag does not change the answer for a group that has streaming nodes of
 // its own: with strict isolation off, the replica manager still serves such a
 // group from its own streaming nodes (isolation, or the legacy default pool,
-// which pools only the replicas of groups that have none), so the reviewer's
-// shape is refused for two replicas and admitted for one exactly as under
-// strict isolation. The regular nodes beside the streaming node do not give
-// the second replica a delegator.
+// which takes in only the replicas of groups that have none), so the
+// reviewer's shape is refused for two replicas and admitted for one exactly
+// as under strict isolation. The regular nodes beside the streaming node do
+// not give the second replica a delegator.
 func TestWithStrictIsolationOffAMixedGroupIsBoundedByItsOwnStreamingNodes(t *testing.T) {
 	installForm(t)
 	withStrictResourceGroupIsolation(t, false)
@@ -399,12 +463,12 @@ func TestWithStrictIsolationOffAMixedGroupIsBoundedByItsOwnStreamingNodes(t *tes
 		"rg_elsewhere": typeutil.NewUniqueSet(202),
 	})()
 
-	_, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 2, true)
+	_, err := admit(ctx, m, []string{"rg_mixed"}, 2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
 		"one streaming node of its own gives one replica a delegator, whatever the flag says")
 
-	assignment, err := AssignReplica(ctx, m, []string{"rg_mixed"}, 1, true)
+	assignment, err := admit(ctx, m, []string{"rg_mixed"}, 1)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"rg_mixed": 1}, assignment)
 }

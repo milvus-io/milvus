@@ -147,74 +147,42 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 			return nil, err
 		}
 
-		// A replica's compute is not only the resource manager's nodes. With
-		// the streaming service on, SpawnReplicasWithReplicaConfig below hands
-		// the replica the STREAMING query nodes of the same resource group,
-		// and the query node embedded in a streaming node is deliberately kept
-		// out of the resource manager (ResourceManager.handleNodeUp returns
-		// early for it) - it reaches a replica through the streaming node
-		// manager instead. Counting only the resource manager's nodes here
-		// therefore refuses a load into a resource group whose compute is a
-		// streaming node, while the spawn that follows would have placed the
-		// replica on it perfectly well.
+		// The regular count is master's rule: a group holds as many replicas
+		// as it has regular query nodes. Delegator capacity is checked over
+		// the collection's whole layout by CheckDelegatorCapacity, using the
+		// same pooling the assignment uses, and is not this rule's business.
 		//
-		// Only an installed form counts them. A stock deployment keeps its
-		// streaming nodes for delegators and its sealed segments on regular
-		// query nodes, and the balancers move nothing onto a streaming node's
-		// query node; admitting a replica on that compute would leave its
-		// segments there for good. The deployment shape that runs a resource
-		// group on streaming nodes alone is the one a compiled-in form
-		// builds, so the count follows extension.FormInstalled and the stock
-		// admission stays exactly what it was.
+		// One waiver, for an installed form with the streaming service on: a
+		// group that has streaming query nodes passes the regular bound. The
+		// query node embedded in a streaming node is deliberately kept out of
+		// the resource manager (ResourceManager.handleNodeUp returns early
+		// for it) and reaches a replica through the streaming node manager,
+		// so such a group may have no regular node at all and still serve a
+		// replica; counting only the resource manager's nodes would refuse a
+		// load the spawn that follows would have placed perfectly well. Only
+		// a form runs a group on streaming nodes alone, so only a form takes
+		// the waiver and the stock admission stays exactly what it was.
 		//
-		// The two counts bound the group, they do not add up, and the bound
-		// follows how the replica manager hands streaming nodes out
-		// (ReplicaManager.buildSQNodeAssignmentHelpers). With the streaming
-		// service on, every replica needs a streaming node for its delegator:
-		// the channel checker places delegators on the replica's streaming
-		// nodes only (GetRWSQNodes), and those are handed out without overlap
-		// between the replicas of a group.
-		//
-		// A group that has streaming nodes of its own is served from them and
-		// nothing else, whatever streaming.strictResourceGroupIsolation.enabled
-		// says: that is what isolation gives it, and what the legacy default
-		// pool gives it too, since that pool takes in only the replicas of
-		// groups that have no streaming node. So such a group is bounded by
-		// its own streaming-node count, however many regular nodes sit beside
-		// them. Bounding it by the larger of the two counts would admit, for
-		// two regular nodes and one streaming node, a second replica that
-		// never receives a streaming node: the channel checker would mark it
-		// unplaced every tick, and a scoped expansion waiting on it would
-		// neither complete nor time out. The one mode this under-admits is
-		// flat allocation, which pools every streaming node for every replica
-		// but only while some replica of the collection sits in a group with
-		// no streaming node at all; a covered group is then refused a replica
-		// the pool could have served. That is accepted: admission cannot see
-		// which mode the assignment will pick, and refusing a load is
-		// recoverable where a replica that can never get a delegator is not.
-		//
-		// A group with no streaming node of its own is where the flag decides.
-		// Under strict isolation it cannot host a delegator and admits
-		// nothing. With the flag off, its replicas' delegators come from the
-		// pool - the legacy default pool or flat allocation - which the
-		// cluster-wide streaming-node check above bounds, so the group holds
-		// as many replicas as it has regular nodes: master's answer, and the
-		// stock admission for that group exactly.
-		available := len(nodes)
+		// Under strict isolation a group with no streaming node of its own
+		// cannot host a delegator at all, whatever its regular count, and is
+		// refused here; with the flag off its delegators come from a pool
+		// the pool check bounds, and master's rule stands.
+		regularNodes := len(nodes)
+		enough := num <= regularNodes
 		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
-			sqNodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName]
 			switch {
-			case sqNodes.Len() > 0:
-				available = sqNodes.Len()
+			case snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName].Len() > 0:
+				enough = true
 			case paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool():
-				available = 0
+				enough = false
+				regularNodes = 0
 			}
 		}
 
-		if num > available {
+		if !enough {
 			mlog.Warn(ctx, "failed to check resource group", mlog.Err(err))
 			if checkNodeNum {
-				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, available, num)
+				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, regularNodes, num)
 				return nil, err
 			}
 		}
