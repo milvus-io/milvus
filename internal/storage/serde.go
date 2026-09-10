@@ -112,17 +112,13 @@ type serdeEntry struct {
 	serialize func(b array.Builder, v any, elementType schemapb.DataType) error
 	// serializeBatch serializes complete field data through Arrow batch APIs.
 	// If nil, BuildRecord falls back to serialize one row at a time.
-	serializeBatch func(b array.Builder, data FieldData, nullable bool, elementType schemapb.DataType) error
+	serializeBatch func(b array.Builder, data FieldData, nullable bool) error
 }
 
 type TextLobRef []byte
 
 type batchValuesBuilder[T any] interface {
 	AppendValues([]T, []bool)
-}
-
-type validFieldData interface {
-	GetValidData() []bool
 }
 
 func validateBatchNullability(data FieldData, nullable bool) error {
@@ -145,11 +141,7 @@ func batchValidity(data FieldData, nullable bool, rowCount int) ([]bool, error) 
 		return nil, nil
 	}
 
-	validDataProvider, ok := data.(validFieldData)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("field data %T does not expose validity data", data)
-	}
-	validData := validDataProvider.GetValidData()
+	validData := data.GetValidData()
 	if len(validData) != rowCount {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"field validity length mismatch, rows=%d, validity=%d, fieldData=%T",
@@ -165,7 +157,6 @@ func serializePrimitiveFieldData[T any](
 	builder array.Builder,
 	data FieldData,
 	nullable bool,
-	_ schemapb.DataType,
 ) error {
 	values, ok := data.GetDataRows().([]T)
 	if !ok {
@@ -195,7 +186,6 @@ func serializeSparseFloatVectorFieldData(
 	builder array.Builder,
 	data FieldData,
 	nullable bool,
-	_ schemapb.DataType,
 ) error {
 	sparseData, ok := data.(*SparseFloatVectorFieldData)
 	if !ok {
@@ -249,9 +239,8 @@ func denseVectorBatchSerializer(dataType schemapb.DataType) func(
 	array.Builder,
 	FieldData,
 	bool,
-	schemapb.DataType,
 ) error {
-	return func(builder array.Builder, data FieldData, nullable bool, _ schemapb.DataType) error {
+	return func(builder array.Builder, data FieldData, nullable bool) error {
 		return serializeDenseVectorFieldData(builder, data, nullable, dataType)
 	}
 }
@@ -1691,17 +1680,17 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			return merr.WrapErrServiceInternalMsg("row num is 0 for field %s", field.Name)
 		}
 
-		// Get element type for ArrayOfVector, otherwise use None
-		elementType := schemapb.DataType_None
-		if field.DataType == schemapb.DataType_ArrayOfVector {
-			elementType = field.GetElementType()
-		}
-
 		if typeEntry.serializeBatch != nil {
-			if err := typeEntry.serializeBatch(fBuilder, fieldData, field.GetNullable(), elementType); err != nil {
+			if err := typeEntry.serializeBatch(fBuilder, fieldData, field.GetNullable()); err != nil {
 				return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
 			}
 			return nil
+		}
+
+		// Get element type for ArrayOfVector, otherwise use None.
+		elementType := schemapb.DataType_None
+		if field.DataType == schemapb.DataType_ArrayOfVector {
+			elementType = field.GetElementType()
 		}
 
 		for j := 0; j < fieldData.RowNum(); j++ {
