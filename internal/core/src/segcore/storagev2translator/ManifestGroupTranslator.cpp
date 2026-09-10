@@ -63,7 +63,7 @@
 namespace milvus::segcore::storagev2translator {
 
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
-static std::atomic<uint64_t> g_mmap_path_generation{0};
+static std::atomic<uint64_t> g_manifest_mmap_path_generation{0};
 
 ColumnSizeEstimateResult
 FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
@@ -770,8 +770,8 @@ ManifestGroupTranslator::load_group_chunk(
     } else {
         // Mmap mode — use unique generation suffix to avoid truncating files
         // that old MAP_SHARED mmaps still reference (see #48658).
-        const auto gen =
-            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
+        const auto gen = g_manifest_mmap_path_generation.fetch_add(
+            1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:
