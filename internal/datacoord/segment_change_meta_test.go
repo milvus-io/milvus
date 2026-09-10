@@ -541,6 +541,34 @@ func TestMeta_UpdateSegmentChangeGroup_PreservesL0Exemption(t *testing.T) {
 	require.Equal(t, []int64{4001}, got.SupersededL0SegmentIDs, "stored decision must be preserved")
 }
 
+// TestMeta_UpdateSegmentChangeGroup_PreservesImmutableFields verifies C25: a
+// caller-rebuilt group that zeroes the record-owned immutable fields must not
+// wipe them on transition — PartitionID/SourceJobID/CreateTS survive.
+func TestMeta_UpdateSegmentChangeGroup_PreservesImmutableFields(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	group := newTestGroup() // PartitionID=100, SourceJobID=999, CreateTS=123
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+
+	// Caller-rebuilt READY record that only carries State + members.
+	ready := &model.SegmentChangeGroup{
+		GroupID:              1,
+		Source:               model.SegmentChangeSourceMixCompaction,
+		CollectionID:         10,
+		State:                model.SegmentChangeStateReady,
+		NewSegmentIDs:        []int64{1001},
+		SupersededSegmentIDs: []int64{2001},
+	}
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+	got := m.GetSegmentChangeGroup(ctx, 10, 1)
+	require.Equal(t, int64(100), got.PartitionID, "PartitionID must be preserved from the stored record")
+	require.Equal(t, int64(999), got.SourceJobID, "SourceJobID must be preserved")
+	require.Equal(t, int64(123), got.CreateTS, "CreateTS must be preserved (staging-timeout sweeps depend on it)")
+	require.Equal(t, model.SegmentChangeStateReady, got.State)
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_DuplicateGroupID verifies C18: two
 // ActionUpdate actions with the same groupID (differing collectionID and
 // members) in ONE composite write are rejected — otherwise both persist under

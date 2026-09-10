@@ -295,19 +295,37 @@ func (m *meta) UpdateSegmentChangeGroup(ctx context.Context, group *model.Segmen
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
+	current := m.segmentChangeGroups[group.GroupID]
 	if err := m.validateSegmentChangeGroupTransitionLocked(group); err != nil {
 		return err
 	}
-	// C17: the L0-exemption decision is meta-owned (stamped at registration);
-	// a caller-rebuilt group does not carry it, so preserve the stored value on
-	// the saved record instead of trusting the caller.
-	group.SupersededL0SegmentIDs = append([]int64(nil), m.segmentChangeGroups[group.GroupID].SupersededL0SegmentIDs...)
-	action := metastore.SaveSegmentChangeGroup(group)
+	// C25: the caller-rebuild pattern supplies only State and transition
+	// metadata; record-owned immutable fields (CollectionID, PartitionID,
+	// SourceJobID, CreateTS, member sets, SupersededL0SegmentIDs) that a
+	// caller cannot reproduce must come from the stored record. Saving the
+	// caller's object wholesale would zero them, breaking CreateTS-based
+	// staging-timeout sweeps and job-to-group attribution.
+	updated := mergeTransitionOntoRecord(current, group)
+	action := metastore.SaveSegmentChangeGroup(updated)
 	if err := m.catalog.Update(ctx, action); err != nil {
 		return err
 	}
 	m.applySegmentChangeGroupActionMemoryLocked(action)
 	return nil
+}
+
+// mergeTransitionOntoRecord applies a state transition onto the stored record:
+// the caller may change State and transition metadata, everything else (the
+// immutable record-owned fields) is preserved from current.
+func mergeTransitionOntoRecord(current, group *model.SegmentChangeGroup) *model.SegmentChangeGroup {
+	updated := current.Clone()
+	updated.State = group.State
+	updated.ReadyTS = group.ReadyTS
+	updated.CommitTS = group.CommitTS
+	updated.PublishEpoch = group.PublishEpoch
+	updated.CommitTime = group.CommitTime
+	updated.FailReason = group.FailReason
+	return updated
 }
 
 // GetSegmentChangeGroup returns a clone of the group, or nil when unknown.
@@ -557,9 +575,10 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 			} else if err := m.validateSegmentChangeGroupTransitionLocked(entry.Group); err != nil {
 				return err
 			} else {
-				// C17: preserve the meta-owned L0-exemption decision on a
-				// caller-rebuilt transition record.
-				entry.Group.SupersededL0SegmentIDs = append([]int64(nil), m.segmentChangeGroups[entry.Group.GroupID].SupersededL0SegmentIDs...)
+				// C25: merge the transition onto the stored record so a
+				// caller-rebuilt group cannot zero the record-owned immutable
+				// fields (PartitionID/SourceJobID/CreateTS/...).
+				entry.Group = mergeTransitionOntoRecord(m.segmentChangeGroups[entry.Group.GroupID], entry.Group)
 			}
 		case metastore.ActionDelete:
 			if current := m.segmentChangeGroups[entry.GroupID]; current != nil && !current.IsTerminal() {
