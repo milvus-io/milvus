@@ -46,7 +46,7 @@ do not select the old HIGH/LOW worker pools.
 | Restore vector nullable/empty-list sidecars and call `LoadWithoutAssemble` | Shared async executor | Synchronous CPU phase, with no slice admission held |
 | Call memory Knowhere `Deserialize` | Same shared async worker | One synchronous call; it occupies this worker until Knowhere returns |
 | Create/write/flush/close mmap files or disk slices | `LocalFileIOPool` | Coroutine awaits the operation; a read/decode lease survives each write |
-| Restore file-backed nullable/empty-list metadata; invoke `DeserializeFromFile` or disk `Deserialize` | `LocalFileIOPool` | Files are closed first; one synchronous call, with no slice admission held |
+| Restore file-backed nullable/empty-list metadata; invoke `DeserializeFromFile` or disk `Deserialize` | Shared async executor | Files are closed first; the synchronous call occupies this worker, with no slice admission or local-file executor held |
 | Failure cleanup of files created by the load | `LocalFileIOPool` | Issued I/O and synchronous finalization drain before cleanup |
 | Parallel work inside `Deserialize` | Whatever workers / parallel runtime Knowhere selects | Milvus does not create deserialization tasks or impose an additional parallelism limit |
 | Publish a completed index | Existing cache-load caller after successful return | Cancellation or failure prevents publishing that result |
@@ -56,6 +56,14 @@ deserializer that executes serially continues on the calling async worker. The
 integration does not imply that every deserializer uses a Knowhere thread pool.
 It also does not make Knowhere deserialization incremental: the complete
 `BinarySet` is available before the call starts.
+
+Memory, mmap, and disk Knowhere finalization all run on the shared async worker.
+For these loads, `LocalFileIOPool` handles Milvus file creation, writes,
+flush/close, and cleanup. After awaiting file closure, the coroutine resumes on
+the shared worker to restore sidecars and invoke the engine. Local file reads,
+mapping, and any synchronous I/O inside Knowhere therefore occupy that async
+worker until the engine returns. Other loads can continue using the local-file
+workers while deserialization runs.
 
 The inspected FLAT, IVF, HNSW, sparse, and embedding-list memory deserializers
 consume memory readers / BinarySet entries. Some sparse implementations retain
@@ -194,9 +202,10 @@ The checked-in Knowhere source has only the default `false` implementation. Its 
 `Deserialize` calls `FileManager::LoadFile` (a no-op in `DiskFileManagerImpl`),
 then reads the staged local files through `LinuxAlignedFileReader` and DiskANN's
 load/cache code. AISAQ follows the same local-reader pattern. MinHash LSH calls
-its local `FileReader` and optionally maps its local index file. Milvus's local
-finalization call may therefore do blocking local I/O; Knowhere owns any internal
-parallelism and subsequent query-time reads.
+its local `FileReader` and optionally maps its local index file. Finalization
+may therefore perform blocking local I/O on the shared async worker after
+staging finishes. Knowhere owns its internal parallelism and subsequent
+query-time reads.
 
 Other Knowhere distributions may override `LoadIndexWithStream()`. Their
 `FileManagerImpl::OpenInputStream` opens a `RemoteInputStream` directly, outside
@@ -205,9 +214,9 @@ this change**. Eagerly caching every object would change lazy-load behavior, so
 that route is retained. Its executor, cancellation, and admission guarantees
 need validation in that backend before claiming that all of its reads obey the
 Milvus streaming budget. A backend that performs synchronous remote reads inside
-`Deserialize` occupies its calling local-file worker and retains that phase's
-executor token until the call returns; the staging shutdown guarantee does not
-extend to those opaque reads.
+`Deserialize` occupies its calling async worker until the call returns. It holds
+no `LocalFileIOPool` executor token during that call; cancellation still waits
+for the engine to return before releasing its inputs and cleaning up staging.
 
 ## Final routing audit
 
@@ -275,6 +284,9 @@ suspend that worker and that finalization starts after admission is released.
 File-backed coverage adds real mmap load/query parity, nullable and empty-list
 metadata, TokenANN/MUVERA sidecars, executor selection, failure cleanup,
 cancellation during finalization, and local-pool shutdown during remote reads.
+Controlled mmap/disk finalizers also check that the single local-file worker
+can execute another task while Knowhere deserialization is paused on the async
+worker, and that failure cleanup happens after deserialization drains.
 The cached build has `WITH_DISKANN=OFF`: controlled Knowhere nodes test the disk
 staging/finalization boundary and stream-selection behavior. A real MinHash LSH
 round trip also exercises the disk adapter with nullable IDs and both heap and
@@ -294,11 +306,11 @@ worker/budget settings against the same stable peak estimate.
 Throughput benchmarks and remote-cluster tests are not part of this verification.
 
 On 2026-09-10 the GCC 12 Release `all_tests` target rebuilt successfully with
-up to 16 concurrent build jobs. The focused run passed all 43 legacy-loader and
-vector-loading cases. The broader run selected 1,156 tests from 129 suites:
-1,154 passed, with two existing floating-point array-equality cases skipped and
-no failures. It covers legacy scalar and vector loads, V3 regressions, storage
-codecs, shared async infrastructure, admission, segment-resource estimates, and
-`FileWriter` failures. The vector cases exercise sparse engine versions 6 and 8
-and MUVERA sidecars at version 11. DiskANN remains disabled in this build; its
-backend I/O boundary was inspected statically.
+up to 16 concurrent build jobs. After moving Knowhere file deserialization to
+the shared async worker, the focused run passed all 22 vector-loading cases.
+The broader run passed all 456 selected tests from 14 suites, with no failures
+or skips. It covers legacy scalar and vector loads, storage codecs, shared async
+infrastructure, admission, segment-resource estimates, and `FileWriter`
+failures. The vector cases exercise sparse engine versions 6 and 8 and MUVERA
+sidecars at version 11. DiskANN remains disabled in this build; its backend I/O
+boundary was inspected statically.
