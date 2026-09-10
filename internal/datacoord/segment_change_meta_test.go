@@ -456,6 +456,91 @@ func TestMeta_LoadSegmentChangeGroups_ZeroGroupFailsClosed(t *testing.T) {
 	require.Error(t, err, "a zero-valued persisted group must fail recovery, not be skipped")
 }
 
+// TestMeta_UpdateSegmentsInfoAndChangeGroups_SaveBinlogStale verifies C15/C16:
+// a stale save-binlog-paths update composed with group actions neither panics
+// (target absent from the pack) nor fails the write (errIgnoredSegmentMetaOperation);
+// the group actions still persist so the group record converges.
+func TestMeta_UpdateSegmentsInfoAndChangeGroups_SaveBinlogStale(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	t.Run("absent target does not panic (C15)", func(t *testing.T) {
+		group := newTestGroup()
+		require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+
+		// A save-binlog-paths operator whose target does not exist in meta at
+		// all. Before C15 this reached updateSegmentPack.Validate's panic.
+		require.NotPanics(t, func() {
+			err := m.UpdateSegmentsInfoAndChangeGroups(ctx,
+				[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(group.Clone())},
+				UpdateBinlogsFromSaveBinlogPathsOperator(777777, nil, nil, nil, nil),
+			)
+			require.NoError(t, err)
+		})
+		require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 1), "group action must still persist")
+	})
+
+	t.Run("already-flushed target maps to no-op (C16)", func(t *testing.T) {
+		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+		})))
+		group := newTestGroup()
+		group.GroupID = 2 // distinct from the first subtest's group 1
+		group.NewSegmentIDs = []int64{1003}
+		group.SupersededSegmentIDs = []int64{2002}
+		require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+
+		// A stale save-binlog-paths on an already-flushed segment returns
+		// errIgnoredSegmentMetaOperation; the composite must drop the stale
+		// segment and still persist the group action, returning nil.
+		ready := group.Clone()
+		ready.State = model.SegmentChangeStateReady
+		err := m.UpdateSegmentsInfoAndChangeGroups(ctx,
+			[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(ready)},
+			UpdateBinlogsFromSaveBinlogPathsOperator(1001, nil, nil, nil, nil),
+		)
+		require.NoError(t, err)
+		require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 2).State)
+	})
+}
+
+// TestMeta_UpdateSegmentChangeGroup_PreservesL0Exemption verifies C17: a caller
+// that rebuilds the group from its own job/plan state (without the meta-stamped
+// SupersededL0SegmentIDs) can still transition the group, and the stored
+// exemption decision is preserved on the saved record.
+func TestMeta_UpdateSegmentChangeGroup_PreservesL0Exemption(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
+	})))
+
+	group := newTestGroup()
+	group.SupersededSegmentIDs = []int64{4001}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	require.Equal(t, []int64{4001}, m.GetSegmentChangeGroup(ctx, 10, 1).SupersededL0SegmentIDs,
+		"exemption stamped at registration")
+
+	// Caller-rebuilt READY record without the meta-owned field.
+	ready := &model.SegmentChangeGroup{
+		GroupID:              1,
+		Source:               model.SegmentChangeSourceMixCompaction,
+		CollectionID:         10,
+		State:                model.SegmentChangeStateReady,
+		NewSegmentIDs:        []int64{1001},
+		SupersededSegmentIDs: []int64{4001},
+	}
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready), "transition must not fail on the meta-owned field")
+	got := m.GetSegmentChangeGroup(ctx, 10, 1)
+	require.Equal(t, model.SegmentChangeStateReady, got.State)
+	require.Equal(t, []int64{4001}, got.SupersededL0SegmentIDs, "stored decision must be preserved")
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_OneTxnConflictingCreates verifies
 // N1: two conflicting new groups in the SAME composite txn are rejected —
 // sibling group actions must see each other's claims, not only the in-memory
