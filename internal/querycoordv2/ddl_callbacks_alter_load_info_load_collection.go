@@ -61,21 +61,35 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	// Node numbers are checked for a first load, and not for a config update
 	// on a loaded collection, which is master's rule and stays the stock
 	// binary's. With a form installed, a request that names resource groups
-	// on a loaded collection is not a config update: it is a scoped expansion
-	// into those groups (see completePlacementForOutOfScopeResourceGroups),
-	// which places replicas exactly as a first load does, so it is admitted
+	// on a loaded collection and asks one of them for more replicas than it
+	// holds is not a config update: it is a scoped expansion into those
+	// groups (see completePlacementForOutOfScopeResourceGroups), which
+	// places replicas exactly as a first load does, so it is admitted
 	// against the same bounds. Without the check, a group with no node - or
 	// with fewer streaming nodes than replicas asked - would receive replicas
 	// that never get a delegator: the scoped task's clock would pause on an
 	// unknown progress forever and the group would report 0 indefinitely.
 	// LoadPartitions has always passed true here for the same reason.
 	//
+	// Admission runs only for a request that ADDS replicas to a group it
+	// names. A scoped request that adds none is not admitted against
+	// anything: the same load re-sent, a shrink, or a request that changes
+	// only its load fields, partitions, priority or replica mode at the
+	// same counts - a config update, which master never admits either. None
+	// of these places a replica, and refusing one for a node that is
+	// restarting would turn an idempotent retry into a failure against a
+	// collection that is still serving.
+	//
 	// Whether the request is scoped is the decision getLoadReplicaConfigForRequest
 	// took, not a second reading of the request: under a cluster-level force
 	// override the groups the request named are discarded and the load states
 	// the whole placement, which is a config update like any other.
+	requestedReplicasNumber, err := utils.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
+	if err != nil {
+		return err
+	}
 	checkNodeNum := currentLoadConfig.Collection == nil ||
-		(extension.FormInstalled() && len(scopedResourceGroups) > 0)
+		(extension.FormInstalled() && len(scopedResourceGroups) > 0 && scopedLoadAddsReplicas(requestedReplicasNumber, currentLoadConfig))
 	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
 	if err != nil {
 		return err
