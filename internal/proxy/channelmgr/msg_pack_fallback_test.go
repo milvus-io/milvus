@@ -18,7 +18,6 @@ package channelmgr
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -52,9 +50,7 @@ func TestGenInsertMsgsByPartitionFallbackSingleIndexPass(t *testing.T) {
 		{"empty selection", 128, nil, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-			require.NoError(t, paramtable.Get().Save(key, strconv.Itoa(tc.threshold)))
-			t.Cleanup(func() { paramtable.Get().Reset(key) })
+			savePackingThresholdForTest(t, tc.threshold)
 			src := newNullableVectorInsertMsgForPackTest(12, 2, 1)
 			if tc.disableViews {
 				patch := mockey.Mock(typeutil.CreateFieldDataRangeView).Return(nil, false).Build()
@@ -143,9 +139,7 @@ func TestGenInsertMsgsByPartitionMixedSelectionKeepsContiguousBatchViews(t *test
 	threshold := max(firstPairSize, secondPairSize) + 1
 	require.GreaterOrEqual(t, firstPairSize+rowSizes[2], threshold)
 
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, strconv.Itoa(threshold)))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	savePackingThresholdForTest(t, threshold)
 
 	msgs, err := GenInsertMsgsByPartition(
 		context.Background(), 2, 1, "test_partition", offsets,
@@ -166,9 +160,7 @@ func TestGenInsertMsgsByPartitionMixedSelectionKeepsContiguousBatchViews(t *test
 }
 
 func TestGenInsertMsgsByPartitionGapWithinBatchCopiesContiguousPrefix(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "1024"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	savePackingThresholdForTest(t, 1024)
 
 	src := newNullableVectorInsertMsgForPackTest(10, 2, 1)
 	offsets := []int{1, 2, 4, 5}
@@ -187,9 +179,7 @@ func TestGenInsertMsgsByPartitionGapWithinBatchCopiesContiguousPrefix(t *testing
 }
 
 func TestGenInsertMsgsByPartitionFallbackNullableSparseVectorSizes(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "73"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	savePackingThresholdForTest(t, 73)
 	src := newNullableVectorInsertMsgForPackTest(8, 2, 1)
 	logicalContents := make([][]byte, 8)
 	var contents [][]byte
@@ -237,9 +227,7 @@ func TestGenInsertMsgsByPartitionFallbackNullableSparseVectorSizes(t *testing.T)
 }
 
 func TestGenInsertMsgsByPartitionFallbackErrorsDiscardPartialBatches(t *testing.T) {
-	key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-	require.NoError(t, paramtable.Get().Save(key, "64"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	savePackingThresholdForTest(t, 64)
 
 	for _, tc := range []struct {
 		name    string
