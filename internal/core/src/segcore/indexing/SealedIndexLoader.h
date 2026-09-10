@@ -12,7 +12,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -41,7 +44,8 @@ class SealedIndexLoader {
                       milvus::tracer::TraceContext ctx,
                       milvus::storage::FileManagerContext file_manager_context,
                       Config config,
-                      milvus::OpContext* op_ctx = nullptr);
+                      milvus::OpContext* op_ctx = nullptr,
+                      std::function<const void*(size_t)> vector_data_view = {});
     // Creates an Index whose concrete implementation owns its storage cache.
     index::IndexPtr
     CreateIndex(milvus::OpContext* ctx);
@@ -104,6 +108,7 @@ class SealedIndexLoader {
     milvus::tracer::TraceContext ctx_;
     milvus::storage::FileManagerContext file_manager_context_;
     Config config_;
+    std::function<const void*(size_t)> vector_data_view_;
     milvus::index::IndexFamily source_family_;
     std::string index_key_;
     IndexLoadInfo index_load_info_;

@@ -1552,7 +1552,9 @@ PrepareSealedIndexLoadConfig(const LoadIndexInfo& load_index_info) {
 }  // namespace
 
 void
-PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
+PrepareLazySealedIndexSlot(
+    LoadIndexInfo& load_index_info,
+    std::function<const void*(size_t)> vector_data_view) {
     // Validate load parameters without inspecting the artifact or deriving its
     // reader contract. HYBRID's concrete family is resolved on first use.
     (void)PrepareSealedIndexLoadConfig(load_index_info);
@@ -1566,7 +1568,8 @@ PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
     metadata->warmup_policy = "disable";
     load_index_info.index = nullptr;
     load_index_info.lazy_index_factory =
-        [metadata = std::move(metadata)](milvus::OpContext* op_ctx) {
+        [metadata = std::move(metadata),
+         vector_data_view = std::move(vector_data_view)](milvus::OpContext* op_ctx) {
             CheckCancellation(op_ctx,
                               metadata->segment_id,
                               metadata->field_id,
@@ -1574,7 +1577,7 @@ PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
             // Keep each attempt private: cancellation must not retain a half-created slot.
             auto attempt = *metadata;
             milvus::tracer::TraceContext trace_ctx{};
-            LoadIndexData(trace_ctx, &attempt, op_ctx);
+            LoadIndexData(trace_ctx, &attempt, op_ctx, vector_data_view);
             CheckCancellation(op_ctx,
                               metadata->segment_id,
                               metadata->field_id,
@@ -1649,7 +1652,8 @@ MakeSealedIndexCapability(const LoadIndexInfo& info) {
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx) {
+              milvus::OpContext* op_ctx,
+              std::function<const void*(size_t)> vector_data_view) {
     auto config = PrepareSealedIndexLoadConfig(*load_index_info);
     // init file manager
     milvus::storage::FieldDataMeta field_meta{load_index_info->collection_id,
@@ -1679,7 +1683,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     // Each index owns the cache for its storage.
     auto loader = std::make_unique<milvus::segcore::SealedIndexLoader>(
-        load_index_info, ctx, file_manager_context, config, op_ctx);
+        load_index_info, ctx, file_manager_context, config, op_ctx,
+        std::move(vector_data_view));
     load_index_info->index_family = loader->Family();
     load_index_info->index_value_type = loader->ValueType();
     load_index_info->index_caps = loader->Caps();
