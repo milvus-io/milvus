@@ -50,7 +50,7 @@ func (ut *upsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *
 	}
 
 	if ut.partialUpdateOriginalFields == nil {
-		return merr.WrapErrServiceInternalMsg("partial update original fields snapshot is unavailable")
+		return merr.WrapErrServiceInternalMsg("partial update: original request fields are unavailable")
 	}
 	attempt := 0
 	err := retry.Do(ctx, func() error {
@@ -372,23 +372,23 @@ func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	return nil
 }
 
-// bindPartialUpdateReadSnapshots publishes proofs only after every write
+// bindPartialUpdateReadTimestamps publishes proofs only after every candidate write
 // channel has a snapshot from this successful read attempt.
-func (ut *upsertTask) bindPartialUpdateReadSnapshots(snapshots *typeutil.ConcurrentMap[string, uint64]) error {
+func (ut *upsertTask) bindPartialUpdateReadTimestamps(channelReadTs *typeutil.ConcurrentMap[string, uint64]) error {
 	if len(ut.partialUpdateCASGroups) == 0 {
-		return merr.WrapErrServiceInternalMsg("partial update: query succeeded but CAS write channel groups are empty")
+		return merr.WrapErrServiceInternalMsg("partial update: query succeeded but CAS candidate write channel groups are empty")
 	}
 	for channel := range ut.partialUpdateCASGroups {
-		ts, ok := snapshots.Get(channel)
+		ts, ok := channelReadTs.Get(channel)
 		if !ok {
-			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is missing for write channel %q", channel)
+			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is missing for candidate write channel %q", channel)
 		}
 		if ts == 0 {
-			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is zero for write channel %q", channel)
+			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is zero for candidate write channel %q", channel)
 		}
 	}
 	for channel, meta := range ut.partialUpdateCASGroups {
-		meta.ReadTs, _ = snapshots.Get(channel)
+		meta.ReadTs, _ = channelReadTs.Get(channel)
 	}
 	return nil
 }

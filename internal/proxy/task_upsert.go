@@ -180,7 +180,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	// Only partial updates read existing rows. Each attempt uses a new Strong
 	// query and records its executed snapshots, independent of the Upsert's BeginTs.
-	snapshots := typeutil.NewConcurrentMap[string, uint64]()
+	channelReadTs := typeutil.NewConcurrentMap[string, uint64]()
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Retrieve,
@@ -247,7 +247,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		lb:                 t.node.(*Proxy).lbPolicy,
 		shardclientMgr:     t.node.(*Proxy).shardMgr,
 		chMgr:              t.node.(*Proxy).chMgr,
-		actualChannelsMvcc: snapshots,
+		actualChannelsMvcc: channelReadTs,
 	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
@@ -257,7 +257,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, storageCost, err
 	}
-	if err := t.bindPartialUpdateReadSnapshots(snapshots); err != nil {
+	if err := t.bindPartialUpdateReadTimestamps(channelReadTs); err != nil {
 		return nil, storageCost, err
 	}
 	return queryResult, storageCost, err
@@ -265,9 +265,19 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 
 // preparePartialUpdate is shared by the initial attempt and CAS retries.
 func (it *upsertTask) preparePartialUpdate(ctx context.Context) error {
-	if err := it.restorePartialUpdateFields(); err != nil {
-		return err
+	if it.partialUpdateOriginalFields == nil {
+		return merr.WrapErrServiceInternalMsg("partial update: original request fields are unavailable")
 	}
+	// Rebuild input order while retaining AutoIDs allocated by earlier attempts.
+	fields := cloneFieldDataList(it.partialUpdateOriginalFields)
+	if len(it.partialUpdateAllocatedIDs) > 0 {
+		if _, err := checkPartialUpdatePrimaryFieldData(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), it.partialUpdateAllocatedIDs); err != nil {
+			return err
+		}
+	}
+	it.req.FieldsData = fields
+	it.upsertMsg.InsertMsg.FieldsData = fields
+
 	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, true); err != nil {
 		return err
 	}
@@ -280,22 +290,6 @@ func (it *upsertTask) preparePartialUpdate(ctx context.Context) error {
 	it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
 	it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
-	return nil
-}
-
-// restorePartialUpdateFields rebuilds input order without changing the user payload.
-func (it *upsertTask) restorePartialUpdateFields() error {
-	if it.partialUpdateOriginalFields == nil {
-		return merr.WrapErrServiceInternalMsg("partial update original fields snapshot is unavailable")
-	}
-	fields := cloneFieldDataList(it.partialUpdateOriginalFields)
-	if len(it.partialUpdateAllocatedIDs) > 0 {
-		if _, err := checkPartialUpdatePrimaryFieldData(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), it.partialUpdateAllocatedIDs); err != nil {
-			return err
-		}
-	}
-	it.req.FieldsData = fields
-	it.upsertMsg.InsertMsg.FieldsData = fields
 	return nil
 }
 
@@ -758,7 +752,7 @@ func (it *upsertTask) allocateMissingPartialUpdateAutoIDs(missingRows []int) (*s
 		return nil, nil
 	}
 	if it.partialUpdateOriginalFields == nil {
-		return nil, merr.WrapErrServiceInternalMsg("partial update original fields snapshot is unavailable")
+		return nil, merr.WrapErrServiceInternalMsg("partial update: original request fields are unavailable")
 	}
 	if _, err := checkPartialUpdatePrimaryFieldData(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
 		return nil, err
