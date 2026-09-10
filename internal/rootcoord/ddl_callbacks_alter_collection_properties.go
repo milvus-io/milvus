@@ -480,6 +480,12 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
+	// A shard split's adoption rides in as an ordinary AlterCollection, and it
+	// is the only alter whose apply is conditional: it retires a source, so it
+	// waits until this cluster has moved that source's data.
+	if err := c.checkShardSplitAdoptionDrained(ctx, result); err != nil {
+		return err
+	}
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
 			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))

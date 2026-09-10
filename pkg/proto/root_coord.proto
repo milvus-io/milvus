@@ -393,6 +393,10 @@ message CommitShardSplitRoutingRequest {
   // collection-wide, so they are committed together with shard_infos.
   uint64 routing_modulus = 8;
   string shard_by = 9;
+  // The shard split this commit belongs to. It rides into the broadcast message
+  // so that every cluster replaying the adoption commit can ask its own
+  // datacoord whether that split's sources have drained locally.
+  int64 split_task_id = 10;
 }
 
 message CreatePartitionResponse {

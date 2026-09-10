@@ -20,17 +20,20 @@ import (
 	"context"
 	"slices"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -68,18 +71,15 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 		return merr.Wrap(merr.WrapErrParameterInvalidMsg("commit shard split routing failed"), err.Error())
 	}
 
-	// No collection lock here, deliberately. This is the last step of a split's
-	// write switch, and its only caller — datacoord's split manager — already
-	// holds the collection's exclusive resource key across the whole fence ->
-	// create -> commit span, precisely so no DDL can change the collection
-	// underneath the target vchannels it just created. Taking the same exclusive
-	// key again from inside that span would block on the caller and deadlock:
-	// the broadcaster's locker is one process-wide instance, and its acquire does
-	// not honor a context.
-	//
-	// The routing commit is therefore protected by its caller, not by itself.
-	// Reaching it from anywhere else would be a bug, and an unlocked one.
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx)
+	// The collection's own resource keys, taken here rather than inherited from
+	// the caller. The write switch is one SplitShard broadcast that commits its
+	// routing from its own ack callback, so nothing holds the collection's
+	// exclusive key across this call any more: what reaches this RPC is the
+	// adoption, a stand-alone DDL that has to serialize against every other
+	// collection DDL exactly like an AlterCollection does -- it REPLACES the
+	// whole vchannel list, so a rename or a schema change interleaved with it
+	// would be written against a topology that no longer exists.
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -104,6 +104,20 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 	updates := routingUpdatesFromRequest(req)
 	if err := checkRoutingCommitAgainstMeta(coll, updates); err != nil {
 		return err
+	}
+
+	// A commit that delists a vchannel is an adoption, and its ack callback asks
+	// THIS cluster's datacoord whether the named split has drained. With no task
+	// to name there is no answer datacoord can give, so the callback would refuse
+	// the commit forever -- and the broadcast, once appended, holds the
+	// collection's exclusive key until its callback succeeds, queueing every
+	// later DDL of the collection behind it with no way out. Refused here, while
+	// it is still only a failed RPC. System, not input: the request comes from
+	// the split coordinator.
+	if updates.GetSplitTaskId() == 0 && routingCommitDelistsAVChannel(coll, updates) {
+		return merr.WrapErrServiceInternalMsg(
+			"commit shard split routing failed, collection %q retires a vchannel without naming the split task it belongs to",
+			coll.Name)
 	}
 
 	// Idempotent by committed topology: if the collection already carries exactly
@@ -134,12 +148,32 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 		},
 		CacheExpirations: cacheExpirations,
 	}
-	// Broadcast to every shard of the new topology plus the control channel, so
-	// all streamingnode shard managers (including the new split targets) and the
-	// proxy caches pick up the new routing version.
-	channels := make([]string, 0, len(vchannels)+1)
+	// Broadcast to the control channel, to every vchannel the collection has
+	// today, and to every vchannel the new topology names -- deduplicated.
+	//
+	// The union is what makes the delisted source reachable. An adoption commit
+	// drops the fenced source from the vchannel list, and the source's OWN
+	// replica of this message is what retires it: the shard interceptor, the
+	// recovery storage and the flusher each read `messageutil.RetiresVChannel`
+	// off the replica they receive and tear their registration down. Broadcasting
+	// only to the post-image would delist the source from the meta while leaving
+	// its streamingnode state alive forever, with no later message able to reach
+	// it -- a vchannel no longer in the collection receives nothing.
+	//
+	// The current list also carries the bystander shards, which need the new
+	// routing version even though the split did not touch them.
+	channels := make([]string, 0, len(coll.VirtualChannelNames)+len(vchannels)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, vchannels...)
+	seen := typeutil.NewSet(channels...)
+	for _, list := range [][]string{coll.VirtualChannelNames, vchannels} {
+		for _, vchannel := range list {
+			if seen.Contain(vchannel) {
+				continue
+			}
+			seen.Insert(vchannel)
+			channels = append(channels, vchannel)
+		}
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{Updates: updates}).
@@ -162,6 +196,7 @@ func routingUpdatesFromRequest(req *rootcoordpb.CommitShardSplitRoutingRequest) 
 		ShardInfos:           req.GetShardInfos(),
 		RoutingModulus:       req.GetRoutingModulus(),
 		ShardBy:              req.GetShardBy(),
+		SplitTaskId:          req.GetSplitTaskId(),
 	}
 }
 
@@ -189,6 +224,15 @@ func routingCommitAlreadyApplied(coll *model.Collection, updates *messagespb.Alt
 		}
 	}
 	return true
+}
+
+// routingCommitDelistsAVChannel reports whether the post-image drops a vchannel
+// the collection has today -- the signature of a split's adoption, which retires
+// the source it drops.
+func routingCommitDelistsAVChannel(coll *model.Collection, updates *messagespb.AlterCollectionMessageUpdates) bool {
+	return slices.ContainsFunc(coll.VirtualChannelNames, func(vchannel string) bool {
+		return !slices.Contains(updates.GetVirtualChannelNames(), vchannel)
+	})
 }
 
 // checkRoutingCommitAgainstMeta refuses a commit that would move the collection
@@ -273,8 +317,15 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.A
 // The lifecycle only ever runs one way. A source is fenced (Normal ->
 // Splitting) and later released (Splitting -> Dropped); the fence is recorded in
 // the WAL and is permanent, so there is no way back to Normal. A target is
-// created writable and later adopted (Creating -> Normal), or abandoned if the
-// split is aborted before adoption (Creating -> Dropped). Dropped is terminal.
+// created writable and later adopted (Creating -> Normal).
+//
+// A target is NOT abandonable. It is write-routable from the moment the write
+// switch publishes it -- `routing.ShardsFromMeta` admits a Creating shard
+// precisely so its residues take writes before it is serviceable for reads --
+// so moving one to Dropped would discard rows that were already accepted, and
+// the residues it owns would have no shard at all. A split that cannot finish is
+// finished forward, by adopting the targets; there is no state transition that
+// undoes it.
 func shardStateMayAdvance(from, to schemapb.ShardState) bool {
 	if from == to {
 		return true
@@ -283,7 +334,7 @@ func shardStateMayAdvance(from, to schemapb.ShardState) bool {
 	case schemapb.ShardState_ShardNormal:
 		return to == schemapb.ShardState_ShardSplitting
 	case schemapb.ShardState_ShardCreating:
-		return to == schemapb.ShardState_ShardNormal || to == schemapb.ShardState_ShardDropped
+		return to == schemapb.ShardState_ShardNormal
 	case schemapb.ShardState_ShardSplitting:
 		return to == schemapb.ShardState_ShardDropped
 	default:
@@ -291,4 +342,65 @@ func shardStateMayAdvance(from, to schemapb.ShardState) bool {
 		// how to advance.
 		return false
 	}
+}
+
+// checkShardSplitAdoptionDrained gates a split's adoption on THIS cluster
+// having drained the sources it retires.
+//
+// The adoption is the commit whose post-image no longer names a vchannel the
+// broadcast reached: applying it retires that source everywhere -- the meta
+// stops routing to it, and its own replica of this message tears its
+// streamingnode registration down. That is only safe once the source's data has
+// actually moved to the targets, and "moved" is a per-cluster fact: a secondary
+// replays the same WAL but compacts, imports and flushes on its own schedule, so
+// the primary's drain says nothing about it. Each cluster therefore asks its own
+// datacoord, and refuses the commit until the answer is yes; the broadcaster
+// retries the callback with backoff.
+//
+// Two things are deliberately NOT gated:
+//
+//   - a routing commit that delists nothing (the write switch, which publishes
+//     the targets while the source keeps serving) -- there is nothing to drain;
+//   - a redelivery of a post-image the collection already carries. datacoord
+//     reclaims a split's task record once the split is done, so a late
+//     redelivery would ask about a task id nobody knows any more -- an answer
+//     that is a System error by design, and one this callback would then retry
+//     forever, wedging every later DDL of the collection behind it.
+func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	header := result.Message.Header()
+	updates := result.Message.MustBody().GetUpdates()
+	if !slices.ContainsFunc(result.Message.BroadcastHeader().VChannels, func(vchannel string) bool {
+		return messageutil.RetiresVChannel(header, updates, vchannel)
+	}) {
+		return nil
+	}
+
+	// allowUnavailable: a collection mid-split is available anyway, and one that
+	// is being dropped is reported by the apply below rather than here.
+	coll, err := c.meta.GetCollectionByID(ctx, "", header.GetCollectionId(), typeutil.MaxTimestamp, true)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return nil
+		}
+		return merr.Wrap(err, "load the collection for the shard split adoption")
+	}
+	if routingCommitAlreadyApplied(coll, updates) {
+		return nil
+	}
+
+	resp, err := c.mixCoord.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{
+		CollectionId: header.GetCollectionId(),
+		SplitTaskId:  updates.GetSplitTaskId(),
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return merr.Wrap(err, "ask this cluster's datacoord whether the shard split has drained")
+	}
+	if !resp.GetDrained() {
+		mlog.Info(ctx, "shard split adoption is waiting for this cluster to drain the source",
+			mlog.FieldCollectionID(header.GetCollectionId()),
+			mlog.Int64("splitTaskID", updates.GetSplitTaskId()))
+		return merr.WrapErrServiceInternalMsg("shard split %d of collection %d not drained on this cluster yet",
+			updates.GetSplitTaskId(), header.GetCollectionId())
+	}
+	return nil
 }

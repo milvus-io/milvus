@@ -19,16 +19,33 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -253,11 +270,13 @@ func TestShardStateMayAdvance(t *testing.T) {
 	for _, s := range all {
 		require.True(t, shardStateMayAdvance(s, s), s.String())
 	}
-	// Forward: fence a source, release it, adopt a target, abandon a target.
+	// Forward: fence a source, release it, adopt a target.
 	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardSplitting))
 	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardDropped))
 	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal))
-	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardDropped))
+	// A target is write-routable from the moment it is published, so there is no
+	// abandoning it: dropping one would discard the writes it has already taken.
+	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardDropped))
 	// Backward: the fence is recorded in the WAL and cannot be undone, an adopted
 	// target cannot go back to not-yet-serviceable, and Dropped is terminal.
 	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardNormal))
@@ -392,4 +411,332 @@ func TestCheckRoutingCommitAgainstMetaRefusesTheNamespaceKeyForAPrimaryKeyPlaced
 	// A primary-key routed split of the same default collection is untouched by
 	// the gate: that is the key its rows were placed by.
 	require.NoError(t, checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false")), routingUpdatesFromRequest(commit("hash(pk)"))))
+}
+
+// splitTestMidSplitCollection is the collection as the adoption commit finds
+// it: the source fenced, the two targets created and already write-routable.
+func splitTestMidSplitCollection() *model.Collection {
+	coll := splitTestCollectionMeta(
+		[]string{splitTestSource, splitTestTarget1, splitTestTarget2},
+		map[string]*model.ShardInfo{
+			splitTestSource:  {VChannelName: splitTestSource, State: schemapb.ShardState_ShardSplitting},
+			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardCreating, Buckets: []uint64{0}},
+			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardCreating, Buckets: []uint64{1}},
+		}, 2)
+	coll.ShardBy = "hash(pk)"
+	return coll
+}
+
+// splitTestAdoptionPostImage is the adoption commit's post-image: the two
+// targets adopted and the source delisted altogether.
+func splitTestAdoptionPostImage() *messagespb.AlterCollectionMessageUpdates {
+	return &messagespb.AlterCollectionMessageUpdates{
+		VirtualChannelNames:  []string{splitTestTarget1, splitTestTarget2},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 1),
+		},
+		RoutingModulus: 2,
+		ShardBy:        "hash(pk)",
+		SplitTaskId:    7,
+	}
+}
+
+// splitTestAlterResult builds the broadcast result of an AlterCollection that
+// reached every vchannel of the collection, the delisted source included.
+func splitTestAlterResult(updates *messagespb.AlterCollectionMessageUpdates, paths ...string) message.BroadcastResultAlterCollectionMessageV2 {
+	vchannels := []string{splitTestSource, splitTestTarget1, splitTestTarget2, splitTestControl}
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			DbId:         1,
+			CollectionId: splitTestCollID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: paths},
+			CacheExpirations: ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
+				ce.OptLPCMDBName(splitTestDB),
+				ce.OptLPCMCollectionName(splitTestCollection),
+				ce.OptLPCMCollectionID(splitTestCollID),
+				ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
+			).Build(),
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{Updates: updates}).
+		WithBroadcast(vchannels).
+		MustBuildBroadcast()
+	results := make(map[string]*message.AppendResult, len(vchannels))
+	for i, vchannel := range vchannels {
+		results[vchannel] = &message.AppendResult{MessageID: rmq.NewRmqID(int64(i + 1)), TimeTick: uint64(100 + i)}
+	}
+	return message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: results,
+	}
+}
+
+// splitTestRoutingAlterResult is the adoption commit: the routing field mask
+// over the post-image that delists the source.
+func splitTestRoutingAlterResult(updates *messagespb.AlterCollectionMessageUpdates) message.BroadcastResultAlterCollectionMessageV2 {
+	return splitTestAlterResult(updates, message.FieldMaskCollectionShardSplitRouting)
+}
+
+// expectAlterCollection arms MetaTable.AlterCollection and records that it ran.
+func (h *splitCallbackHarness) expectAlterCollection(err error) *mockrootcoord.IMetaTable_AlterCollection_Call {
+	return h.meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).
+		Run(func(context.Context, message.BroadcastResultAlterCollectionMessageV2) {
+			h.record("AlterCollection")
+		}).Return(err)
+}
+
+// expectDrained arms CheckShardSplitDrained and records that it ran.
+func (h *splitCallbackHarness) expectDrained(resp *datapb.CheckShardSplitDrainedResponse, err error) *imocks.MixCoord_CheckShardSplitDrained_Call {
+	return h.mixCoord.EXPECT().CheckShardSplitDrained(mock.Anything, mock.Anything).
+		Run(func(context.Context, *datapb.CheckShardSplitDrainedRequest) {
+			h.record("CheckShardSplitDrained")
+		}).Return(resp, err)
+}
+
+// TestCommitShardSplitRoutingBroadcastsToTheDelistedSource: the adoption commit
+// drops a vchannel from the collection, and that vchannel's own replica is what
+// retires it on the streamingnode -- so the broadcast has to reach it even
+// though the post-image no longer names it. The commit also takes the
+// collection's resource keys itself: its caller no longer holds them.
+func TestCommitShardSplitRoutingBroadcastsToTheDelistedSource(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().GetCollectionByName(mock.Anything, splitTestDB, splitTestCollection, mock.Anything, mock.Anything).
+		Return(splitTestMidSplitCollection(), nil)
+	meta.EXPECT().ListAliases(mock.Anything, splitTestDB, splitTestCollection, mock.Anything).Return(nil, nil)
+	c := newTestCore(withMeta(meta))
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(splitTestControl).Maybe()
+	streaming.SetWALForTest(wal)
+
+	var got message.BroadcastMutableMessage
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			got = msg
+			return &types.BroadcastAppendResult{}, nil
+		}).Once()
+	bapi.EXPECT().Close().Return().Maybe()
+
+	var gotKeys []message.ResourceKey
+	locker := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
+		To(func(_ context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			gotKeys = keys
+			return bapi, nil
+		}).Build()
+	defer locker.UnPatch()
+
+	require.NoError(t, c.broadcastCommitShardSplitRouting(context.Background(), &rootcoordpb.CommitShardSplitRoutingRequest{
+		DbName:               splitTestDB,
+		CollectionName:       splitTestCollection,
+		CollectionId:         splitTestCollID,
+		VirtualChannelNames:  []string{splitTestTarget1, splitTestTarget2},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 1),
+		},
+		RoutingModulus: 2,
+		ShardBy:        "hash(pk)",
+		SplitTaskId:    7,
+	}))
+
+	require.NotNil(t, got)
+	// The control channel, the two adopted targets, and the source the
+	// post-image delists -- each exactly once.
+	require.ElementsMatch(t,
+		[]string{splitTestControl, splitTestSource, splitTestTarget1, splitTestTarget2},
+		got.BroadcastHeader().VChannels)
+	// The split's id rides in the body, so every cluster replaying this commit
+	// can ask its own datacoord about the same task.
+	require.EqualValues(t, 7, message.MustAsBroadcastAlterCollectionMessageV2(got).MustBody().GetUpdates().GetSplitTaskId())
+	require.ElementsMatch(t, []message.ResourceKey{
+		message.NewSharedDBNameResourceKey(splitTestDB),
+		message.NewExclusiveCollectionNameResourceKey(splitTestDB, splitTestCollection),
+	}, gotKeys)
+}
+
+// TestAdoptionCallbackWaitsForTheLocalDrain: the adoption is what retires the
+// source, and every cluster retires its own copy of it. The callback therefore
+// asks THIS cluster's datacoord whether the split's sources have drained here,
+// and refuses to apply the post-image until they have.
+func TestAdoptionCallbackWaitsForTheLocalDrain(t *testing.T) {
+	t.Run("not drained yet", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		var got *datapb.CheckShardSplitDrainedRequest
+		h.mixCoord.EXPECT().CheckShardSplitDrained(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, req *datapb.CheckShardSplitDrainedRequest) {
+				h.record("CheckShardSplitDrained")
+				got = req
+			}).Return(&datapb.CheckShardSplitDrainedResponse{Status: merr.Success(), Drained: false}, nil).Once()
+
+		err := h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage()))
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "not drained")
+		// Nothing applied: the meta still routes to the source.
+		require.Equal(t, []string{"CheckShardSplitDrained"}, h.calls)
+		require.Equal(t, 0, h.broadcasts)
+		require.EqualValues(t, splitTestCollID, got.GetCollectionId())
+		require.EqualValues(t, 7, got.GetSplitTaskId())
+	})
+
+	t.Run("drained", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		h.expectDrained(&datapb.CheckShardSplitDrainedResponse{Status: merr.Success(), Drained: true}, nil).Once()
+		h.expectAlterCollection(nil).Once()
+
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+		require.Equal(t, []string{"CheckShardSplitDrained", "AlterCollection"}, h.calls)
+		require.Equal(t, 1, h.broadcasts)
+	})
+
+	t.Run("datacoord unreachable", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		h.expectDrained(nil, errors.New("rpc error")).Once()
+
+		err := h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage()))
+		require.Error(t, err)
+		require.Equal(t, []string{"CheckShardSplitDrained"}, h.calls)
+	})
+
+	t.Run("datacoord has no record of the task", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		h.expectDrained(&datapb.CheckShardSplitDrainedResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("no record of shard split task 7")),
+		}, nil).Once()
+
+		err := h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage()))
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.Equal(t, []string{"CheckShardSplitDrained"}, h.calls)
+	})
+
+	t.Run("the collection is gone", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, nil)
+		h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrCollectionNotFound(splitTestCollID)).Once()
+		h.meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(errAlterCollectionNotFound).Once()
+
+		// The gate has nothing to gate; the apply below reports the same thing
+		// and the callback finishes instead of retrying forever.
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+	})
+
+	t.Run("the collection cannot be read", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, nil)
+		h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, mock.Anything).
+			Return(nil, errors.New("etcd down")).Once()
+
+		require.Error(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+		require.Empty(t, h.calls)
+	})
+}
+
+// TestAdoptionCallbackSkipsTheDrainOnARedeliveredCommit: a redelivery after
+// datacoord reclaimed the task must never ask about a task id datacoord no
+// longer knows -- that answer is a System error, and the collection's DDL
+// callback queue would wedge behind it forever. A post-image the collection
+// already carries is therefore applied without asking.
+func TestAdoptionCallbackSkipsTheDrainOnARedeliveredCommit(t *testing.T) {
+	coll := splitTestCollectionMeta(
+		[]string{splitTestTarget1, splitTestTarget2},
+		map[string]*model.ShardInfo{
+			splitTestTarget1: {VChannelName: splitTestTarget1, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
+			splitTestTarget2: {VChannelName: splitTestTarget2, State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
+		}, 2)
+	coll.ShardBy = "hash(pk)"
+	h := newSplitCallbackHarness(t, coll)
+	h.expectAlterCollection(nil).Once()
+
+	require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage())))
+	require.Equal(t, []string{"AlterCollection"}, h.calls)
+}
+
+// TestAdoptionCallbackAppliesANonSplitRoutingCommitImmediately: the drain gate
+// belongs to the adoption alone. An alter that carries no routing mask, and a
+// routing commit that delists nothing -- the write switch, which publishes the
+// targets while the source keeps serving -- both apply straight away.
+func TestAdoptionCallbackAppliesANonSplitRoutingCommitImmediately(t *testing.T) {
+	t.Run("no routing mask", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		h.expectAlterCollection(nil).Once()
+
+		result := splitTestAlterResult(&messagespb.AlterCollectionMessageUpdates{
+			Description: "a plain properties alter",
+		}, message.FieldMaskCollectionDescription)
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), result))
+		require.Equal(t, []string{"AlterCollection"}, h.calls)
+	})
+
+	t.Run("a routing commit that delists nothing", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		h.expectAlterCollection(nil).Once()
+
+		require.NoError(t, h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestPostImage())))
+		require.Equal(t, []string{"AlterCollection"}, h.calls)
+	})
+}
+
+// TestCommitShardSplitRoutingReportsALockFailure: the commit takes the
+// collection's resource keys itself, before it reads any meta, so a locker that
+// refuses -- a secondary cluster rejects every broadcast -- fails the commit
+// rather than letting it broadcast unserialized.
+func TestCommitShardSplitRoutingReportsALockFailure(t *testing.T) {
+	c := newTestCore(withMeta(mockrootcoord.NewIMetaTable(t)))
+	locker := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
+		To(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return nil, broadcast.ErrNotPrimary
+		}).Build()
+	defer locker.UnPatch()
+
+	err := c.broadcastCommitShardSplitRouting(context.Background(), &rootcoordpb.CommitShardSplitRoutingRequest{
+		DbName:               splitTestDB,
+		CollectionName:       splitTestCollection,
+		VirtualChannelNames:  []string{splitTestTarget1, splitTestTarget2},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 1),
+		},
+		RoutingModulus: 2,
+	})
+	require.ErrorIs(t, err, broadcast.ErrNotPrimary)
+}
+
+// TestCommitShardSplitRoutingRefusesAnAdoptionWithNoSplitTaskId: the adoption's
+// callback asks datacoord about the split it names, and a broadcast whose
+// callback can never succeed holds the collection's exclusive key forever. A
+// commit that retires a vchannel without naming its split is therefore a failed
+// RPC, not an appended message.
+func TestCommitShardSplitRoutingRefusesAnAdoptionWithNoSplitTaskId(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().GetCollectionByName(mock.Anything, splitTestDB, splitTestCollection, mock.Anything, mock.Anything).
+		Return(splitTestMidSplitCollection(), nil)
+	c := newTestCore(withMeta(meta))
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Close().Return().Maybe()
+	locker := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
+		To(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return bapi, nil
+		}).Build()
+	defer locker.UnPatch()
+
+	// Nothing is broadcast: the mock would fail the test on an unexpected
+	// Broadcast call.
+	err := c.broadcastCommitShardSplitRouting(context.Background(), &rootcoordpb.CommitShardSplitRoutingRequest{
+		DbName:               splitTestDB,
+		CollectionName:       splitTestCollection,
+		CollectionId:         splitTestCollID,
+		VirtualChannelNames:  []string{splitTestTarget1, splitTestTarget2},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 1),
+		},
+		RoutingModulus: 2,
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "without naming the split task")
+	require.False(t, merr.IsRetryableErr(err), "the same request gets the same answer")
 }

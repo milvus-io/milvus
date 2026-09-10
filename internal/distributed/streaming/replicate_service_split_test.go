@@ -227,6 +227,7 @@ func TestOverwriteRoutingAlterCollectionRemapsChannelNames(t *testing.T) {
 				// must survive as empty rather than being invented.
 				{},
 			},
+			SplitTaskId: 7,
 		}
 	}
 
@@ -251,6 +252,10 @@ func TestOverwriteRoutingAlterCollectionRemapsChannelNames(t *testing.T) {
 	assert.Equal(t, []string{"q0_1v0", "q1_1v1"}, updates.GetVirtualChannelNames())
 	assert.Equal(t, []string{"q0", "q1"}, updates.GetPhysicalChannelNames())
 	assert.Equal(t, []string{"q0_1v0", ""}, shardInfoNames(updates.GetShardInfos()))
+	// The split task id is an id, not a name: nothing to remap, and the in-place
+	// rewrite above must not drop it -- the secondary's adoption gate asks its
+	// own datacoord about exactly this task.
+	assert.EqualValues(t, 7, updates.GetSplitTaskId())
 
 	// (a2) a routing commit naming a channel the topology cannot map is refused
 	// rather than half-remapped: a topology naming channels of both clusters is

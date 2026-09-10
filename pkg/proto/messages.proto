@@ -405,6 +405,11 @@ message AlterCollectionMessageUpdates {
     // The routing-key expression, back-filled at the first split of a collection
     // created before shard_by existed. Empty leaves it undeclared.
     string shard_by                            = 14;
+    // The shard split this routing commit belongs to. The adoption commit --- the
+    // one whose post-image delists a fenced source --- is gated on the LOCAL
+    // datacoord reporting that split's sources drained, so every cluster that
+    // replays this message can ask its own datacoord about the same task.
+    int64 split_task_id                        = 15;
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.
