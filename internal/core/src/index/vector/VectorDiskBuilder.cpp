@@ -309,6 +309,7 @@ VectorDiskBuilder<T>::VectorDiskBuilder(DataType elem_type,
                   PhysicalVectorDataType<T>());
     }
     engine_->SetDim(dim);
+    ConfigureMRL(*engine_, dim, build_params_);
 }
 
 template <typename T>
@@ -501,6 +502,33 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                           "failed to build disk vector index: status {} ({})",
                           static_cast<int>(status),
                           knowhere::Status2String(status));
+            }
+            knowhere::BinarySet entries;
+            const auto serialize_status =
+                engine_->native_index.Serialize(entries);
+            file_manager_->RethrowFirstFailure();
+            if (serialize_status != knowhere::Status::success) {
+                ThrowInfo(KnowhereStatusToErrorCode(serialize_status),
+                          "failed to serialize disk vector index: status {} "
+                          "({})",
+                          static_cast<int>(serialize_status),
+                          knowhere::Status2String(serialize_status));
+            }
+            for (const auto& [name, binary] : entries.binary_map_) {
+                AssertInfo(!name.empty() &&
+                               std::filesystem::path(name).filename() == name,
+                           "disk vector index returned invalid sidecar name {}",
+                           name);
+                AssertInfo(binary != nullptr && binary->size >= 0,
+                           "disk vector index returned invalid sidecar {}",
+                           name);
+                const auto path =
+                    (std::filesystem::path(file_manager_->Directory()) / name)
+                        .string();
+                WriteFile(path,
+                          binary->data.get(),
+                          static_cast<size_t>(binary->size));
+                file_manager_->RegisterOwnedFile(path);
             }
         }
 

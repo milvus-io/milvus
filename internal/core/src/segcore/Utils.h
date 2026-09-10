@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <functional>
 #include <cstdlib>
@@ -205,7 +207,9 @@ bool
 CanLazyCreateSealedIndexSlot(const LoadIndexInfo& load_index_info);
 
 void
-PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info);
+PrepareLazySealedIndexSlot(
+    LoadIndexInfo& load_index_info,
+    std::function<const void*(size_t)> vector_data_view = {});
 
 IndexRegistration
 MakeSealedIndexRegistration(const LoadIndexInfo& info);
@@ -216,7 +220,8 @@ MakeSealedIndexCapability(const LoadIndexInfo& info);
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx = nullptr);
+              milvus::OpContext* op_ctx = nullptr,
+              std::function<const void*(size_t)> vector_data_view = {});
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.
