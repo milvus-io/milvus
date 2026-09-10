@@ -76,7 +76,7 @@ class VectorMemIndex : public VectorIndex {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     // Sealed loading uses admitted reads on the shared async executor.
-    // Memory Deserialize runs there; mmap file work runs on LocalFileIOPool.
+    // Memory/mmap Deserialize runs there; file staging uses LocalFileIOPool.
     // Knowhere owns its internal deserialization parallelism.
     // Cancellation drains issued reads and is checked around deserialization.
     void
@@ -176,7 +176,7 @@ class VectorMemIndex : public VectorIndex {
                       folly::CancellationToken token);
 
     // Shared synchronous finalizer; all input files must be closed. The async
-    // path invokes this on LocalFileIOPool with no slice admission held.
+    // path invokes this on the shared async worker with no slice admission held.
     void
     FinalizeMmapLoad(const Config& config,
                      bool wrote_index_data,

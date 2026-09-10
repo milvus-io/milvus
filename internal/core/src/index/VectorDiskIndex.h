@@ -68,8 +68,8 @@ class VectorDiskAnnIndex : public VectorIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
-    // Admitted staging runs on the shared async executor; file operations and
-    // synchronous Knowhere finalization run on LocalFileIOPool.
+    // Admitted reads and synchronous Knowhere finalization use the shared async
+    // executor. File staging and cleanup run on LocalFileIOPool.
     void
     Load(milvus::tracer::TraceContext ctx,
          const Config& config,

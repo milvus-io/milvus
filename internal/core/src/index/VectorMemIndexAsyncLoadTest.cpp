@@ -854,6 +854,14 @@ TEST_F(VectorMemIndexAsyncLoadTest,
             });
             ASSERT_EQ(entered_future.wait_for(std::chrono::seconds(5)),
                       std::future_status::ready);
+            // A blocked Deserialize must leave the single local-file worker
+            // available to service another load's writes.
+            auto local_probe = std::make_shared<std::promise<void>>();
+            auto local_progress = local_probe->get_future();
+            storage::LocalFileIOPool::GetInstance().GetExecutor()->add(
+                [local_probe] { local_probe->set_value(); });
+            EXPECT_EQ(local_progress.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
             if (cancelled) {
                 cancel.requestCancellation();
             }
@@ -862,7 +870,7 @@ TEST_F(VectorMemIndexAsyncLoadTest,
             release.set_value();
             task.wait();
             drain.dismiss();
-            EXPECT_TRUE(observation->thread.starts_with("MILVUS_LF_IO"));
+            EXPECT_TRUE(observation->thread.starts_with("MILVUS_ASYNC"));
             if (cancelled) {
                 try {
                     task.get();
@@ -911,7 +919,7 @@ TEST_F(VectorMemIndexAsyncLoadTest,
                 DataType::NONE, type, "L2", version_, Context());
             loaded.Load({}, config, nullptr);
             EXPECT_TRUE(observation->finalized);
-            EXPECT_EQ(observation->thread.starts_with("MILVUS_LF_IO"), enabled);
+            EXPECT_EQ(observation->thread.starts_with("MILVUS_ASYNC"), enabled);
             observation->finalize = {};
         }
     }
@@ -1178,7 +1186,7 @@ TEST_F(VectorMemIndexAsyncLoadTest, FileFinalizerFailureRemovesStaging) {
             EXPECT_EQ(error.get_error_code(), UnexpectedError);
         }
         EXPECT_TRUE(observation->finalized);
-        EXPECT_TRUE(observation->thread.starts_with("MILVUS_LF_IO"));
+        EXPECT_TRUE(observation->thread.starts_with("MILVUS_ASYNC"));
         if (disk) {
             EXPECT_FALSE(std::filesystem::exists(
                 observation->manager->GetLocalIndexObjectPrefix()));

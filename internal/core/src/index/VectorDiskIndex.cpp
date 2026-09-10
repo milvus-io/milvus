@@ -405,15 +405,11 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                         token);
                 }
             }
-            co_await storage::RunLocalFileIOAsync(
-                [&] {
-                    storage::ThrowIfCancelled(token,
-                                              "VectorDiskIndex::Finalize");
-                    FinalizeDiskLoad(ctx, std::move(load_config));
-                    storage::ThrowIfCancelled(token,
-                                              "VectorDiskIndex::Finalize");
-                },
-                priority);
+            storage::ThrowIfCancelled(token, "VectorDiskIndex::Finalize");
+            // Staging has closed all files and released its leases. Restore
+            // metadata and invoke Knowhere on this shared async worker; keep
+            // the index and files alive until the synchronous call returns.
+            FinalizeDiskLoad(ctx, std::move(load_config));
             storage::ThrowIfCancelled(token, "VectorDiskIndex::Publish");
         } catch (...) {
             failure = std::current_exception();

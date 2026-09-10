@@ -1282,7 +1282,7 @@ VectorMemIndex<T>::LoadFromFileAsync(const Config& config,
     std::exception_ptr failure;
     try {
         // Acquire a local executor only for this phase, never across a remote
-        // wait. Creation, writes, flush/close and finalization all use this pool.
+        // wait. Creation, writes and flush/close use this pool.
         co_await storage::RunLocalFileIOAsync(
             [&] {
                 for (size_t i = 0; i < paths.size(); ++i) {
@@ -1363,8 +1363,7 @@ VectorMemIndex<T>::LoadFromFileAsync(const Config& config,
                 .count());
         co_await storage::RunLocalFileIOAsync(
             [&] {
-                storage::ThrowIfCancelled(token,
-                                          "VectorMemIndex::FinalizeMmap");
+                storage::ThrowIfCancelled(token, "VectorMemIndex::CloseMmap");
                 const auto start_finish = std::chrono::steady_clock::now();
                 for (auto& writer : writers) {
                     writer->Finish();
@@ -1376,35 +1375,31 @@ VectorMemIndex<T>::LoadFromFileAsync(const Config& config,
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         write_duration)
                         .count());
-                ValidDataView valid_data;
-                if (sidecars.Contains(VALID_DATA_COUNT_KEY) ||
-                    sidecars.Contains(VALID_DATA_KEY)) {
-                    AssertInfo(sidecars.Contains(VALID_DATA_COUNT_KEY) &&
-                                   sidecars.Contains(VALID_DATA_KEY),
-                               "nullable vector index valid_data files are "
-                               "incomplete");
-                    const auto count = sidecars.GetByName(VALID_DATA_COUNT_KEY);
-                    const auto bitmap = sidecars.GetByName(VALID_DATA_KEY);
-                    valid_data =
-                        LoadValidDataViewFromPayload(count->data.get(),
-                                                     count->size,
-                                                     bitmap->data.get(),
-                                                     bitmap->size);
-                }
-                std::optional<std::span<const uint8_t>> empty_offsets;
-                if (sidecars.Contains(EMPTY_EMB_LIST_OFFSET_KEY)) {
-                    const auto empty =
-                        sidecars.GetByName(EMPTY_EMB_LIST_OFFSET_KEY);
-                    empty_offsets.emplace(empty->data.get(), empty->size);
-                }
-                // No admission lease remains. Invoke once and let Knowhere own any
-                // internal parallelism; cancellation must drain this synchronous call.
-                FinalizeMmapLoad(
-                    config, wrote_index_data, valid_data, empty_offsets);
-                storage::ThrowIfCancelled(token,
-                                          "VectorMemIndex::FinalizeMmap");
             },
             priority);
+        storage::ThrowIfCancelled(token, "VectorMemIndex::FinalizeMmap");
+        ValidDataView valid_data;
+        if (sidecars.Contains(VALID_DATA_COUNT_KEY) ||
+            sidecars.Contains(VALID_DATA_KEY)) {
+            AssertInfo(sidecars.Contains(VALID_DATA_COUNT_KEY) &&
+                           sidecars.Contains(VALID_DATA_KEY),
+                       "nullable vector index valid_data files are incomplete");
+            const auto count = sidecars.GetByName(VALID_DATA_COUNT_KEY);
+            const auto bitmap = sidecars.GetByName(VALID_DATA_KEY);
+            valid_data = LoadValidDataViewFromPayload(count->data.get(),
+                                                      count->size,
+                                                      bitmap->data.get(),
+                                                      bitmap->size);
+        }
+        std::optional<std::span<const uint8_t>> empty_offsets;
+        if (sidecars.Contains(EMPTY_EMB_LIST_OFFSET_KEY)) {
+            const auto empty = sidecars.GetByName(EMPTY_EMB_LIST_OFFSET_KEY);
+            empty_offsets.emplace(empty->data.get(), empty->size);
+        }
+        // Resume on the shared async worker with no slice lease or local-file
+        // executor held. Knowhere owns internal parallelism; cancellation must
+        // drain this synchronous call before releasing files or sidecars.
+        FinalizeMmapLoad(config, wrote_index_data, valid_data, empty_offsets);
         storage::ThrowIfCancelled(token, "VectorMemIndex::PublishMmap");
     } catch (...) {
         failure = std::current_exception();
