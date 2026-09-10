@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -243,9 +245,13 @@ func (m *meta) validateSegmentChangeGroupTransitionLocked(group *model.SegmentCh
 			"illegal segment change group %d transition %s -> %s",
 			group.GroupID, current.State, group.State)
 	}
+	// C17: only the caller-owned member sets are compared. SupersededL0SegmentIDs
+	// is meta-computed at registration (stampSupersededL0ExemptionsLocked) and a
+	// caller rebuilding the group from its own job/plan state cannot reproduce
+	// it; comparing it would block every transition. The stored decision is
+	// preserved onto the saved record instead.
 	if !segmentIDSetEqual(current.NewSegmentIDs, group.NewSegmentIDs) ||
-		!segmentIDSetEqual(current.SupersededSegmentIDs, group.SupersededSegmentIDs) ||
-		!segmentIDSetEqual(current.SupersededL0SegmentIDs, group.SupersededL0SegmentIDs) {
+		!segmentIDSetEqual(current.SupersededSegmentIDs, group.SupersededSegmentIDs) {
 		return merr.WrapErrDataIntegrityMsg(
 			"segment change group %d member set changed during transition %s -> %s; members are fixed at registration",
 			group.GroupID, current.State, group.State)
@@ -292,6 +298,10 @@ func (m *meta) UpdateSegmentChangeGroup(ctx context.Context, group *model.Segmen
 	if err := m.validateSegmentChangeGroupTransitionLocked(group); err != nil {
 		return err
 	}
+	// C17: the L0-exemption decision is meta-owned (stamped at registration);
+	// a caller-rebuilt group does not carry it, so preserve the stored value on
+	// the saved record instead of trusting the caller.
+	group.SupersededL0SegmentIDs = append([]int64(nil), m.segmentChangeGroups[group.GroupID].SupersededL0SegmentIDs...)
 	action := metastore.SaveSegmentChangeGroup(group)
 	if err := m.catalog.Update(ctx, action); err != nil {
 		return err
@@ -534,6 +544,10 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 				}
 			} else if err := m.validateSegmentChangeGroupTransitionLocked(entry.Group); err != nil {
 				return err
+			} else {
+				// C17: preserve the meta-owned L0-exemption decision on a
+				// caller-rebuilt transition record.
+				entry.Group.SupersededL0SegmentIDs = append([]int64(nil), m.segmentChangeGroups[entry.Group.GroupID].SupersededL0SegmentIDs...)
 			}
 		case metastore.ActionDelete:
 			if current := m.segmentChangeGroups[entry.GroupID]; current != nil && !current.IsTerminal() {
@@ -575,6 +589,18 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		return nil
 	}
 
+	// C15: `updateSegmentPack.Validate` panics when fromSaveBinlogPathSegmentID
+	// is set but the target segment is absent from the pack (a save-binlog-paths
+	// target concurrently dropped/GC'd). UpdateSegmentsInfo never reaches that
+	// path because its empty-pack guard short-circuits first; here groupActions
+	// can keep the write alive, so neutralize the stale marker before
+	// validation — a dropped target is a benign stale update, not a panic.
+	if updatePack.fromSaveBinlogPathSegmentID != 0 {
+		if _, ok := updatePack.segments[updatePack.fromSaveBinlogPathSegmentID]; !ok {
+			updatePack.fromSaveBinlogPathSegmentID = 0
+		}
+	}
+
 	// C3: for a COMMITTED (publish) transition, every member must have been
 	// touched by an operator (i.e. still present in meta and flipped). The
 	// operator return value alone is ambiguous — UpdateStatusOperator returns
@@ -601,7 +627,22 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	}
 
 	if err := updatePack.Validate(); err != nil {
-		return err
+		// C16: errIgnoredSegmentMetaOperation must not fail the composite write
+		// nor loop a retrying RPC. UpdateSegmentsInfo maps it to nil (a stale
+		// save-binlog-paths update is a benign no-op); here the group actions
+		// must still be persisted so the group record converges, so drop only
+		// the stale segment from the pack and continue.
+		if errors.Is(err, errIgnoredSegmentMetaOperation) {
+			mlog.Info(ctx, "meta update: ignored stale segment meta operation, dropping it and persisting the rest",
+				mlog.Err(err))
+			delete(updatePack.segments, updatePack.fromSaveBinlogPathSegmentID)
+			updatePack.fromSaveBinlogPathSegmentID = 0
+			if len(updatePack.segments) == 0 && len(groupActions) == 0 {
+				return nil
+			}
+		} else {
+			return err
+		}
 	}
 	updatePack.prepareSegmentMetricUpdates()
 
