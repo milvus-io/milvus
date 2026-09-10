@@ -412,6 +412,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				PlanID:                 planID,
 				TriggerID:              signal.id,
 				State:                  datapb.CompactionTaskState_pipelining,
+				NodeID:                 NullNodeID,
 				StartTime:              pts.Unix(),
 				Type:                   datapb.CompactionType_MixCompaction,
 				CollectionTtl:          ct.collectionTTL.Nanoseconds(),

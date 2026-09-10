@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -104,9 +103,10 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+			return
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 	mlog.Info(context.TODO(), "mixCompactionTask notify compaction tasks to DataNode")
@@ -114,7 +114,10 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+		return
 	}
+	decCoordExecutingCompactionTaskNum(t.GetTaskProto().GetType())
+	incNodeExecutingCompactionTaskNum(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetType())
 }
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
@@ -123,9 +126,13 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil || result == nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to get compaction result", mlog.Err(err))
+		originNodeID := t.GetTaskProto().GetNodeID()
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+			return
 		}
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 	switch result.GetState() {

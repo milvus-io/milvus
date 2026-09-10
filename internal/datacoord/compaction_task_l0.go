@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -135,15 +134,18 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 			log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 			return
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+		return
 	}
+	decCoordExecutingCompactionTaskNum(t.GetTaskProto().GetType())
+	incNodeExecutingCompactionTaskNum(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetType())
 }
 
 func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
@@ -153,10 +155,14 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil || result == nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to get compaction result", mlog.Err(err))
+		originNodeID := t.GetTaskProto().GetNodeID()
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
 			log.Warn(context.TODO(), "update l0 compaction task meta failed", mlog.Err(err))
+			return
 		}
+		decNodeExecutingCompactionTaskNum(originNodeID, t.GetTaskProto().GetType())
+		incCoordPendingCompactionTaskNum(t.GetTaskProto().GetType())
 		return
 	}
 	switch result.GetState() {
