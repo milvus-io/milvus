@@ -72,6 +72,19 @@ class MemFileManagerImpl : public FileManagerImpl {
                             folly::CancellationToken token = {},
                             std::string_view entry_name = {});
 
+    // Prepare a destination once per logical entry (including empty entries).
+    // The returned consumer receives ordered entry-relative offsets; its borrowed
+    // bytes remain admitted until the awaited consumer returns. Preparation runs
+    // on the caller executor, so file operations belong in an awaited consumer.
+    using IndexEntryConsumerFactory =
+        std::function<LegacyIndexConsumer(const std::string&, size_t)>;
+    folly::coro::Task<void>
+    StreamIndexEntriesAsync(const std::vector<std::string>& remote_files,
+                            const IndexEntryConsumerFactory& prepare,
+                            proto::common::LoadPriority priority,
+                            folly::CancellationToken token = {},
+                            std::string_view entry_name = {});
+
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);
 

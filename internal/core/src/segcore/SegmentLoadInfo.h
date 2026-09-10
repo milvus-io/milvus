@@ -1174,17 +1174,14 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            // Scalar and memory vector loaders inspect persisted envelopes.
+            // Scalar and memory/mmap vector loaders inspect persisted envelopes.
             // Defer their byte estimates until a file context is available.
             const auto& index_type =
                 load_index_info.index_params.at("index_type");
             const bool needs_file_context =
                 !IsVectorDataType(load_index_info.field_type) ||
-                (!knowhere::UseDiskLoad(index_type,
-                                        load_index_info.index_engine_version) &&
-                 !(load_index_info.enable_mmap &&
-                   knowhere::KnowhereCheck::SupportMmapIndexTypeCheck(
-                       index_type)));
+                !knowhere::UseDiskLoad(index_type,
+                                       load_index_info.index_engine_version);
             auto request =
                 milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                     load_index_info.field_type,

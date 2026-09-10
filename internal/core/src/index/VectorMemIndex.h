@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include "common/BitsetView.h"
@@ -40,6 +42,7 @@
 #include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
+struct ValidDataView;
 // TODO : growing index should be isolated from VectorMemIndex
 // For general index, it should not suppport AddWithDataset etc.
 // For growing index, it should suppport AddWithDataset etc.
@@ -72,8 +75,9 @@ class VectorMemIndex : public VectorIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
-    // Sealed memory loading uses admitted reads on the shared async executor.
-    // Deserialize runs on that caller; Knowhere owns its internal parallelism.
+    // Sealed loading uses admitted reads on the shared async executor.
+    // Memory Deserialize runs there; mmap file work runs on LocalFileIOPool.
+    // Knowhere owns its internal deserialization parallelism.
     // Cancellation drains issued reads and is checked around deserialization.
     void
     Load(milvus::tracer::TraceContext ctx,
@@ -163,6 +167,21 @@ class VectorMemIndex : public VectorIndex {
  private:
     void
     LoadFromFile(const Config& config);
+
+    // Streams mmap entries into their existing file layout, retaining only
+    // nullable/empty-list payloads. Drains local work before failure cleanup.
+    folly::coro::Task<void>
+    LoadFromFileAsync(const Config& config,
+                      proto::common::LoadPriority priority,
+                      folly::CancellationToken token);
+
+    // Shared synchronous finalizer; all input files must be closed. The async
+    // path invokes this on LocalFileIOPool with no slice admission held.
+    void
+    FinalizeMmapLoad(const Config& config,
+                     bool wrote_index_data,
+                     const ValidDataView& valid_data,
+                     std::optional<std::span<const uint8_t>> empty_offsets);
 
     bool
     IsEmptyEmbListIndex() const {

@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/VectorMemIndex.h"
+#include "storage/LocalFileIOPool.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -85,8 +86,6 @@
 namespace milvus::index {
 
 namespace {
-
-constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY = "empty_emb_list_offsets";
 
 struct EmptyEmbListState {
     int64_t dim;
@@ -504,8 +503,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                         milvus::OpContext* op_ctx) {
     const bool use_async_load =
         segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    // File-backed Knowhere loading is migrated separately.
-    if (!use_async_load || config.contains(MMAP_FILE_PATH)) {
+    if (!use_async_load) {
         Load(ctx, config);
         return;
     }
@@ -518,6 +516,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
         storage::ThrowIfCancelled(token, "VectorMemIndex::Load");
         AssertInfo(file_manager_ != nullptr,
                    "Vector load requires a file manager");
+        if (config.contains(MMAP_FILE_PATH)) {
+            co_await LoadFromFileAsync(config, priority, token);
+            co_return;
+        }
         const auto files =
             config.at(INDEX_FILES).get<std::vector<std::string>>();
         BinarySet binary;
@@ -1222,40 +1224,228 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         embedding_list_raw_index_writer_ptr->Finish();
     }
 
+    ValidDataView valid_data;
+    if (valid_data_count_codec || valid_data_codec) {
+        AssertInfo(valid_data_count_codec && valid_data_codec,
+                   "nullable vector index valid_data files are incomplete");
+        valid_data =
+            LoadValidDataViewFromPayload(valid_data_count_codec->PayloadData(),
+                                         valid_data_count_codec->PayloadSize(),
+                                         valid_data_codec->PayloadData(),
+                                         valid_data_codec->PayloadSize());
+    }
+    std::optional<std::span<const uint8_t>> empty_offsets;
+    if (empty_emb_list_offsets_codec) {
+        empty_offsets.emplace(empty_emb_list_offsets_codec->PayloadData(),
+                              empty_emb_list_offsets_codec->PayloadSize());
+    }
+    const auto start_finalize = std::chrono::steady_clock::now();
+    FinalizeMmapLoad(config, wrote_index_data, valid_data, empty_offsets);
+    LOG_INFO(
+        "load vector index done, mmap_file_path:{}, download_duration:{}, "
+        "write_files_duration:{}, deserialize_duration:{}",
+        local_filepath.value(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            write_disk_duration_sum)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_finalize)
+            .count());
+}
+
+template <typename T>
+folly::coro::Task<void>
+VectorMemIndex<T>::LoadFromFileAsync(const Config& config,
+                                     proto::common::LoadPriority priority,
+                                     folly::CancellationToken token) {
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto main_path = config.at(MMAP_FILE_PATH).get<std::string>();
+    const bool emb_list = elem_type_ != DataType::NONE;
+    std::vector<std::string> paths;
+    paths.reserve(emb_list ? 3 : 1);
+    paths.push_back(main_path);
+    if (emb_list) {
+        paths.push_back(config.at(EMB_LIST_META_PATH).get<std::string>());
+        if (config.contains(EMB_LIST_RAW_INDEX_PATH)) {
+            paths.push_back(
+                config.at(EMB_LIST_RAW_INDEX_PATH).get<std::string>());
+        }
+    }
+    std::vector<std::unique_ptr<storage::FileWriter>> writers(paths.size());
+    std::vector<std::string> created;
+    created.reserve(paths.size());
+    BinarySet sidecars;
+    std::chrono::steady_clock::duration write_duration{};
+    bool wrote_index_data = false;
+    std::exception_ptr failure;
+    try {
+        // Acquire a local executor only for this phase, never across a remote
+        // wait. Creation, writes, flush/close and finalization all use this pool.
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                for (size_t i = 0; i < paths.size(); ++i) {
+                    storage::ThrowIfCancelled(token,
+                                              "VectorMemIndex::CreateMmap");
+                    std::error_code error;
+                    // The sealed cache reuses these filenames across reloads.
+                    // FileWriter replaces stale targets, as the sync path does.
+                    std::filesystem::create_directories(
+                        std::filesystem::path(paths[i]).parent_path(), error);
+                    if (error) {
+                        ThrowInfo(
+                            FileCreateFailed,
+                            "Cannot create mmap index directory for {}: {}",
+                            paths[i],
+                            error.message());
+                    }
+                    created.push_back(paths[i]);
+                    writers[i] = std::make_unique<storage::FileWriter>(
+                        paths[i],
+                        storage::io::GetPriorityFromLoadPriority(priority));
+                }
+            },
+            priority);
+        storage::MemFileManagerImpl::IndexEntryConsumerFactory prepare =
+            [&](const std::string& name,
+                size_t size) -> storage::LegacyIndexConsumer {
+            if (IsValidDataBinary(name) || name == EMPTY_EMB_LIST_OFFSET_KEY) {
+                auto data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+                auto* destination = data.get();
+                sidecars.Append(name, std::move(data), size);
+                return [destination](size_t offset,
+                                     std::span<const uint8_t> bytes)
+                           -> folly::coro::Task<void> {
+                    if (!bytes.empty()) {
+                        std::memcpy(
+                            destination + offset, bytes.data(), bytes.size());
+                    }
+                    co_return;
+                };
+            }
+            size_t writer = 0;
+            if (name == knowhere::meta::EMB_LIST_META && emb_list) {
+                writer = 1;
+            } else if (name == knowhere::meta::EMB_LIST_RAW_INDEX) {
+                AssertInfo(writers.size() == 3,
+                           "emb list raw index mmap filepath is empty when "
+                           "load index");
+                writer = 2;
+            } else {
+                wrote_index_data = true;
+            }
+            return [&, writer](size_t, std::span<const uint8_t> bytes)
+                       -> folly::coro::Task<void> {
+                // The upstream read/decode lease survives this awaited write.
+                const auto start_write = std::chrono::steady_clock::now();
+                co_await storage::RunLocalFileIOAsync(
+                    [&] {
+                        storage::ThrowIfCancelled(token,
+                                                  "VectorMemIndex::WriteMmap");
+                        writers[writer]->Write(bytes.data(), bytes.size());
+                    },
+                    priority);
+                write_duration +=
+                    std::chrono::steady_clock::now() - start_write;
+            };
+        };
+        // Metadata/decoding resumes on the shared async executor. Native reads
+        // suspend it; ChunkManager-only inputs read synchronously on this worker.
+        const auto start_read = std::chrono::steady_clock::now();
+        co_await file_manager_->StreamIndexEntriesAsync(
+            files, prepare, priority, token);
+        const auto download_duration =
+            std::chrono::steady_clock::now() - start_read - write_duration;
+        milvus::monitor::internal_storage_download_duration.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                download_duration)
+                .count());
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token,
+                                          "VectorMemIndex::FinalizeMmap");
+                const auto start_finish = std::chrono::steady_clock::now();
+                for (auto& writer : writers) {
+                    writer->Finish();
+                    writer.reset();
+                }
+                write_duration +=
+                    std::chrono::steady_clock::now() - start_finish;
+                milvus::monitor::internal_storage_write_disk_duration.Observe(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        write_duration)
+                        .count());
+                ValidDataView valid_data;
+                if (sidecars.Contains(VALID_DATA_COUNT_KEY) ||
+                    sidecars.Contains(VALID_DATA_KEY)) {
+                    AssertInfo(sidecars.Contains(VALID_DATA_COUNT_KEY) &&
+                                   sidecars.Contains(VALID_DATA_KEY),
+                               "nullable vector index valid_data files are "
+                               "incomplete");
+                    const auto count = sidecars.GetByName(VALID_DATA_COUNT_KEY);
+                    const auto bitmap = sidecars.GetByName(VALID_DATA_KEY);
+                    valid_data =
+                        LoadValidDataViewFromPayload(count->data.get(),
+                                                     count->size,
+                                                     bitmap->data.get(),
+                                                     bitmap->size);
+                }
+                std::optional<std::span<const uint8_t>> empty_offsets;
+                if (sidecars.Contains(EMPTY_EMB_LIST_OFFSET_KEY)) {
+                    const auto empty =
+                        sidecars.GetByName(EMPTY_EMB_LIST_OFFSET_KEY);
+                    empty_offsets.emplace(empty->data.get(), empty->size);
+                }
+                // No admission lease remains. Invoke once and let Knowhere own any
+                // internal parallelism; cancellation must drain this synchronous call.
+                FinalizeMmapLoad(
+                    config, wrote_index_data, valid_data, empty_offsets);
+                storage::ThrowIfCancelled(token,
+                                          "VectorMemIndex::FinalizeMmap");
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "VectorMemIndex::PublishMmap");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                writers.clear();
+                this->mmap_file_raii_.reset();
+                for (const auto& path : created) {
+                    std::error_code ignored;
+                    std::filesystem::remove(path, ignored);
+                }
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
+}
+
+template <typename T>
+void
+VectorMemIndex<T>::FinalizeMmapLoad(
+    const Config& config,
+    bool wrote_index_data,
+    const ValidDataView& valid_data,
+    std::optional<std::span<const uint8_t>> empty_offsets) {
+    const auto local_filepath = config.at(MMAP_FILE_PATH).get<std::string>();
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
-    if (is_embedding_list) {
-        conf[EMB_LIST_META_PATH] = embedding_list_meta_path.value();
-        if (embedding_list_raw_index_path.has_value()) {
-            conf[EMB_LIST_RAW_INDEX_PATH] =
-                embedding_list_raw_index_path.value();
-        }
-    }
-    auto restore_id_map = [&]() -> RestoredIdMap {
-        if (!valid_data_count_codec && !valid_data_codec) {
-            return {};
-        }
-        AssertInfo(valid_data_count_codec && valid_data_codec,
-                   "nullable vector index valid_data files are incomplete");
-        return RestoreIdMapFromValidDataPayload(
-            index_.GetIdMap(),
-            valid_data_count_codec->PayloadData(),
-            valid_data_count_codec->PayloadSize(),
-            valid_data_codec->PayloadData(),
-            valid_data_codec->PayloadSize(),
-            &conf,
-            std::filesystem::path(local_filepath.value())
-                .parent_path()
-                .string());
-    };
-    const auto restored_id_map = restore_id_map();
+    const auto restored_id_map = RestoreIdMapFromValidData(
+        index_.GetIdMap(),
+        valid_data,
+        &conf,
+        std::filesystem::path(local_filepath).parent_path().string());
 
     auto start_deserialize = std::chrono::system_clock::now();
     std::chrono::duration<double> deserialize_duration{};
     if (wrote_index_data) {
         LOG_INFO("load index into Knowhere...");
-        auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
+        auto stat = index_.DeserializeFromFile(local_filepath, conf);
         deserialize_duration =
             std::chrono::system_clock::now() - start_deserialize;
         if (stat != knowhere::Status::success) {
@@ -1264,11 +1454,10 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                       KnowhereStatusString(stat));
         }
         this->SetDim(index_.Dim());
-    } else if (empty_emb_list_offsets_codec) {
+    } else if (empty_offsets) {
         LOG_INFO("load empty emb_list vector index metadata only...");
         auto empty_emb_list_state = LoadEmptyEmbListOffsetsFromPayload(
-            empty_emb_list_offsets_codec->PayloadData(),
-            static_cast<size_t>(empty_emb_list_offsets_codec->PayloadSize()));
+            empty_offsets->data(), empty_offsets->size());
         this->SetDim(empty_emb_list_state.dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state.offsets);
         if (restored_id_map.has_valid_data) {
@@ -1278,7 +1467,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         }
     } else {
         LOG_INFO("load all-null nullable vector index valid data only...");
-        AssertInfo(valid_data_count_codec && valid_data_codec,
+        AssertInfo(valid_data.found,
                    "nullable vector index valid_data files are incomplete");
         if (conf.contains(DIM_KEY)) {
             this->SetDim(GetDimFromConfig(conf));
@@ -1294,20 +1483,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             deserialize_duration)
             .count());
 
-    this->mmap_file_raii_ =
-        std::make_unique<MmapFileRAII>(local_filepath.value());
-    LOG_INFO(
-        "load vector index done, mmap_file_path:{}, download_duration:{}, "
-        "write_files_duration:{}, deserialize_duration:{}",
-        local_filepath.value(),
-        std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
-            .count(),
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            write_disk_duration_sum)
-            .count(),
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            deserialize_duration)
-            .count());
+    this->mmap_file_raii_ = std::make_unique<MmapFileRAII>(local_filepath);
 }
 
 template <typename T>
