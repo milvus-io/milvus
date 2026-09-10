@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -426,6 +425,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				log.Info(ctx, "unify field data format failed", mlog.Err(err))
 				return err
 			}
+		}
+		// Default-valued query results carry a validity mask during merge.
+		// FillWithDefaultValue clears it for non-nullable request fields, so
+		// restore an all-valid mask after filling defaults to keep appended rows aligned.
+		if fieldSchema.GetDefaultValue() != nil && len(typeutil.GetFieldDataValidData(fieldData)) == 0 {
+			typeutil.SetFieldDataValidData(fieldData, lo.RepeatBy(upsertIDSize, func(int) bool { return true }))
 		}
 		fieldsDataToCheckAligned = append(fieldsDataToCheckAligned, fieldData)
 	}

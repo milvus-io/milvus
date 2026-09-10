@@ -40,8 +40,8 @@ import (
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -5725,8 +5725,13 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 			break
 		}
 	}
-	assert.NotNil(t, defaultColField)
+	require.NotNil(t, defaultColField)
 	assert.Equal(t, []string{"a", "b", "default_val"}, defaultColField.GetScalars().GetStringData().GetData())
+	require.Equal(t, []bool{true, true, true}, typeutil.GetFieldDataValidData(defaultColField))
+	// Exercise the final insert validation; checking values alone misses a short mask.
+	require.NoError(t, fieldvalidator.NewValidateUtil().Validate(task.insertFieldData, schema.SchemaHelper, 3))
+	require.Empty(t, typeutil.GetFieldDataValidData(defaultColField))
+	require.Equal(t, []string{"a", "b", "default_val"}, defaultColField.GetScalars().GetStringData().GetData())
 }
 
 func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
