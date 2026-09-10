@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -44,6 +45,146 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRestoreCompactionTaskMetricsBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	taskMeta := newTestCompactionTaskMeta(t)
+	m := &meta{compactionTaskMeta: taskMeta}
+	p := &datapb.CompactionTask{
+		TriggerID: 99531,
+		PlanID:    99531,
+		NodeID:    99531,
+		Type:      datapb.CompactionType_SortCompaction,
+		State:     datapb.CompactionTaskState_executing,
+	}
+	require.NoError(t, m.SaveCompactionTask(ctx, p))
+	compactionTask := newMixCompactionTask(p, nil, m, newMockVersionManager())
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99531", p.Type.String(), metrics.Executing)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99531", p.Type.String(), metrics.Done)
+	initialExecuting, initialDone := testutil.ToFloat64(executing), testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		executing.Set(initialExecuting)
+		done.Set(initialDone)
+	})
+
+	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler.EXPECT().Enqueue(compactionTask).Run(func(task.Task) {
+		// Dispatch can start as soon as Enqueue publishes the task.
+		require.Equal(t, initialExecuting+1, testutil.ToFloat64(executing))
+		require.NoError(t, compactionTask.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)))
+	}).Once()
+	handler := newCompactionInspector(m, nil, nil, scheduler, scheduler, newMockVersionManager())
+	handler.restoreTask(compactionTask)
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
+}
+
+func TestRemoveCompactionTaskMetricsUsePersistedState(t *testing.T) {
+	ctx := context.Background()
+	m := &meta{compactionTaskMeta: newTestCompactionTaskMeta(t)}
+	p := &datapb.CompactionTask{
+		TriggerID: 99532,
+		PlanID:    99532,
+		NodeID:    99532,
+		Type:      datapb.CompactionType_SortCompaction,
+		State:     datapb.CompactionTaskState_executing,
+		Channel:   "removed-after-retry",
+	}
+	require.NoError(t, m.SaveCompactionTask(ctx, p))
+	compactionTask := newMixCompactionTask(p, nil, m, newMockVersionManager())
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99532", p.Type.String(), metrics.Executing)
+	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Pending)
+	initialExecuting, initialPending := testutil.ToFloat64(executing), testutil.ToFloat64(pending)
+	t.Cleanup(func() {
+		executing.Set(initialExecuting)
+		pending.Set(initialPending)
+	})
+
+	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler.EXPECT().Enqueue(compactionTask).Once()
+	scheduler.EXPECT().AbortAndRemoveTask(p.PlanID).Once()
+	handler := newCompactionInspector(m, nil, nil, scheduler, scheduler, newMockVersionManager())
+	handler.restoreTask(compactionTask)
+
+	// Metadata contains the last persisted state even if the task object's
+	// atomic pointer still exposes an older version after concurrent updates.
+	retry := compactionTask.ShadowClone(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+	require.NoError(t, m.SaveCompactionTask(ctx, retry))
+	handler.removeTasksByChannel(p.Channel)
+	handler.removeTasksByChannel(p.Channel)
+	require.Empty(t, handler.executingTasks)
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+}
+
+func TestSubmitCompactionTaskMetricsRollback(t *testing.T) {
+	m := &meta{compactionTaskMeta: newTestCompactionTaskMeta(t)}
+	handler := newCompactionInspector(m, nil, nil, nil, nil, newMockVersionManager())
+	handler.queueTasks = NewCompactionQueue(1, func(CompactionTask) int { return 0 })
+	p := &datapb.CompactionTask{PlanID: 99533, NodeID: NullNodeID, Type: datapb.CompactionType_SortCompaction, State: datapb.CompactionTaskState_pipelining}
+	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Pending)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Done)
+	initialPending, initialDone := testutil.ToFloat64(pending), testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		pending.Set(initialPending)
+		done.Set(initialDone)
+	})
+	first := newMixCompactionTask(p, nil, m, newMockVersionManager())
+	require.NoError(t, first.SaveTaskMeta())
+	require.NoError(t, handler.submitTask(first))
+	for i, state := range []datapb.CompactionTaskState{datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_failed} {
+		rejected := newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(99534 + i), NodeID: NullNodeID, Type: p.Type, State: state}, nil, m, newMockVersionManager())
+		require.NoError(t, rejected.SaveTaskMeta())
+		require.ErrorIs(t, handler.submitTask(rejected), errFull)
+		require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+		require.Equal(t, initialDone, testutil.ToFloat64(done))
+	}
+	handler.removeTasksByChannel("")
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+}
+
+func TestL0CompactionTaskMetricsFastFinish(t *testing.T) {
+	ctx := context.Background()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 99536, CollectionID: 1, PartitionID: 1, InsertChannel: "fast-finish-metrics",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
+	})))
+	p := &datapb.CompactionTask{
+		PlanID: 99536, TriggerID: 99536, CollectionID: 1, PartitionID: 1,
+		Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
+		NodeID: NullNodeID, Channel: "fast-finish-metrics", InputSegments: []int64{99536}, Schema: newTestSchema(),
+	}
+	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Pending)
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Executing)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Done)
+	initialPending, initialExecuting, initialDone := testutil.ToFloat64(pending), testutil.ToFloat64(executing), testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		pending.Set(initialPending)
+		executing.Set(initialExecuting)
+		done.Set(initialDone)
+	})
+	compactionTask := newL0CompactionTask(p, nil, m)
+	require.NoError(t, compactionTask.SaveTaskMeta())
+	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler.EXPECT().Enqueue(compactionTask).Once()
+	handler := newCompactionInspector(m, nil, nil, scheduler, scheduler, newMockVersionManager())
+	require.NoError(t, handler.submitTask(compactionTask))
+	handler.schedule()
+	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
+	// There is no L1/L2 target: complete locally without a worker RPC.
+	compactionTask.CreateTaskOnWorker(99536, session.NewMockCluster(t))
+	require.Equal(t, datapb.CompactionTaskState_meta_saved, compactionTask.GetTaskProto().State)
+	require.Equal(t, initialPending, testutil.ToFloat64(pending))
+	require.Equal(t, initialExecuting+1, testutil.ToFloat64(executing))
+	require.NoError(t, handler.checkCompaction())
+	handler.cleanFailedTasks()
+	require.Empty(t, handler.executingTasks)
+	require.Equal(t, datapb.CompactionTaskState_cleaned, compactionTask.GetTaskProto().State)
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
+}
 
 func TestCompactionPlanHandlerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionPlanHandlerSuite))
@@ -458,6 +599,8 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksCluster
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
+	taskMeta := newTestCompactionTaskMeta(s.T())
+	s.mockMeta.EXPECT().GetCompactionTaskMeta().Return(taskMeta).Maybe()
 	ch := "ch1"
 
 	scheduler := s.handler.scheduler.(*task.MockGlobalScheduler)
@@ -479,6 +622,8 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		NodeID:  1,
 	}, nil, s.mockMeta, newMockVersionManager())
 
+	s.NoError(taskMeta.SaveCompactionTask(context.Background(), t1.GetTaskProto()))
+	s.NoError(taskMeta.SaveCompactionTask(context.Background(), t2.GetTaskProto()))
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
 	s.handler.removeTasksByChannel(ch)
@@ -488,6 +633,8 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannelPreservesTerminalDoneMetric() {
 	s.SetupTest()
+	taskMeta := newTestCompactionTaskMeta(s.T())
+	s.mockMeta.EXPECT().GetCompactionTaskMeta().Return(taskMeta).Maybe()
 	const (
 		channel     = "terminal-task-channel"
 		nodeID      = int64(99528)
@@ -514,13 +661,15 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannelPreservesTerminalDo
 	for i, state := range terminalStates {
 		planID := firstPlanID + int64(i)
 		scheduler.EXPECT().AbortAndRemoveTask(planID).Once()
-		s.handler.restoreTask(newMixCompactionTask(&datapb.CompactionTask{
+		compactionTask := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:  planID,
 			Type:    datapb.CompactionType_MixCompaction,
 			State:   state,
 			Channel: channel,
 			NodeID:  nodeID,
-		}, nil, s.mockMeta, newMockVersionManager()))
+		}, nil, s.mockMeta, newMockVersionManager())
+		s.NoError(taskMeta.SaveCompactionTask(context.Background(), compactionTask.GetTaskProto()))
+		s.handler.restoreTask(compactionTask)
 	}
 	s.Equal(initialDone+float64(len(terminalStates)), testutil.ToFloat64(done))
 

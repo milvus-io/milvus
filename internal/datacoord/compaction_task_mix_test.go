@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globaltask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -355,6 +357,7 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 		normalDone.Set(initialNormalDone)
 	})
 
+	taskMeta := newTestCompactionTaskMeta(t)
 	meta := NewMockCompactionMeta(t)
 	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, segmentID int64) *SegmentInfo {
@@ -364,7 +367,7 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 			}}
 		},
 	).Maybe()
-	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(taskMeta.SaveCompactionTask).Maybe()
 	meta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Times(2)
 	meta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
 		nil, &segMetricMutation{}, nil).Times(2)
@@ -385,6 +388,7 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 	}
 
 	compactionTask := newTask(retryPlanID)
+	require.NoError(t, compactionTask.SaveTaskMeta())
 
 	scheduler := globaltask.NewMockGlobalScheduler(t)
 	scheduler.EXPECT().Enqueue(compactionTask).Once()
@@ -432,6 +436,7 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 
 	// A separate task with no retry must still follow pending -> executing -> done.
 	normalTask := newTask(normalPlanID)
+	require.NoError(t, normalTask.SaveTaskMeta())
 	require.NoError(t, handler.submitTask(normalTask))
 	require.Equal(t, initialPending+1, testutil.ToFloat64(pending))
 
@@ -467,16 +472,34 @@ func TestMixCompactionTaskMetricsConcurrentCompletionDoesNotDrift(t *testing.T) 
 	})
 
 	firstSaveStarted := make(chan struct{})
+	secondSaveStarted := make(chan struct{})
 	releaseFirstSave := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseFirstSave) })
+	t.Cleanup(release)
 	var saveCalls atomic.Int32
-	meta := NewMockCompactionMeta(t)
-	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
-		func(context.Context, *datapb.CompactionTask) error {
-			if saveCalls.Add(1) == 1 {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, task *datapb.CompactionTask) error {
+			if task.State == datapb.CompactionTaskState_completed && saveCalls.Add(1) == 1 {
 				close(firstSaveStarted)
 				<-releaseFirstSave
 			}
 			return nil
+		},
+	).Times(3)
+	taskMeta, err := newCompactionTaskMeta(context.Background(), catalog)
+	require.NoError(t, err)
+	var updateCalls atomic.Int32
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, task *datapb.CompactionTask) error {
+			// Signal after the second caller has cloned its task, before it
+			// waits for the metadata lock held by the first save.
+			if updateCalls.Add(1) == 2 {
+				close(secondSaveStarted)
+			}
+			return taskMeta.SaveCompactionTask(ctx, task)
 		},
 	).Twice()
 
@@ -487,6 +510,7 @@ func TestMixCompactionTaskMetricsConcurrentCompletionDoesNotDrift(t *testing.T) 
 		NodeID:  nodeID,
 		Channel: "concurrent-completion",
 	}, nil, meta, newMockVersionManager())
+	require.NoError(t, taskMeta.SaveCompactionTask(context.Background(), task.GetTaskProto()))
 	incCompactionTaskMetric(task.GetTaskProto())
 
 	firstDone := make(chan error, 1)
@@ -500,19 +524,10 @@ func TestMixCompactionTaskMetricsConcurrentCompletionDoesNotDrift(t *testing.T) 
 		secondDone <- task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 	}()
 
-	var secondErr error
-	secondFinished := false
-	select {
-	case secondErr = <-secondDone:
-		secondFinished = true
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(releaseFirstSave)
+	<-secondSaveStarted
+	release()
 	require.NoError(t, <-firstDone)
-	if !secondFinished {
-		secondErr = <-secondDone
-	}
-	require.NoError(t, secondErr)
+	require.NoError(t, <-secondDone)
 
 	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
 	require.Equal(t, initialDone+1, testutil.ToFloat64(done))

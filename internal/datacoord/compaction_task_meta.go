@@ -167,6 +167,13 @@ func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *dat
 		mlog.Error(ctx, "meta update: update compaction task fail", mlog.Err(err))
 		return err
 	}
+	// Read the previous persisted version under the existing metadata lock.
+	// Concurrent callers may hold the same stale task snapshot, but only the
+	// first successful save should account for a transition. Initial admission
+	// is accounted for by the inspector, so the first save has no delta.
+	if old := csm.compactionTasks[task.GetTriggerID()][task.GetPlanID()]; old != nil {
+		updateCompactionTaskMetrics(old, task)
+	}
 	csm.saveCompactionTaskMemory(task)
 	return nil
 }
@@ -178,6 +185,16 @@ func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionT
 	}
 	csm.compactionTasks[task.TriggerID][task.PlanID] = task
 	csm.taskStats.Add(task.PlanID, newCompactionTaskStats(task))
+}
+
+// removeTaskMetric must be called after the inspector has stopped updates to
+// the task. Use the persisted version, which may be newer than the task object.
+func (csm *compactionTaskMeta) removeTaskMetric(task *datapb.CompactionTask) {
+	csm.RLock()
+	defer csm.RUnlock()
+	if persisted := csm.compactionTasks[task.GetTriggerID()][task.GetPlanID()]; persisted != nil {
+		decCompactionTaskMetric(persisted)
+	}
 }
 
 func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {

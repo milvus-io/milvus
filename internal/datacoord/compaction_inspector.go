@@ -550,17 +550,21 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 			)
 			c.scheduler.AbortAndRemoveTask(id)
 			delete(c.executingTasks, id)
-			decCompactionTaskMetric(task.GetTaskProto())
+			c.meta.GetCompactionTaskMeta().removeTaskMetric(task.GetTaskProto())
 		}
 	}
 	c.executingGuard.Unlock()
 }
 
 func (c *compactionInspector) submitTask(t CompactionTask) error {
+	// Account for admission before the queue publishes the task. Roll back the
+	// same metric if admission fails, even when the initial state is terminal.
+	metric := getCompactionTaskMetric(t.GetTaskProto())
+	updateCompactionTaskMetric(metric, 1)
 	if err := c.queueTasks.Enqueue(t); err != nil {
+		updateCompactionTaskMetric(metric, -1)
 		return err
 	}
-	incCompactionTaskMetric(t.GetTaskProto())
 	return nil
 }
 
@@ -568,9 +572,9 @@ func (c *compactionInspector) submitTask(t CompactionTask) error {
 func (c *compactionInspector) restoreTask(t CompactionTask) {
 	c.executingGuard.Lock()
 	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
+	incCompactionTaskMetric(t.GetTaskProto())
 	c.scheduler.Enqueue(t)
 	c.executingGuard.Unlock()
-	incCompactionTaskMetric(t.GetTaskProto())
 }
 
 // getCompactionTask return compaction
