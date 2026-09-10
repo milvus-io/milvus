@@ -3215,6 +3215,8 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 				})
 				task.schema = mustNewSchemaInfo(schema)
 				task.partitionKeyMode = true
+				task.upsertMsg.InsertMsg.PartitionName = ""
+				task.upsertMsg.DeleteMsg.PartitionName = ""
 				task.req.Namespace = &namespace
 				task.upsertMsg.InsertMsg.Namespace = &namespace
 				require.NoError(t, addNamespaceData(schema, task.upsertMsg.InsertMsg))
@@ -3230,6 +3232,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
 			patch((*MetaCache).GetCollectionSchema, task.schema, nil)
 			patch((*MetaCache).GetPartitionID, int64(100), nil)
+			patch((*MetaCache).GetPartitionsIndex, []string{"_default_0"}, nil)
 			patch(getPartitionIDs, []int64{100}, nil)
 			patch(getDefaultPartitionsInPartitionKeyMode, []string{"_default_0"}, nil)
 			allocated := 0
