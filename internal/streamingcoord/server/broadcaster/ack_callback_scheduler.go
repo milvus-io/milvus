@@ -264,8 +264,18 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 }
 
 // doAckCallback executes the ack callback.
-func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
-	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
+func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) error {
+	if err := s.executeAckCallback(bt, g); err != nil {
+		return err
+	}
+	// GC handoff must happen after the callback releases its resource keys.
+	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
+	return nil
+}
+
+func (s *ackCallbackScheduler) executeAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
+	ctx := s.notifier.Context()
+	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
 	defer func() {
 		s.rkLockerMu.Lock()
 		g.Unlock()
@@ -273,16 +283,16 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 
 		s.notifyResourceKeyReleased()
 		if err == nil {
-			logger.Info(context.TODO(), "execute ack callback done")
+			logger.Info(ctx, "execute ack callback done")
 		} else {
-			logger.Warn(context.TODO(), "execute ack callback failed", mlog.Err(err))
+			logger.Warn(ctx, "execute ack callback failed", mlog.Err(err))
 		}
 	}()
-	logger.Info(context.TODO(), "start to execute ack callback")
-	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
+	logger.Info(ctx, "start to execute ack callback")
+	if err := bt.BlockUntilAllAck(ctx); err != nil {
 		return err
 	}
-	logger.Debug(context.TODO(), "all vchannels are acked")
+	logger.Debug(ctx, "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
 	makeMap := make(map[string]*message.AppendResult, len(result))
@@ -295,19 +305,18 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	}
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
-	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
+	if err := runAckCallbackWithTrace(ctx, msg, func(spanCtx context.Context) error {
 		return s.callMessageAckCallbackUntilDone(spanCtx, msg, makeMap)
 	}); err != nil {
 		return err
 	}
 	bt.ObserveAckCallbackDone()
 
-	logger.Debug(context.TODO(), "ack callback done")
-	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
+	logger.Debug(ctx, "ack callback done")
+	if err := bt.MarkAckCallbackDone(ctx); err != nil {
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
 	}
-	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
 	return nil
 }
 
