@@ -158,7 +158,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 				}, nil
 			}
 			percentage = scoped
-			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(collectionID, rgName)
+			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(ctx, collectionID, rgName)
 		}
 
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
