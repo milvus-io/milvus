@@ -84,6 +84,10 @@ type sqnFixture struct {
 	nodeMgr *session.NodeManager
 	dist    *meta.DistributionManager
 	segment *datapb.SegmentInfo
+	// targetSegments is what the target reports as the collection's sealed
+	// segments (the next target, read first); it starts as the one segment
+	// and a test may add more.
+	targetSegments map[int64]*datapb.SegmentInfo
 
 	checker *SegmentChecker
 	// offered is the node set the assignment policy was last given.
@@ -126,8 +130,9 @@ func newSQNFixture(t *testing.T) *sqnFixture {
 	targets.EXPECT().IsNextTargetExist(mock.Anything, sqnCollection).Return(true).Maybe()
 	targets.EXPECT().IsCurrentTargetExist(mock.Anything, sqnCollection, mock.Anything).Return(false).Maybe()
 	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, meta.CurrentTarget).Return(nil).Maybe()
+	f.targetSegments = map[int64]*datapb.SegmentInfo{f.segment.GetID(): f.segment}
 	targets.EXPECT().GetSealedSegmentsByCollection(mock.Anything, sqnCollection, mock.Anything).
-		Return(map[int64]*datapb.SegmentInfo{f.segment.GetID(): f.segment}).Maybe()
+		RunAndReturn(func(context.Context, int64, int32) map[int64]*datapb.SegmentInfo { return f.targetSegments }).Maybe()
 	f.targetVersion = 1
 	targets.EXPECT().GetCollectionTargetVersion(mock.Anything, sqnCollection, mock.Anything).
 		RunAndReturn(func(context.Context, int64, int32) int64 { return f.targetVersion }).Maybe()
@@ -174,7 +179,35 @@ func (f *sqnFixture) recordingScheduler(t *testing.T) task.Scheduler {
 		f.scheduled = append(f.scheduled, added)
 		return nil
 	}).Maybe()
+	// The real assignment policy asks the scheduler what is in flight; here
+	// nothing is.
+	scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
+		Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	return scheduler
+}
+
+// useScoreBasedPolicy replaces the recording policy with the one a running
+// coordinator uses by default, over the fixture's own stores, for the tests
+// that are about what the policy does with the nodes it is offered rather
+// than which nodes reach it.
+func (f *sqnFixture) useScoreBasedPolicy() {
+	f.checker.assignPolicy = assign.NewAssignPolicyFactory(
+		f.checker.scheduler, f.nodeMgr, f.dist, f.meta, f.checker.targetMgr,
+	).GetPolicy(assign.PolicyTypeScoreBased)
+}
+
+// putMoreSealedSegmentsOn adds sealed segments to the target and makes them
+// resident on nodeID, beside the fixture's own segment.
+func (f *sqnFixture) putMoreSealedSegmentsOn(nodeID int64, segmentIDs ...int64) {
+	// Update states the node's whole distribution, so the segments already
+	// resident on it are put again beside the new ones.
+	resident := f.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
+	for _, segmentID := range segmentIDs {
+		info := &datapb.SegmentInfo{ID: segmentID, CollectionID: sqnCollection, PartitionID: 10, InsertChannel: sqnShard, NumOfRows: 1}
+		f.targetSegments[segmentID] = info
+		resident = append(resident, &meta.Segment{SegmentInfo: info, Node: nodeID, Version: 1})
+	}
+	f.dist.SegmentDistManager.Update(nodeID, resident...)
 }
 
 // firstNodePolicy is an assignment policy that places every segment on the
@@ -514,6 +547,87 @@ func TestSealedSegmentsMisplacedOnAStreamingQueryNodeMoveToARegularNode(t *testi
 	}
 	assert.EqualValues(t, sqnRegular, nodesByAction[task.ActionTypeGrow], "loaded on the regular node")
 	assert.EqualValues(t, sqnStreaming, nodesByAction[task.ActionTypeReduce], "released from the streaming node's query node")
+}
+
+// The move pass goes through the policy's normal node filter and batch
+// size, like every automatic move, rather than force-assigning. The benefit
+// evaluator that the normal path enables cannot block it: the source node is
+// the streaming node's query node, never among the candidates, so the policy
+// sees no source to weigh the move against. The real policy moves the
+// segment exactly as the recording one did.
+func TestTheMovePassMovesThroughTheRealPolicy(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.useScoreBasedPolicy()
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.putSealedSegmentOn(sqnStreaming)
+
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	require.Len(t, tasks, 1)
+	move := tasks[0]
+	assert.Equal(t, task.TaskTypeMove, task.GetTaskType(move))
+	nodesByAction := make(map[task.ActionType]int64)
+	for _, action := range move.Actions() {
+		nodesByAction[action.Type()] = action.Node()
+	}
+	assert.EqualValues(t, sqnRegular, nodesByAction[task.ActionTypeGrow])
+	assert.EqualValues(t, sqnStreaming, nodesByAction[task.ActionTypeReduce])
+}
+
+// A regular node that reported resource exhaustion must not receive new
+// segment loads for the duration of its mark (NodeManager.MarkResourceExhaustion).
+// Force-assigning skipped the filter that enforces it and re-issued the same
+// moves onto the quarantined node every round; the normal path leaves the
+// segment where it is until the node recovers.
+func TestAResourceExhaustedNodeReceivesNoMisplacedSegment(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.useScoreBasedPolicy()
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.nodeMgr.MarkResourceExhaustion(sqnRegular, time.Minute)
+	f.putSealedSegmentOn(sqnStreaming)
+
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	assert.Empty(t, tasks, "a resource-exhausted node is not offered a segment")
+}
+
+// Nor does a node that is stopping.
+func TestAStoppingNodeReceivesNoMisplacedSegment(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.useScoreBasedPolicy()
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.nodeMgr.Stopping(sqnRegular)
+	f.putSealedSegmentOn(sqnStreaming)
+
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	assert.Empty(t, tasks)
+}
+
+// Each shard issues at most a balance batch of moves per round, as the
+// balancer would - the batch bounds one assignment call, and the pass makes
+// one per shard - rather than every misplaced segment at once onto a node
+// that just arrived; the rest follow in later rounds.
+func TestMisplacedSegmentsMoveAtMostABalanceBatchPerShardPerRound(t *testing.T) {
+	setForm(t, true)
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.QueryCoordCfg.BalanceSegmentBatchSize.Key, "2"))
+	t.Cleanup(func() { p.Reset(p.QueryCoordCfg.BalanceSegmentBatchSize.Key) })
+	f := newSQNFixture(t)
+	f.useScoreBasedPolicy()
+	f.addGroup(t, 1)
+	f.addRegularNode(t, sqnRegular)
+	f.putSealedSegmentOn(sqnStreaming)
+	f.putMoreSealedSegmentsOn(sqnStreaming, 2, 3, 4)
+
+	tasks := f.check(t, f.replica([]int64{sqnRegular}, []int64{sqnStreaming}), &meta.DmChannel{})
+	assert.Len(t, tasks, 2, "four misplaced segments on one shard, a batch of two per shard per round")
+	for _, moved := range tasks {
+		assert.Equal(t, task.TaskTypeMove, task.GetTaskType(moved))
+	}
 }
 
 // While the group has no regular node the segment is where it must be, and
