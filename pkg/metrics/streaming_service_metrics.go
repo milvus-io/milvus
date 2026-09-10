@@ -115,6 +115,20 @@ var (
 		Help: "Current rate limit state of streaming service client",
 	}, WALChannelLabelName, WALRateLimitStateLabelName)
 
+	// StreamingServiceClientReplicateGatedAppendTotal counts the replicated
+	// appends currently held back on this cluster waiting for another vchannel's
+	// replica of the same broadcast to land here (the shard-split append gate).
+	//
+	// A non-zero value that does not fall is the signal: a gated append blocks
+	// its whole pchannel's replicate stream, so a stuck gate looks like stalled
+	// replication and nothing else names the vchannel it is actually waiting on.
+	// Labelled by pchannel rather than vchannel, so the cardinality is bounded by
+	// the cluster's channel count instead of its collection count.
+	StreamingServiceClientReplicateGatedAppendTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "replicate_gated_append_total",
+		Help: "Total of replicated appends waiting for the append-first replicas of their broadcast",
+	}, WALChannelLabelName)
+
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "pchannel_info",
@@ -613,6 +627,7 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 		registry.MustRegister(StreamingServiceClientConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
 		registry.MustRegister(StreamingServiceClientRateLimitState)
+		registry.MustRegister(StreamingServiceClientReplicateGatedAppendTotal)
 	})
 }
 

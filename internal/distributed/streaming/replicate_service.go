@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -75,9 +78,36 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 // side knows: the sender sees one replica at a time and has no way to observe
 // another cluster's ticks. The streamingcoord ack state is the fact it waits on.
 //
-// It cannot deadlock: an append-first replica never waits for anything, and
-// every other replica waits only on append-first ones, so the wait graph has no
-// cycle even when a rehash fences several sources at once.
+// # Why this cannot wedge replication
+//
+// "A source never waits, so the wait graph is acyclic" is NOT the argument, and
+// believing it is a trap: a gated replica blocks its whole stream, so a target
+// parked here also blocks every append-first replica queued behind it on the
+// same pchannel. The edges that matter are stream edges, not just wait edges.
+//
+// Progress rests on three facts:
+//
+//	(a) For each broadcast, every append-first replica's time tick is strictly
+//	    below every other replica's. The primary's broadcaster appends the
+//	    append-first group AND persists it with AckPartial before it even starts
+//	    appending the rest -- see splitAppendFirst in
+//	    internal/streamingcoord/server/broadcaster/pending_broadcast_task.go.
+//	(b) Time ticks are totally ordered across pchannels (they come from one TSO).
+//	(c) Each replicate stream delivers its pchannel in tick order.
+//
+// Take the message with the minimum tick among all stream heads on this cluster.
+// If it is append-first, it is not gated and proceeds. If it is gated, then by
+// (a) each of its append-first replicas has a strictly smaller tick, so by (b)
+// and (c) each is either already appended here -- its ack merely in flight -- or
+// still queued behind a head with a smaller tick, contradicting minimality.
+// Either way something moves, and the same collapse handles a multi-source
+// rehash and two splits crossing in opposite directions between two pchannels.
+//
+// Fact (a) is the load-bearing one and it lives in ANOTHER package. An
+// "optimization" that appended the rest concurrently with the append-first group
+// would leave every primary-side test green and break secondary liveness: a
+// target could then carry a tick below its source's, and the minimum-tick
+// message could be a gated one whose sources are queued behind IT.
 //
 // Called AFTER the remap, so the names it compares and the names it waits on are
 // both this cluster's.
@@ -91,11 +121,40 @@ func (s replicateService) waitAppendFirstReplicas(ctx context.Context, msg messa
 		// are waiting for.
 		return nil
 	}
+
+	// Head-of-line blocking makes this wait indistinguishable from wedged
+	// replication unless it says so: name the broadcast and the vchannels, so an
+	// operator staring at a frozen pchannel learns which OTHER pchannel to look
+	// at. The gauge is what an alert can watch; it is decremented on every exit.
+	pchannel := funcutil.ToPhysicalChannel(msg.VChannel())
+	logger := mlog.With(
+		mlog.Uint64("broadcastID", bh.BroadcastID),
+		mlog.String("vchannel", msg.VChannel()),
+		mlog.Strings("appendFirstVChannels", bh.AppendFirstVChannels),
+		mlog.String("messageType", msg.MessageType().String()))
+	logger.Info(ctx, "replicated append is gated on its broadcast's append-first replicas")
+	gatedTotal := metrics.StreamingServiceClientReplicateGatedAppendTotal.WithLabelValues(
+		paramtable.GetStringNodeID(), pchannel)
+	gatedTotal.Inc()
+	// Deferred, so the gauge comes back down on every exit -- including a panic
+	// unwinding through here. A gauge that only ever climbs is worse than none:
+	// it would raise the alert it exists for, forever.
+	defer gatedTotal.Dec()
+	start := time.Now()
+
 	// The error is returned as it stands. Everything that can fail here is
 	// transient -- the replicate stream's context ending, the coord being
 	// unreachable, the broadcaster shutting down -- and the replicate stream
 	// retries from its checkpoint, re-entering the wait.
-	return s.streamingCoordClient.Broadcast().WaitVChannelsAcked(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
+	err := s.streamingCoordClient.Broadcast().WaitVChannelsAcked(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
+	if err != nil {
+		logger.Warn(ctx, "replicated append gate failed, the stream will retry from its checkpoint",
+			mlog.Duration("gatedFor", time.Since(start)), mlog.Err(err))
+		return err
+	}
+	logger.Info(ctx, "replicated append gate opened, the append-first replicas landed",
+		mlog.Duration("gatedFor", time.Since(start)))
+	return nil
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
@@ -207,9 +266,16 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 			}
 			targetBroadcastVChannels = append(targetBroadcastVChannels, targetBroadcastVChannel)
 		}
-		msg.OverwriteReplicateVChannel(targetVChannel, targetBroadcastVChannels)
-	} else {
-		msg.OverwriteReplicateVChannel(targetVChannel)
+		// A broadcast header that arrives self-inconsistent -- an append-first
+		// list naming a vchannel the broadcast does not cover -- fails the
+		// message, not the process. The stream re-delivers the same bytes on
+		// every reconnect, so a panic here would be a crash loop rather than a
+		// diagnosis.
+		if err := msg.OverwriteReplicateVChannel(targetVChannel, targetBroadcastVChannels); err != nil {
+			return nil, status.NewReplicateViolation("failed to overwrite replicate vchannels, %s", err.Error())
+		}
+	} else if err := msg.OverwriteReplicateVChannel(targetVChannel); err != nil {
+		return nil, status.NewReplicateViolation("failed to overwrite replicate vchannel, %s", err.Error())
 	}
 
 	// create collection message will set the vchannel in its body, so we need to overwrite it.

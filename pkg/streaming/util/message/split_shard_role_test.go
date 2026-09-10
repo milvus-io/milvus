@@ -102,16 +102,19 @@ func TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive(t *testing
 	}, "ack-sync-up cannot be added to an already append-first broadcast")
 }
 
-// TestOverwriteReplicateVChannelPanicsOnAForeignAppendFirst pins what happens
+// TestOverwriteReplicateVChannelRejectsAForeignAppendFirst pins what happens
 // when a broadcast header's append-first list is NOT a subset of its own
 // vchannel list.
 //
 // The builder refuses to produce such a header, so this forges one: the case
 // only reaches a secondary cluster from a malformed or corrupted remote header,
-// and there is no name to map it to. Refusing loudly is the point -- carrying
-// the source cluster's name through would make the secondary's append gate wait
-// on a vchannel that exists nowhere here, silently and forever.
-func TestOverwriteReplicateVChannelPanicsOnAForeignAppendFirst(t *testing.T) {
+// and there is no name to map it to. It must be refused -- carrying the source
+// cluster's name through would make the secondary's append gate wait on a
+// vchannel that exists nowhere here, silently and forever -- but refused as an
+// ERROR, not a panic: the replicate stream re-delivers the same bytes after
+// every reconnect, so a panic would crash-loop the proxy instead of failing the
+// one message.
+func TestOverwriteReplicateVChannelRejectsAForeignAppendFirst(t *testing.T) {
 	msg := NewSplitShardMessageBuilderV2().
 		WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
 		WithBody(&messagespb.SplitShardMessageBody{}).
@@ -126,7 +129,15 @@ func TestOverwriteReplicateVChannelPanicsOnAForeignAppendFirst(t *testing.T) {
 	assert.NoError(t, err)
 	replica.properties.Set(messageBroadcastHeader, encoded)
 
-	assert.Panics(t, func() {
-		replica.OverwriteReplicateVChannel(replica.VChannel(), []string{"q0_1v0", "q1_1v1"})
+	var overwriteErr error
+	assert.NotPanics(t, func() {
+		overwriteErr = replica.OverwriteReplicateVChannel(replica.VChannel(), []string{"q0_1v0", "q1_1v1"})
 	})
+	assert.Error(t, overwriteErr)
+	assert.Contains(t, overwriteErr.Error(), "foreign_1v9")
+
+	// A well-formed header still succeeds through the same path.
+	wellFormed := msg.SplitIntoMutableMessage()[1].(*messageImpl)
+	assert.NoError(t, wellFormed.OverwriteReplicateVChannel(
+		wellFormed.VChannel(), []string{"q0_1v0", "q1_1v1"}))
 }

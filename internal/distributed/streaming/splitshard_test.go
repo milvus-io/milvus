@@ -86,6 +86,24 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 // needs the message so it can observe the split; the vchannel set is the
 // union of CollectionVChannels, SourceVChannels, the targets and the control
 // channel, and only the sources are appended (and therefore persisted) first.
+func TestNewSplitShardBroadcastMessageCoversTheCollection(t *testing.T) {
+	param := newSplitShardParam()
+	// "p1_1v0" is a bystander shard of the same collection: neither a source
+	// nor a target of this split, but still listed among the collection's
+	// current vchannels.
+	param.CollectionVChannels = []string{"p0_1v0", "p1_1v0"}
+
+	msg, err := streaming.NewSplitShardBroadcastMessage(param)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+
+	bh := msg.BroadcastHeader()
+	assert.ElementsMatch(t,
+		[]string{"p0_1v0", "p1_1v0", "p0_1v1", "p0_1v2", "p0_vcchan"},
+		bh.VChannels)
+	assert.ElementsMatch(t, param.SourceVChannels, bh.AppendFirstVChannels)
+}
+
 // TestSplitShardBroadcastIsReplicable pins the decision this whole redesign
 // rests on: the split travels down the replicate stream instead of being
 // withheld from it, so a secondary cluster ends up with the same shard topology
@@ -104,24 +122,6 @@ func TestSplitShardBroadcastIsReplicable(t *testing.T) {
 	for _, replica := range msg.SplitIntoMutableMessage() {
 		assert.False(t, replica.IsUnreplicable(), replica.VChannel())
 	}
-}
-
-func TestNewSplitShardBroadcastMessageCoversTheCollection(t *testing.T) {
-	param := newSplitShardParam()
-	// "p1_1v0" is a bystander shard of the same collection: neither a source
-	// nor a target of this split, but still listed among the collection's
-	// current vchannels.
-	param.CollectionVChannels = []string{"p0_1v0", "p1_1v0"}
-
-	msg, err := streaming.NewSplitShardBroadcastMessage(param)
-	require.NoError(t, err)
-	require.NotNil(t, msg)
-
-	bh := msg.BroadcastHeader()
-	assert.ElementsMatch(t,
-		[]string{"p0_1v0", "p1_1v0", "p0_1v1", "p0_1v2", "p0_vcchan"},
-		bh.VChannels)
-	assert.ElementsMatch(t, param.SourceVChannels, bh.AppendFirstVChannels)
 }
 
 // assertSplitShardParamInvalid asserts that Validate reports the caller of

@@ -197,9 +197,188 @@ func TestBlockUntilVChannelAckedOnARecoveredTask(t *testing.T) {
 		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0x01, 0x00})
 	task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 
-	assert.NoError(t, task.BlockUntilVChannelAcked(context.Background(), "p0_1v0"))
+	assert.NoError(t, task.BlockUntilVChannelAcked(context.Background(), "p0_1v0", nil))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	assert.ErrorIs(t, task.BlockUntilVChannelAcked(ctx, "p1_1v1"), context.DeadlineExceeded)
+	assert.ErrorIs(t, task.BlockUntilVChannelAcked(ctx, "p1_1v1", nil), context.DeadlineExceeded)
+}
+
+// TestWaitVChannelsAckedIsReleasedByClose is the shutdown case. A gated wait
+// holds the broadcaster's lifetime, and Close() waits on that lifetime -- so if
+// Close did not release the waiters first, the two would deadlock and mixcoord's
+// shutdown would hang until SIGKILL. The gate's caller cannot break the tie: it
+// is a different process's replicate stream, whose context has no deadline.
+//
+// Both halves of the wait are covered: one waiter parked on a broadcast that
+// never arrives, one parked on a vchannel of a broadcast that did.
+func TestWaitVChannelsAckedIsReleasedByClose(t *testing.T) {
+	bm := newWaitTestManager(t)
+
+	const arrived = uint64(905)
+	const neverArrives = uint64(906)
+
+	msg := createNewSplitShardBroadcastMsg(
+		[]string{"p0_1v0", "p1_1v1", "p2_1v2"}, "p0_1v0", "p1_1v1").WithBroadcastID(arrived)
+	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p0_1v0", 130)))
+
+	// (a) parked on an unacked vchannel of an existing broadcast.
+	onVChannel := make(chan error, 1)
+	go func() {
+		onVChannel <- bm.WaitVChannelsAcked(context.Background(), arrived, []string{"p0_1v0", "p1_1v1"})
+	}()
+	// (b) parked on a broadcast that has never been heard of.
+	onTask := make(chan error, 1)
+	go func() {
+		onTask <- bm.WaitVChannelsAcked(context.Background(), neverArrives, []string{"p0_1v0"})
+	}()
+	require.Eventually(t, func() bool { return waitersOf(bm, neverArrives) == 1 }, time.Second, time.Millisecond)
+	// Give (a) a moment to reach its select before Close races it.
+	time.Sleep(50 * time.Millisecond)
+
+	closed := make(chan struct{})
+	go func() {
+		bm.Close()
+		close(closed)
+	}()
+
+	select {
+	case err := <-onVChannel:
+		assert.Error(t, err, "a wait parked on a vchannel must end when the broadcaster closes")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() did not release the vchannel waiter")
+	}
+	select {
+	case err := <-onTask:
+		assert.Error(t, err, "a wait parked on a missing broadcast must end when the broadcaster closes")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() did not release the task-creation waiter")
+	}
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() did not return; it is deadlocked against the waiters it must release")
+	}
+
+	// A wait started after the close is refused outright rather than parked.
+	assert.Error(t, bm.WaitVChannelsAcked(context.Background(), arrived, []string{"p1_1v1"}))
+}
+
+// TestUnackedVChannelsReportsWhatTheGateIsStillWaitingFor covers the naming the
+// slow-wait Warn depends on: an operator seeing a frozen replicate stream needs
+// to be told WHICH vchannel has not landed, not merely that something has not.
+func TestUnackedVChannelsReportsWhatTheGateIsStillWaitingFor(t *testing.T) {
+	bm := newWaitTestManager(t)
+	defer bm.Close()
+
+	const broadcastID = uint64(907)
+	msg := createNewSplitShardBroadcastMsg(
+		[]string{"p0_1v0", "p1_1v1", "p2_1v2"}, "p0_1v0", "p1_1v1").WithBroadcastID(broadcastID)
+	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p0_1v0", 140)))
+
+	task, ok := bm.getBroadcastTaskByID(broadcastID)
+	require.True(t, ok)
+	assert.Equal(t, []string{"p1_1v1"}, task.UnackedVChannels([]string{"p0_1v0", "p1_1v1"}))
+	// A name outside the broadcast counts as unacked rather than raising here:
+	// this feeds a log line, not a decision.
+	assert.Equal(t, []string{"p9_1v9"}, task.UnackedVChannels([]string{"p9_1v9"}))
+
+	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p1_1v1", 141)))
+	assert.Empty(t, task.UnackedVChannels([]string{"p0_1v0", "p1_1v1"}))
+}
+
+// TestIsVChannelAckedAcceptsALegacyBitmapOnlyTask pins the one predicate every
+// reader of the ack state shares.
+//
+// A task persisted before 2.6.1 carries only the acked bitmap, with no
+// checkpoint beside it. PendingBroadcastMessages has always treated that as
+// acked; if the gate's own check disagreed, such a vchannel would read as
+// unacked forever and the gate would never open.
+func TestIsVChannelAckedAcceptsALegacyBitmapOnlyTask(t *testing.T) {
+	paramtable.Init()
+	registry.ResetRegistration()
+
+	metrics := newBroadcasterMetrics()
+	ackScheduler := newAckCallbackScheduler(nil)
+
+	msg := createNewSplitShardBroadcastMsg([]string{"p0_1v0", "p1_1v1"}, "p0_1v0").WithBroadcastID(908)
+	proto := createNewWaitAckBroadcastTaskFromMessage(
+		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0x01, 0x00})
+	// Strip the checkpoints, leaving only the bitmap: the legacy shape.
+	proto.AckedCheckpoints = nil
+	task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
+
+	assert.Empty(t, task.UnackedVChannels([]string{"p0_1v0"}))
+	assert.NoError(t, task.BlockUntilVChannelAcked(context.Background(), "p0_1v0", nil))
+
+	// Every shape the predicate has to answer for, stated directly. The task
+	// above is the legacy one; the rest are the shapes a live or recovered task
+	// takes, including the truncated arrays a partially written record leaves.
+	assert.True(t, isVChannelAcked(&streamingpb.BroadcastTask{
+		AckedVchannelBitmap: []byte{0x01},
+	}, 0), "bitmap set, no checkpoint array at all")
+	assert.False(t, isVChannelAcked(&streamingpb.BroadcastTask{
+		AckedVchannelBitmap: []byte{0x00},
+	}, 0), "nothing set, and no checkpoint to fall back on")
+	assert.False(t, isVChannelAcked(&streamingpb.BroadcastTask{}, 3),
+		"an index past both arrays is not acked")
+	assert.True(t, isVChannelAcked(&streamingpb.BroadcastTask{
+		AckedCheckpoints: []*streamingpb.AckedCheckpoint{{TimeTick: 7}},
+	}, 0), "a checkpoint with a real tick")
+	assert.False(t, isVChannelAcked(&streamingpb.BroadcastTask{
+		AckedCheckpoints: []*streamingpb.AckedCheckpoint{{TimeTick: 0}},
+	}, 0), "TimeTick 0 is the not-yet-acked sentinel, not an ack")
+	assert.False(t, isVChannelAcked(&streamingpb.BroadcastTask{
+		AckedCheckpoints: []*streamingpb.AckedCheckpoint{nil},
+	}, 0), "a nil checkpoint is not an ack")
+
+	// The unacked one still blocks, so the bitmap is being read rather than
+	// everything being called acked.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	assert.ErrorIs(t, task.BlockUntilVChannelAcked(ctx, "p1_1v1", nil), context.DeadlineExceeded)
+}
+
+// TestWaitVChannelsAckedReportsASlowWait drives the observability the reviewer
+// asked for: a wait that outlives the threshold must report itself once, naming
+// the broadcast and the vchannels still unacked, and must report its release.
+// Head-of-line blocking makes this the only signal an operator gets -- a gated
+// replica freezes its whole pchannel's replicate stream, which from outside
+// looks like replication being broken rather than being ordered.
+func TestWaitVChannelsAckedReportsASlowWait(t *testing.T) {
+	bm := newWaitTestManager(t)
+	defer bm.Close()
+
+	restore := waitVChannelsAckedSlowThreshold
+	waitVChannelsAckedSlowThreshold = 10 * time.Millisecond
+	defer func() { waitVChannelsAckedSlowThreshold = restore }()
+
+	const broadcastID = uint64(909)
+	msg := createNewSplitShardBroadcastMsg(
+		[]string{"p0_1v0", "p1_1v1", "p2_1v2"}, "p0_1v0", "p1_1v1").WithBroadcastID(broadcastID)
+
+	// (a) Slow while the broadcast has not arrived at all: the observer reports
+	// every named vchannel, since it has no task to ask.
+	early := make(chan error, 1)
+	earlyCtx, cancelEarly := context.WithCancel(context.Background())
+	go func() { early <- bm.WaitVChannelsAcked(earlyCtx, broadcastID, []string{"p0_1v0", "p1_1v1"}) }()
+	time.Sleep(80 * time.Millisecond)
+	cancelEarly()
+	assert.ErrorIs(t, <-early, context.Canceled)
+
+	// (b) Slow with the task present and one vchannel still missing: released
+	// once it lands, which is the Info half.
+	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p0_1v0", 150)))
+	late := make(chan error, 1)
+	go func() {
+		late <- bm.WaitVChannelsAcked(context.Background(), broadcastID, []string{"p0_1v0", "p1_1v1"})
+	}()
+	time.Sleep(80 * time.Millisecond)
+	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p1_1v1", 151)))
+	select {
+	case err := <-late:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the reported wait was never released")
+	}
 }

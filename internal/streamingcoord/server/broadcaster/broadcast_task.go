@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -233,7 +234,7 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if isVChannelAcked(b.task, i) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
@@ -489,14 +490,19 @@ func (b *broadcastTask) closeVChannelAcked(vchannel string) {
 }
 
 // BlockUntilVChannelAcked blocks until the given vchannel of this broadcast has
-// a recorded checkpoint, the context ends, or the vchannel turns out not to
-// belong to this broadcast at all.
+// a recorded ack, the context ends, the broadcaster starts closing, or the
+// vchannel turns out not to belong to this broadcast at all.
 //
-// The last case is a Milvus bug rather than a caller mistake: every waiter names
-// vchannels taken from the broadcast header the task itself was built from, so a
-// name that is not in the header means the two disagree about the broadcast's
-// own topology.
-func (b *broadcastTask) BlockUntilVChannelAcked(ctx context.Context, vchannel string) error {
+// closing is the broadcaster's shutdown signal; a nil channel means "no such
+// signal", which is what a caller that owns no broadcaster passes. Waiting past
+// shutdown is pointless -- no ack can arrive after it -- and it would keep the
+// broadcaster's lifetime, and with it the whole coord's shutdown, parked.
+//
+// A vchannel outside the broadcast is a Milvus bug rather than a caller mistake:
+// every waiter names vchannels taken from the broadcast header the task itself
+// was built from, so a name that is not in the header means the two disagree
+// about the broadcast's own topology.
+func (b *broadcastTask) BlockUntilVChannelAcked(ctx context.Context, vchannel string, closing <-chan struct{}) error {
 	ch, err := b.vchannelAckedChan(vchannel)
 	if err != nil {
 		return err
@@ -508,9 +514,51 @@ func (b *broadcastTask) BlockUntilVChannelAcked(ctx context.Context, vchannel st
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-closing:
+		return status.NewOnShutdownError(
+			"broadcaster is closing, stop waiting for vchannel %s of broadcast %d", vchannel, b.Header().BroadcastID)
 	case <-ch:
 		return nil
 	}
+}
+
+// UnackedVChannels returns those of the given vchannels that have no recorded
+// ack yet. Reporting only, so a name that is not part of this broadcast is
+// counted as unacked rather than raised here.
+func (b *broadcastTask) UnackedVChannels(vchannels []string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	unacked := make([]string, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		idx := findIdxOfVChannel(vchannel, b.header().VChannels)
+		if idx >= 0 && isVChannelAcked(b.task, idx) {
+			continue
+		}
+		unacked = append(unacked, vchannel)
+	}
+	return unacked
+}
+
+// isVChannelAcked is THE predicate for "this vchannel's replica has landed",
+// shared by every reader of the ack state so they cannot drift apart.
+//
+// Both halves matter. The checkpoint is what the ack path writes today, and
+// TimeTick == 0 is its not-yet-acked sentinel (proto.Clone turns an absent
+// checkpoint into a zero-valued one rather than a nil, so the nil check alone
+// does not decide it). The bitmap is what a task persisted before 2.6.1 carries,
+// with no checkpoint beside it -- reading only the checkpoint would call such a
+// vchannel unacked forever, which for the append gate means a wait that never
+// ends.
+func isVChannelAcked(task *streamingpb.BroadcastTask, idx int) bool {
+	if idx < len(task.AckedVchannelBitmap) && task.AckedVchannelBitmap[idx] != 0 {
+		return true
+	}
+	if idx >= len(task.AckedCheckpoints) {
+		return false
+	}
+	cp := task.AckedCheckpoints[idx]
+	return cp != nil && cp.TimeTick != 0
 }
 
 // vchannelAckedChan returns the channel closed when the vchannel is acked, or a
@@ -524,10 +572,8 @@ func (b *broadcastTask) vchannelAckedChan(vchannel string) (chan struct{}, error
 		return nil, merr.WrapErrServiceInternalMsg(
 			"vchannel %s is not a vchannel of broadcast %d", vchannel, b.header().BroadcastID)
 	}
-	if idx < len(b.task.AckedCheckpoints) {
-		if cp := b.task.AckedCheckpoints[idx]; cp != nil && cp.TimeTick != 0 {
-			return nil, nil
-		}
+	if isVChannelAcked(b.task, idx) {
+		return nil, nil
 	}
 	if b.vchannelAcked == nil {
 		b.vchannelAcked = make(map[string]chan struct{}, 1)

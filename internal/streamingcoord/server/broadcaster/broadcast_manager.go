@@ -82,6 +82,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 
 	m := &broadcastTaskManager{
 		lifetime:            typeutil.NewLifetime(),
+		closing:             make(chan struct{}),
 		mu:                  &sync.Mutex{},
 		tasks:               tasks,
 		taskCreationWaiters: make(map[uint64][]chan struct{}),
@@ -106,8 +107,21 @@ type broadcastTaskManager struct {
 	mlog.Binder
 
 	lifetime *typeutil.Lifetime
-	mu       *sync.Mutex
-	tasks    map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	// closing is closed by Close() BEFORE it waits for the lifetime, so that
+	// anything parked on an event that can no longer happen lets go.
+	//
+	// WaitVChannelsAcked is the reason it exists. It holds the lifetime across a
+	// wait bounded only by its caller's context, and that caller is a DIFFERENT
+	// process -- the secondary's proxy, whose replicate-stream context carries no
+	// deadline. mixcoord's GracefulStop closes this broadcaster before it reaches
+	// the gRPC server's GracefulStopTimeout fallback, so without this channel a
+	// single gated replica keeps lifetime.Wait() blocked until the pod is
+	// SIGKILLed. A waiter has nothing to gain by outliving the broadcaster: no
+	// ack can arrive after it.
+	closing   chan struct{}
+	closeOnce sync.Once
+	mu        *sync.Mutex
+	tasks     map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
 	// taskCreationWaiters holds, per broadcastID, the channels that
 	// WaitVChannelsAcked registered while that broadcast had no task yet. A
 	// secondary cluster learns of a broadcast only from the replicas its
@@ -332,16 +346,122 @@ func (bm *broadcastTaskManager) WaitVChannelsAcked(ctx context.Context, broadcas
 	}
 	defer bm.lifetime.Done()
 
+	// A gated replica blocks its ENTIRE pchannel's replicate stream on the
+	// secondary -- handleReplicateMessage is called synchronously from the
+	// stream's recv loop -- so a wait that does not end is indistinguishable,
+	// from outside, from replication being wedged. Say which broadcast and which
+	// vchannel it is waiting for; that names the stream that is actually stuck.
+	observer := bm.observeAckWait(ctx, broadcastID, vchannels)
+	defer observer.Release(ctx)
+
 	t, err := bm.blockUntilBroadcastTaskCreated(ctx, broadcastID)
 	if err != nil {
 		return err
 	}
+	observer.TaskArrived(t)
+	// The task pointer is resolved once and deliberately NOT re-resolved between
+	// vchannels, unlike the creation wait above, which loops. Only DropTombstone
+	// removes a task from the manager, and a task is tombstoned only after every
+	// one of its vchannels has been acked -- so by the time this pointer could go
+	// stale, every channel it hands out is already closed and the gate is open.
+	// Re-resolving could only ever find the same task or nothing at all.
 	for _, vchannel := range vchannels {
-		if err := t.BlockUntilVChannelAcked(ctx, vchannel); err != nil {
+		if err := t.BlockUntilVChannelAcked(ctx, vchannel, bm.closing); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// waitVChannelsAckedSlowThreshold is how long a gate may wait before the coord
+// says so out loud. Chosen well above any healthy cross-cluster append: a
+// replicate stream that is keeping up delivers the append-first replicas within
+// the time it takes them to be consumed, milliseconds to seconds. Crossing this
+// means something upstream is not moving.
+//
+// A variable rather than a constant only so a test can reach the slow path
+// without sleeping through it; nothing in production writes it.
+var waitVChannelsAckedSlowThreshold = 30 * time.Second
+
+// ackWaitObserver reports a gate that is taking too long, exactly once, and then
+// reports its release, exactly once. Silent for a wait that finishes promptly,
+// which is nearly all of them.
+type ackWaitObserver struct {
+	logger      *mlog.Logger
+	broadcastID uint64
+	vchannels   []string
+	start       time.Time
+	stop        context.CancelFunc
+
+	mu     sync.Mutex
+	task   *broadcastTask
+	warned bool
+}
+
+// observeAckWait starts watching a wait that has just begun.
+func (bm *broadcastTaskManager) observeAckWait(ctx context.Context, broadcastID uint64, vchannels []string) *ackWaitObserver {
+	watchCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	o := &ackWaitObserver{
+		logger:      bm.Logger(),
+		broadcastID: broadcastID,
+		vchannels:   vchannels,
+		start:       time.Now(),
+		stop:        stop,
+	}
+	go o.watch(watchCtx)
+	return o
+}
+
+// watch fires the one Warn, if the wait lives long enough to earn it.
+func (o *ackWaitObserver) watch(ctx context.Context) {
+	timer := time.NewTimer(waitVChannelsAckedSlowThreshold)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+	}
+
+	o.mu.Lock()
+	o.warned = true
+	task := o.task
+	o.mu.Unlock()
+
+	unacked := o.vchannels
+	if task != nil {
+		unacked = task.UnackedVChannels(o.vchannels)
+	}
+	o.logger.Warn(ctx, "append gate is still waiting for a broadcast's append-first replicas",
+		mlog.Uint64("broadcastID", o.broadcastID),
+		mlog.Strings("appendFirstVChannels", o.vchannels),
+		mlog.Strings("unackedVChannels", unacked),
+		mlog.Bool("taskArrived", task != nil),
+		mlog.Duration("elapsed", time.Since(o.start)))
+}
+
+// TaskArrived records the broadcast task once it exists here, so a later Warn
+// can name the vchannels that are actually still unacked rather than all of them.
+func (o *ackWaitObserver) TaskArrived(task *broadcastTask) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.task = task
+}
+
+// Release ends the watch, and says so only if the Warn was already spent -- an
+// operator who saw the Warn needs the matching "it moved" line; nobody needs one
+// for a wait that was never reported.
+func (o *ackWaitObserver) Release(ctx context.Context) {
+	o.stop()
+	o.mu.Lock()
+	warned := o.warned
+	o.mu.Unlock()
+	if !warned {
+		return
+	}
+	o.logger.Info(ctx, "append gate stopped waiting for a broadcast's append-first replicas",
+		mlog.Uint64("broadcastID", o.broadcastID),
+		mlog.Strings("appendFirstVChannels", o.vchannels),
+		mlog.Duration("elapsed", time.Since(o.start)))
 }
 
 // blockUntilBroadcastTaskCreated returns the task of the given broadcastID,
@@ -359,6 +479,9 @@ func (bm *broadcastTaskManager) blockUntilBroadcastTaskCreated(ctx context.Conte
 			// retry, so an abandoned waiter per attempt would accumulate.
 			bm.removeTaskCreationWaiter(broadcastID, created)
 			return nil, ctx.Err()
+		case <-bm.closing:
+			bm.removeTaskCreationWaiter(broadcastID, created)
+			return nil, status.NewOnShutdownError("broadcaster is closing, stop waiting for broadcast %d to arrive", broadcastID)
 		case <-created:
 			// Loop rather than trust the notification: the task is looked up
 			// again under the lock, so a task removed between the close and the
@@ -431,6 +554,12 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 // Close closes the broadcast task manager.
 func (bm *broadcastTaskManager) Close() {
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+	// Release the waits that hold the lifetime BEFORE waiting on it, or Close
+	// deadlocks against them: WaitVChannelsAcked's wait ends only on its caller's
+	// context, which belongs to another cluster's replicate stream and carries no
+	// deadline. Guarded by a Once so that a second Close -- which the schedulers
+	// below do not tolerate anyway -- cannot turn into a double-close panic here.
+	bm.closeOnce.Do(func() { close(bm.closing) })
 	bm.lifetime.Wait()
 
 	bm.broadcastScheduler.Close()

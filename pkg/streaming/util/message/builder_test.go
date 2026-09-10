@@ -259,7 +259,7 @@ func TestReplicateBuilder(t *testing.T) {
 	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().MessageID))
 	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().LastConfirmedMessageID))
 
-	replicateMsg.OverwriteReplicateVChannel("v11", []string{"v11", "v12"})
+	require.NoError(t, replicateMsg.OverwriteReplicateVChannel("v11", []string{"v11", "v12"}))
 	assert.Equal(t, "v11", replicateMsg.VChannel())
 	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
 	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
@@ -304,7 +304,7 @@ func TestOverwriteReplicateVChannelRemapsAppendFirst(t *testing.T) {
 	for _, vchannel := range sourceVChannels {
 		targetVChannels = append(targetVChannels, strings.Replace(vchannel, "p", "q", 1))
 	}
-	replicateMsg.OverwriteReplicateVChannel("q1_1v1", targetVChannels)
+	require.NoError(t, replicateMsg.OverwriteReplicateVChannel("q1_1v1", targetVChannels))
 
 	bh := replicateMsg.BroadcastHeader()
 	assert.Equal(t, targetVChannels, bh.VChannels)

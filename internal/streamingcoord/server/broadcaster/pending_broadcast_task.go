@@ -106,6 +106,16 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 // group named by the broadcast header and the rest. Already-acked replicas are
 // not pending, so after a restart that persisted the first group this returns
 // an empty first group and the task proceeds to the rest.
+//
+// A SECONDARY cluster's liveness depends on how Execute uses this split, not
+// merely on the tick ordering it gives this cluster: the whole group must be
+// appended (and AckPartial-persisted) BEFORE the rest is appended, so that every
+// append-first replica's tick is strictly below every other replica's. That is
+// premise (a) of the append gate's progress argument in
+// internal/distributed/streaming/replicate_service.go
+// (waitAppendFirstReplicas). Appending the rest concurrently with this group
+// would keep every test in this package green and wedge a secondary's replicate
+// streams.
 func (b *pendingBroadcastTask) splitAppendFirst() (first []message.MutableMessage, rest []message.MutableMessage) {
 	appendFirst := typeutil.NewSet(b.header().AppendFirstVChannels...)
 	for _, msg := range b.pendingMessages {
