@@ -5624,7 +5624,14 @@ func IdempotencyKeyHandlerFunc(c *gin.Context) {
 	// unchecked key would ride along on every coordinator RPC of any v1 or v2
 	// route -- see ValidateIdempotencyKey for what that costs.
 	if err := interceptor.ValidateIdempotencyKey(key); err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		status := http.StatusOK
+		// This middleware is registered on the whole HTTP engine, before the v1
+		// and v2 groups diverge. Apply the opt-in projection only to v2 so v1 and
+		// the default disabled mode retain the legacy 200 envelope.
+		if strings.HasPrefix(c.FullPath(), "/v2/vectordb/") {
+			status = projectedStatus(err)
+		}
+		HTTPAbortReturn(c, status, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})

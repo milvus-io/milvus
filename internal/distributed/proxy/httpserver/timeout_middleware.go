@@ -265,6 +265,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
+		standardErrorStatus := paramtable.Get().HTTPCfg.StandardErrorStatus.GetAsBool()
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
 		if requestTimeout != "" {
@@ -304,7 +305,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		buffer := bufPool.Get()
 		buffer.Reset()
 		recorder := newTimeoutResponseRecorder(buffer)
-		if req.Body != nil {
+		if standardErrorStatus && req.Body != nil {
 			req.Body = &bodyReadTracker{ReadCloser: req.Body, bodyReceived: &recorder.bodyReceived}
 		}
 		handlerCtx := gCtx.Copy()
@@ -358,7 +359,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			if traceID, ok := getTraceID(gCtx); ok {
 				setTraceIDHeaderTo(realWriter.Header(), traceID)
 			}
-			realWriter.WriteHeader(middlewareTimeoutStatus(recorder.bodyReceived.Load()))
+			realWriter.WriteHeader(middlewareTimeoutStatus(recorder.bodyReceived.Load(), standardErrorStatus))
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 			realWriter.Write(body)
 		}

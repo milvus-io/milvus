@@ -74,19 +74,17 @@ func errToHTTPStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// grpcCodeToHTTPStatus recovers the status of a raw gRPC error that reached the
-// funnel without a merr wrapping. Only explicit input/auth codes are mapped;
-// transport, timeout, cancellation without HTTP provenance, and every other
-// raw gRPC error stay 500. A merr error has no GRPCStatus(), so FromError
-// reports ok=false and this never fires for it.
+// grpcCodeToHTTPStatus recovers explicit authentication and authorization
+// statuses from a raw gRPC error. InvalidArgument is deliberately not mapped:
+// HookInterceptor uses it for every Mock/Before/After hook failure, including
+// server failures after the handler has already run, so the code alone cannot
+// prove input blame. An explicitly input-marked error is handled above.
 func grpcCodeToHTTPStatus(err error) (int, bool) {
 	st, ok := grpcstatus.FromError(err)
 	if !ok || st.Code() == codes.OK {
 		return 0, false
 	}
 	switch st.Code() {
-	case codes.InvalidArgument:
-		return http.StatusBadRequest, true
 	case codes.Unauthenticated:
 		return http.StatusUnauthorized, true
 	case codes.PermissionDenied:
@@ -116,14 +114,20 @@ func recordErrorType(c *gin.Context, err error) {
 	c.Set("error_type", errorTypeForAccessLog(err).String())
 }
 
-// errorTypeForAccessLog keeps the access-log attribution aligned with the HTTP
-// projection for raw gRPC client errors, which carry no merr classification.
+// errorTypeForAccessLog keeps access-log attribution aligned with the HTTP
+// projection, including the conservative treatment of unclassified gRPC errors.
 func errorTypeForAccessLog(err error) merr.ErrorType {
+	// Schema mismatch is input-classified by the shared merr sentinel for legacy
+	// retry consumers, but this HTTP boundary projects the transient schema race
+	// as 500, so its access-log attribution must remain system-owned as well.
+	if merr.Code(err) == merr.Code(merr.ErrCollectionSchemaMismatch) {
+		return merr.SystemError
+	}
 	if merr.GetErrorType(err) == merr.InputError {
 		return merr.InputError
 	}
 	switch grpcstatus.Code(err) {
-	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied:
+	case codes.Unauthenticated, codes.PermissionDenied:
 		return merr.InputError
 	default:
 		return merr.SystemError
@@ -133,21 +137,36 @@ func errorTypeForAccessLog(err error) merr.ErrorType {
 // middlewareTimeoutStatus separates only the boundary that is provable here:
 // an incomplete request upload is 408, while every timeout after body receipt
 // is a server-side 500. Gate-off keeps the pre-existing 408 for compatibility.
-func middlewareTimeoutStatus(bodyReceived bool) int {
-	if !bodyReceived || !paramtable.Get().HTTPCfg.StandardErrorStatus.GetAsBool() {
+// standardErrorStatus is a per-request snapshot so one timeout decision cannot
+// observe two different config values.
+func middlewareTimeoutStatus(bodyReceived, standardErrorStatus bool) int {
+	if !bodyReceived || !standardErrorStatus {
 		return http.StatusRequestTimeout
 	}
 	return http.StatusInternalServerError
 }
 
-// projectedStatusForRequest upgrades a canceled error to 499 (client closed)
-// only when the request context itself was canceled — the signal that proves
-// the caller went away. Both merr CanceledCode and a raw gRPC Canceled status
-// are accepted under that guard; without the provenance, cancellation stays
-// the neutral 500.
-func projectedStatusForRequest(gCtx *gin.Context, err error) int {
-	status := projectedStatus(err)
-	if gCtx == nil {
+// projectedBodyReadStatus classifies failures returned while receiving the
+// request body before JSON decoding starts. A canceled request context proves
+// that the caller went away; a timeout-capable read error proves a receive-phase
+// timeout; all other transport failures remain the neutral 500.
+func projectedBodyReadStatus(gCtx *gin.Context, err error) int {
+	if !paramtable.Get().HTTPCfg.StandardErrorStatus.GetAsBool() {
+		return http.StatusOK
+	}
+	if gCtx != nil && gCtx.Request != nil &&
+		errors.Is(gCtx.Request.Context().Err(), context.Canceled) {
+		return statusClientClosedRequest
+	}
+	var timeoutErr interface{ Timeout() bool }
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+		return http.StatusRequestTimeout
+	}
+	return http.StatusInternalServerError
+}
+
+func applyRequestCancellationStatus(gCtx *gin.Context, err error, status int) int {
+	if gCtx == nil || gCtx.Request == nil {
 		return status
 	}
 	if status == http.StatusInternalServerError &&
@@ -158,15 +177,25 @@ func projectedStatusForRequest(gCtx *gin.Context, err error) int {
 	return status
 }
 
+// projectedStatusForRequest upgrades a canceled error to 499 (client closed)
+// only when the request context itself was canceled — the signal that proves
+// the caller went away. Both merr CanceledCode and a raw gRPC Canceled status
+// are accepted under that guard; without the provenance, cancellation stays
+// the neutral 500.
+func projectedStatusForRequest(gCtx *gin.Context, err error) int {
+	return applyRequestCancellationStatus(gCtx, err, projectedStatus(err))
+}
+
 // projectedAuthorizationStatus preserves the legacy 403 used for authorization
 // interceptor failures while the feature is disabled. With standard statuses
 // enabled, only explicit auth failures remain 401/403; infrastructure failures
 // and proven client cancellation become 500/499.
 func projectedAuthorizationStatus(gCtx *gin.Context, err error) int {
-	if !paramtable.Get().HTTPCfg.StandardErrorStatus.GetAsBool() {
+	standardErrorStatus := paramtable.Get().HTTPCfg.StandardErrorStatus.GetAsBool()
+	if !standardErrorStatus {
 		return http.StatusForbidden
 	}
-	return projectedStatusForRequest(gCtx, err)
+	return applyRequestCancellationStatus(gCtx, err, errToHTTPStatus(err))
 }
 
 // errorFromStatusForHTTP restores the input classification that old peers could

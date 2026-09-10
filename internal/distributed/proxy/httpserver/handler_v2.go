@@ -437,7 +437,22 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		body, readErr := io.ReadAll(gCtx.Request.Body)
+		if readErr != nil {
+			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(readErr),
+				mlog.Any("url", gCtx.Request.URL.Path))
+			status := projectedBodyReadStatus(gCtx, readErr)
+			if status != http.StatusOK {
+				recordErrorType(gCtx, readErr)
+			}
+			HTTPAbortReturn(gCtx, status, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + readErr.Error(),
+			})
+			return
+		}
+		gCtx.Set(gin.BodyBytesKey, body)
+		if err := binding.JSON.BindBody(body, req); err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
@@ -1840,7 +1855,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
-			return resp, merr.ErrCheckPrimaryKey
+			return merr.Status(merr.ErrCheckPrimaryKey), merr.ErrCheckPrimaryKey
 		}
 	}
 	return resp, err
@@ -1959,7 +1974,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
-			return resp, merr.ErrCheckPrimaryKey
+			return merr.Status(merr.ErrCheckPrimaryKey), merr.ErrCheckPrimaryKey
 		}
 	}
 	return resp, err

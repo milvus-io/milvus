@@ -23,19 +23,31 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"testing/iotest"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type timeoutReadError struct{}
+
+func (timeoutReadError) Error() string { return "request body read timeout" }
+func (timeoutReadError) Timeout() bool { return true }
 
 func TestErrToHTTPStatus(t *testing.T) {
 	cases := []struct {
@@ -60,7 +72,9 @@ func TestErrToHTTPStatus(t *testing.T) {
 		{"non-merr error", assert.AnError, http.StatusInternalServerError},
 		{"deadline exceeded", context.DeadlineExceeded, http.StatusInternalServerError},
 		{"canceled without provenance", context.Canceled, http.StatusInternalServerError},
-		{"raw grpc InvalidArgument", status.Error(codes.InvalidArgument, "x"), http.StatusBadRequest},
+		{"raw grpc InvalidArgument is ambiguous", status.Error(codes.InvalidArgument, "x"), http.StatusInternalServerError},
+		{"system-marked raw grpc InvalidArgument", merr.WrapErrAsSysError(status.Error(codes.InvalidArgument, "x")), http.StatusInternalServerError},
+		{"explicitly marked raw grpc InvalidArgument", merr.WrapErrAsInputError(status.Error(codes.InvalidArgument, "x")), http.StatusBadRequest},
 		{"raw grpc Unauthenticated", status.Error(codes.Unauthenticated, "x"), http.StatusUnauthorized},
 		{"raw grpc PermissionDenied", status.Error(codes.PermissionDenied, "x"), http.StatusForbidden},
 		{"raw grpc Unavailable", status.Error(codes.Unavailable, "x"), http.StatusInternalServerError},
@@ -83,7 +97,10 @@ func TestErrorTypeForAccessLog(t *testing.T) {
 	}{
 		{"merr input", merr.ErrParameterInvalid, merr.InputError},
 		{"merr system", merr.ErrServiceInternal, merr.SystemError},
-		{"raw grpc InvalidArgument", status.Error(codes.InvalidArgument, "x"), merr.InputError},
+		{"schema mismatch HTTP override", merr.ErrCollectionSchemaMismatch, merr.SystemError},
+		{"raw grpc InvalidArgument is ambiguous", status.Error(codes.InvalidArgument, "x"), merr.SystemError},
+		{"system-marked raw grpc InvalidArgument", merr.WrapErrAsSysError(status.Error(codes.InvalidArgument, "x")), merr.SystemError},
+		{"explicitly marked raw grpc InvalidArgument", merr.WrapErrAsInputError(status.Error(codes.InvalidArgument, "x")), merr.InputError},
 		{"raw grpc Unauthenticated", status.Error(codes.Unauthenticated, "x"), merr.InputError},
 		{"raw grpc PermissionDenied", status.Error(codes.PermissionDenied, "x"), merr.InputError},
 		{"raw grpc Unavailable", status.Error(codes.Unavailable, "x"), merr.SystemError},
@@ -123,6 +140,43 @@ func TestProjectedStatusGate(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, projectedStatus(merr.ErrServiceRateLimit))
 	assert.Equal(t, http.StatusBadRequest, projectedStatus(merr.ErrParameterInvalid))
 	assert.Equal(t, http.StatusOK, projectedStatus(nil))
+}
+
+func TestIdempotencyKeyHandlerProjectsOnlyV2Errors(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.StandardErrorStatus.Key
+	defer paramtable.Get().Reset(key)
+
+	engine := gin.New()
+	engine.Use(IdempotencyKeyHandlerFunc)
+	engine.POST("/v1/vector/insert", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	engine.POST("/v2/vectordb/entities/insert", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	tests := []struct {
+		name    string
+		enabled bool
+		path    string
+		want    int
+	}{
+		{"default v2 keeps legacy envelope", false, "/v2/vectordb/entities/insert", http.StatusOK},
+		{"enabled v1 keeps legacy envelope", true, "/v1/vector/insert", http.StatusOK},
+		{"enabled v2 projects input error", true, "/v2/vectordb/entities/insert", http.StatusBadRequest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paramtable.Get().Save(key, strconv.FormatBool(tc.enabled))
+			req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+			req.Header.Set(HTTPHeaderIdempotencyKey, "invalid\tkey")
+			w := httptest.NewRecorder()
+
+			engine.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.want, w.Code)
+			response := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), response))
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), response.Code)
+		})
+	}
 }
 
 func TestProjectedStatusForRequest(t *testing.T) {
@@ -171,16 +225,84 @@ func TestProjectedAuthorizationStatus(t *testing.T) {
 }
 
 func TestMiddlewareTimeoutStatus(t *testing.T) {
+	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(true, false))
+	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(false, false))
+	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(false, true))
+	assert.Equal(t, http.StatusInternalServerError, middlewareTimeoutStatus(true, true))
+}
+
+func TestWrapperPostClassifiesBodyReadFailures(t *testing.T) {
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.StandardErrorStatus.Key
-
-	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(true))
-	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(false))
-
-	paramtable.Get().Save(key, "true")
 	defer paramtable.Get().Reset(key)
-	assert.Equal(t, http.StatusRequestTimeout, middlewareTimeoutStatus(false))
-	assert.Equal(t, http.StatusInternalServerError, middlewareTimeoutStatus(true))
+
+	cases := []struct {
+		name          string
+		enabled       bool
+		body          io.Reader
+		cancelRequest bool
+		wantStatus    int
+		wantErrorType bool
+	}{
+		{"legacy timeout", false, iotest.ErrReader(timeoutReadError{}), false, http.StatusOK, false},
+		{"malformed JSON", true, bytes.NewBufferString(`{"x"`), false, http.StatusBadRequest, false},
+		{"client canceled", true, iotest.ErrReader(assert.AnError), true, statusClientClosedRequest, true},
+		{"receive timeout", true, iotest.ErrReader(timeoutReadError{}), false, http.StatusRequestTimeout, true},
+		{"other read failure", true, iotest.ErrReader(assert.AnError), false, http.StatusInternalServerError, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paramtable.Get().Save(key, strconv.FormatBool(tc.enabled))
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req := httptest.NewRequest(http.MethodPost, "/bind", tc.body)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(ctx)
+			}
+			c.Request = req
+			called := false
+			wrapperPost(func() any { return &DefaultReq{} }, func(context.Context, *gin.Context, any, string) (interface{}, error) {
+				called = true
+				return nil, nil
+			})(c)
+
+			assert.False(t, called)
+			assert.Equal(t, tc.wantStatus, w.Code)
+			body := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), body))
+			assert.Equal(t, merr.Code(merr.ErrIncorrectParameterFormat), body.Code)
+			_, hasErrorType := c.Get("error_type")
+			assert.Equal(t, tc.wantErrorType, hasErrorType)
+			if hasErrorType {
+				assert.Equal(t, merr.SystemError.String(), c.GetString("error_type"))
+			}
+		})
+	}
+}
+
+func TestTimeoutMiddlewareInstallsBodyTrackerOnlyWhenProjectionEnabled(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.StandardErrorStatus.Key
+	defer paramtable.Get().Reset(key)
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			paramtable.Get().Save(key, strconv.FormatBool(enabled))
+			tracked := make(chan bool, 1)
+			engine := gin.New()
+			engine.POST("/track", timeoutMiddleware(func(c *gin.Context) {
+				_, ok := c.Request.Body.(*bodyReadTracker)
+				tracked <- ok
+				c.Status(http.StatusNoContent)
+			}))
+
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/track", bytes.NewBufferString(`{}`)))
+			assert.Equal(t, enabled, <-tracked)
+		})
+	}
 }
 
 func TestBodyReadTracker(t *testing.T) {
@@ -214,14 +336,15 @@ func TestTimeoutMiddlewareClassifiesBodyReceipt(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().HTTPCfg.StandardErrorStatus.Key)
 	defer paramtable.Get().Reset(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key)
 
+	completeHandlerRelease := make(chan struct{})
 	ginHandler := gin.New()
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(ContextUsername, "root")
 		c.Next()
 	})
 	ginHandler.POST("/complete", timeoutMiddleware(wrapperPost(func() any { return &DefaultReq{} }, func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
+		<-completeHandlerRelease
+		return nil, nil
 	})))
 	ginHandler.POST("/incomplete", timeoutMiddleware(wrapperPost(func() any { return &DefaultReq{} }, func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
@@ -230,6 +353,7 @@ func TestTimeoutMiddlewareClassifiesBodyReceipt(t *testing.T) {
 	completeReq := httptest.NewRequest(http.MethodPost, "/complete", bytes.NewReader([]byte(`{}`)))
 	completeResp := httptest.NewRecorder()
 	ginHandler.ServeHTTP(completeResp, completeReq)
+	close(completeHandlerRelease)
 	assert.Equal(t, http.StatusInternalServerError, completeResp.Code)
 
 	reader, writer := io.Pipe()
@@ -281,6 +405,55 @@ func TestProjectedStatusThroughHandlers(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
 			assert.Equal(t, tc.wantCode, returnBody.Code)
+		})
+	}
+}
+
+func TestMalformedMutationResponseCountsAsProcessedFailure(t *testing.T) {
+	paramtable.Init()
+	standardStatusKey := paramtable.Get().HTTPCfg.StandardErrorStatus.Key
+	quotaKey := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+	paramtable.Get().Save(standardStatusKey, "true")
+	paramtable.Get().Save(quotaKey, "false")
+	defer paramtable.Get().Reset(standardStatusKey)
+	defer paramtable.Get().Reset(quotaKey)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status: commonSuccessStatus,
+		IDs:    &schemapb.IDs{},
+	}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status: commonSuccessStatus,
+		IDs:    &schemapb.IDs{},
+	}, nil).Once()
+	server := initHTTPServerV2(mp, false)
+	body := `{"collectionName":"book","data":[{"book_id":1,"word_count":10,"book_intro":[0.1,0.2]}]}`
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			path := versionalV2(EntityCategory, action)
+			method := routeToMethod[path]
+			failed := metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, metrics.CauseSystem, DefaultDbName, "book")
+			rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.RejectedLabel, metrics.CauseSystem, DefaultDbName, "book")
+			failedBefore := testutil.ToFloat64(failed)
+			rejectedBefore := testutil.ToFloat64(rejected)
+
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body)))
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			response := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), response))
+			assert.Equal(t, merr.Code(merr.ErrCheckPrimaryKey), response.Code)
+			assert.Equal(t, failedBefore+1, testutil.ToFloat64(failed))
+			assert.Equal(t, rejectedBefore, testutil.ToFloat64(rejected))
 		})
 	}
 }
