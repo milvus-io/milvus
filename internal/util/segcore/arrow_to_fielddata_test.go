@@ -530,3 +530,60 @@ func TestArrowFieldsToProto_BinaryVector_DimFallback(t *testing.T) {
 	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
 	assert.Equal(t, []byte{0xFF, 0x00, 0x0F, 0xF0}, result[0].GetVectors().GetBinaryVector())
 }
+
+// TestArrowFieldsToProto_StringOwnedAfterRelease verifies that converted
+// string data is owned by Go and remains valid after the Arrow record is
+// released. Before the fix, arr.Value() returned a zero-copy view into the
+// Arrow buffer, causing use-after-free once rec.Release() freed the C memory.
+func TestArrowFieldsToProto_StringOwnedAfterRelease(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	rec := buildTestRecordWithFieldIDs(
+		pool,
+		[]arrow.Field{{Name: "name", Type: arrow.BinaryTypes.String}},
+		[]int64{200},
+		func(bs []array.Builder) {
+			b := bs[0].(*array.StringBuilder)
+			b.AppendValues([]string{"hello", "world", "zero-copy"}, nil)
+		},
+	)
+
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 200, Name: "name", DataType: schemapb.DataType_VarChar},
+	))
+	assert.NoError(t, err)
+
+	// Release the Arrow record — this frees the underlying buffer.
+	rec.Release()
+
+	// The converted strings must still be valid because ArrowFieldsToProto
+	// clones them into Go-managed memory.
+	data := result[0].GetScalars().GetStringData().GetData()
+	assert.Equal(t, []string{"hello", "world", "zero-copy"}, data)
+}
+
+// TestArrowFieldsToProto_JSONOwnedAfterRelease verifies JSON byte slices are
+// owned copies, not views into the Arrow buffer.
+func TestArrowFieldsToProto_JSONOwnedAfterRelease(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	rec := buildTestRecordWithFieldIDs(
+		pool,
+		[]arrow.Field{{Name: "meta", Type: arrow.BinaryTypes.Binary}},
+		[]int64{201},
+		func(bs []array.Builder) {
+			b := bs[0].(*array.BinaryBuilder)
+			b.Append([]byte(`{"key":"val"}`))
+			b.Append([]byte(`[1,2,3]`))
+		},
+	)
+
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 201, Name: "meta", DataType: schemapb.DataType_JSON},
+	))
+	assert.NoError(t, err)
+
+	rec.Release()
+
+	data := result[0].GetScalars().GetJsonData().GetData()
+	assert.Equal(t, []byte(`{"key":"val"}`), data[0])
+	assert.Equal(t, []byte(`[1,2,3]`), data[1])
+}

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -145,7 +146,9 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		arr := col.(*array.String)
 		data := make([]string, numRows)
 		for j := 0; j < numRows; j++ {
-			data[j] = arr.Value(j)
+			// arr.Value returns a zero-copy view into the Arrow buffer;
+			// Clone so the string outlives rec.Release().
+			data[j] = strings.Clone(arr.Value(j))
 		}
 		fd.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
