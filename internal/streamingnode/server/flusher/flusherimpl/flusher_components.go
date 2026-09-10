@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -27,14 +28,39 @@ import (
 
 // flusherComponents is the components of the flusher.
 type flusherComponents struct {
-	wal                        wal.WAL
-	broker                     broker.Broker
-	cpUpdater                  *util.ChannelCheckpointUpdater
-	chunkManager               storage.ChunkManager
-	dataServices               map[string]*dataSyncServiceWrapper
+	wal          wal.WAL
+	broker       broker.Broker
+	cpUpdater    *util.ChannelCheckpointUpdater
+	chunkManager storage.ChunkManager
+	dataServices map[string]*dataSyncServiceWrapper
+	// fenced holds, per source vchannel, the largest SplitShard fence tick
+	// (T_switch) seen for it: the time tick at or after which its data sync
+	// service has drained every message the fence-time dd_node sealed and
+	// may close itself. A same-task re-fence carries a larger tick than the
+	// one before it, so the drain point is the largest one ever observed,
+	// not the first. Seeded from the recovery snapshot on restart (see
+	// fencedTicksFromSnapshot) so a source fenced before a restart still
+	// closes once its checkpoint catches up.
+	fenced                     map[string]uint64
 	logger                     *mlog.Logger
 	recoveryCheckPointTimeTick uint64 // The time tick of the recovery storage.
 	rs                         recovery.RecoveryStorage
+}
+
+// fencedTicksFromSnapshot collects the fence tick (VChannelMeta.SplitTimeTick,
+// i.e. T_switch) of every SPLITTED vchannel recorded in the recovery
+// snapshot. It seeds flusherComponents.fenced on restart: a source vchannel
+// that was fenced before the restart, and whose data sync service survived
+// it (recovered because it was not yet drained), must still close itself
+// once its checkpoint passes T_switch.
+func fencedTicksFromSnapshot(vchannels map[string]*streamingpb.VChannelMeta) map[string]uint64 {
+	fenced := make(map[string]uint64, len(vchannels))
+	for vchannel, meta := range vchannels {
+		if meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+			fenced[vchannel] = meta.GetSplitTimeTick()
+		}
+	}
+	return fenced
 }
 
 // WhenCreateCollection handles the create collection message.
@@ -127,6 +153,50 @@ func (impl *flusherComponents) WhenDropCollection(ctx context.Context, vchannel 
 		delete(impl.dataServices, vchannel)
 		impl.logger.Info(ctx, "drop data sync service", mlog.FieldVChannel(vchannel))
 	}
+}
+
+// RecordFence records the fence tick (T_switch) of a SplitShard source
+// replica dispatched to vchannel, before the replica is forwarded to its
+// data sync service. A same-task re-fence can carry a larger tick than a
+// prior one -- the largest tick ever observed is kept, since the data sync
+// service isn't drained until its checkpoint passes every fence it was
+// handed, not merely the first.
+func (impl *flusherComponents) RecordFence(vchannel string, tick uint64) {
+	if impl.fenced == nil {
+		impl.fenced = make(map[string]uint64)
+	}
+	if tick > impl.fenced[vchannel] {
+		impl.fenced[vchannel] = tick
+	}
+}
+
+// CloseIfDrained closes and removes the data sync service of vchannel once
+// its checkpoint has caught up with the fence tick recorded for it, i.e.
+// once it has synced every message the fence-time dd_node sealed. It is a
+// no-op when vchannel was never fenced, or its checkpoint has not reached
+// the fence tick yet, and idempotent afterwards: once the data sync service
+// is removed, later calls (including the same or a smaller checkpoint) find
+// nothing left to close and log nothing.
+//
+// This is deliberately not reached from the AlterCollection replica that
+// retires the vchannel -- on a secondary that replica can arrive before the
+// fenced segments are flushed, and closing there would drop unflushed data.
+// The data sync service closes itself only once its own checkpoint proves
+// it is drained.
+func (impl *flusherComponents) CloseIfDrained(ctx context.Context, vchannel string, timestamp uint64) {
+	fenceTick := impl.fenced[vchannel]
+	if fenceTick == 0 || timestamp < fenceTick {
+		return
+	}
+	ds, ok := impl.dataServices[vchannel]
+	if !ok {
+		return
+	}
+	ds.Close()
+	delete(impl.dataServices, vchannel)
+	delete(impl.fenced, vchannel)
+	impl.logger.Info(ctx, "closed the fenced source's data sync service once its checkpoint passed the fence",
+		mlog.FieldVChannel(vchannel), mlog.Uint64("fenceTimeTick", fenceTick), mlog.Uint64("checkpointTimeTick", timestamp))
 }
 
 // HandleMessage handles the plain message.

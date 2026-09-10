@@ -168,6 +168,21 @@ func (impl *WALFlusherImpl) Close() {
 	impl.metrics.Close()
 }
 
+// onCheckpointUpdated is the checkpoint-updater callback: it is invoked once
+// DataCoord has acked a vchannel's advanced checkpoint. It persists the acked
+// position as the recovered checkpoint, then gives a fenced source's data
+// sync service the chance to close itself once this checkpoint proves it has
+// drained everything the fence-time dd_node sealed.
+func (impl *WALFlusherImpl) onCheckpointUpdated(mp *msgpb.MsgPosition) {
+	messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), mp.MsgID)
+	impl.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
+		MessageID: messageID,
+		TimeTick:  mp.Timestamp,
+		Magic:     utility.RecoveryMagicStreamingInitialized,
+	})
+	impl.flusherComponents.CloseIfDrained(context.TODO(), mp.GetChannelName(), mp.GetTimestamp())
+}
+
 // buildFlusherComponents builds the components of the flusher.
 func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, message.MessageID, error) {
 	// Get all existed vchannels of the pchannel.
@@ -197,14 +212,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
-	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), mp.MsgID)
-		impl.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
-			MessageID: messageID,
-			TimeTick:  mp.Timestamp,
-			Magic:     utility.RecoveryMagicStreamingInitialized,
-		})
-	})
+	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, impl.onCheckpointUpdated)
 	go cpUpdater.Start()
 
 	fc := &flusherComponents{
@@ -213,6 +221,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		cpUpdater:                  cpUpdater,
 		chunkManager:               chunkManager,
 		dataServices:               make(map[string]*dataSyncServiceWrapper),
+		fenced:                     fencedTicksFromSnapshot(snapshot.VChannels),
 		logger:                     impl.logger,
 		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
 		rs:                         impl.RecoveryStorage,
@@ -325,6 +334,13 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		case message.SplitShardRoleSource:
 			// The source replica falls through to the data sync service, whose
 			// dd_node seals the fenced segments and sets the flush timestamp.
+			// Record the fence tick before forwarding: the data sync service
+			// closes itself once its own checkpoint proves it has drained
+			// everything sealed at the fence (flusherComponents.CloseIfDrained,
+			// invoked from the checkpoint-updater callback), rather than being
+			// torn down by the AlterCollection replica that later retires this
+			// vchannel.
+			impl.flusherComponents.RecordFence(msg.VChannel(), splitShardMsg.TimeTick())
 		case message.SplitShardRoleBystander:
 			// The broadcast now covers every vchannel of the collection, so a
 			// bystander shard -- neither fenced nor created by this split --
@@ -355,10 +371,20 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			return nil
 		}
 		if messageutil.RetiresVChannel(alterMsg.Header(), alterMsg.MustBody().GetUpdates(), msg.VChannel()) {
-			// A routing commit that delists this vchannel retires it: close the
-			// data sync service the genesis spawned and do not forward. Reuses
-			// the drop-collection teardown, already scoped to one vchannel.
-			impl.flusherComponents.WhenDropCollection(ctx, msg.VChannel())
+			// A routing commit that delists this vchannel retires it, but this
+			// replica does not close its data sync service: on a secondary it
+			// can arrive before the fenced segments are flushed, and closing
+			// here would drop data that hasn't drained yet. The drop-collection
+			// teardown (WhenDropCollection) is deliberately not reused for this
+			// either -- that path is meant for a vchannel that is actually being
+			// dropped and reaches DropVirtualChannel at DataCoord through the
+			// sync manager, which a retiring-but-still-draining vchannel must
+			// not trigger. The data sync service closes itself once its own
+			// checkpoint passes the fence tick recorded when the source replica
+			// of SplitShard was dispatched (flusherComponents.CloseIfDrained).
+			// RetiresVChannel is still checked here -- not just to no-op -- so a
+			// later task can hang recovery-side work off the same predicate; the
+			// flusher itself has nothing left to do but not forward.
 			return nil
 		}
 	case message.MessageTypeRollbackImport:
