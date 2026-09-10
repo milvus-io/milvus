@@ -282,7 +282,7 @@ func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
 
 // ExternalSpecContext carries the raw external-table inputs that C++
 // InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
-// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// (storage layer) and format-layer properties (e.g. reader.exttable.snapshot_id)
 // from a single external_spec JSON. Zero value (CollectionID=0, Source="")
 // signals an internal (non-external) collection — injectExternalSpecProperties
 // treats it as a no-op.
