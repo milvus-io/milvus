@@ -153,19 +153,34 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoin
 	// moment that minimum crosses any pending retirement's SplitTimeTick,
 	// instead of waiting on unrelated traffic to bump dirtyCounter or on the
 	// next periodic tick.
+	if r.hasCollectableRetiredVChannelLocked() {
+		r.notifyPersist()
+	}
+}
+
+// hasCollectableRetiredVChannelLocked reports whether some pending
+// retirement has now drained: the pchannel-wide minimum flusher checkpoint --
+// the very tick persistDirtySnapshot hands to ConsumeDirtyAndGetSnapshot --
+// has reached its fence, so the next snapshot would actually remove it from
+// the catalog. A retirement that has not drained yet is deliberately NOT
+// collectable: it is nothing the persist loop can act on, and treating it as
+// dirty would spin the graceful-shutdown loop (which persists for as long as
+// isDirty holds) until the timeout.
+// The caller must already hold r.mu.
+func (r *recoveryStorageImpl) hasCollectableRetiredVChannelLocked() bool {
 	if len(r.retiredVChannels) == 0 {
-		return
+		return false
 	}
 	minimumCheckpoint := r.getFlusherCheckpointLocked()
 	if minimumCheckpoint == nil {
-		return
+		return false
 	}
 	for retiredVChannel := range r.retiredVChannels {
 		if info, ok := r.vchannels[retiredVChannel]; ok && minimumCheckpoint.TimeTick >= info.meta.SplitTimeTick {
-			r.notifyPersist()
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // GetSchema gets the schema of the collection at the given timetick.

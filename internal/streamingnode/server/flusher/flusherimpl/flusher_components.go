@@ -168,6 +168,13 @@ func (impl *flusherComponents) WhenDropCollection(ctx context.Context, vchannel 
 	if ok {
 		delete(impl.dataServices, vchannel)
 	}
+	// The fence tick is dropped with the vchannel itself, whether or not a
+	// data sync service is still around: once the collection is gone the
+	// recorded T_switch has no consumer left, and keeping it would let a
+	// later vchannel of the same name (only reachable by a replay of the
+	// same collection id) be closed by a stale fence the moment it is
+	// spawned.
+	delete(impl.fenced, vchannel)
 	impl.mu.Unlock()
 	if !ok {
 		return

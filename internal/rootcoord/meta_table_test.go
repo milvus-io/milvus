@@ -5143,6 +5143,53 @@ func TestApplyShardSplitRouting(t *testing.T) {
 		require.Equal(t, []string{v0}, mt.collID2Meta[collectionID].VirtualChannelNames)
 	})
 
+	// Supersession answers a question about shard STATES only, so an incoherent
+	// post-image whose states happen to line up satisfies it by accident. Only a
+	// backwards shard transition -- the one refusal a later commit can also
+	// cause -- may be re-read as supersession; every other refusal names
+	// something no later commit could have made true, and must stay loud.
+	t.Run("the namespace routing key on an already-split collection is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		mt.collID2Meta[collectionID].Properties = []*commonpb.KeyValuePair{
+			{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+		}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		// Same topology, same modulus, same states -- so the collection is
+		// trivially "at or beyond" it -- but it back-fills a routing key this
+		// collection's rows were never placed by.
+		namespaced := postImage()
+		namespaced.ShardBy = namespaceShardBy
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, namespaced, 200)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.ErrorContains(t, err, "placed by primary key")
+		require.Equal(t, "hash(pk)", mt.collID2Meta[collectionID].ShardBy)
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a shrinking modulus is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		// Every shard stays where it is, so supersession would say yes; the
+		// modulus, which is the divisor every residue was computed against,
+		// goes backwards.
+		shrunk := postImage()
+		shrunk.RoutingModulus = 1
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, shrunk, 200)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.ErrorContains(t, err, "cannot take it down to")
+		require.EqualValues(t, 2, mt.collID2Meta[collectionID].RoutingModulus)
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
 	// A shard_by back-fill leaves every state equal, so the collection is
 	// trivially "at or beyond" the post-image -- yet the commit still has work to
 	// do. Asking supersession before forward-legality would drop it silently.

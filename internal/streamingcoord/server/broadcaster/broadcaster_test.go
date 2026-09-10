@@ -151,6 +151,9 @@ func TestBroadcaster(t *testing.T) {
 	broadcastAPI.Close()
 
 	bc.Close()
+	// A second Close is reachable on a real shutdown and must return rather than
+	// park the caller (see TestBroadcasterCloseIsIdempotent).
+	bc.Close()
 	broadcastAPI, err = bc.WithResourceKeys(context.Background())
 	assert.NoError(t, err)
 	_, err = broadcastAPI.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}))
@@ -1341,6 +1344,50 @@ func TestBroadcasterSchedulerAddTaskAfterClose(t *testing.T) {
 	result, err := scheduler.AddTask(context.Background(), nil)
 	assert.Nil(t, result)
 	assert.Error(t, err)
+}
+
+// TestBroadcasterCloseIsIdempotent: Close is reachable twice on a real
+// shutdown -- mixcoord's GracefulStop closes the broadcaster, and a component
+// that also holds it can close it again -- so the second call must return
+// instead of parking the shutdown goroutine forever. Every step of Close is
+// re-entrant on its own: the lifetime state is a plain assignment, the closing
+// channel is behind a Once, and both schedulers' BlockUntilFinish waits on a
+// future that is already resolved.
+func TestBroadcasterCloseIsIdempotent(t *testing.T) {
+	paramtable.Init()
+	registry.ResetRegistration()
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	ackScheduler := newAckCallbackScheduler(mlog.With())
+	bm := &broadcastTaskManager{
+		lifetime:           typeutil.NewLifetime(),
+		closing:            make(chan struct{}),
+		mu:                 &sync.Mutex{},
+		tasks:              map[uint64]*broadcastTask{},
+		broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
+		ackScheduler:       ackScheduler,
+	}
+	ackScheduler.bm = bm
+	ackScheduler.Initialize(nil, nil, bm)
+
+	// Closed on a goroutine so a regression fails the test instead of hanging
+	// the whole package until the go test timeout.
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		bm.Close()
+		bm.Close()
+	}()
+	select {
+	case <-closed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("a second Close must return rather than block")
+	}
 }
 
 func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {

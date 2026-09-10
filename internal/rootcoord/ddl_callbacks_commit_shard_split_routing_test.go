@@ -328,6 +328,24 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 	}
 	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(revoke)), merr.ErrServiceInternal)
 
+	// Nor may it shrink: the modulus is the divisor every residue the shards
+	// already own was computed against, so halving it re-interprets them --
+	// keys the collection has been accepting for one shard start hashing to
+	// another while the rows already written stay where they were.
+	shrink := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v0", "v1", "v2"},
+		RoutingModulus:      1,
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardDropped),
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+		},
+	}
+	shrinkErr := checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(shrink))
+	require.ErrorIs(t, shrinkErr, merr.ErrServiceInternal, "a planning bug, not the content of a user request")
+	assert.Contains(t, shrinkErr.Error(), "cannot take it down to")
+
 	// Forward is fine: retire the FENCED source's vchannel and keep the two
 	// targets. The source must still be Splitting to be delisted -- see below.
 	coll.ShardInfos["v0"] = &model.ShardInfo{VChannelName: "v0", State: schemapb.ShardState_ShardSplitting}
@@ -664,6 +682,29 @@ func TestAdoptionCallbackWaitsForTheLocalDrain(t *testing.T) {
 		err := h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(splitTestAdoptionPostImage()))
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Equal(t, []string{"CheckShardSplitDrained"}, h.calls)
+	})
+
+	// The RPC refuses a retiring commit that names no split task, so a message
+	// that carries none has already been appended: there is nothing left to
+	// reject, only a wedge to name. The gate still asks datacoord (and still
+	// refuses), and says so loudly on the way.
+	t.Run("no split task named", func(t *testing.T) {
+		h := newSplitCallbackHarness(t, splitTestMidSplitCollection())
+		var got *datapb.CheckShardSplitDrainedRequest
+		h.mixCoord.EXPECT().CheckShardSplitDrained(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, req *datapb.CheckShardSplitDrainedRequest) {
+				h.record("CheckShardSplitDrained")
+				got = req
+			}).Return(&datapb.CheckShardSplitDrainedResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("no record of shard split task 0")),
+		}, nil).Once()
+
+		taskless := splitTestAdoptionPostImage()
+		taskless.SplitTaskId = 0
+		err := h.callback.alterCollectionV2AckCallback(context.Background(), splitTestRoutingAlterResult(taskless))
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.Equal(t, []string{"CheckShardSplitDrained"}, h.calls)
+		require.Zero(t, got.GetSplitTaskId())
 	})
 
 	t.Run("the collection is gone", func(t *testing.T) {

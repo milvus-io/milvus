@@ -1263,7 +1263,15 @@ func (mt *MetaTable) ApplyShardSplitRouting(ctx context.Context, collectionID Un
 		// same from here, and only one of them is a bug: a post-image a LATER
 		// commit has already overtaken has nothing left to write and must not be
 		// retried, while a genuinely incoherent one must stay loud.
-		if shardSplitRoutingSuperseded(coll, updates) {
+		//
+		// Only a BACKWARDS shard transition can be the former, and it says so
+		// with errRoutingCommitBackwards. shardSplitRoutingSuperseded answers a
+		// question about shard states alone, so asking it about any other
+		// refusal -- an unroutable namespace key, a revoked or shrinking
+		// modulus, a shard delisted from a state that never stopped taking
+		// writes -- would let an incoherent post-image be swallowed as
+		// "already done" whenever its states happen to line up.
+		if errors.Is(err, errRoutingCommitBackwards) && shardSplitRoutingSuperseded(coll, updates) {
 			return errShardSplitRoutingSuperseded
 		}
 		return err

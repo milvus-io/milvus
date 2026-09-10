@@ -25,7 +25,13 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
+	// A drained retirement is dirty even when dirtyCounter is 0: its meta was
+	// typically persisted (clearing dirty) long before the flusher checkpoint
+	// caught up with its fence, and the removal write that finally deletes
+	// the row from the catalog is only emitted by a persist round. Without
+	// this, a graceful shutdown that happens to land on such a round leaves
+	// the retired meta in etcd, to be reloaded on the next start.
+	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil || rs.hasCollectableRetiredVChannelLocked()
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to

@@ -1273,6 +1273,73 @@ func TestFlusherComponentsCloseIfDrainedWithoutADataSyncServiceIsANoop(t *testin
 	assert.Empty(t, fc.dataServices)
 }
 
+// TestFlusherComponentsWhenDropCollectionClearsTheFence: the drop-collection
+// teardown must drop the vchannel's fence tick together with its data sync
+// service. A vchannel of the same name spawned afterwards -- only reachable
+// by a replay of the same collection id -- would otherwise inherit the stale
+// T_switch and be closed by the very first checkpoint past it, even though
+// nothing ever fenced it.
+func TestFlusherComponentsWhenDropCollectionClearsTheFence(t *testing.T) {
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		fenced:       map[string]uint64{"v1": 2000, "v2": 3000},
+		logger:       mlog.With(),
+	}
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	fc.WhenDropCollection(context.Background(), "v1")
+	assert.Empty(t, fc.dataServices)
+	assert.Equal(t, map[string]uint64{"v2": 3000}, fc.fenced,
+		"the dropped vchannel's fence tick must be cleared, and only that one")
+
+	// WhenDropCollection closes the data sync service inline, so by now it
+	// is fully closed (see newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	default:
+		t.Fatal("the data sync service must be closed by the drop-collection teardown")
+	}
+
+	// A same-name vchannel spawned after the drop is not fenced, so no
+	// checkpoint may close it.
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+	fc.CloseIfDrained(context.Background(), "v1", 1<<62)
+	_, ok := fc.dataServices["v1"]
+	assert.True(t, ok, "a vchannel re-spawned after a drop must not inherit the old fence tick")
+}
+
+// TestFlusherComponentsWhenDropCollectionClearsTheFenceWithoutADataSyncService:
+// the fence tick is cleared even when the data sync service is already gone
+// (it closed itself once drained), so the map never retains an entry for a
+// vchannel whose collection has been dropped.
+func TestFlusherComponentsWhenDropCollectionClearsTheFenceWithoutADataSyncService(t *testing.T) {
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		fenced:       map[string]uint64{"v1": 2000},
+		logger:       mlog.With(),
+	}
+
+	require.NotPanics(t, func() {
+		fc.WhenDropCollection(context.Background(), "v1")
+	})
+	assert.Empty(t, fc.fenced)
+}
+
 // TestFlusherComponentsRecordFenceTakesTheLargerTick: a same-task re-fence
 // carries a larger tick than the fence before it (e.g. a retried SplitShard
 // broadcast). The drain threshold must be the largest tick ever observed,

@@ -649,6 +649,92 @@ func TestRetiredSourceIsCollectedOnAQuietPChannel(t *testing.T) {
 	assert.Empty(t, rs.retiredVChannels, "the pending-retirement tracking must be cleaned up once collected")
 }
 
+// TestGracefulCloseCollectsADrainedRetirement: the graceful-shutdown persist
+// loop runs for as long as isDirty() holds. A retirement typically drains
+// long after its meta was last persisted (dirtyCounter back to 0), so the one
+// removal write that finally deletes the row from the catalog only makes it
+// out on shutdown if isDirty() counts a drained retirement as dirty.
+func TestGracefulCloseCollectsADrainedRetirement(t *testing.T) {
+	rs, persisted := newRecoveryStorageForRetireGCTest(t, 2000)
+	// Everything else is already persisted: only the pending retirement,
+	// whose flusher checkpoint has just passed the fence, is left.
+	rs.dirtyCounter = 0
+	rs.vchannels["v0"].dirty = false
+	require.True(t, rs.isDirty(), "a drained retirement must keep the storage dirty")
+
+	require.NoError(t, rs.persistDritySnapshotWhenClosing())
+
+	assert.True(t, rs.gracefulClosed)
+	_, ok := rs.vchannels["v0"]
+	assert.False(t, ok, "the drained retirement must be collected before the graceful close returns")
+	require.Contains(t, *persisted, "v0")
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
+	assert.True(t, (*persisted)["v0"].Retired)
+	assert.False(t, rs.isDirty(), "nothing is left to persist once the retirement is collected")
+}
+
+// TestIsDirtyIgnoresAnUndrainedRetirement: only a *collectable* retirement
+// counts as dirty. A retirement the flusher has not drained past is nothing a
+// persist round can act on, and calling it dirty would spin the
+// graceful-shutdown loop -- which persists for as long as isDirty() holds --
+// until the graceful timeout expires.
+func TestIsDirtyIgnoresAnUndrainedRetirement(t *testing.T) {
+	newRS := func() *recoveryStorageImpl {
+		rs := &recoveryStorageImpl{
+			vchannels:        map[string]*vchannelRecoveryInfo{},
+			persistNotifier:  make(chan struct{}, 1),
+			retiredVChannels: map[string]struct{}{"v0": {}},
+		}
+		rs.vchannels["v0"] = &vchannelRecoveryInfo{
+			meta: &streamingpb.VChannelMeta{
+				Vchannel:      "v0",
+				State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+				Retired:       true,
+				SplitTimeTick: 2000,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 1,
+				},
+			},
+			flusherCheckpoint: &WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 1999},
+		}
+		return rs
+	}
+
+	t.Run("the fence has not been passed yet", func(t *testing.T) {
+		assert.False(t, newRS().isDirty())
+	})
+
+	t.Run("the pchannel-wide minimum is still unknown", func(t *testing.T) {
+		rs := newRS()
+		rs.vchannels["v0"].flusherCheckpoint = nil
+		assert.False(t, rs.isDirty())
+	})
+
+	t.Run("no pending retirement at all", func(t *testing.T) {
+		rs := newRS()
+		delete(rs.retiredVChannels, "v0")
+		assert.False(t, rs.isDirty())
+	})
+
+	t.Run("the retired vchannel is already gone", func(t *testing.T) {
+		rs := newRS()
+		// Another vchannel keeps the pchannel-wide minimum well past the
+		// fence, so only the missing meta itself can rule the retirement out.
+		rs.vchannels["v1"] = &vchannelRecoveryInfo{
+			meta: &streamingpb.VChannelMeta{
+				Vchannel: "v1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 1,
+				},
+			},
+			flusherCheckpoint: &WALCheckpoint{MessageID: rmq.NewRmqID(9), TimeTick: 9000},
+		}
+		delete(rs.vchannels, "v0")
+		assert.False(t, rs.isDirty())
+	})
+}
+
 // TestUpdateFlusherCheckpointNotifiesOnlyWhenAPendingRetirementIsPastItsFence
 // pins down every reason UpdateFlusherCheckpoint must NOT wake the persist
 // loop, complementing TestRetiredSourceIsCollectedOnAQuietPChannel's positive

@@ -19,14 +19,19 @@ import (
 // replicate stream like any other DDL rather than being withheld from it.
 //
 // Two mechanisms on the receiving side make that safe, and neither belongs in
-// this file -- both live in replicate_service.go, which is where a replica is
-// received:
+// this file -- both live where a replica is received, replicate_service.go:
 //
 //  1. Name remap. Every channel name this message carries -- the sources and
 //     targets in the header, the routing post-image and the genesis in the body,
 //     and the broadcast header's append_first_vchannels -- names a channel of
 //     the PRIMARY. The secondary rewrites all of them into its own namespace
-//     before the replica is appended.
+//     before the replica is appended. The message-body names are rewritten by
+//     replicate_service.go's per-message-type table; append_first_vchannels is
+//     not in that table at all -- it is rewritten generically, for every
+//     broadcast message type, by messageImpl.OverwriteReplicateVChannel, which
+//     maps it through the very vchannel mapping the replicate service supplies
+//     for the broadcast header (and refuses a header whose append-first list is
+//     not a subset of that list).
 //  2. The append gate. The primary's ordering (sources appended and persisted
 //     first) is produced by the broadcaster and is not carried by the replicate
 //     streams, which deliver each pchannel independently. The secondary

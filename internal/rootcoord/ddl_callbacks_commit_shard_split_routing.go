@@ -43,9 +43,11 @@ import (
 // topology rides in an AlterCollection message under the shard-split routing
 // field mask, so the existing broadcast -> ack -> meta_table.AlterCollection ->
 // Collection.ApplyUpdates path persists it atomically and invalidates the proxy
-// caches. The broadcast reaches every shard of the new topology (existing shards
-// plus the split targets) so the streamingnode shard managers converge on the
-// new routing version.
+// caches. The broadcast reaches the control channel, every vchannel the
+// collection carries today -- including a source this commit delists, which is
+// the only way that source ever learns it has been retired -- and every vchannel
+// the new topology names, deduplicated, so the streamingnode shard managers
+// converge on the new routing version (see the union built below).
 func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
 	if req.GetCollectionName() == "" {
 		return merr.WrapErrParameterInvalidMsg("commit shard split routing failed, collection name is empty")
@@ -286,6 +288,24 @@ func routingCommitDelistsAVChannel(coll *model.Collection, updates *messagespb.A
 // collection it routes by namespace. Kept in step with datacoord's shardByOf.
 const namespaceShardBy = "hash(" + common.NamespaceFieldName + ")"
 
+// errRoutingCommitBackwards marks the ONE refusal checkRoutingCommitAgainstMeta
+// makes that a correct system can also produce: a shard whose state the
+// post-image would move backwards. That is exactly what a redelivery of an
+// earlier commit looks like once a later one has finished the split, which is
+// why ApplyShardSplitRouting is allowed to re-read such a refusal as
+// supersession and end the callback quietly.
+//
+// Every other refusal -- an unroutable namespace key, a revoked or shrinking
+// modulus, a shard delisted from a state that never stopped taking writes --
+// says the post-image itself is incoherent. No later commit can make those
+// true, so they must stay loud rather than being swallowed as "already done":
+// shardSplitRoutingSuperseded answers a question about shard STATES only, and
+// an incoherent post-image can satisfy it by accident.
+//
+// The mark rides on top of the merr error, so the code and message a caller
+// (and the wire) sees are unchanged.
+var errRoutingCommitBackwards = errors.New("shard split routing commit moves a shard backwards")
+
 func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.AlterCollectionMessageUpdates) error {
 	// Routing is not revocable. Once a collection has been split, its shards own
 	// residues and only the modulus says what those residues mean; a commit that
@@ -302,6 +322,19 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.A
 		return merr.WrapErrServiceInternalMsg(
 			"commit shard split routing failed, collection %q routes at modulus %d and a commit cannot take it back to none",
 			coll.Name, coll.RoutingModulus)
+	}
+
+	// Nor may it shrink. The modulus is the divisor every residue in every
+	// shard was computed against; halving it re-interprets residues the shards
+	// already own, so keys the collection has been accepting for one shard
+	// start hashing to another while the rows already written stay where they
+	// were. Only a growth (a doubling) keeps existing residues meaning what
+	// they meant. System for the same reason as above: the post-image is
+	// written by the split coordinator, so a shrink is a planning bug.
+	if updates.GetRoutingModulus() != 0 && updates.GetRoutingModulus() < coll.RoutingModulus {
+		return merr.WrapErrServiceInternalMsg(
+			"commit shard split routing failed, collection %q routes at modulus %d and a commit cannot take it down to %d",
+			coll.Name, coll.RoutingModulus, updates.GetRoutingModulus())
 	}
 
 	// The namespace routing key is valid only for a collection whose rows have
@@ -346,11 +379,12 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.A
 			// System for the same reason as above. Note what this does NOT
 			// distinguish: a post-image a later commit has overtaken looks
 			// exactly like an incoherent one from here. The callback separates
-			// the two with shardSplitRoutingSuperseded; the RPC does not need
-			// to, because its caller can act on the refusal.
-			return merr.WrapErrServiceInternalMsg(
+			// the two with shardSplitRoutingSuperseded, and reaches that
+			// question only through the mark this refusal carries; the RPC does
+			// not need to, because its caller can act on the refusal.
+			return errors.Mark(merr.WrapErrServiceInternalMsg(
 				"commit shard split routing failed, shard %q cannot go from %s back to %s",
-				vchannel, current.State.String(), to.String())
+				vchannel, current.State.String(), to.String()), errRoutingCommitBackwards)
 		}
 	}
 
@@ -478,6 +512,23 @@ func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result
 		return true, nil
 	}
 
+	// A retiring post-image with no task to name is a wedge, not a slow drain:
+	// datacoord has nothing to look up, so the gate below refuses forever and
+	// the broadcaster retries this callback forever, holding the collection's
+	// exclusive key and queueing every later DDL of the collection behind it.
+	// The RPC refuses such a request outright, so reaching here means the
+	// message was already appended -- there is nothing left to reject, only
+	// something to say loudly enough that the operator can find the cause.
+	// Once per callback invocation: the broadcaster's own retry log already
+	// paces the repetitions.
+	if updates.GetSplitTaskId() == 0 {
+		mlog.Error(ctx, "shard split adoption retires a vchannel without naming a split task; "+
+			"this cluster's datacoord cannot answer the drain question, so the commit will be retried forever "+
+			"and every later DDL of the collection is queued behind it",
+			mlog.FieldMessage(result.Message),
+			mlog.FieldCollectionID(header.GetCollectionId()))
+	}
+
 	resp, err := c.mixCoord.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{
 		CollectionId: header.GetCollectionId(),
 		SplitTaskId:  updates.GetSplitTaskId(),
@@ -486,9 +537,8 @@ func (c *DDLCallback) checkShardSplitAdoptionDrained(ctx context.Context, result
 		return false, merr.Wrap(err, "ask this cluster's datacoord whether the shard split has drained")
 	}
 	if !resp.GetDrained() {
-		mlog.Info(ctx, "shard split adoption is waiting for this cluster to drain the source",
-			mlog.FieldCollectionID(header.GetCollectionId()),
-			mlog.Int64("splitTaskID", updates.GetSplitTaskId()))
+		// Not logged here: waiting is the expected answer, and the broadcaster
+		// already warns once per retry with the returned error.
 		return false, merr.WrapErrServiceInternalMsg("shard split %d of collection %d not drained on this cluster yet",
 			updates.GetSplitTaskId(), header.GetCollectionId())
 	}
