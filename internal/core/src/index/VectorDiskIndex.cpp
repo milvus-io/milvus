@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -47,6 +48,7 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_factory.h"
+#include "knowhere/index/mrl_index_node.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "opentelemetry/trace/span.h"
@@ -68,6 +70,34 @@ namespace milvus::index {
 namespace {
 
 constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY = "empty_emb_list_offsets";
+constexpr const char* MRL_META_KEY = "MRL_META";
+constexpr const char* MRL_REFINE_STATE_KEY = "MRL_REFINE/DATA_VIEW_STATE";
+
+void
+WriteBinary(const std::shared_ptr<storage::LocalChunkManager>& chunk_manager,
+            const std::filesystem::path& path,
+            const knowhere::BinaryPtr& binary) {
+    AssertInfo(binary != nullptr, "MRL sidecar payload is missing");
+    if (!chunk_manager->Exist(path.string())) {
+        chunk_manager->CreateFile(path.string());
+    }
+    chunk_manager->Write(path.string(), 0, binary->data.get(), binary->size);
+}
+
+void
+AppendBinaryFromFile(
+    const std::shared_ptr<storage::LocalChunkManager>& chunk_manager,
+    const std::filesystem::path& path,
+    const char* binary_key,
+    knowhere::BinarySet& binary_set) {
+    AssertInfo(chunk_manager->Exist(path.string()),
+               "MRL sidecar file {} is missing",
+               path.string());
+    const auto size = chunk_manager->Size(path.string());
+    auto data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+    chunk_manager->Read(path.string(), 0, data.get(), size);
+    binary_set.Append(binary_key, std::move(data), size);
+}
 
 struct EmptyEmbListState {
     int64_t dim = 0;
@@ -287,7 +317,11 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
-    const storage::FileManagerContext& file_manager_context)
+    const storage::FileManagerContext& file_manager_context,
+    int64_t source_dim,
+    int64_t mrl_dim,
+    bool with_mrl_refine,
+    knowhere::ViewDataOp view_data)
     : VectorIndex(index_type, metric_type), elem_type_(elem_type) {
     CheckMetricTypeSupport<T>(metric_type);
     file_manager_ =
@@ -317,6 +351,16 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
             ThrowInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
         ThrowInfo(ErrorCode::KnowhereError, get_index_obj.what());
+    }
+    if (mrl_dim > 0 && mrl_dim < source_dim) {
+        mrl_enabled_ = true;
+        with_mrl_refine_ = with_mrl_refine;
+        index_ = knowhere::CreateMRLIndex(std::move(index_),
+                                          source_dim,
+                                          mrl_dim,
+                                          knowhere::datatype_v<T>,
+                                          with_mrl_refine,
+                                          std::move(view_data));
     }
 }
 
@@ -381,7 +425,21 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             nostd_span_load_engine(span_load_engine);
         auto engine_scope = opentelemetry::trace::Tracer::WithActiveSpan(
             nostd_span_load_engine);
-        auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
+        knowhere::BinarySet binary_set;
+        if (mrl_enabled_) {
+            const auto prefix = std::filesystem::path(local_index_path_prefix);
+            AppendBinaryFromFile(local_chunk_manager,
+                                 prefix / MRL_META_FILE,
+                                 MRL_META_KEY,
+                                 binary_set);
+            if (with_mrl_refine_) {
+                AppendBinaryFromFile(local_chunk_manager,
+                                     prefix / MRL_REFINE_STATE_FILE,
+                                     MRL_REFINE_STATE_KEY,
+                                     binary_set);
+            }
+        }
+        auto stat = index_.Deserialize(binary_set, load_config);
         if (stat != knowhere::Status::success)
             ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to Deserialize index, {}",
@@ -418,6 +476,25 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
             ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to serialize index, {}",
                       KnowhereStatusString(stat));
+        }
+        if (mrl_enabled_) {
+            auto local_chunk_manager =
+                storage::LocalChunkManagerSingleton::GetInstance()
+                    .GetChunkManager();
+            const auto prefix = std::filesystem::path(
+                file_manager_->GetLocalIndexObjectPrefix());
+            const auto meta_path = prefix / MRL_META_FILE;
+            WriteBinary(
+                local_chunk_manager, meta_path, ret.GetByName(MRL_META_KEY));
+            AssertInfo(file_manager_->AddFile(meta_path.string()),
+                       "failed to upload MRL metadata");
+            auto refine_state = ret.GetByName(MRL_REFINE_STATE_KEY);
+            if (refine_state != nullptr) {
+                const auto refine_path = prefix / MRL_REFINE_STATE_FILE;
+                WriteBinary(local_chunk_manager, refine_path, refine_state);
+                AssertInfo(file_manager_->AddFile(refine_path.string()),
+                           "failed to upload MRL refinement state");
+            }
         }
     }
     const auto& remote_paths_to_size =

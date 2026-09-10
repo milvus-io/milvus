@@ -612,6 +612,85 @@ TEST_P(IndexTest, BuildAndQuery) {
     }
 }
 
+#ifdef BUILD_DISK_ANN
+TEST(Indexing, MRLDiskAnnBuildLoadAndQuery) {
+    constexpr int64_t nb = 3000;
+    constexpr int64_t nq = 2;
+    constexpr int64_t topk = 5;
+    constexpr int64_t query_offset = 100;
+    constexpr int64_t mrl_dim = DIM / 2;
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(nb);
+    auto base = knowhere::GenDataSet(nb, DIM, raw_data.data());
+    auto query =
+        knowhere::GenDataSet(nq, DIM, raw_data.data() + query_offset * DIM);
+
+    milvus::index::CreateIndexInfo create_info;
+    create_info.index_type = knowhere::IndexEnum::INDEX_DISKANN;
+    create_info.metric_type = knowhere::metric::L2;
+    create_info.field_type = DataType::VECTOR_FLOAT;
+    create_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    create_info.dim = DIM;
+    create_info.mrl_dim = mrl_dim;
+    create_info.with_mrl_refine = true;
+    create_info.view_data = [data = raw_data.data()](size_t id) {
+        return static_cast<const void*>(data + id * DIM);
+    };
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    milvus::storage::FileManagerContext file_manager_context(
+        field_meta, index_meta, chunk_manager, fs);
+
+    auto build_conf = generate_build_conf(knowhere::IndexEnum::INDEX_DISKANN,
+                                          knowhere::metric::L2);
+    build_conf[MRL_DIM_KEY] = std::to_string(mrl_dim);
+    build_conf[WITH_MRL_REFINE_KEY] = "true";
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_info, file_manager_context);
+    ASSERT_NO_THROW(index->BuildWithDataset(base, build_conf));
+    auto stats = index->Upload();
+    auto index_files = stats->GetIndexFiles();
+    EXPECT_TRUE(std::any_of(
+        index_files.begin(), index_files.end(), [](const auto& file) {
+            return file.find(MRL_META_FILE) != std::string::npos;
+        }));
+    EXPECT_TRUE(std::any_of(
+        index_files.begin(), index_files.end(), [](const auto& file) {
+            return file.find(MRL_REFINE_STATE_FILE) != std::string::npos;
+        }));
+    index.reset();
+
+    auto loaded = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_info, file_manager_context);
+    auto load_conf = generate_load_conf(
+        knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2, 0);
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(loaded.get());
+    ASSERT_NE(vec_index, nullptr);
+    ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    EXPECT_FALSE(vec_index->HasRawData());
+
+    SearchInfo search_info;
+    search_info.topk_ = topk;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.search_params_ = generate_search_conf(
+        knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2);
+    SearchResult result;
+    vec_index->Query(query, search_info, nullptr, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), nq * topk);
+    for (int64_t i = 0; i < nq; ++i) {
+        EXPECT_EQ(result.seg_offsets_[i * topk], query_offset + i);
+    }
+}
+#endif
+
 TEST_P(IndexTest, Mmap) {
 #ifdef __APPLE__
     // faiss MmappedFileMappingOwner is not implemented on macOS:

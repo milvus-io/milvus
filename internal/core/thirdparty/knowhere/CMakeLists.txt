@@ -14,8 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION 16e873b1 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+# MRLIndexNode support used by this branch.
+set( KNOWHERE_VERSION 4fd883e094ab725411acd780f3106ffffa4125bb )
+set( GIT_REPOSITORY  "https://github.com/jamesgao-jpg/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")

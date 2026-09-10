@@ -53,7 +53,11 @@ class VectorMemIndex : public VectorIndex {
         const IndexVersion& version,
         bool use_knowhere_build_pool = true,
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        int64_t source_dim = -1,
+        int64_t mrl_dim = -1,
+        bool with_mrl_refine = false,
+        knowhere::ViewDataOp view_data = {});
 
     // knowhere data view index special constucter for intermin index, no need to hold file_manager_ to upload or download files
     VectorMemIndex(DataType elem_type /* used for embedding list only */,
@@ -61,7 +65,10 @@ class VectorMemIndex : public VectorIndex {
                    const MetricType& metric_type,
                    const IndexVersion& version,
                    const knowhere::ViewDataOp view_data,
-                   bool use_knowhere_build_pool = true);
+                   bool use_knowhere_build_pool = true,
+                   int64_t source_dim = -1,
+                   int64_t mrl_dim = -1,
+                   bool with_mrl_refine = false);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -105,6 +112,11 @@ class VectorMemIndex : public VectorIndex {
 
     bool
     IsIndexRefineEnabled() const override;
+
+    bool
+    IsMmapSupported() const override {
+        return !mrl_enabled_ && VectorIndex::IsMmapSupported();
+    }
 
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
@@ -170,6 +182,7 @@ class VectorMemIndex : public VectorIndex {
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
+    bool mrl_enabled_{false};
     std::vector<size_t> empty_emb_list_offsets_;
 };
 
