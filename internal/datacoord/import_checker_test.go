@@ -408,6 +408,38 @@ func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
 	s.Empty(job.GetReason())
 }
 
+// runGCLoop evaluates a snapshot taken at the start of the tick. A job that
+// entered Committing after the snapshot must still not be failed.
+func (s *ImportCheckerSuite) TestCheckTimeoutStaleSnapshotCommittingJob() {
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	s.NoError(err)
+	staleSnapshot := s.importMeta.GetJob(context.TODO(), s.jobID)
+
+	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	s.NoError(err)
+
+	s.checker.tryTimeoutJob(staleSnapshot)
+
+	// Only the state is asserted: UpdateJobReason in the same UpdateJob call still
+	// applies, and reason is surfaced to clients only for Failed jobs.
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+}
+
+func (s *ImportCheckerSuite) TestUpdateJobStateRefusesFailingCommittedJob() {
+	for _, state := range []internalpb.ImportJobState{
+		internalpb.ImportJobState_Committing,
+		internalpb.ImportJobState_Completed,
+	} {
+		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: state}}
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		s.Equal(state, job.GetState())
+	}
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Uncommitted}}
+	UpdateJobState(internalpb.ImportJobState_Failed)(job)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+}
+
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
