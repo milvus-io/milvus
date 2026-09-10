@@ -50,18 +50,26 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	return s.anyReplicaAvailable(s.meta.GetByCollection(s.ctx, collectionID))
 }
 
-// checkAnyReplicaAvailableInResourceGroup is checkAnyReplicaAvailable
-// restricted to the collection's replicas that live in rgName: the answer a
-// ShowLoadCollections scoped to a resource group gives, where the caller asks
-// whether THAT group can serve, not whether any group can.
-func (s *Server) checkAnyReplicaAvailableInResourceGroup(collectionID int64, rgName string) bool {
-	replicas := lo.Filter(s.meta.GetByCollection(s.ctx, collectionID), func(replica *meta.Replica, _ int) bool {
-		return replica.GetResourceGroup() == rgName
-	})
-	return s.anyReplicaAvailable(replicas)
+// checkAnyReplicaAvailableInResourceGroup is the answer a ShowLoadCollections
+// scoped to a resource group gives: whether THAT group can serve the
+// collection, which is the group's shard-leader readiness - every shard of
+// the collection has a serviceable leader in the group's replicas, on a node
+// the coordinator knows (utils.ShardLeaderReadinessByResourceGroup, the same
+// verdict the scoped load waits for). It is not the collection-wide rule
+// restricted to one group: that rule reads a replica with no read-only node
+// as available, so a replica just spawned into the group, holding nothing,
+// would read true beside a progress of 0.
+func (s *Server) checkAnyReplicaAvailableInResourceGroup(ctx context.Context, collectionID int64, rgName string) bool {
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
+	if err != nil {
+		mlog.Warn(ctx, "the resource group's shard-leader readiness cannot be answered, reporting it as not serving",
+			mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
+		return false
+	}
+	return readiness.Ready
 }
 
-// anyReplicaAvailable is the rule behind both: a replica is available when
+// anyReplicaAvailable is the collection-wide rule: a replica is available when
 // every one of its read-only nodes is still known to the node manager, and
 // the answer is yes as soon as one replica is.
 func (s *Server) anyReplicaAvailable(replicas []*meta.Replica) bool {

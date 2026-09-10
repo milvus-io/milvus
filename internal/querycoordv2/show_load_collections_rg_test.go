@@ -161,33 +161,32 @@ func (f *rgLoadPercentageFixture) putReplicaWithRONode(t *testing.T, collectionI
 	})))
 }
 
-// The reviewer's L2: a scoped row's percentage spoke for the group, but its
-// query_service_available still spoke for the whole collection, so a group
-// that could not serve was reported as serving whenever any other group
-// could. A collection loaded in rg-a and expanding into rg-b, whose replica
-// is at 40 with no serving delegator yet and is not available, answers 40 and
-// false for rg-b, and the collection-wide 100 and true without a scope.
-//
-// What makes rg-b's replica unavailable is a read-only node the node manager
-// does not know. The rule looks at nothing else - not at the delegator, whose
-// absence only shows in the percentage - and the scoped answer is that same
-// rule restricted to the group's replicas.
-func TestShowLoadCollectionsScopedAnswersQueryServiceAvailableForTheGroupOnly(t *testing.T) {
+// A scoped row's query_service_available answers from the group's
+// shard-leader readiness - every shard of the collection has a serviceable
+// leader in the group's replicas, on a node the coordinator knows - not
+// from the collection-wide rule (every read-only node alive, a replica with
+// none counting as available), which read true for a replica that had
+// loaded nothing. A collection loaded in rg-a and just expanded into rg-b,
+// whose fresh replica holds no delegator, answers 0 and false for rg-b,
+// 100 and true for rg-a, and the collection-wide 100 and true - by the
+// unchanged rule - without a scope.
+func TestShowLoadCollectionsScopedAnswersQueryServiceAvailableFromTheGroupsShardLeaders(t *testing.T) {
 	withFailedLoadCache(t)
 	f := newRGLoadPercentageFixture(t)
-	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2, 3, 4)
+	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
 	f.putReplica(t, 100, 10, "rg-a")
-	f.putDelegator(100, 10, "100-dmc0", 1, 2, 3, 4)
+	f.registerNode(10)
+	f.putServiceableDelegator(100, 10, "100-dmc0", 1, 2)
+	f.promoteTarget(t, 100)
 	// The collection-wide figure is the mean of its partitions' own: rg-a
 	// carries everything, so the collection reads as loaded.
 	require.NoError(t, f.meta.PutPartitionWithoutSave(context.Background(), &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 100, PartitionID: 1000},
 		LoadPercentage:    100,
 	}))
-	f.putReplicaWithRONode(t, 100, 20, 21, "rg-b")
-	// The channel is watched and one segment of four is there: two of the
-	// five targets, 40, and no serving delegator yet.
-	f.putDelegator(100, 20, "100-dmc0", 1)
+	// rg-b's replica was just spawned: no delegator, nothing loaded, and no
+	// read-only node either, which is what made the old rule call it available.
+	f.putReplica(t, 100, 20, "rg-b")
 
 	show := func(rg string) *querypb.ShowCollectionsResponse {
 		resp, err := f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
@@ -200,15 +199,37 @@ func TestShowLoadCollectionsScopedAnswersQueryServiceAvailableForTheGroupOnly(t 
 		return resp
 	}
 
-	scoped := show("rg-b")
-	assert.EqualValues(t, 40, scoped.GetInMemoryPercentages()[0], "sanity: the group's own progress")
-	assert.False(t, scoped.GetQueryServiceAvailable()[0],
-		"scoped, the answer is whether THIS group can serve, and rg-b cannot")
+	fresh := show("rg-b")
+	assert.EqualValues(t, 0, fresh.GetInMemoryPercentages()[0], "sanity: the group's own progress")
+	assert.False(t, fresh.GetQueryServiceAvailable()[0],
+		"a replica that serves no shard is not available, whatever its read-only nodes say")
+
+	serving := show("rg-a")
+	assert.EqualValues(t, 100, serving.GetInMemoryPercentages()[0])
+	assert.True(t, serving.GetQueryServiceAvailable()[0], "every shard has a serviceable leader in rg-a")
 
 	unscoped := show("")
 	assert.EqualValues(t, 100, unscoped.GetInMemoryPercentages()[0])
 	assert.True(t, unscoped.GetQueryServiceAvailable()[0],
 		"unscoped, the collection-wide answer is unchanged: rg-a serves")
+}
 
-	assert.True(t, show("rg-a").GetQueryServiceAvailable()[0], "and rg-a answers for itself")
+// A group whose leader is not serviceable, or sits on a node the
+// coordinator does not know, is not serving, however far its load is.
+func TestShowLoadCollectionsScopedIsNotAvailableWithoutAServiceableLeader(t *testing.T) {
+	withFailedLoadCache(t)
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
+	f.putReplica(t, 100, 10, "rg-a")
+	f.putDelegator(100, 10, "100-dmc0", 1, 2) // every segment there, but the view does not report serviceable
+	f.promoteTarget(t, 100)
+
+	resp, err := f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{100},
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	assert.EqualValues(t, 100, resp.GetInMemoryPercentages()[0], "sanity: fully loaded by the percentage")
+	assert.False(t, resp.GetQueryServiceAvailable()[0], "loaded is not serving: the leader is not serviceable")
 }

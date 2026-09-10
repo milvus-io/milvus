@@ -189,6 +189,30 @@ func (f *rgLoadPercentageFixture) putDelegator(collectionID, nodeID int64, chann
 	f.dist.ChannelDistManager.Update(nodeID, channel)
 }
 
+// promoteTarget makes the collection's next target its current one, which
+// is the target the shard-leader readiness reads. The percentage is
+// unchanged by it: that figure reads the next target first and falls back
+// to the current one.
+func (f *rgLoadPercentageFixture) promoteTarget(t *testing.T, collectionID int64) {
+	t.Helper()
+	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(context.Background(), collectionID))
+}
+
+// registerNode makes nodeID one the coordinator knows, which a leader must
+// sit on to count as serving.
+func (f *rgLoadPercentageFixture) registerNode(nodeID int64) {
+	f.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID, Address: "localhost", Hostname: "localhost"}))
+}
+
+// putServiceableDelegator is putDelegator with the leader view reporting
+// itself serviceable: the delegator can answer a query.
+func (f *rgLoadPercentageFixture) putServiceableDelegator(collectionID, nodeID int64, channelName string, segmentIDs ...int64) {
+	f.putDelegator(collectionID, nodeID, channelName, segmentIDs...)
+	channel := f.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))[0]
+	channel.View.Status = &querypb.LeaderViewStatus{Serviceable: true}
+	f.dist.ChannelDistManager.Update(nodeID, channel)
+}
+
 // TestGetLoadPercentageByResourceGroup_NoReplicaOnRG asserts that a
 // collection with no replica in the requested resource group reports -1,
 // even though the collection is fully loaded elsewhere. Deleting the
