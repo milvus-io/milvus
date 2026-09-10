@@ -167,6 +167,82 @@ func (f *admissionFixture) loadCollection(t *testing.T, req *querypb.LoadCollect
 	return checkedNodeNum, err
 }
 
+// loadPartitions is loadCollection for the LoadPartitions callback, which
+// checks node numbers on every request.
+func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartitionsRequest) error {
+	t.Helper()
+	s := &Server{meta: f.meta, broker: f.broker}
+	broadcast := mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build()
+	defer broadcast.UnPatch()
+	generate := mockey.Mock(job.GenerateAlterLoadConfigMessage).Return(nil, nil).Build()
+	defer generate.UnPatch()
+	return s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(), req)
+}
+
+// The reviewer's failure, through the callback. With strict isolation off,
+// rg_a holds one regular node and no streaming node, and the default group
+// holds two streaming nodes. The collection is loaded into rg_a, whose
+// replica the replica manager serves from the default group's pool. A
+// scoped load of two replicas into the default group would put three
+// replicas on that pool's two nodes: one would never receive a delegator,
+// its group's scoped task would read unknown forever and the load would
+// neither complete nor time out. It is refused; one replica is admitted.
+func TestAScopedExpansionIsAdmittedAgainstThePoolItsReplicasShare(t *testing.T) {
+	setForm(t, true)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_a", 1)
+	f.loadedIn(t, 13, "rg_a")
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
+	})()
+
+	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
+		CollectionID:   13,
+		ReplicaNumber:  2,
+		ResourceGroups: []string{meta.DefaultResourceGroupName},
+	})
+	assert.True(t, checked)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
+		"rg_a's replica already sits in the default pool: three replicas on two streaming nodes")
+
+	_, err = f.loadCollection(t, &querypb.LoadCollectionRequest{
+		CollectionID:   13,
+		ReplicaNumber:  1,
+		ResourceGroups: []string{meta.DefaultResourceGroupName},
+	})
+	assert.NoError(t, err, "two replicas on two streaming nodes")
+}
+
+// LoadPartitions checks node numbers on every request and takes the same
+// bound, or a placement the pool cannot serve would be admitted through it.
+func TestAScopedLoadPartitionsIsAdmittedAgainstThePoolItsReplicasShare(t *testing.T) {
+	setForm(t, true)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_a", 1)
+	f.loadedIn(t, 14, "rg_a")
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
+	})()
+
+	err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+		CollectionID:   14,
+		PartitionIDs:   []int64{1},
+		ReplicaNumber:  2,
+		ResourceGroups: []string{meta.DefaultResourceGroupName},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+
+	err = f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+		CollectionID:   14,
+		PartitionIDs:   []int64{1},
+		ReplicaNumber:  1,
+		ResourceGroups: []string{meta.DefaultResourceGroupName},
+	})
+	assert.NoError(t, err)
+}
+
 // The reviewer's finding: master checks node numbers only for a first load,
 // and a config update on a loaded collection skips the check. With a form, a
 // LoadCollection naming resource groups on a loaded collection is a scoped
