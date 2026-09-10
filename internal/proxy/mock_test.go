@@ -98,10 +98,12 @@ func newMockIDAllocatorInterface() allocator.Interface {
 type mockTask struct {
 	baseTask
 	*TaskCondition
-	id    UniqueID
-	name  string
-	tType commonpb.MsgType
-	ts    Timestamp
+	id        UniqueID
+	name      string
+	tType     commonpb.MsgType
+	ts        Timestamp
+	executeFn func(context.Context) error
+	subTask   bool
 }
 
 func (m *mockTask) CanSkipAllocTimestamp() bool {
@@ -149,11 +151,18 @@ func (m *mockTask) PreExecute(ctx context.Context) error {
 }
 
 func (m *mockTask) Execute(ctx context.Context) error {
+	if m.executeFn != nil {
+		return m.executeFn(ctx)
+	}
 	return nil
 }
 
 func (m *mockTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (m *mockTask) IsSubTask() bool {
+	return m.subTask
 }
 
 func newMockTask(ctx context.Context) *mockTask {
