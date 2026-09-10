@@ -115,3 +115,23 @@ func TestFunctionScoreSchema(t *testing.T) {
 		assert.Equal(t, fn.Params, nf.Functions[i].Params)
 	}
 }
+
+func TestFunctionScoreClone(t *testing.T) {
+	fs := NewFunctionScore().
+		AddFunction(NewFunction().WithName("boost").WithType(FunctionTypeRerank).
+			WithParam("reranker", "boost").WithParam("weight", 2.0)).
+		WithParam("boost_mode", "sum")
+
+	clone := fs.Clone()
+	assert.Equal(t, fs, clone)
+
+	fs.AddFunction(NewFunction().WithName("second"))
+	assert.Len(t, clone.Functions, 1, "clone must not share the source Functions slice")
+
+	clone.AddFunction(NewFunction().WithName("clone_only"))
+	assert.Len(t, fs.Functions, 2, "source must not see functions added to the clone")
+
+	fs.WithParam("function_mode", "multiply")
+	_, ok := clone.Params["function_mode"]
+	assert.False(t, ok, "clone must not share the source Params map")
+}

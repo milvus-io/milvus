@@ -174,6 +174,9 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	}
 
 	if r.functionScore != nil {
+		if len(r.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
+		}
 		request.FunctionScore = r.functionScore.ProtoMessage()
 	}
 
@@ -368,6 +371,12 @@ func (r *AnnRequest) WithIgnoreGrowing(ignoreGrowing bool) *AnnRequest {
 	return r
 }
 
+// WithFunctionReranker adds a scoring Function to the request. On a hybrid
+// search the score is attached to this sub-request and applied to this leg on
+// the server (server support for per-sub-request FunctionScore is in flight,
+// see https://github.com/milvus-io/milvus/issues/52956); to apply the same
+// score to every leg today, use HybridSearchOption.WithFunctionRerankers or
+// HybridSearchOption.WithFunctionScore instead.
 func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
 	if r.functionScore == nil {
 		r.functionScore = entity.NewFunctionScore()
@@ -377,10 +386,11 @@ func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
 }
 
 // WithFunctionScore sets the search FunctionScore (functions plus score
-// options such as boost_mode / boost_function_mode). It replaces any
-// functions accumulated via WithFunctionReranker.
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionReranker, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
 func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
-	r.functionScore = fs
+	r.functionScore = fs.Clone()
 	return r
 }
 
@@ -616,10 +626,10 @@ type hybridSearchOption struct {
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
 
-	limit             int
-	offset            int
-	reranker          Reranker
-	functionScore     *entity.FunctionScore
+	limit         int
+	offset        int
+	reranker      Reranker
+	functionScore *entity.FunctionScore
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -653,6 +663,10 @@ func (opt *hybridSearchOption) WithReranker(reranker Reranker) *hybridSearchOpti
 	return opt
 }
 
+// WithFunctionRerankers adds a scoring Function applied to every leg of the
+// hybrid search on the server. For per-sub-request scores (server support in
+// flight, see https://github.com/milvus-io/milvus/issues/52956), attach the
+// Function to the sub-request's AnnRequest instead.
 func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Function) *hybridSearchOption {
 	if opt.functionScore == nil {
 		opt.functionScore = entity.NewFunctionScore()
@@ -662,10 +676,11 @@ func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Fu
 }
 
 // WithFunctionScore sets the search FunctionScore (functions plus score
-// options such as boost_mode / boost_function_mode). It replaces any
-// functions accumulated via WithFunctionRerankers.
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionRerankers, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
 func (opt *hybridSearchOption) WithFunctionScore(fs *entity.FunctionScore) *hybridSearchOption {
-	opt.functionScore = fs
+	opt.functionScore = fs.Clone()
 	return opt
 }
 
@@ -705,6 +720,9 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 	}
 
 	if opt.functionScore != nil {
+		if len(opt.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
+		}
 		r.FunctionScore = opt.functionScore.ProtoMessage()
 	}
 

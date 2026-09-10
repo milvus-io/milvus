@@ -170,6 +170,50 @@ func (s *SearchOptionSuite) TestFunctionScore() {
 		s.Require().NoError(err)
 		s.Nil(req.GetFunctionScore())
 	})
+
+	s.Run("shared_score_not_aliased", func() {
+		shared := entity.NewFunctionScore().
+			AddFunction(boostFn1).
+			WithParam("boost_mode", "sum")
+
+		optA := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(shared)
+		optB := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(shared)
+
+		// mutating the shared score after building options must not leak into them
+		shared.AddFunction(boostFn2)
+		shared.WithParam("function_mode", "multiply")
+
+		reqA, err := optA.Request()
+		s.Require().NoError(err)
+		fsA := reqA.GetFunctionScore()
+		s.Len(fsA.GetFunctions(), 1, "options must not accumulate functions from a shared score")
+		s.Equal(map[string]string{"boost_mode": "sum"}, entity.KvPairsMap(fsA.GetParams()))
+
+		reqB, err := optB.Request()
+		s.Require().NoError(err)
+		s.Len(reqB.GetFunctionScore().GetFunctions(), 1)
+	})
+
+	s.Run("empty_score_errors", func() {
+		empty := entity.NewFunctionScore().WithParam("boost_mode", "sum")
+
+		_, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(empty).
+			Request()
+		s.Error(err)
+		s.Contains(err.Error(), "no functions")
+
+		_, err = NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionScore(empty).
+			HybridRequest()
+		s.Error(err)
+		s.Contains(err.Error(), "no functions")
+	})
 }
 
 func (s *SearchOptionSuite) TestWithNamespace() {

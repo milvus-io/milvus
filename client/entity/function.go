@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 type FunctionType = schemapb.FunctionType
@@ -131,7 +132,7 @@ func (f *Function) ReadProto(p *schemapb.FunctionSchema) *Function {
 
 // FunctionScore models the search-time FunctionScore message: a set of scoring
 // Functions (e.g. boost rankers) plus score-option params such as boost_mode
-// and boost_function_mode.
+// and function_mode.
 type FunctionScore struct {
 	Functions []*Function
 	Params    map[string]string
@@ -151,6 +152,38 @@ func (fs *FunctionScore) AddFunction(f *Function) *FunctionScore {
 func (fs *FunctionScore) WithParam(key string, value any) *FunctionScore {
 	fs.Params[key] = paramValueToString(value)
 	return fs
+}
+
+// Clone returns a deep copy of fs: functions and params are copied so the
+// returned score does not share mutable state with the source.
+func (fs *FunctionScore) Clone() *FunctionScore {
+	nf := NewFunctionScore()
+	for _, f := range fs.Functions {
+		nf.AddFunction(f.Clone())
+	}
+	for k, v := range fs.Params {
+		nf.Params[k] = v
+	}
+	return nf
+}
+
+// Clone returns a deep copy of f.
+func (f *Function) Clone() *Function {
+	nf := &Function{
+		Name:             f.Name,
+		Description:      f.Description,
+		Type:             f.Type,
+		InputFieldNames:  append([]string(nil), f.InputFieldNames...),
+		OutputFieldNames: append([]string(nil), f.OutputFieldNames...),
+		Params:           make(map[string]string, len(f.Params)),
+		id:               f.id,
+		inputFieldIDs:    append([]int64(nil), f.inputFieldIDs...),
+		outputFieldIDs:   append([]int64(nil), f.outputFieldIDs...),
+	}
+	for k, v := range f.Params {
+		nf.Params[k] = v
+	}
+	return nf
 }
 
 // ProtoMessage returns corresponding schemapb.FunctionScore
