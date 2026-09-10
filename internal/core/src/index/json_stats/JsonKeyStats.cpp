@@ -540,7 +540,20 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
             BsonBuilder::AppendToDom(root, path_vec, value, key.type_);
         } else {
             if (key.type_ == JSONType::ARRAY) {
-                auto bson_bytes = BuildBsonArrayBytesFromJsonString(value);
+                std::vector<uint8_t> bson_bytes;
+                try {
+                    bson_bytes = BuildBsonArrayBytesFromJsonString(value);
+                } catch (const SegcoreError& e) {
+                    ThrowInfo(e.get_error_code(),
+                              "invalid JSON array, segment {}, field {}, row "
+                              "{}, key {}, array: {}, error: {}",
+                              segment_id_,
+                              field_id_,
+                              row_id,
+                              key.key_,
+                              value,
+                              e.what());
+                }
                 parquet_writer_->AppendValue(
                     key.ToColumnName(),
                     std::string(
