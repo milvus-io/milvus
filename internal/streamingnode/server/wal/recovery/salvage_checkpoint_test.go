@@ -127,7 +127,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 		}
 
 		// consumeDirtySnapshot should pick up the pending salvage checkpoint even when dirtyCounter==0
-		snapshot := rs.consumeDirtySnapshot()
+		snapshot := rs.consumeDirtySnapshot(0)
 		assert.NotNil(t, snapshot)
 		assert.Equal(t, cp, snapshot.SalvageCheckpoint)
 
@@ -135,7 +135,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 		assert.Nil(t, rs.pendingSalvageCheckpoint)
 
 		// A second call with nothing dirty should return nil
-		snapshot2 := rs.consumeDirtySnapshot()
+		snapshot2 := rs.consumeDirtySnapshot(0)
 		assert.Nil(t, snapshot2)
 	})
 
@@ -154,7 +154,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 			metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		snapshot := rs.consumeDirtySnapshot()
+		snapshot := rs.consumeDirtySnapshot(0)
 		assert.NotNil(t, snapshot)
 		assert.Nil(t, snapshot.SalvageCheckpoint)
 		assert.Equal(t, 0, rs.dirtyCounter)
@@ -180,7 +180,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 			metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		snapshot := rs.consumeDirtySnapshot()
+		snapshot := rs.consumeDirtySnapshot(0)
 		assert.NotNil(t, snapshot)
 		assert.Equal(t, cp, snapshot.SalvageCheckpoint)
 		assert.Equal(t, 0, rs.dirtyCounter)
@@ -208,7 +208,7 @@ func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
 	assert.True(t, rs.isDirty())
 
 	// Consuming the snapshot clears pendingSalvageCheckpoint.
-	snapshot := rs.consumeDirtySnapshot()
+	snapshot := rs.consumeDirtySnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, rs.isDirty())
 }

@@ -183,7 +183,10 @@ func (r *recoveryStorageImpl) notifyPersist() {
 
 // consumeDirtySnapshot consumes the dirty state and returns a snapshot to persist.
 // A snapshot is always a consistent state (fully consume a message or a txn message) of the recovery storage.
-func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
+// flusherCheckpointTimeTick is the tick up to which the flusher has actually
+// drained this pchannel (0 if not yet known); it decides whether a retired
+// SPLITTED vchannel has drained past its fence and can be collected.
+func (r *recoveryStorageImpl) consumeDirtySnapshot(flusherCheckpointTimeTick uint64) *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
@@ -202,7 +205,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 		}
 	}
 	for _, vchannel := range r.vchannels {
-		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot()
+		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot(flusherCheckpointTimeTick)
 		if shouldBeRemoved {
 			delete(r.vchannels, vchannel.meta.Vchannel)
 		}
@@ -697,19 +700,19 @@ func (r *recoveryStorageImpl) handleSchemaChange(ctx context.Context, msg messag
 // handlePutCollection handles the put collection message.
 //
 // A retiring replica -- a shard-split routing commit that delists this
-// vchannel -- tears the vchannel down the same way DropVChannel once did:
-// its recovery info moves to DROPPED and stops being rebuilt on every WAL
-// open. Segments are flushed first for the reason handleDropCollection
-// flushes them: a replay can recreate GROWING segments after the vchannel
-// was marked dropped, so flushing unconditionally is what makes the replay
-// idempotent. A retired vchannel has been fenced since long before this
-// point, so in practice there is nothing to flush -- which is why this must
-// not be an assumption.
+// vchannel -- marks the vchannel retired, not dropped: unlike
+// handleDropCollection's teardown, there is no flush here and the state
+// never moves to DROPPED. The vchannel was already fenced (SPLITTED) and had
+// its segments flushed by the earlier SplitShard broadcast, so there is
+// nothing left to flush by the time a retire lands; the source is left
+// SPLITTED so it can never be picked up by dropAllVirtualChannel and
+// mistakenly reported to DataCoord as dropped. ConsumeDirtyAndGetSnapshot is
+// what later collects the meta from the catalog, once the flusher checkpoint
+// proves the fence has fully drained.
 func (r *recoveryStorageImpl) handleAlterCollection(ctx context.Context, msg message.ImmutableAlterCollectionMessageV2) {
 	if messageutil.RetiresVChannel(msg.Header(), msg.MustBody().GetUpdates(), msg.VChannel()) {
-		r.flushAllSegmentOfVChannel(ctx, msg)
-		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-			vchannelInfo.ObserveDropVChannel(msg.TimeTick())
+		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+			vchannelInfo.ObserveRetire(msg.TimeTick())
 		}
 		r.Logger().Info(ctx, "retire vchannel", mlog.FieldMessage(msg))
 		return

@@ -196,23 +196,34 @@ func (info *vchannelRecoveryInfo) ObserveDropCollection(msg message.ImmutableDro
 	info.dirty = true
 }
 
-// ObserveDropVChannel is called when a vchannel is retired: the vchannel a
-// shard split delisted is being reclaimed, so its recovery info moves to
-// DROPPED and stops being rebuilt on every WAL open.
+// ObserveRetire is called when a vchannel is retired: the routing commit
+// that finishes a shard split delists this vchannel, so it no longer serves
+// or receives traffic.
 //
-// Same shape as ObserveDropCollection, and deliberately so — the end state is
-// identical, only the scope differs (one vchannel rather than every vchannel of
-// a collection). A vchannel that is already DROPPED is left alone, which is
-// what makes a replayed message harmless.
-func (info *vchannelRecoveryInfo) ObserveDropVChannel(timetick uint64) {
-	if timetick < info.meta.CheckpointTimeTick {
+// Unlike the old ObserveDropVChannel this never moves the vchannel to
+// DROPPED — the source of a shard split must not, because DROPPED is what
+// dropAllVirtualChannel scans the persisted snapshot for to call DataCoord's
+// DropVirtualChannel, and that RPC destroys DataCoord's own tombstone for a
+// channel a client can still be depending on if this streamingnode crashes
+// before the split is fully drained. So retiring only sets a flag on an
+// already-SPLITTED vchannel: it stays SPLITTED, and
+// ConsumeDirtyAndGetSnapshot is what later decides the meta is safe to
+// remove from the catalog, once the flusher checkpoint proves nothing is
+// left to replay past the fence — without ever touching DataCoord.
+//
+// Only a SPLITTED (already-fenced) vchannel is retirable. A vchannel that
+// has not been fenced yet takes no action (retiring only ever follows
+// fencing in the real flow), and neither does one that is already retired
+// or otherwise gone — which is what makes a replayed retire harmless.
+func (info *vchannelRecoveryInfo) ObserveRetire(timetick uint64) {
+	if info.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
 		return
 	}
-	if info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+	if info.meta.Retired {
+		// make it idempotent, only the first retire can be observed.
 		return
 	}
-	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
-	info.meta.CheckpointTimeTick = timetick
+	info.meta.Retired = true
 	info.dirty = true
 }
 
@@ -220,6 +231,14 @@ func (info *vchannelRecoveryInfo) ObserveDropVChannel(timetick uint64) {
 // The vchannel is fenced by shard split: it never accepts new DML again,
 // and the state must survive restarts so the fence keeps holding after
 // recovery.
+//
+// An already-SPLITTED vchannel is not re-fenced from scratch: T_switch (the
+// split task's latest fence record) is raised to the new message's tick
+// when that tick is larger, mirroring the shard manager's own T_switch
+// bookkeeping — a re-fence after a crash, or a retry that lands a later
+// tick than the one already recorded, must keep T_switch current. An older
+// tick (a stale retry arriving after a newer fence already advanced things)
+// changes nothing, which is covered by the checkpoint guard below.
 func (info *vchannelRecoveryInfo) ObserveSplitShard(msg message.ImmutableSplitShardMessageV2) {
 	if msg.TimeTick() < info.meta.CheckpointTimeTick {
 		// the txn message will share the same time tick.
@@ -228,9 +247,17 @@ func (info *vchannelRecoveryInfo) ObserveSplitShard(msg message.ImmutableSplitSh
 		// Consistent state is guaranteed by the recovery storage's mutex.
 		return
 	}
+	if info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+		if msg.TimeTick() > info.meta.SplitTimeTick {
+			info.meta.SplitTimeTick = msg.TimeTick()
+			info.meta.CheckpointTimeTick = msg.TimeTick()
+			info.dirty = true
+		}
+		return
+	}
 	if info.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
-		// make it idempotent, a dropped or already splitted vchannel never
-		// goes back to normal.
+		// make it idempotent, a dropped vchannel never goes back to normal
+		// or splitted.
 		return
 	}
 	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
@@ -289,9 +316,19 @@ func (info *vchannelRecoveryInfo) ObserveCreatePartition(msg message.ImmutableCr
 
 // ConsumeDirtyAndGetSnapshot returns the snapshot of the vchannel recovery info.
 // It returns nil if the vchannel recovery info is not dirty.
-func (info *vchannelRecoveryInfo) ConsumeDirtyAndGetSnapshot() (dirtySnapshot *streamingpb.VChannelMeta, ShouldBeRemoved bool) {
+//
+// ShouldBeRemoved is computed from the live state regardless of dirty, same
+// as before: a DROPPED vchannel is always removable. A SPLITTED vchannel
+// that the adoption replica has retired becomes removable too, once
+// flusherCheckpointTimeTick — the tick up to which the flusher has actually
+// drained this pchannel — has passed the fence (SplitTimeTick), because that
+// is what proves there is nothing left of the source to replay.
+func (info *vchannelRecoveryInfo) ConsumeDirtyAndGetSnapshot(flusherCheckpointTimeTick uint64) (dirtySnapshot *streamingpb.VChannelMeta, ShouldBeRemoved bool) {
+	shouldBeRemoved := info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED ||
+		(info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED &&
+			info.meta.Retired && flusherCheckpointTimeTick >= info.meta.SplitTimeTick)
 	if !info.dirty {
-		return nil, info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
+		return nil, shouldBeRemoved
 	}
 	// create the snapshot of the vchannel recovery info first.
 	snapshot := proto.Clone(info.meta).(*streamingpb.VChannelMeta)
@@ -308,5 +345,5 @@ func (info *vchannelRecoveryInfo) ConsumeDirtyAndGetSnapshot() (dirtySnapshot *s
 		}
 	}
 	info.dirty = false
-	return snapshot, info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
+	return snapshot, shouldBeRemoved
 }

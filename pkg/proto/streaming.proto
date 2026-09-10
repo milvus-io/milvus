@@ -670,6 +670,7 @@ message VChannelMeta {
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
     uint64 split_time_tick = 5; // T_switch: the time tick of the SplitShard fence message, set when state becomes SPLITTED. A re-fence reads it back so the split coordinator can recover T_switch after a crash.
     int64 split_task_id = 6; // The split task that placed the fence, returned on a re-fence so a caller can tell its own retry from another task's fence.
+    bool retired = 7; // Set by the routing commit that delists a SPLITTED vchannel. The meta is removed once the flusher checkpoint passes split_time_tick.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

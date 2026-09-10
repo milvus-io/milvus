@@ -6,14 +6,23 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // newSplitShardMessage builds one replica of a SplitShard broadcast, landing
@@ -202,17 +211,18 @@ func TestVChannelRecoveryInfoObserveSplitShard(t *testing.T) {
 	// the splitted vchannel is still active: it serves replay until dropped.
 	assert.True(t, info.IsActive())
 
-	// idempotent: a second split message takes no effect.
+	// a re-fence on an already-SPLITTED vchannel raises T_switch to the
+	// newer tick instead of taking no effect.
 	info.dirty = false
 	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 200))
-	assert.Equal(t, uint64(100), info.meta.CheckpointTimeTick)
-	assert.False(t, info.dirty)
+	assert.Equal(t, uint64(200), info.meta.CheckpointTimeTick)
+	assert.Equal(t, uint64(200), info.meta.SplitTimeTick)
+	assert.True(t, info.dirty)
 
 	// the SPLITTED state is persisted in the snapshot and the vchannel
 	// meta must not be removed from the catalog (the fence must survive
 	// restarts until the vchannel is really dropped).
-	info.dirty = true
-	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, snapshot.State)
 	assert.False(t, shouldBeRemoved)
 
@@ -251,67 +261,137 @@ func TestRecoveryStorageSplitAndDropAreScopedToOneVChannel(t *testing.T) {
 	assert.True(t, rs.segments[1002].IsGrowing(), "the sibling shard is still live and must not be sealed")
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, rs.vchannels["v1"].meta.State)
 
-	// Retiring v0 must likewise leave v1 alone.
+	// Retiring v0 must likewise leave v1 alone. v0 stays SPLITTED -- the
+	// source must never go DROPPED -- and is only marked Retired.
 	rs.handleMessage(context.Background(), newRetireMessage("v0", 1, []string{"v1"}, 200))
-	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v0"].meta.State)
+	assert.True(t, rs.vchannels["v0"].meta.Retired)
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, rs.vchannels["v1"].meta.State)
 	assert.True(t, rs.segments[1002].IsGrowing())
 }
 
-// TestVChannelRecoveryInfoObserveDropVChannel exercises ObserveDropVChannel
-// directly: it now takes the plain timetick that retires a vchannel (the
-// AlterCollection replica no longer owns this call, handleAlterCollection's
-// state guard does), so the checkpoint and idempotency guards need their own
-// coverage independent of that caller.
-func TestVChannelRecoveryInfoObserveDropVChannel(t *testing.T) {
+// TestVChannelRecoveryInfoRetireMarksASplittedVChannel exercises ObserveRetire
+// directly, which replaces the old ObserveDropVChannel: a retire only ever
+// touches an already-SPLITTED (fenced) vchannel, marking it Retired without
+// ever moving it to DROPPED.
+func TestVChannelRecoveryInfoRetireMarksASplittedVChannel(t *testing.T) {
+	// a vchannel that has not been fenced yet (NORMAL) is untouched -- in the
+	// real flow a retire always follows a fence, but a stray one must still
+	// be a safe no-op.
+	normal := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel: "v-normal",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}
+	normal.ObserveRetire(100)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, normal.meta.State)
+	assert.False(t, normal.meta.Retired)
+	assert.False(t, normal.dirty)
+
+	// a SPLITTED (fenced) vchannel is the only one a retire actually acts on:
+	// Retired flips true and the meta is marked dirty, but the state stays
+	// SPLITTED -- the source must never go DROPPED.
+	splitted := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel:      "v-splitted",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			SplitTimeTick: 2000,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}
+	splitted.ObserveRetire(2500)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, splitted.meta.State)
+	assert.True(t, splitted.meta.Retired)
+	assert.True(t, splitted.dirty)
+
+	// idempotent: a replayed retire takes no further effect.
+	splitted.dirty = false
+	splitted.ObserveRetire(3000)
+	assert.True(t, splitted.meta.Retired)
+	assert.False(t, splitted.dirty)
+
+	// a vchannel that is already gone (DROPPED) is untouched by a stray retire.
+	dropped := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel: "v-dropped",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}
+	dropped.ObserveRetire(100)
+	assert.False(t, dropped.meta.Retired)
+	assert.False(t, dropped.dirty)
+}
+
+// TestObserveSplitShardRaisesTheFenceTick: the shard manager's own T_switch
+// bookkeeping treats the latest fence record of the task as authoritative, so
+// a re-fence on an already-SPLITTED vchannel must raise SplitTimeTick to a
+// larger tick, and a stale (older) re-fence must never move it backwards.
+func TestObserveSplitShardRaisesTheFenceTick(t *testing.T) {
 	info := &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
-			Vchannel:           "v1",
-			State:              streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-			CheckpointTimeTick: 50,
+			Vchannel: "v1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 				CollectionId: 1,
 			},
 		},
 	}
 
-	// a timetick older than the checkpoint is ignored.
-	info.ObserveDropVChannel(10)
-	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, info.meta.State)
-	assert.False(t, info.dirty)
+	// the first fence keeps today's behaviour: it sets T_switch outright.
+	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 2000))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, info.meta.State)
+	assert.Equal(t, uint64(2000), info.meta.SplitTimeTick)
 
-	// the retire moves the vchannel to DROPPED.
-	info.ObserveDropVChannel(100)
-	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, info.meta.State)
-	assert.Equal(t, uint64(100), info.meta.CheckpointTimeTick)
+	// a later re-fence raises T_switch to the newer tick.
+	info.dirty = false
+	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 3000))
+	assert.Equal(t, uint64(3000), info.meta.SplitTimeTick)
 	assert.True(t, info.dirty)
 
-	// idempotent: a second retire takes no effect.
+	// a stale re-fence (an older tick than the one already recorded) leaves
+	// T_switch exactly where the newer fence put it.
 	info.dirty = false
-	info.ObserveDropVChannel(200)
-	assert.Equal(t, uint64(100), info.meta.CheckpointTimeTick)
+	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 2500))
+	assert.Equal(t, uint64(3000), info.meta.SplitTimeTick)
 	assert.False(t, info.dirty)
 }
 
 // TestRecoveryStorageAlterCollectionRetiresTheDelistedVChannel: a shard-split
-// routing commit that delists this vchannel retires it, exactly as
-// DropVChannel once did.
+// routing commit that delists this vchannel retires it -- once the vchannel
+// is already fenced (SPLITTED) by the earlier SplitShard broadcast. The
+// source is never moved to DROPPED: it stays SPLITTED, and the routing
+// commit only sets the Retired flag that later lets it be collected once the
+// flusher has drained past the fence.
 func TestRecoveryStorageAlterCollectionRetiresTheDelistedVChannel(t *testing.T) {
 	rs := newTestRecoveryStorage(t)
 	addActiveVChannel(rs, "v0", 1, []int64{2})
 	addGrowingSegment(rs, 1001, 1, 2, "v0")
 
-	rs.handleMessage(context.Background(), newRetireMessage("v0", 1, []string{"v1"}, 100))
-	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
-	// Flushed unconditionally: a replay can recreate GROWING segments after the
-	// vchannel was marked dropped, so the teardown must not assume there is
-	// nothing left.
+	// The retire routing commit always follows the fence in the real flow;
+	// the fence itself already flushed the growing segments.
+	rs.handleSplitShard(context.Background(), newSplitShardMessage("v0", "v0", []string{"v0-target1"}, 1, nil, 50))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v0"].meta.State)
 	assert.False(t, rs.segments[1001].IsGrowing())
+
+	rs.handleMessage(context.Background(), newRetireMessage("v0", 1, []string{"v1"}, 100))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v0"].meta.State,
+		"retiring must never move the source to DROPPED")
+	assert.True(t, rs.vchannels["v0"].meta.Retired)
 
 	// Replaying the teardown is harmless, and one for a vchannel that is gone
 	// entirely must not panic either.
 	rs.handleMessage(context.Background(), newRetireMessage("v0", 1, []string{"v1"}, 200))
-	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v0"].meta.State)
+	assert.True(t, rs.vchannels["v0"].meta.Retired)
 	assert.NotPanics(t, func() {
 		rs.handleMessage(context.Background(), newRetireMessage("v-gone", 1, []string{"v1"}, 300))
 	})
@@ -357,9 +437,106 @@ func TestVChannelRecoveryInfoSplitTimeTickIsPersisted(t *testing.T) {
 	}
 	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 4242))
 
-	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot(0)
 	assert.False(t, shouldBeRemoved)
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, snapshot.State)
 	assert.Equal(t, uint64(4242), snapshot.SplitTimeTick,
 		"T_switch must be persisted; a re-fence after restart reads it back from here")
+}
+
+// newRecoveryStorageForRetireGCTest builds a bare recoveryStorageImpl carrying
+// exactly one retired-and-SPLITTED vchannel whose flusher checkpoint sits at
+// flusherCheckpointTimeTick, plus enough resource wiring for persistDirtySnapshot
+// to run: a catalog mock that records the persisted snapshot, and a mixcoord
+// mock that deliberately has no DropVirtualChannel expectation -- calling it
+// unexpectedly fails the test, which is exactly the assertion this test needs.
+// The vchannel starts dirty so the snapshot actually flows through
+// dropAllVirtualChannel and SaveRecoverySnapshot in both cases -- exercising
+// the real path, not a shortcut that never emits a snapshot at all.
+func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick uint64) (rs *recoveryStorageImpl, persistedVChannels *map[string]*streamingpb.VChannelMeta) {
+	persisted := make(map[string]*streamingpb.VChannelMeta)
+	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
+			for k, v := range snapshot.VChannels {
+				persisted[k] = v
+			}
+			return nil
+		})
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(mixCoord)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
+
+	truncator := mock_walimpls.NewMockWALImpls(t)
+	truncator.EXPECT().Truncate(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	channel := types.PChannelInfo{Name: "test-pchannel"}
+	rs = &recoveryStorageImpl{
+		cfg:     newConfig(),
+		channel: channel,
+		checkpoint: &WALCheckpoint{
+			MessageID: rmq.NewRmqID(10),
+			TimeTick:  10,
+		},
+		segments:     map[int64]*segmentRecoveryInfo{},
+		vchannels:    map[string]*vchannelRecoveryInfo{},
+		dirtyCounter: 1, // force consumeDirtySnapshot to actually run.
+		metrics:      newRecoveryStorageMetrics(channel),
+		truncator:    truncator,
+	}
+	rs.vchannels["v0"] = &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel:      "v0",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			Retired:       true,
+			SplitTimeTick: 2000,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+		dirty: true,
+		flusherCheckpoint: &WALCheckpoint{
+			MessageID: rmq.NewRmqID(1),
+			TimeTick:  flusherCheckpointTimeTick,
+		},
+	}
+	return rs, &persisted
+}
+
+// TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence: a
+// retired SPLITTED vchannel is only safe to collect once the flusher has
+// actually drained past T_switch -- collecting it earlier could still lose
+// data the flusher has not consumed yet. Either way, DataCoord must never be
+// called: the source's own catalog collection is a purely local decision.
+func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *testing.T) {
+	t.Run("flusher checkpoint has not passed the fence yet", func(t *testing.T) {
+		rs, persisted := newRecoveryStorageForRetireGCTest(t, 1999)
+
+		err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
+		assert.NoError(t, err)
+
+		_, ok := rs.vchannels["v0"]
+		assert.True(t, ok, "the retired meta must stay in the catalog until the flusher drains past the fence")
+		// It is still persisted as SPLITTED -- never DROPPED -- so a replay
+		// after a restart could never send it through dropAllVirtualChannel.
+		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, (*persisted)["v0"].State)
+	})
+
+	t.Run("flusher checkpoint has passed the fence", func(t *testing.T) {
+		rs, persisted := newRecoveryStorageForRetireGCTest(t, 2000)
+
+		err := rs.persistDirtySnapshot(context.Background(), mlog.InfoLevel)
+		assert.NoError(t, err)
+
+		_, ok := rs.vchannels["v0"]
+		assert.False(t, ok, "a retired vchannel drained past the fence must be collected from the catalog")
+		// The persisted snapshot still carries it as SPLITTED, not DROPPED --
+		// dropAllVirtualChannel (which ran just before this save, over the
+		// very same snapshot) never had a DROPPED entry to act on, so
+		// DataCoord's DropVirtualChannel (unconfigured on the mock above)
+		// was never reached.
+		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, (*persisted)["v0"].State)
+	})
 }

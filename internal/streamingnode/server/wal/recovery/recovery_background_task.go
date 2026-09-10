@@ -77,7 +77,16 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlog.Level) (err error) {
 	if rs.pendingPersistSnapshot == nil {
 		// if there's no dirty snapshot, generate a new one.
-		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
+		// The flusher checkpoint is read once here so a retired SPLITTED
+		// vchannel's removal decision is based on how far the flusher has
+		// actually drained; unknown (nil) is treated as 0, which never
+		// satisfies the removal condition, so a retired meta is never
+		// collected before the flusher checkpoint is even established.
+		var flusherCheckpointTimeTick uint64
+		if flusherCP := rs.getFlusherCheckpoint(); flusherCP != nil {
+			flusherCheckpointTimeTick = flusherCP.TimeTick
+		}
+		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot(flusherCheckpointTimeTick)
 	}
 	if rs.pendingPersistSnapshot == nil {
 		return nil
