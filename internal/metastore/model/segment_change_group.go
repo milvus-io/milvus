@@ -231,6 +231,20 @@ func (g *SegmentChangeGroup) Validate() error {
 	if g == nil {
 		return merr.WrapErrServiceInternalMsg("segment change group is nil")
 	}
+	// C21: bound the enum ranges. Every alive-group predicate in the meta layer
+	// is a whitelist that skips anything outside STAGED/READY, so an out-of-range
+	// State would never enter the reverse indexes — its members/superseded become
+	// claimable by a second group (bypassing the anti-duplication invariant) —
+	// while IsTerminal/CanTransitionTo both fall through to false, leaving the
+	// record neither deletable nor transitionable.
+	if g.State < SegmentChangeStateStaged || g.State > SegmentChangeStateAborted {
+		return merr.WrapErrDataIntegrityMsg(
+			"segment change group %d has invalid state %d", g.GroupID, int32(g.State))
+	}
+	if g.Source < SegmentChangeSourceImportJob || g.Source > SegmentChangeSourceCDCReplicated {
+		return merr.WrapErrDataIntegrityMsg(
+			"segment change group %d has invalid source %d", g.GroupID, int32(g.Source))
+	}
 	if g.GroupID <= 0 {
 		return merr.WrapErrServiceInternalMsg("segment change group %d requires a positive group ID", g.GroupID)
 	}
@@ -273,9 +287,11 @@ func MarshalSegmentChangeGroup(g *SegmentChangeGroup) ([]byte, error) {
 	return json.Marshal(g)
 }
 
-// UnmarshalSegmentChangeGroup deserializes a group from etcd. Malformed values
-// are returned as an error so the caller can skip the bad key instead of
-// aborting startup.
+// UnmarshalSegmentChangeGroup deserializes a group from etcd. A malformed or
+// zero-valued record is returned as a data-integrity error so the caller fails
+// recovery instead of silently orphaning the record's staged members (a group
+// is the sole owner of its members' visibility — SegmentInfo has no
+// change_group_id field).
 func UnmarshalSegmentChangeGroup(data []byte) (*SegmentChangeGroup, error) {
 	group := &SegmentChangeGroup{}
 	if err := json.Unmarshal(data, group); err != nil {
