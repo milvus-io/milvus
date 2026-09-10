@@ -25,10 +25,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func newTestCatalogGroup() *model.SegmentChangeGroup {
@@ -181,4 +183,27 @@ func TestCatalog_SegmentChangeGroupCorruptValueFailsClosed(t *testing.T) {
 
 	_, err := catalog.ListSegmentChangeGroups(ctx)
 	require.Error(t, err, "a malformed persisted group must fail recovery, not be skipped")
+}
+
+// TestCatalog_RecordOnlyUpdateRejectsBinlogs verifies C26: a non-AlterEncoding
+// ActionUpdate cannot honor binlog increments (including DroppedBinlogFieldIDs
+// removals), so it must be rejected rather than silently dropping them and
+// resurrecting zombie binlog entries on restart.
+func TestCatalog_RecordOnlyUpdateRejectsBinlogs(t *testing.T) {
+	ctx := context.Background()
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	// The error is returned before any write, so MultiSaveAndRemove must NOT
+	// be reached.
+
+	catalog := NewCatalog(metakv, "", "")
+	seg := &datapb.SegmentInfo{ID: 1, CollectionID: 1, State: commonpb.SegmentState_Dropped}
+	err := catalog.Update(ctx, metastore.UpdateAction{
+		Type: metastore.ActionUpdate,
+		Entry: metastore.SegmentEntry{
+			Segment: seg,
+			Binlogs: []metastore.BinlogsIncrement{{Segment: seg}},
+		},
+	})
+	require.Error(t, err, "record-only update with binlog increments must be rejected")
 }

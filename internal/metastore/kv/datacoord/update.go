@@ -196,9 +196,18 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 	}
 	switch t {
 	case metastore.ActionAdd:
+		// C26: honor the caller's increments (including DroppedBinlogFieldIDs
+		// removals) instead of silently overwriting them with a default; a
+		// dropped binlog field whose removal is omitted would be resurrected by
+		// the prefix scan in listBinlogs on restart. Fall back to the full
+		// segment increment only when none is supplied.
+		increments := e.Binlogs
+		if len(increments) == 0 {
+			increments = []metastore.BinlogsIncrement{{Segment: e.Segment}}
+		}
 		kvs, removals, err := kc.buildAlterSegmentsKvs(ctx,
 			[]*datapb.SegmentInfo{e.Segment},
-			[]metastore.BinlogsIncrement{{Segment: e.Segment}})
+			increments)
 		if err != nil {
 			return err
 		}
@@ -234,6 +243,15 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 		}
 		for k, v := range kvs {
 			b.Save(k, v)
+		}
+		if len(e.Binlogs) > 0 {
+			// C26: the record-only (non-AlterEncoding) ActionUpdate persists no
+			// binlog KVs and cannot honor DroppedBinlogFieldIDs removals —
+			// silently dropping them would resurrect zombie binlog entries.
+			// Reject per the Update contract ("reject what you cannot
+			// implement") instead of losing the removals without an error.
+			return merr.WrapErrServiceInternalMsg(
+				"datacoord catalog: binlog increments are not supported on a record-only segment update; use AlterEncoding")
 		}
 	default:
 		return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to a segment", t)

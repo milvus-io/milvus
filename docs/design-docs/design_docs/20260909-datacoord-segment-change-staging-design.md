@@ -310,6 +310,14 @@ message SegmentChangeGroup {
   SegmentChangeState state;
   repeated int64 new_segment_ids;         // staged members
   repeated int64 superseded_segment_ids;  // parents retired at publication
+  // superseded_l0_segment_ids: the subset of superseded_segment_ids exempted
+  // from the anti-duplication invariant as L0 delta segments at REGISTRATION
+  // time (C11/C27). Persisted so recovery is stable: an L0 parent may be GC'd
+  // from SegmentMeta later, and the persisted decision (not a live segment
+  // lookup) must drive recovery — otherwise identical persisted bytes would
+  // flip from conflict-free into a startup conflict once the L0 segment
+  // disappears.
+  repeated int64 superseded_l0_segment_ids;
   uint64 commit_ts;                       // allocated at publication; 0 while staged
   int64  create_ts;
   int64  ready_ts;                        // observability: staged -> ready duration
@@ -337,8 +345,11 @@ Write-time constraints (violation ⇒ `merr.WrapErrDataIntegrityMsg`):
   application to a shared L1 target and multiple L0 ops may reference the same
   segment. L0 does not stage in this design (see §6.2) and will be absorbed by
   the DataView delta watermark (`transform_start_after_timetick`) rather than
-  by groups; groups therefore never list an L0 `superseded`, and the uniqueness
-  check skips an explicitly-L0 parent defensively.
+  by groups. A group MAY therefore list an L0 parent as `superseded`, and that
+  exemption is persisted in `superseded_l0_segment_ids` at registration (C11):
+  the uniqueness check skips it and recovery uses the persisted decision, not a
+  live segment-level lookup, so GC of the L0 parent cannot flip identical
+  persisted bytes into a startup conflict.
 
 #### 1.2 `SegmentInfo` extension (datapb)
 
@@ -406,12 +417,17 @@ SegmentMeta + DataView snapshot in one txn). There is therefore **no
 "COMMITTED state lost" window**; replay logic only handles the
 "txn committed but response lost" case (§5.4), using `publish_epoch`.
 
-> **Atomicity boundary (F3)**: the invariant above holds strictly only while
-> the composite op count ≤ the store's `MaxTxnOps`. Above the limit,
+> **Atomicity boundary (F3, C28)**: the invariant above holds strictly only
+> while the composite op count ≤ the store's `MaxTxnOps`. Above the limit,
 > `txn.Commit` falls back to the chunked path: the non-commit ops (segment
-> flips / superseded retirement) are flushed first in recorded order, and the
-> commit-marked group record (`SaveSegmentChangeGroup`) lands LAST as the
-> visibility marker. A crash between the two leaves the intermediate state
+> flips / superseded retirement) are flushed first in recorded order, and
+> commit-marked ops land LAST as the visibility marker. The group record's
+> commit-marker semantics are STATE-QUALIFIED (C13): only a TERMINAL group
+> (`SaveSegmentChangeGroup` on COMMITTED/FAILED/ABORTED) is commit-marked and
+> lands last; an ALIVE group (STAGED/READY) is a plain in-order Save that the
+> composite write places BEFORE its staged members. A crash in the terminal
+> case leaves the intermediate state
+> "members visible but group still STAGED/READY" — the very state the
 > "members visible but group still STAGED/READY" — the very state the
 > same-txn argument excludes. The reconciler's READY probe must therefore
 > explicitly handle this state (e.g. treat "members flipped but no COMMITTED
@@ -859,6 +875,19 @@ Replay safety:
   "ABORTED + reclamation on probe failure" rule is therefore withdrawn.
 - Recovery runs inside the recovery barrier (provided by #52537); external RPCs
   do not enter, so a half-recovered state is never read.
+
+> **Known limitation (C24)**: recovery is fail-closed on cross-record conflicts
+> (duplicate group IDs, member/superseded overlaps), which bricks `newMeta` and
+> thus Coordinator startup. This assumes there is NO "persisted but reported
+> failure" window — i.e. every group write either returns success (in-memory
+> updated) or did not commit. A lost etcd response or a partial
+> `commitFallback` chunk flush could leave an alive group that the running
+> process cannot see; a subsequent batch would then legally claim the same
+> superseded parent and persist a conflicting second group, bricking the NEXT
+> restart. The base PR has no producers, so the window is unreachable today;
+> the mitigation — the per-collection recovery disposition that marks a STAGED
+> group whose members are missing as FAILED (reclaimable) instead of aborting
+> startup — is part of the reconciler follow-up (M5).
 
 ## GC and Staged-Member Reclamation
 
