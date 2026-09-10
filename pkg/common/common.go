@@ -346,12 +346,14 @@ const (
 	SearchTopkRatioKey = "search_topk_ratio"
 	RefineTopkRatioKey = "refine_topk_ratio"
 
-	ParamsKey      = "params"
-	IndexTypeKey   = "index_type"
-	MetricTypeKey  = "metric_type"
-	DimKey         = "dim"
-	MaxLengthKey   = "max_length"
-	MaxCapacityKey = "max_capacity"
+	ParamsKey        = "params"
+	IndexTypeKey     = "index_type"
+	MetricTypeKey    = "metric_type"
+	DimKey           = "dim"
+	MRLDimKey        = "mrl_dim"
+	WithMRLRefineKey = "with_mrl_refine"
+	MaxLengthKey     = "max_length"
+	MaxCapacityKey   = "max_capacity"
 
 	DropRatioBuildKey = "drop_ratio_build"
 

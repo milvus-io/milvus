@@ -78,8 +78,18 @@ FilterValidDataDiskFileSlices(const std::vector<std::string>& files) {
 inline std::vector<std::string>
 GetCacheFilesForDiskIndexLoad(const std::vector<std::string>& index_files,
                               bool load_index_with_stream) {
-    return load_index_with_stream ? FilterValidDataDiskFileSlices(index_files)
-                                  : index_files;
+    if (!load_index_with_stream) {
+        return index_files;
+    }
+    auto files = FilterValidDataDiskFileSlices(index_files);
+    for (const auto& file : index_files) {
+        const auto name = file.substr(file.find_last_of('/') + 1);
+        if (name.starts_with(MRL_META_FILE + "_") ||
+            name.starts_with(MRL_REFINE_STATE_FILE + "_")) {
+            files.emplace_back(file);
+        }
+    }
+    return files;
 }
 
 inline bool

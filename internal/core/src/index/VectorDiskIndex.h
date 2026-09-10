@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "index/VectorIndex.h"
+#include "knowhere/object.h"
 #include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::index {
@@ -33,7 +34,11 @@ class VectorDiskAnnIndex : public VectorIndex {
         const MetricType& metric_type,
         const IndexVersion& version,
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        int64_t source_dim = -1,
+        int64_t mrl_dim = -1,
+        bool with_mrl_refine = false,
+        knowhere::ViewDataOp view_data = {});
 
     BinarySet
     Serialize(const Config& config) override {  // deprecated
@@ -149,6 +154,8 @@ class VectorDiskAnnIndex : public VectorIndex {
     uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;
+    bool mrl_enabled_{false};
+    bool with_mrl_refine_{false};
     std::vector<size_t> empty_emb_list_offsets_;
 };
 

@@ -54,7 +54,12 @@ VecIndexCreator::VecIndexCreator(
     index_info.field_name = field_name;
     index_info.index_engine_version =
         index::GetIndexEngineVersionFromConfig(config_);
-    index_info.dim = dim;
+    index_info.dim = dim > 0 ? dim : index::GetDimFromConfig(config_);
+    index_info.mrl_dim =
+        index::GetValueFromConfig<int64_t>(config_, MRL_DIM_KEY).value_or(-1);
+    index_info.with_mrl_refine =
+        index::GetValueFromConfig<bool>(config_, WITH_MRL_REFINE_KEY)
+            .value_or(false);
 
     index_ = index::IndexFactory::GetInstance().CreateIndex(
         index_info, file_manager_context);
