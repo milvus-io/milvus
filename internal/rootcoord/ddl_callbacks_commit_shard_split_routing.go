@@ -101,7 +101,8 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 			req.GetCollectionName(), coll.CollectionID, req.GetCollectionId())
 	}
 
-	if err := checkRoutingCommitAgainstMeta(coll, req); err != nil {
+	updates := routingUpdatesFromRequest(req)
+	if err := checkRoutingCommitAgainstMeta(coll, updates); err != nil {
 		return err
 	}
 
@@ -117,7 +118,7 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 	// states: a commit that re-expresses the same shards at a doubled modulus
 	// leaves every state alone, and comparing states only would report it as
 	// already committed and silently drop it.
-	if routingCommitAlreadyApplied(coll, req) {
+	if routingCommitAlreadyApplied(coll, updates) {
 		return errIgnoredAlterCollection
 	}
 
@@ -133,14 +134,6 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 		},
 		CacheExpirations: cacheExpirations,
 	}
-	updates := &messagespb.AlterCollectionMessageUpdates{
-		VirtualChannelNames:  vchannels,
-		PhysicalChannelNames: req.GetPhysicalChannelNames(),
-		ShardInfos:           req.GetShardInfos(),
-		RoutingModulus:       req.GetRoutingModulus(),
-		ShardBy:              req.GetShardBy(),
-	}
-
 	// Broadcast to every shard of the new topology plus the control channel, so
 	// all streamingnode shard managers (including the new split targets) and the
 	// proxy caches pick up the new routing version.
@@ -158,17 +151,31 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 	return nil
 }
 
+// routingUpdatesFromRequest lifts the five routing fields out of the RPC request
+// into the post-image shape a SplitShard message body already carries, so the
+// commit checks below have exactly one input type. The RPC and the ack callback
+// commit the same thing by two routes; they must not diverge in what they check.
+func routingUpdatesFromRequest(req *rootcoordpb.CommitShardSplitRoutingRequest) *messagespb.AlterCollectionMessageUpdates {
+	return &messagespb.AlterCollectionMessageUpdates{
+		VirtualChannelNames:  req.GetVirtualChannelNames(),
+		PhysicalChannelNames: req.GetPhysicalChannelNames(),
+		ShardInfos:           req.GetShardInfos(),
+		RoutingModulus:       req.GetRoutingModulus(),
+		ShardBy:              req.GetShardBy(),
+	}
+}
+
 // routingCommitAlreadyApplied reports whether the collection already carries
-// exactly the topology the request commits: the same vchannels, each at the same
-// lifecycle state and owning the same residues, against the same modulus. A
-// shard_by the request leaves empty is not compared, since an empty one means
+// exactly the topology the post-image commits: the same vchannels, each at the
+// same lifecycle state and owning the same residues, against the same modulus. A
+// shard_by the post-image leaves empty is not compared, since an empty one means
 // "nothing to back-fill" rather than "clear it".
-func routingCommitAlreadyApplied(coll *model.Collection, req *rootcoordpb.CommitShardSplitRoutingRequest) bool {
-	vchannels := req.GetVirtualChannelNames()
-	if len(coll.VirtualChannelNames) != len(vchannels) || coll.RoutingModulus != req.GetRoutingModulus() {
+func routingCommitAlreadyApplied(coll *model.Collection, updates *messagespb.AlterCollectionMessageUpdates) bool {
+	vchannels := updates.GetVirtualChannelNames()
+	if len(coll.VirtualChannelNames) != len(vchannels) || coll.RoutingModulus != updates.GetRoutingModulus() {
 		return false
 	}
-	if req.GetShardBy() != "" && coll.ShardBy != req.GetShardBy() {
+	if updates.GetShardBy() != "" && coll.ShardBy != updates.GetShardBy() {
 		return false
 	}
 	for i, vchannel := range vchannels {
@@ -176,7 +183,7 @@ func routingCommitAlreadyApplied(coll *model.Collection, req *rootcoordpb.Commit
 		if !ok {
 			return false
 		}
-		want := req.GetShardInfos()[i]
+		want := updates.GetShardInfos()[i]
 		if info.State != want.GetState() || !slices.Equal(info.Buckets, want.GetHashRouting().GetBuckets()) {
 			return false
 		}
@@ -199,17 +206,17 @@ func routingCommitAlreadyApplied(coll *model.Collection, req *rootcoordpb.Commit
 // collection it routes by namespace. Kept in step with datacoord's shardByOf.
 const namespaceShardBy = "hash(" + common.NamespaceFieldName + ")"
 
-func checkRoutingCommitAgainstMeta(coll *model.Collection, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
+func checkRoutingCommitAgainstMeta(coll *model.Collection, updates *messagespb.AlterCollectionMessageUpdates) error {
 	// Routing is not revocable. Once a collection has been split, its shards own
 	// residues and only the modulus says what those residues mean; a commit that
 	// zeroes it would leave the collection reading as never-split and route by
 	// position over a channel list that now contains retired sources -- writes
 	// landing on shards that do not own them, and on fenced ones that reject
 	// them. A modulus may grow (a doubling) or stay, never return to zero.
-	if coll.RoutingModulus != 0 && req.GetRoutingModulus() == 0 {
+	if coll.RoutingModulus != 0 && updates.GetRoutingModulus() == 0 {
 		return merr.WrapErrParameterInvalidMsg(
 			"commit shard split routing failed, collection %q routes at modulus %d and a commit cannot take it back to none",
-			req.GetCollectionName(), coll.RoutingModulus)
+			coll.Name, coll.RoutingModulus)
 	}
 
 	// The namespace routing key is valid only for a collection whose rows have
@@ -228,28 +235,28 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, req *rootcoordpb.Comm
 	// System, not input, and not retriable: the request comes from the split
 	// coordinator, a plan that names this key for this collection is a
 	// planning bug, and asking again gets the same answer.
-	if req.GetShardBy() == namespaceShardBy {
+	if updates.GetShardBy() == namespaceShardBy {
 		enabled, err := common.IsNamespaceShardingEnabled(coll.Properties...)
 		if err != nil {
 			return merr.WrapErrServiceInternalErr(err, "commit shard split routing failed, collection %q has a malformed %s",
-				req.GetCollectionName(), common.NamespaceShardingEnabledKey)
+				coll.Name, common.NamespaceShardingEnabledKey)
 		}
 		if !enabled || !common.IsNamespaceModePartitionKey(coll.Properties...) {
 			return merr.WrapErrServiceInternalMsg(
 				"commit shard split routing failed, collection %q cannot route by %s: its rows are placed by primary key "+
 					"(namespace.sharding.enabled=%t, namespace.mode=%s), so it must split under hash(pk) or not at all",
-				req.GetCollectionName(), namespaceShardBy, enabled, common.GetNamespaceMode(coll.Properties...))
+				coll.Name, namespaceShardBy, enabled, common.GetNamespaceMode(coll.Properties...))
 		}
 	}
 
-	for i, vchannel := range req.GetVirtualChannelNames() {
+	for i, vchannel := range updates.GetVirtualChannelNames() {
 		current, ok := coll.ShardInfos[vchannel]
 		if !ok {
 			// A vchannel the collection does not have yet: a split target being
 			// created. Any state is a valid start.
 			continue
 		}
-		to := req.GetShardInfos()[i].GetState()
+		to := updates.GetShardInfos()[i].GetState()
 		if !shardStateMayAdvance(current.State, to) {
 			return merr.WrapErrParameterInvalidMsg(
 				"commit shard split routing failed, shard %q cannot go from %s back to %s",

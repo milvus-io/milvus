@@ -221,25 +221,25 @@ func TestRoutingCommitAlreadyApplied(t *testing.T) {
 		}
 	}
 
-	require.True(t, routingCommitAlreadyApplied(coll, req(2, []uint64{0}, []uint64{1})))
+	require.True(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(req(2, []uint64{0}, []uint64{1}))))
 
 	// A rebase onto a doubled modulus leaves every state alone and changes only
 	// the residues. Comparing states alone would call this already committed and
 	// silently drop it.
-	require.False(t, routingCommitAlreadyApplied(coll, req(4, []uint64{0, 2}, []uint64{1, 3})))
+	require.False(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(req(4, []uint64{0, 2}, []uint64{1, 3}))))
 	// Same modulus, different residues.
-	require.False(t, routingCommitAlreadyApplied(coll, req(2, []uint64{1}, []uint64{0})))
+	require.False(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(req(2, []uint64{1}, []uint64{0}))))
 	// A shard_by back-fill the collection does not carry yet.
 	backfill := req(2, []uint64{0}, []uint64{1})
 	backfill.ShardBy = "hash($namespace_id)"
-	require.False(t, routingCommitAlreadyApplied(coll, backfill))
+	require.False(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(backfill)))
 	// An empty shard_by asks for no back-fill, so it does not make the commit
 	// look different.
-	require.True(t, routingCommitAlreadyApplied(coll, req(2, []uint64{0}, []uint64{1})))
+	require.True(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(req(2, []uint64{0}, []uint64{1}))))
 	// A vchannel the collection does not have.
 	unknown := req(2, []uint64{0}, []uint64{1})
 	unknown.VirtualChannelNames = []string{"v0", "v9"}
-	require.False(t, routingCommitAlreadyApplied(coll, unknown))
+	require.False(t, routingCommitAlreadyApplied(coll, routingUpdatesFromRequest(unknown)))
 }
 
 func TestShardStateMayAdvance(t *testing.T) {
@@ -292,7 +292,7 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardCreating, 1),
 		},
 	}
-	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, stale), merr.ErrParameterInvalid)
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(stale)), merr.ErrParameterInvalid)
 
 	// Routing is not revocable: a commit cannot take a split collection back to
 	// no modulus, which would make it read as never-split and route by position
@@ -306,7 +306,7 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardNormal),
 		},
 	}
-	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, revoke), merr.ErrParameterInvalid)
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(revoke)), merr.ErrParameterInvalid)
 
 	// Forward is fine: retire the source's vchannel and keep the two targets.
 	forward := &rootcoordpb.CommitShardSplitRoutingRequest{
@@ -318,7 +318,7 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardNormal, 1),
 		},
 	}
-	require.NoError(t, checkRoutingCommitAgainstMeta(coll, forward))
+	require.NoError(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(forward)))
 
 	// A doubling that rebases every shard onto the new modulus is forward too.
 	rebase := &rootcoordpb.CommitShardSplitRoutingRequest{
@@ -331,11 +331,11 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 			pbShard(schemapb.ShardState_ShardCreating, 0, 2),
 		},
 	}
-	require.NoError(t, checkRoutingCommitAgainstMeta(coll, rebase))
+	require.NoError(t, checkRoutingCommitAgainstMeta(coll, routingUpdatesFromRequest(rebase)))
 
 	// A collection that has never been split may of course start at zero.
 	fresh := &model.Collection{Name: "c", VirtualChannelNames: []string{"v0"}}
-	require.NoError(t, checkRoutingCommitAgainstMeta(fresh, revoke))
+	require.NoError(t, checkRoutingCommitAgainstMeta(fresh, routingUpdatesFromRequest(revoke)))
 }
 
 // The namespace routing key is valid only for a collection whose rows have
@@ -365,25 +365,31 @@ func TestCheckRoutingCommitAgainstMetaRefusesTheNamespaceKeyForAPrimaryKeyPlaced
 
 	// The default namespace collection: sharding.enabled written as false at
 	// create time. Its rows are placed by primary key.
-	err := checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false"), kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), commit(namespaceShardBy))
+	err := checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false"), kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), routingUpdatesFromRequest(commit(namespaceShardBy)))
 	require.ErrorIs(t, err, merr.ErrServiceInternal, "a planning bug, not user input")
 	require.False(t, merr.IsRetryableErr(err), "asking again gets the same answer")
 	assert.Contains(t, err.Error(), "placed by primary key")
 
 	// sharding on, but partition mode: still placed by primary key.
-	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "true"), kv(common.NamespaceModeKey, common.NamespaceModePartition)), commit(namespaceShardBy))
+	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "true"), kv(common.NamespaceModeKey, common.NamespaceModePartition)), routingUpdatesFromRequest(commit(namespaceShardBy)))
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
 	// The property absent altogether reads as false, the create-time default.
-	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), commit(namespaceShardBy))
+	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), routingUpdatesFromRequest(commit(namespaceShardBy)))
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	// A malformed property is a System error too: nothing about the request can
+	// be changed to make it parse.
+	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "yes")), routingUpdatesFromRequest(commit(namespaceShardBy)))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Contains(t, err.Error(), common.NamespaceShardingEnabledKey)
 
 	// The one configuration the key is valid for.
 	require.NoError(t, checkRoutingCommitAgainstMeta(
 		collWith(kv(common.NamespaceShardingEnabledKey, "true"), kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)),
-		commit(namespaceShardBy)))
+		routingUpdatesFromRequest(commit(namespaceShardBy))))
 
 	// A primary-key routed split of the same default collection is untouched by
 	// the gate: that is the key its rows were placed by.
-	require.NoError(t, checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false")), commit("hash(pk)")))
+	require.NoError(t, checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false")), routingUpdatesFromRequest(commit("hash(pk)"))))
 }

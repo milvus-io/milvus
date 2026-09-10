@@ -300,22 +300,34 @@ func SplitShardResultFrom(param SplitShardParam, result *types.BroadcastAppendRe
 	}, nil
 }
 
-// splitTargetGenesisPosition turns a target vchannel's append result into its
-// first checkpoint.
+// SplitTargetGenesisPosition turns a target vchannel's landed SplitShard
+// replica into that vchannel's first checkpoint.
 //
 // The message id is used rather than the last-confirmed one, for the reason
 // collection creation uses it (ddl_callbacks_create_collection.go): a zero
 // last-confirmed id serializes to nil under WoodPecker and downstream
 // assertions panic on a nil position, while the message id is just as complete
 // here -- the vchannel is created BY this message, so nothing precedes it.
-func splitTargetGenesisPosition(vchannel string, result *types.AppendResult) *msgpb.MsgPosition {
+//
+// Exported because the recipe has two callers on two different result types:
+// the append-time decode below (types.AppendResult) and rootcoord's SplitShard
+// ack callback (message.AppendResult), which seeds the same positions at
+// datacoord. A second copy of the recipe is exactly what must not exist -- a
+// position that disagrees with the one already seeded would rewind or skip the
+// target's readers.
+func SplitTargetGenesisPosition(vchannel string, messageID message.MessageID, timeTick uint64) *msgpb.MsgPosition {
 	return &msgpb.MsgPosition{
 		ChannelName: vchannel,
-		MsgID:       adaptor.MustGetMQWrapperIDFromMessage(result.MessageID).Serialize(),
+		MsgID:       adaptor.MustGetMQWrapperIDFromMessage(messageID).Serialize(),
 		// Carried explicitly: the delegator's Seek deserializes the id with
 		// MustGetMessageIDFromMQWrapperIDBytesWithWALName, so a position whose
 		// WAL name is Unknown panics there instead of failing.
-		WALName:   commonpb.WALName(result.MessageID.WALName()),
-		Timestamp: result.TimeTick,
+		WALName:   commonpb.WALName(messageID.WALName()),
+		Timestamp: timeTick,
 	}
+}
+
+// splitTargetGenesisPosition adapts an append result to the recipe above.
+func splitTargetGenesisPosition(vchannel string, result *types.AppendResult) *msgpb.MsgPosition {
+	return SplitTargetGenesisPosition(vchannel, result.MessageID, result.TimeTick)
 }
