@@ -516,6 +516,13 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	for id, owner := range m.supersededSegmentToGroup {
 		claimedSuperseded[id] = owner
 	}
+	// C18: m.segmentChangeGroups is only updated after the catalog write, so a
+	// SECOND action for the same groupID in one call would be validated as if
+	// the first did not exist — with differing collectionIDs/members both would
+	// persist under two keys and brick recovery on duplicate group IDs. Track
+	// groupIDs seen within this call and reject duplicates, mirroring
+	// addSegmentChangeGroupLocked and loadSegmentChangeGroups.
+	seenGroupIDs := make(map[int64]struct{})
 	for _, action := range groupActions {
 		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
 		switch action.Type {
@@ -526,6 +533,11 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 			if err := entry.Group.Validate(); err != nil {
 				return err
 			}
+			if _, dup := seenGroupIDs[entry.Group.GroupID]; dup {
+				return merr.WrapErrDataIntegrityMsg(
+					"duplicate segment change group %d in one composite write", entry.Group.GroupID)
+			}
+			seenGroupIDs[entry.Group.GroupID] = struct{}{}
 			if m.segmentChangeGroups[entry.Group.GroupID] == nil {
 				if err := m.validateSegmentChangeGroupOwnershipAgainstLocked(entry.Group, claimedStaged, claimedSuperseded); err != nil {
 					return err
