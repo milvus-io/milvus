@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
@@ -41,6 +42,7 @@
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -193,10 +195,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
     // on a single segment, executed on one Driver thread (Velox-style single-
     // threaded operator pipeline). If groupby is ever parallelized per-nq or
     // shared across queries, this cache must be guarded — data race otherwise.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>>
-        str_pw_map;
+    // Keep each visited chunk pinned without building views for its other rows.
+    mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance.
@@ -239,19 +239,21 @@ class SealedDataGetter : public DataGetter<OutputType> {
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
-                if (str_pw_map.find(chunk_id) == str_pw_map.end()) {
-                    // for now, search_group_by does not handle null values
-                    auto pw = segment_.chunk_view<std::string_view>(
-                        op_ctx_, field_id_, chunk_id);
-                    str_pw_map[chunk_id] = std::move(pw);
+                auto it = str_pw_map.find(chunk_id);
+                if (it == str_pw_map.end()) {
+                    auto column = segment_.GetChunkedColumn(field_id_);
+                    AssertInfo(column != nullptr,
+                               "raw string field {} has no chunked column",
+                               field_id_.get());
+                    auto pin = column->GetChunk(op_ctx_, chunk_id);
+                    it = str_pw_map.emplace(chunk_id, std::move(pin)).first;
                 }
-                auto& pw = str_pw_map[chunk_id];
-                auto& [str_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                const auto* chunk =
+                    static_cast<const StringChunk*>(it->second.get());
+                if (!chunk->isValid(inner_offset)) {
                     return std::nullopt;
                 }
-                std::string_view str_val_view = str_chunk_view[inner_offset];
-                return std::string(str_val_view.data(), str_val_view.length());
+                return std::string((*chunk)[inner_offset]);
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
                 if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
                     auto pw = segment_.chunk_view<milvus::Json>(
