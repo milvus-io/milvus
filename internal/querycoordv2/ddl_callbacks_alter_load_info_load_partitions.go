@@ -53,6 +53,11 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	if err != nil {
 		return err
 	}
+	// Same bound as the LoadCollection callback: the delegator capacity over
+	// the collection's whole layout, in the pools the assignment will use.
+	if err := utils.CheckDelegatorCapacity(ctx, s.meta, req.GetCollectionID(), expectedReplicasNumber, len(scopedResourceGroups) > 0); err != nil {
+		return err
+	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
 	// With a form installed, a request that names resource groups speaks only
