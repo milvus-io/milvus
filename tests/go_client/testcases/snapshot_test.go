@@ -987,13 +987,17 @@ func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool) {
 			require.Equal(t, sourceCollection, snapshotInfo.GetCollectionName())
 			snapshotSource := snapshotInfo.GetS3Location()
 			require.NotEmpty(t, snapshotSource)
+			var snapshotStorageCfg minioConfig
+			if withL0 || layout == "self_contained" {
+				snapshotStorageCfg = snapshotFixtureStorageConfig(t, getMinIOConfig(), snapshotSource)
+			}
 			if withL0 {
 				cfg := getMinIOConfig()
 				minioClient, err = newMinIOClient(cfg)
 				require.NoError(t, err)
 				minioBucket = cfg.bucket
 				skipIfMinIOUnreachable(ctx, t, minioClient, minioBucket)
-				requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotSource, "", "", firstID)
+				requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotStorageCfg.address, snapshotSource, "", "", firstID)
 			}
 
 			if layout == "self_contained" {
@@ -1012,9 +1016,9 @@ func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool) {
 					require.NoError(t, minioClient.MakeBucket(ctx, bucketName, miniogo.MakeBucketOptions{}))
 					foreignBucket = bucketName
 					minioBucket = foreignBucket
-					minioCfg.bucket = foreignBucket
-					externalSpec = extTestSpec(minioCfg, "parquet")
-					exportTarget = extTestURI(minioCfg, exportPrefix)
+					snapshotStorageCfg.bucket = foreignBucket
+					externalSpec = extTestSpec(snapshotStorageCfg, "parquet")
+					exportTarget = extTestURI(snapshotStorageCfg, exportPrefix)
 				}
 				exportJobID, err := mc.ExportSnapshot(ctx,
 					client.NewExportSnapshotOption(snapshotName, sourceCollection, exportTarget).WithExternalSpec(externalSpec))
@@ -1037,7 +1041,7 @@ func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool) {
 				)
 				require.NoError(t, err)
 				if withL0 {
-					requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotSource, exportPrefix, relocatedPrefix, firstID)
+					requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotStorageCfg.address, snapshotSource, exportPrefix, relocatedPrefix, firstID)
 				}
 			}
 
@@ -1148,10 +1152,10 @@ func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool) {
 // V1 L0 even for a V3 collection. This fixture explicitly requires that format;
 // V3 L0 manifest resolution is covered by server tests, not by interpreting its
 // pathless PB summaries as physical files here.
-func requireSnapshotL0Delete(t *testing.T, ctx context.Context, mc *miniogo.Client, bucket, metadataURI, oldPrefix, newPrefix string, deletedPK int64) {
+func requireSnapshotL0Delete(t *testing.T, ctx context.Context, mc *miniogo.Client, bucket, storageEndpoint, metadataURI, oldPrefix, newPrefix string, deletedPK int64) {
 	t.Helper()
 	read := func(objectPath string) []byte {
-		objectPath, err := snapshotFixtureObjectKey(objectPath, bucket, mc.EndpointURL().Host, oldPrefix, newPrefix)
+		objectPath, err := snapshotFixtureObjectKey(objectPath, bucket, storageEndpoint, oldPrefix, newPrefix)
 		require.NoError(t, err)
 		object, err := mc.GetObject(ctx, bucket, objectPath, miniogo.GetObjectOptions{})
 		require.NoError(t, err)
@@ -1197,6 +1201,36 @@ func requireSnapshotL0Delete(t *testing.T, ctx context.Context, mc *miniogo.Clie
 		}
 	}
 	require.True(t, found, "fixture has no applicable active L0 containing the expected delete; background compaction may have folded it before snapshot capture")
+}
+
+// Keep the server's storage identity separate from the client's dial address.
+// CI clients use a namespace-qualified MinIO hostname, while the server uses
+// the short service name. Export/Import enforce exact endpoint identity, and
+// nested snapshot references must still match the endpoint reported by Milvus.
+// Only URI checks/construction use this config; object I/O keeps the dial config.
+func snapshotFixtureStorageConfig(t *testing.T, cfg minioConfig, metadataURI string) minioConfig {
+	t.Helper()
+	u, err := url.Parse(metadataURI)
+	require.NoError(t, err)
+	require.Equal(t, "minio", u.Scheme, "this fixture requires MinIO storage")
+	_, err = snapshotFixtureObjectKey(metadataURI, cfg.bucket, u.Host, "", "")
+	require.NoError(t, err)
+	cfg.address = u.Host
+	return cfg
+}
+
+func TestSnapshotFixtureStorageConfig(t *testing.T) {
+	cfg := minioConfig{address: "gosdk-14906-minio.jenkins-milvus-ci:9000", bucket: "source"}
+	metadataURI := "minio://gosdk-14906-minio:9000/source/files/snapshots/1/metadata/2.json"
+	serverCfg := snapshotFixtureStorageConfig(t, cfg, metadataURI)
+	require.Equal(t, "gosdk-14906-minio.jenkins-milvus-ci:9000", cfg.address)
+	key, err := snapshotFixtureObjectKey(metadataURI, cfg.bucket, serverCfg.address, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "files/snapshots/1/metadata/2.json", key)
+	serverCfg.bucket = "destination"
+	require.Equal(t, "minio://gosdk-14906-minio:9000/destination/export", extTestURI(serverCfg, "export"))
+	_, err = snapshotFixtureObjectKey("minio://other:9000/source/files/delta", cfg.bucket, serverCfg.address, "", "")
+	require.Error(t, err, "a foreign endpoint must not be accepted as a DNS alias")
 }
 
 // DescribeSnapshot returns an endpoint-style minio URI, while Avro references
