@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -268,6 +269,63 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	cleanupOSS(cli, bucketName, rootPath)
+}
+
+// Test_garbageCollector_importingSegmentStatsKept pins that a stats file under
+// an Importing segment is retained even though its log ID is not registered in
+// Statslogs yet. Import V3 pre-registers the segment at task creation but
+// persists Statslogs only at acceptance, while the PK stats file is already
+// written under stats_log/ and the task may retry indefinitely.
+func Test_garbageCollector_importingSegmentStatsKept(t *testing.T) {
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	newGC := func(meta *meta, cli *storage.RemoteChunkManager) *garbageCollector {
+		return newGarbageCollector(meta, newMockHandler(), GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: 0,
+			dropTolerance:    time.Hour * 24,
+		})
+	}
+
+	t.Run("importing segment keeps unregistered stats", func(t *testing.T) {
+		bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
+		cli, _, stats, _, _, err := initUtOSSEnv(bucketName, rootPath, 1)
+		require.NoError(t, err)
+
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		segment := buildSegment(1, 10, 100, "ch")
+		segment.State = commonpb.SegmentState_Importing
+		segment.IsImporting = true
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		gc := newGC(meta, cli)
+		gc.recycleUnusedBinlogFiles(context.TODO())
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		gc.close()
+		cleanupOSS(cli, bucketName, rootPath)
+	})
+
+	t.Run("flushed segment without stats registration still collected", func(t *testing.T) {
+		bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
+		cli, _, stats, _, _, err := initUtOSSEnv(bucketName, rootPath, 1)
+		require.NoError(t, err)
+		require.Len(t, stats, 1)
+
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		segment := buildSegment(1, 10, 100, "ch")
+		segment.State = commonpb.SegmentState_Flushed
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		gc := newGC(meta, cli)
+		gc.recycleUnusedBinlogFiles(context.TODO())
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), []string{})
+		gc.close()
+		cleanupOSS(cli, bucketName, rootPath)
+	})
 }
 
 // initialize unit test sso env
@@ -2790,6 +2848,40 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 	mu.Unlock()
 }
 
+// TestGarbageCollector_recycleDroppedSegments_StorageV3WithoutManifest pins that
+// a StorageV3 segment dropped before any manifest was written (import retry,
+// failure, or cleanup) is removed from meta instead of erroring forever on the
+// empty manifest path.
+func TestGarbageCollector_recycleDroppedSegments_StorageV3WithoutManifest(t *testing.T) {
+	ctx := context.Background()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	const segID = int64(1001)
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segID,
+			CollectionID:   100,
+			PartitionID:    10,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Dropped,
+			DroppedAt:      uint64(time.Now().Add(-time.Hour).UnixNano()),
+			StorageVersion: storage.StorageV3,
+		},
+	}
+	require.NoError(t, m.AddSegment(ctx, segment))
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cm,
+		dropTolerance: 0,
+	})
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Nil(t, m.GetSegment(ctx, segID))
+}
+
 func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *testing.T) {
 	ctx := context.Background()
 	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
@@ -4994,4 +5086,37 @@ func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
 	defer mu.Unlock()
 	assert.Contains(t, removed, expectedJSON)
 	assert.Contains(t, removed, indexFile)
+}
+
+func TestGarbageCollector_recycleUnusedImportV3Prefixes(t *testing.T) {
+	ctx := context.Background()
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	gc := newGarbageCollector(nil, newMockHandler(), GcOption{
+		cli:              cli,
+		missingTolerance: 0, // freshly written objects are already past tolerance
+		importJobAlive: func(_ context.Context, jobID int64) bool {
+			return jobID == 43 // job 43 is still alive; job 42 is an orphan
+		},
+	})
+
+	orphanPath := path.Join(cli.RootPath(), metautil.BuildImportV3JobPath(42), "plans", "reshard", "10", "plan.pb")
+	livePath := path.Join(cli.RootPath(), metautil.BuildImportV3JobPath(43), "plans", "reshard", "10", "plan.pb")
+	require.NoError(t, cli.Write(ctx, orphanPath, []byte("orphan")))
+	require.NoError(t, cli.Write(ctx, livePath, []byte("live")))
+
+	// The orphan prefix is removed while the live job's prefix is kept.
+	gc.recycleUnusedImportV3Prefixes(ctx)
+	exist, err := cli.Exist(ctx, orphanPath)
+	require.NoError(t, err)
+	require.False(t, exist)
+	exist, err = cli.Exist(ctx, livePath)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	// A nil importJobAlive disables the scan entirely.
+	gc.option.importJobAlive = nil
+	gc.recycleUnusedImportV3Prefixes(ctx)
+	exist, err = cli.Exist(ctx, livePath)
+	require.NoError(t, err)
+	require.True(t, exist)
 }

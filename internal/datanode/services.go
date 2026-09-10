@@ -743,8 +743,13 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		totalSlots     = index.CalculateNodeSlots()
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
+		importV2Used   = node.importScheduler.Slots()
+		importV3Used   int64
 	)
+	if node.importV3TaskMgr != nil {
+		importV3Used = node.importV3TaskMgr.Slots()
+	}
+	importUsed := importV2Used + importV3Used
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
 	if availableSlots < 0 {
@@ -757,6 +762,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
+		mlog.Int64("importV3Used", importV3Used),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -812,6 +818,28 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
+	case taskcommon.Reshard:
+		req := &datapb.ReshardTaskRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), req.GetSlot(), func(runCtx context.Context, runID int64) ([]*datapb.SegmentResult, error) {
+			return nil, node.executeReshardTask(runCtx, req, runID)
+		})
+	case taskcommon.ImportV3:
+		req := &datapb.ImportTaskV3Request{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), req.GetSlot(), func(runCtx context.Context, runID int64) ([]*datapb.SegmentResult, error) {
+			return node.executeImportTaskV3(runCtx, req, runID)
+		})
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -937,6 +965,10 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.Reshard:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.Reshard)
+	case taskcommon.ImportV3:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.ImportV3)
 	case taskcommon.Compaction:
 		resp, err := node.GetCompactionState(ctx, &datapb.CompactionStateRequest{PlanID: taskID})
 		if err != nil {
@@ -1064,6 +1096,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
+	case taskcommon.Reshard, taskcommon.ImportV3:
+		return node.dropImportV3WorkerTask(taskID, properties.GetTaskVersion())
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:

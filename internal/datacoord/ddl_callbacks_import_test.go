@@ -279,6 +279,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -328,6 +329,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -387,6 +389,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -451,6 +454,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -513,6 +517,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -574,6 +579,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.NoError(err)
@@ -867,6 +873,8 @@ func TestImportFlowIntegration(t *testing.T) {
 
 func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

@@ -62,10 +62,12 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	csvReader.Comma = sep
 
 	header, err := csvReader.Read()
-	mlog.Info(ctx, "csv header parsed", mlog.Strings("header", header))
 	if err != nil {
-		return nil, merr.WrapErrImportSysFailedMsg("failed to read csv header, error: %v", err)
+		// Keep the cause chain: a transient object-store timeout must stay
+		// retriable instead of being stringified into terminal SysFailed.
+		return nil, common.WrapDecodeErr(err, "failed to read csv header")
 	}
+	mlog.Info(ctx, "csv header parsed", mlog.Strings("header", header))
 
 	rowParser, err := NewRowParser(schema, header, nullkey)
 	if err != nil {
@@ -93,7 +95,13 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	var cnt int64 = 0
 	for {
 		value, err := r.cr.Read()
-		if err == io.EOF || len(value) == 0 {
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, common.WrapDecodeErr(err, "failed to read csv row")
+		}
+		if len(value) == 0 {
 			break
 		}
 		row, err := r.parser.Parse(value)

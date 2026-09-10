@@ -56,6 +56,8 @@ type ImportCheckerSuite struct {
 func (s *ImportCheckerSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -392,6 +394,16 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 	s.Equal("import timeout", job.GetReason())
+}
+
+func (s *ImportCheckerSuite) TestCheckTimeoutDoesNotFailCommittingJob() {
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+
+	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+	s.Empty(job.GetReason())
 }
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
@@ -836,6 +848,16 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
+func (s *ImportCheckerSuite) TestCheckCollectionDoesNotFailCommittingJob() {
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	broker := s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+
+	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+
+	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
 func TestImportChecker(t *testing.T) {
 	suite.Run(t, new(ImportCheckerSuite))
 }
@@ -849,6 +871,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// prepare objects
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

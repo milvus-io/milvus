@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -131,7 +132,42 @@ type importMeta struct {
 	catalog metastore.DataCoordCatalog
 }
 
+func normalizeImportJobVersion(jobVersion datapb.ImportJobVersion) (datapb.ImportJobVersion, error) {
+	switch jobVersion {
+	case datapb.ImportJobVersion_ImportJobVersionUnspecified:
+		return datapb.ImportJobVersion_ImportJobVersionV1, nil
+	case datapb.ImportJobVersion_ImportJobVersionV1, datapb.ImportJobVersion_ImportJobVersionV3:
+		return jobVersion, nil
+	default:
+		return datapb.ImportJobVersion_ImportJobVersionUnspecified, merr.WrapErrDataIntegrityMsg(
+			"unsupported import job version %d; supported versions are %d and %d",
+			jobVersion,
+			datapb.ImportJobVersion_ImportJobVersionV1,
+			datapb.ImportJobVersion_ImportJobVersionV3)
+	}
+}
+
 func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, alloc allocator.Allocator, meta *meta) (ImportMeta, error) {
+	tasks := newImportTasks()
+
+	importMeta := &importMeta{}
+	restoredReshardTasks, err := catalog.ListReshardTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range restoredReshardTasks {
+		t := newReshardTask(task, importMeta, meta, alloc)
+		tasks.add(t)
+	}
+	restoredImportTasksV3, err := catalog.ListImportTasksV3(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range restoredImportTasksV3 {
+		t := newImportTaskV3(task, importMeta, meta, alloc)
+		tasks.add(t)
+	}
+
 	restoredPreImportTasks, err := catalog.ListPreImportTasks(ctx)
 	if err != nil {
 		return nil, err
@@ -144,9 +180,6 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 	if err != nil {
 		return nil, err
 	}
-
-	tasks := newImportTasks()
-	importMeta := &importMeta{}
 
 	for _, task := range restoredPreImportTasks {
 		t := &preImportTask{
@@ -171,6 +204,11 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 
 	jobs := make(map[int64]ImportJob)
 	for _, job := range restoredJobs {
+		jobVersion, err := normalizeImportJobVersion(job.GetVersion())
+		if err != nil {
+			return nil, err
+		}
+		job.Version = jobVersion
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
 			tr:        timerecord.NewTimeRecorder("import job"),
@@ -186,14 +224,17 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	originJob := m.jobs[job.GetJobID()]
-	if originJob != nil {
-		originJob := originJob.Clone()
-		internalJob := originJob.(*importJob).ImportJob
-		internalJob.ReadyVchannels = lo.Union(originJob.GetReadyVchannels(), job.GetReadyVchannels())
-		job = originJob
+	jobVersion, err := normalizeImportJobVersion(job.GetVersion())
+	if err != nil {
+		return err
 	}
-	err := m.catalog.SaveImportJob(ctx, job.(*importJob).ImportJob)
+	job.(*importJob).Version = jobVersion
+	if originJob := m.jobs[job.GetJobID()]; originJob != nil {
+		merged := originJob.Clone()
+		merged.(*importJob).ReadyVchannels = lo.Union(originJob.GetReadyVchannels(), job.GetReadyVchannels())
+		job = merged
+	}
+	err = m.catalog.SaveImportJob(ctx, job.(*importJob).ImportJob)
 	if err != nil {
 		return err
 	}
@@ -213,6 +254,12 @@ func (m *importMeta) UpdateJob(ctx context.Context, jobID int64, actions ...Upda
 		updatedJob := job.Clone()
 		for _, action := range actions {
 			action(updatedJob)
+		}
+		if job.GetState() == internalpb.ImportJobState_Committing &&
+			updatedJob.GetState() == internalpb.ImportJobState_Failed {
+			// Committing is the 2PC point of no return. Late timeout/worker/GC
+			// callbacks must not regress an in-flight vchannel commit to Failed.
+			return nil
 		}
 		err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob)
 		if err != nil {
@@ -284,6 +331,16 @@ func (m *importMeta) AddTask(ctx context.Context, task ImportTask) error {
 			return err
 		}
 		m.tasks.add(task)
+	case ReshardTaskType:
+		if err := m.catalog.SaveReshardTask(ctx, task.(*reshardTask).task.Load()); err != nil {
+			return err
+		}
+		m.tasks.add(task)
+	case ImportTaskV3Type:
+		if err := m.catalog.SaveImportTaskV3(ctx, task.(*importTaskV3).task.Load()); err != nil {
+			return err
+		}
+		m.tasks.add(task)
 	}
 	return nil
 }
@@ -311,6 +368,16 @@ func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...Up
 			}
 			// update memory task
 			task.(*importTask).task.Store(updatedTask.(*importTask).task.Load())
+		case ReshardTaskType:
+			if err := m.catalog.SaveReshardTask(ctx, updatedTask.(*reshardTask).task.Load()); err != nil {
+				return err
+			}
+			task.(*reshardTask).task.Store(updatedTask.(*reshardTask).task.Load())
+		case ImportTaskV3Type:
+			if err := m.catalog.SaveImportTaskV3(ctx, updatedTask.(*importTaskV3).task.Load()); err != nil {
+				return err
+			}
+			task.(*importTaskV3).task.Store(updatedTask.(*importTaskV3).task.Load())
 		}
 	}
 
@@ -362,6 +429,14 @@ func (m *importMeta) RemoveTask(ctx context.Context, taskID int64) error {
 		case ImportTaskType:
 			err := m.catalog.DropImportTask(ctx, taskID)
 			if err != nil {
+				return err
+			}
+		case ReshardTaskType:
+			if err := m.catalog.DropReshardTask(ctx, taskID); err != nil {
+				return err
+			}
+		case ImportTaskV3Type:
+			if err := m.catalog.DropImportTaskV3(ctx, taskID); err != nil {
 				return err
 			}
 		}

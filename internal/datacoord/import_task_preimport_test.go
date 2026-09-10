@@ -57,6 +57,8 @@ func TestPreImportTask_TaskTime(t *testing.T) {
 func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 	t.Run("CreatePreImportTask rpc failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -96,6 +98,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 
 	t.Run("UpdateTask failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -139,6 +143,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -180,6 +186,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 	t.Run("QueryPreImport rpc failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -211,6 +219,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 
 	t.Run("preimport failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -255,6 +265,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -290,6 +302,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 func TestPreImportTask_DropTaskOnWorker(t *testing.T) {
 	t.Run("DropImport rpc failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -322,6 +336,8 @@ func TestPreImportTask_DropTaskOnWorker(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

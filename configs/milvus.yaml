@@ -958,9 +958,12 @@ dataCoord:
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
+    enableImportV3: false # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    fragmentSizeInMB: 128 # Target logical size in MiB for one sorted ImportTaskV3 fragment.
+    fragmentMergeFanIn: 16 # Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:

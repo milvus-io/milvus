@@ -186,7 +186,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		// Deterministic autoID: each file owns a disjoint PK range replicated from
 		// the primary. A nil cursor (no range) falls back to the local allocator.
 		var cur *pkCursor
-		if r := file.GetPreAllocatedAutoIds(); r.GetEnd() > r.GetBegin() {
+		if r := file.GetPreAllocatedAutoIds(); r != nil && r.GetEnd() > r.GetBegin() {
 			cur = &pkCursor{begin: r.GetBegin(), end: r.GetEnd(), next: r.GetBegin()}
 		} else if pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema()); err == nil &&
 			pkField.GetAutoID() && !importutilv2.IsBackup(req.GetOptions()) && !importutilv2.IsL0Import(req.GetOptions()) {

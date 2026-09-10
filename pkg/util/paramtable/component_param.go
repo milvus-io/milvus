@@ -6155,11 +6155,14 @@ type dataCoordConfig struct {
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
+	EnableImportV3                  ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	ImportFragmentSize              ParamItem `refreshable:"true"`
+	FragmentMergeFanIn              ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
@@ -7522,6 +7525,19 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	}
 	p.ImportInReplicatingCluster.Init(base.mgr)
 
+	p.EnableImportV3 = ParamItem{
+		Key:     "dataCoord.import.enableImportV3",
+		Version: "3.0.0",
+		Doc: "One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. " +
+			"Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. " +
+			"The gate only selects the version for new requests; persisted WAL messages and jobs always resume " +
+			"with their stored version. Disabling the gate again after activation is unsupported.",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.EnableImportV3.Init(base.mgr)
+
 	p.EnableL0Import = ParamItem{
 		Key:     "dataCoord.import.enableL0Import",
 		Version: "2.7.0",
@@ -7577,6 +7593,32 @@ raise this for files written with small row groups, many columns, or untruncated
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.ImportFragmentSize = ParamItem{
+		Key:          "dataCoord.import.fragmentSizeInMB",
+		Version:      "3.0.0",
+		Doc:          "Target logical size in MiB for one sorted ImportTaskV3 fragment.",
+		DefaultValue: "128",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportFragmentSize.Init(base.mgr)
+	if p.ImportFragmentSize.GetAsInt64() <= 0 {
+		panic("dataCoord.import.fragmentSizeInMB must be positive")
+	}
+
+	p.FragmentMergeFanIn = ParamItem{
+		Key:          "dataCoord.import.fragmentMergeFanIn",
+		Version:      "3.0.0",
+		Doc:          "Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.FragmentMergeFanIn.Init(base.mgr)
+	if fanIn := p.FragmentMergeFanIn.GetAsInt(); fanIn < 2 || fanIn > 1024 {
+		panic("dataCoord.import.fragmentMergeFanIn must be in [2, 1024]")
+	}
 
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
