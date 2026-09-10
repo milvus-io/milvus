@@ -54,6 +54,23 @@ import (
 //
 // expected is the non-nil map utils.AssignReplica just returned. It is never
 // mutated, because the caller may still log it.
+// scopedLoadAddsReplicas reports whether a scoped request asks any of the
+// groups it names for more replicas than the collection already holds there.
+// Only such a request places anything and is admitted against node numbers;
+// a request that changes nothing - a client re-sending the load that placed
+// the collection, while a node of the group restarts - or that only shrinks
+// a group adds no replica, and reaches the no-op or the shrink it asks for
+// without being refused for compute it does not need.
+func scopedLoadAddsReplicas(requested map[string]int, current job.CurrentLoadConfig) bool {
+	held := current.GetReplicaNumber()
+	for rgName, num := range requested {
+		if num > held[rgName] {
+			return true
+		}
+	}
+	return false
+}
+
 func completePlacementForOutOfScopeResourceGroups(
 	ctx context.Context,
 	collectionID int64,
