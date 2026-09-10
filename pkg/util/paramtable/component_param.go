@@ -2531,7 +2531,6 @@ type proxyConfig struct {
 	PartitionNameRegexp               ParamItem `refreshable:"true"`
 	MustUsePartitionKey               ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
-	AutoIDUpsertAllowInsert           ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
@@ -3087,15 +3086,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
 	}
 	p.SkipAutoIDCheck.Init(base.mgr)
-
-	p.AutoIDUpsertAllowInsert = ParamItem{
-		Key:          "proxy.autoIDUpsertAllowInsert",
-		Version:      "3.0.2",
-		DefaultValue: "true",
-		Doc:          "whether a full AutoID upsert generates a new primary key and inserts the row when the supplied primary key is not found; when false, any missing lookup primary key rejects the entire request before ID allocation or WAL append",
-		Export:       true,
-	}
-	p.AutoIDUpsertAllowInsert.Init(base.mgr)
 
 	p.SkipPartitionKeyCheck = ParamItem{
 		Key:          "proxy.skipPartitionKeyCheck",

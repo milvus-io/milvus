@@ -104,8 +104,8 @@ The observable behavior changes are:
 
 Ordinary non-partial AutoID Upsert follows
 [Preserve Primary Keys in Full AutoID Upsert](20260803-autoid-upsert-primary-key-preservation.md):
-it preserves an existing PK and applies the Proxy's insert-on-not-found
-configuration when the lookup PK is missing. That behavior is independent of
+it preserves an existing PK and inserts with a newly generated AutoID when the
+lookup PK is missing. That behavior is independent of
 the Partial Upsert CAS protocol described here.
 
 ### Internal protocol

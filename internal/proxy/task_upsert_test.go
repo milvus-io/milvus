@@ -2657,89 +2657,32 @@ func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
 		t.Cleanup(func() { partitionInfoPatch.UnPatch() })
 	}
 
-	for _, value := range []string{"true", "false"} {
-		t.Run("non replace field op promotes to partial with config "+value, func(t *testing.T) {
-			installMetadataMocks(t)
-			require.NoError(t, Params.Save(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key, value))
-			t.Cleanup(func() {
-				Params.Reset(Params.ProxyCfg.AutoIDUpsertAllowInsert.Key)
-			})
-			m := mockey.Mock((*upsertTask).preparePartialUpdateCASGroups).Return(nil).Build()
-			defer m.UnPatch()
-			m = mockey.Mock((*upsertTask).queryPreExecute).Return(nil).Build()
-			defer m.UnPatch()
-			m = mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
-			defer m.UnPatch()
-			m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
-			defer m.UnPatch()
+	t.Run("non replace field op promotes to partial", func(t *testing.T) {
+		installMetadataMocks(t)
+		m := mockey.Mock((*upsertTask).preparePartialUpdateCASGroups).Return(nil).Build()
+		defer m.UnPatch()
+		m = mockey.Mock((*upsertTask).queryPreExecute).Return(nil).Build()
+		defer m.UnPatch()
+		m = mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
+		defer m.UnPatch()
+		m = mockey.Mock((*upsertTask).deletePreExecute).Return(nil).Build()
+		defer m.UnPatch()
 
-			req := newRequest()
-			req.FieldOps = []*schemapb.FieldPartialUpdateOp{{
-				FieldName: "tags",
-				Op:        schemapb.FieldPartialUpdateOp_ARRAY_APPEND,
-			}}
-			task := &upsertTask{
-				baseTask: baseTask{MetaCache: &MetaCache{}},
-				ctx:      context.Background(),
-				req:      req,
-			}
-			task.SetTs(100)
+		req := newRequest()
+		req.FieldOps = []*schemapb.FieldPartialUpdateOp{{
+			FieldName: "tags",
+			Op:        schemapb.FieldPartialUpdateOp_ARRAY_APPEND,
+		}}
+		task := &upsertTask{
+			baseTask: baseTask{MetaCache: &MetaCache{}},
+			ctx:      context.Background(),
+			req:      req,
+		}
+		task.SetTs(100)
 
-			require.NoError(t, task.PreExecute(context.Background()))
-			require.True(t, task.req.GetPartialUpdate())
-		})
-	}
-}
-
-func TestClassifyFullAutoIDUpsertCapturesAllowInsertBeforeQuery(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		initial bool
-		updated bool
-	}{
-		{name: "enabled", initial: true, updated: true},
-		{name: "disabled", initial: false, updated: false},
-		{name: "disabled during query", initial: true, updated: false},
-		{name: "enabled during query", initial: false, updated: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
-			original := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetValue()
-			t.Cleanup(func() { require.NoError(t, Params.Save(key, original)) })
-			task := newFullAutoIDUpsertPreExecuteTask()
-			primaryField, err := typeutil.GetPrimaryFieldSchema(task.schema.CollectionSchema)
-			require.NoError(t, err)
-			requestIDs := partialUpdateCASIDs([]int64{10, 20})
-			require.NoError(t, Params.Save(key, strconv.FormatBool(tc.initial)))
-			queryCalls := 0
-			m := mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-				queryCalls++
-				require.NoError(t, Params.Save(key, strconv.FormatBool(tc.updated)))
-				return &milvuspb.QueryResults{
-					Status: merr.Success(),
-					FieldsData: []*schemapb.FieldData{
-						partialUpdateCASPKFieldData([]int64{10}),
-					},
-				}, segcore.StorageCost{}, nil
-			}).Build()
-			defer m.UnPatch()
-
-			assertDecision := func(task *upsertTask, allowInsert bool) {
-				t.Helper()
-				plan, err := task.classifyFullAutoIDUpsert(context.Background(), requestIDs, primaryField)
-				if allowInsert {
-					require.NoError(t, err)
-					require.Equal(t, []bool{true, false}, plan.existing)
-				} else {
-					require.ErrorIs(t, err, merr.ErrAutoIDUpsertTargetNotFound)
-					require.Nil(t, plan)
-				}
-			}
-			assertDecision(task, tc.initial)
-			assertDecision(newFullAutoIDUpsertPreExecuteTask(), tc.updated)
-			require.Equal(t, 2, queryCalls)
-		})
-	}
+		require.NoError(t, task.PreExecute(context.Background()))
+		require.True(t, task.req.GetPartialUpdate())
+	})
 }
 
 func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
@@ -2792,11 +2735,7 @@ func newFullAutoIDUpsertPreExecuteTask() *upsertTask {
 	}
 }
 
-func TestClassifyFullAutoIDUpsertRejectsMixedBatchBeforeAllocation(t *testing.T) {
-	key := Params.ProxyCfg.AutoIDUpsertAllowInsert.Key
-	original := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetValue()
-	require.NoError(t, Params.Save(key, "false"))
-	t.Cleanup(func() { require.NoError(t, Params.Save(key, original)) })
+func TestFullAutoIDUpsertInsertsMissingTarget(t *testing.T) {
 	retrievePatch := mockey.Mock(retrieveByPKs).Return(
 		&milvuspb.QueryResults{
 			Status: merr.Success(),
@@ -2820,9 +2759,10 @@ func TestClassifyFullAutoIDUpsertRejectsMixedBatchBeforeAllocation(t *testing.T)
 	task := newFullAutoIDUpsertPreExecuteTask()
 
 	err := task.insertPreExecute(context.Background())
-	require.ErrorIs(t, err, merr.ErrAutoIDUpsertTargetNotFound)
-	require.Equal(t, 0, allocationCalls)
-	require.Empty(t, task.rowIDs)
+	require.NoError(t, err)
+	require.Equal(t, 1, allocationCalls)
+	require.Equal(t, []int64{10, 1001}, task.result.GetIDs().GetIntId().GetData())
+	require.Equal(t, []int64{10}, task.upsertMsg.DeleteMsg.GetPrimaryKeys().GetIntId().GetData())
 }
 
 func TestClassifyFullAutoIDUpsertPropagatesQueryErrorBeforeAllocation(t *testing.T) {

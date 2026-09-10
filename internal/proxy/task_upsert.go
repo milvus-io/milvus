@@ -282,10 +282,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 }
 
 // classifyFullAutoIDUpsert queries PK existence and builds a plan in request order.
-// It rejects disallowed missing targets before allocating IDs or preparing writes.
+// Missing targets receive generated IDs during payload preparation.
 func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *schemapb.IDs, primaryField *schemapb.FieldSchema) (*fullAutoIDUpsertPlan, error) {
-	// Capture once before Query so a config refresh cannot change this attempt's policy.
-	allowInsert := Params.ProxyCfg.AutoIDUpsertAllowInsert.GetAsBool()
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-classifyFullAutoID")
 	resp, storageCost, err := retrieveByPKs(ctx, it, requestIDs, []string{primaryField.GetName()})
 	if err != nil {
@@ -358,10 +356,6 @@ func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *
 			notFoundCount++
 		}
 	}
-	if notFoundCount > 0 && !allowInsert {
-		return nil, merr.WrapErrAutoIDUpsertTargetNotFound(notFoundCount)
-	}
-
 	mlog.With(mlog.String("collectionName", it.req.GetCollectionName())).Debug(
 		ctx,
 		"classified full AutoID Upsert primary keys",
