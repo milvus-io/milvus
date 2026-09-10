@@ -15,8 +15,8 @@ The migration is incremental:
 4. Knowhere mmap/disk loading, including its stream/lazy-load contracts.
 5. Bounded concurrent slice reads and a final routing audit.
 
-Steps 1–4 are implemented at the Milvus load boundary. Step 5 remains follow-up
-work; internal remote reads in stream-capable Knowhere implementations retain
+Steps 1–5 are implemented at the Milvus load boundary. Internal remote reads
+in stream-capable Knowhere implementations retain
 their own admission contract, as detailed below. Index building,
 uploads, and independent text-match/JSON-key stats entries are outside these
 steps. Packed scalar V3 keeps its existing reader and materializer.
@@ -37,10 +37,12 @@ do not select the old HIGH/LOW worker pools.
 | Sealed-load dispatch | Existing synchronous cache-load caller | One outer `blockingWait` schedules the complete load coroutine |
 | Open object, obtain size, parse envelope and slice metadata | Shared async executor | `OpenInputFile` / ChunkManager `Size` can still block this worker; this migration does not make object opening asynchronous |
 | Wait for slice admission | Shared async executor | Coroutine suspends without occupying a worker |
+| Dispatch concurrent slices and join their completion | Shared async executor | Child coroutines run on the caller's executor; no nested `blockingWait` |
 | Native `ReadAtAsyncInto` | Storage backend owns I/O and completion | Coroutine suspends and resumes on the shared async executor |
 | Buffered Arrow `ReadAsync` fallback | Arrow I/O context / backend; its completion callback copies the returned buffer | Coroutine resumes on the shared async executor after that copy |
 | ChunkManager-only or rooted-local source read | Shared async executor | Existing synchronous read; no submission to HIGH/LOW |
 | Decode/decrypt a legacy envelope; copy into its final BinarySet entry | Shared async executor | CPU work runs directly; consumer completes before its slice lease is released |
+| Wait for the preceding file consumer | Shared async executor | Coroutine suspends while retaining admission; acquires no local-file executor token |
 | Restore vector nullable/empty-list sidecars and call `LoadWithoutAssemble` | Shared async executor | Synchronous CPU phase, with no slice admission held |
 | Call memory Knowhere `Deserialize` | Same shared async worker | One synchronous call; it occupies this worker until Knowhere returns |
 | Create/write/flush/close mmap files or disk slices | `LocalFileIOPool` | Coroutine awaits the operation; a read/decode lease survives each write |
@@ -72,8 +74,8 @@ Legacy scalar consumers use the same transport phases. Their final phase varies:
 
 Local-file work uses the existing disabled-pool fallback to the shared async
 executor. For Milvus staging, a local-file executor token does not span remote
-I/O. Cross-executor operations are awaited; an async worker never calls a child's blocking load
-wrapper. Existing disk-index construction still prepares its generated directory
+I/O. Cross-executor operations are awaited; an async worker never calls a child's
+blocking load wrapper. Existing disk-index construction still prepares its generated directory
 on the constructing caller; the table describes the subsequent sealed `Load`.
 
 ## Slice ownership and memory estimates
@@ -82,8 +84,8 @@ on the constructing caller; the table describes the subsequent sealed `Load`.
 validates slice counts and aggregate lengths, prepares one destination per logical
 entry, then streams slices into its awaited consumer. `LoadIndexBinarySetAsync`
 uses that reader to allocate and fill each required BinarySet entry. It reuses
-`LegacyIndexLoader` rather than retaining a map of every decoded slice. Unsliced entries remain separate entries;
-sliced entries are reconstructed using their persisted slice metadata.
+`LegacyIndexLoader` rather than retaining a map of every decoded slice. Unsliced
+entries remain separate entries; sliced entries use their persisted slice metadata.
 
 Each slice follows this lifetime:
 
@@ -100,7 +102,7 @@ byte capacity is not a hard cap below that unit's memory requirement.
 
 For vector memory loads, file-aware planning retains the existing Knowhere
 resource estimate and reserves at least final estimated memory plus assembled
-payload bytes plus the largest estimated decode/metadata scratch. This covers
+payload bytes plus the bounded concurrent decode scratch described below. This covers
 the overlap between the BinarySet and the constructed index. These are resource
 estimates, not allocator-enforced limits inside Knowhere or codec libraries.
 Input retained by Knowhere uses its existing shared ownership.
@@ -108,7 +110,7 @@ Input retained by Knowhere uses its existing shared ownership.
 The BinarySet is request-owned and is not charged to a short-lived slice lease
 or a shared overhead group. `SegmentLoadInfo` defers memory/mmap-vector estimates
 until a file context is available. Mmap estimates include retained nullable and
-empty-list payloads, parsed slice metadata, the largest decode scratch, and up to
+empty-list payloads, parsed slice metadata, bounded decode scratch, and up to
 three `FileWriter::MAX_BUFFER_SIZE` buffers (main, embedding metadata, raw index).
 Knowhere reads the embedding metadata file into heap before restoring its
 strategy; that payload also belongs in the estimate. Compatibility sidecar
@@ -124,8 +126,51 @@ prove a bound on unusually large encoded disk objects, retained disk sidecars,
 or backend-internal loading scratch. Actual Milvus slice reads still acquire the
 shared admission controller using their inspected decode requirements.
 
-Steps 1–4 process one slice at a time within a load; different loads can progress
-concurrently. Step 5 will add bounded intra-load concurrency.
+## Concurrent slice window
+
+`StreamLegacyIndexFilesAsync` processes the ordered files of one logical entry
+or one local disk file. It splits raw payloads into the existing 16 MiB ranges;
+each encoded/encrypted object remains one decode unit. Files are opened lazily
+as the window advances. Envelope inspection and logical-entry preparation stay
+sequential; small unsliced entries reuse the single-unit path.
+
+Each window contains at most eight outstanding units and 128 MiB of estimated
+scratch. These bounds reuse `DEFAULT_FIELD_MAX_MEMORY_LIMIT` and its ratio to
+`DEFAULT_INDEX_FILE_SLICE_SIZE`. A decode unit exceeding 128 MiB runs alone in
+that load. Every unit also acquires the shared controller's byte and slot lease;
+global capacity can further restrict progress, including to a single slot.
+With one shared worker, multiple native reads can still be outstanding. Purely
+synchronous source reads occupy that worker, so their parallelism depends on
+the executor's workers.
+
+The producer acquires leases in destination order before dispatching child
+coroutines. Raw ranges are flattened across file boundaries for this purpose:
+an earlier file never needs another admission while a later file holds a lease
+waiting for it. Memory consumers place completed ranges directly at disjoint
+offsets. File consumers await the preceding consumer's completion before
+calling the existing sequential `FileWriter` on `LocalFileIOPool`. This retains
+its unaligned-slice, buffering, direct-I/O, and write-limiter behavior.
+
+The window advances from its oldest completed unit. A slow first unit can limit
+refill, while completed memory ranges release their leases immediately and
+other loads can use that capacity. The loader retains only bounded completion
+signals, not a separate copied-result queue. Its first error cancels sibling
+work; all issued reads and consumers join before buffers, writers, or index
+destinations can be destroyed. Waiting and joining suspend coroutines rather
+than blocking async workers.
+
+For largest inspected unit scratch `s`, the shared planning helper reserves
+`max(s, min(128 MiB, 8 * s))`, using saturating arithmetic. Executor worker count
+and refreshable global byte/slot capacities do not reduce this estimate, so
+expanding them after translator construction cannot invalidate the legacy
+window estimate. Parsed slice metadata remains request-owned alongside that
+window in scalar and vector estimates. Writer buffers and retained BinarySet
+or sidecar data remain separate. Disk's coarse allowance covers the ordinary
+128 MiB window; the oversized-codec/backend limitations above still apply.
+
+Packed scalar V3 retains its existing materializer and resource accounting.
+Reconciling its independently sampled worker/mode settings is separate from
+this legacy-window bound.
 
 ## File layout and Knowhere I/O boundary
 
@@ -164,6 +209,37 @@ Milvus streaming budget. A backend that performs synchronous remote reads inside
 executor token until the call returns; the staging shutdown guarantee does not
 extend to those opaque reads.
 
+## Final routing audit
+
+The production call-site audit covers `LoadIndexToMemory`, `CacheIndexToDisk`
+and its text/ngram/stats variants, `GetObjectData`, index metadata loaders,
+`OpenInputStream`, and explicit HIGH/LOW pool retrievals.
+
+| Reachable load path | Enabled route / remaining boundary |
+| --- | --- |
+| `SealedIndexTranslator` legacy scalar dispatch | Context-aware `ScalarIndex::Load` invokes `LoadLegacyAsync` on the shared executor |
+| Numeric/string Sort, Bitmap, Marisa, Hybrid | Shared BinarySet streamer; Hybrid awaits its child coroutine |
+| Tantivy/Ngram and RTree | Shared metadata streamer, concurrent disk-file streamer, awaited local finalizer |
+| JSON scalar wrappers | Await the base coroutine and restore existing missing/null sidecars |
+| Knowhere memory and mmap | Shared logical-entry streamer; memory copies by offset and mmap consumers write in order |
+| Knowhere disk | Concurrent staging for the files selected by `LoadIndexWithStream`; backend-owned remote reads retain their existing contract |
+| Legacy Hybrid/Bitmap resource metadata | Admitted inspection and metadata assembly, scheduled on the shared executor when enabled |
+| Packed V3 and FMIndex | Existing `LoadUnifiedAsync` reader/materializer; not routed through the legacy decoder |
+
+The remaining synchronous calls in those scalar/vector implementations belong
+to their two-argument compatibility loaders and associated metadata overloads.
+Index building uses `CacheRawDataToMemory`, `CacheRawDataToDisk`,
+`CacheOptFieldToDisk`, and field-data `GetObjectData` consumers. Independent
+`TextMatchIndex::Load`, BSON shared-key stats, and JSON stats metadata retain
+their existing loaders. JSON shredding data already has its own async branch,
+but that does not migrate every stats file. These entry points do not pass
+through the sealed-index dispatch covered by this migration.
+
+HIGH/LOW pools therefore still exist. Existing V3 shared-overhead accounting
+also consults `ThreadPools::GetLoadExecutorWorkers()`, which can initialize those
+pools; this change does not claim to remove their construction. Enabled legacy
+payload tasks do not use that helper or submit to those pools.
+
 ## Cancellation and failures
 
 Cancellation before admission prevents new reads. An issued async read drains
@@ -174,8 +250,8 @@ alive throughout. File writes likewise drain before their borrowed read buffer
 or admission lease is released. Failed mmap loads remove the targets prepared by
 that call. Configured mmap filenames replace stale targets, matching the
 compatibility path and allowing cache reloads; unrelated files are preserved.
-Failed disk loads remove the file manager's generated staging directory. Successful loads retain
-the existing file ownership and unmapping behavior.
+Failed disk loads remove the file manager's generated staging directory.
+Successful loads retain the existing file ownership and unmapping behavior.
 
 Existing typed storage failures propagate through the new boundary. Escaping
 `std::bad_alloc` and Folly cancellation become `MemAllocateFailed` and
@@ -207,12 +283,22 @@ a proprietary stream implementation.
 
 The shared legacy-loader suite covers raw/Parquet/encrypted decoding, malformed
 envelopes, short reads, decoder failures and draining reads on cancellation.
+Concurrent cases control native read completion to exercise a slow first range,
+reversed completion across raw/encoded file boundaries, offset placement and
+ordered writes, encrypted decoding with multiple workers, and byte-for-byte
+memory/disk assembly. They also cover the eight-unit and byte windows with
+unlimited global admission, indivisible oversized units, shrinking global
+limits, HIGH/LOW contention, and cancellation/consumer failure while sibling
+reads remain outstanding. The vector estimate test compares rollout modes and
+worker/budget settings against the same stable peak estimate.
 Throughput benchmarks and remote-cluster tests are not part of this verification.
 
 On 2026-09-10 the GCC 12 Release `all_tests` target rebuilt successfully with
-up to 16 concurrent build jobs. All 447 selected tests from 14 suites passed,
-including 22 vector-loading cases, existing vector load/query cases, scalar
-streaming, storage codecs, shared async infrastructure, admission,
-segment-resource estimates, and `FileWriter` failures. The vector cases exercise
-sparse engine versions 6 and 8 and MUVERA sidecars at version 11. DiskANN remains
-disabled in this build; its backend I/O boundary was inspected statically.
+up to 16 concurrent build jobs. The focused run passed all 43 legacy-loader and
+vector-loading cases. The broader run selected 1,156 tests from 129 suites:
+1,154 passed, with two existing floating-point array-equality cases skipped and
+no failures. It covers legacy scalar and vector loads, V3 regressions, storage
+codecs, shared async infrastructure, admission, segment-resource estimates, and
+`FileWriter` failures. The vector cases exercise sparse engine versions 6 and 8
+and MUVERA sidecars at version 11. DiskANN remains disabled in this build; its
+backend I/O boundary was inspected statically.
