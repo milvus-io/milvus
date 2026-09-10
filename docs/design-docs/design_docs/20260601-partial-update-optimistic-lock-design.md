@@ -104,8 +104,9 @@ The observable behavior changes are:
   `ErrCollectionPartialUpdateConflict` with `Retriable=false`.
 - A replacement update that exhausts its retry budget returns
   `ErrServiceUnavailable` with `Retriable=true`.
-- AutoID partial update becomes update-only: every supplied PK must exist in the
-  query snapshot, and the merged Insert preserves that PK.
+- AutoID partial update preserves existing PKs. Missing rows receive new AutoIDs
+  and use insert semantics; the mutation result returns the destination PKs in
+  request order.
 
 Ordinary non-partial AutoID upsert continues to allocate a new PK.
 
@@ -257,10 +258,13 @@ make a multi-vchannel request atomic.
 Proxy builds the first attempt and every eligible retry in the same order:
 
 ```text
-route original PKs to vchannels
+route current request PKs (including previously allocated AutoIDs) to vchannels
   -> resolve and snapshot every touched PChannel term
   -> enqueue a new Strong Query with GuaranteeTimestamp = MvccTimestamp = 0
   -> collect actual nonzero readTS from each successful write channel
+  -> if an unconverted AutoID PK is missing: validate insert fields, allocate
+     its destination PK, update the retry payload, regenerate function output,
+     and repeat routing, term resolution, and Strong read for the new PKs
   -> merge
   -> attach that channel's term and readTS to every CAS Insert chunk
 ```
@@ -284,15 +288,49 @@ Proxy retains the existing merge implementation, including:
 - compact nullable-vector representation;
 - partition-key immutability validation.
 
-For AutoID collections, partial update requires every request PK to be present
-in the query snapshot. A missing PK rejects the complete request before WAL
-append. The merged Insert preserves the request PK so Delete, Insert, routing,
-and CAS all address the same row.
+For AutoID collections, a PK present in the query snapshot keeps its identity.
+A missing PK selects insert semantics and receives a fresh AutoID. This decision
+uses the source row's query snapshot; a later insert of the supplied source PK
+does not redirect the newly allocated entity back to that source PK. Required
+insert fields must be supplied, while nullable/default fields use the ordinary
+partial-update insert merge rules.
+
+If a required field is missing, Proxy returns a non-retriable parameter error
+identifying the first missing PK and its zero-based request row index, explaining
+that the PK was absent from the query scope and insert fallback needs the named
+field. For example: `partial update: primary key 100 (row index 0) does not exist
+in the query scope; cannot insert a new entity: missing required field "vector"`.
+The query scope includes the requested partition and namespace; absence here
+must not be interpreted as absence from every partition in the collection.
+
+Proxy replaces missing PKs in both the working payload and its retry payload.
+It then resolves terms and performs another Strong read using the destination
+PKs before merging. Consequently, the CAS proof, Insert, and any Delete address
+the same destination PK and vchannel. Existing-only requests need no extra read.
+If another original row disappears during this read, it is also converted;
+each request row can receive a new PK at most once, bounding this preparation.
+
+Allocated IDs remain stable throughout the request's internal CAS retries,
+even when still absent. If another vchannel already committed a generated row,
+the next read sees that destination row and rebuilds an update at the same PK.
+This retains the existing REPLACE retry behavior without allocating duplicate
+entities. Relative operations still do not retry automatically, and unknown
+append outcomes still stop retries. This is not cross-request deduplication:
+a new client request has a new allocation lifecycle.
+
+A missing source PK produces no Delete. An insert under its new AutoID therefore
+writes only the destination vchannel; if later retried as an update, its Delete
+and Insert both use that same AutoID. A batch can still span multiple vchannels,
+whose transactions commit independently; there is no cross-vchannel atomicity.
+After successful execution, Proxy returns destination IDs in input-row order,
+while message packing continues to use the merged row order.
 
 ### CAS metadata and encryption
 
-Proxy derives the touched vchannels from the original request PKs. CAS metadata
-contains only the attempt `readTS` and observed PChannel term; it does not
+Proxy derives the touched vchannels from the current request PKs, including
+allocated destination AutoIDs. It rebuilds the channel set and read proofs after
+any allocation; the missing source PK is not included in Delete or final CAS
+solely because it was used for the initial lookup. CAS metadata contains only the attempt `readTS` and observed PChannel term; it does not
 duplicate the collection ID, schema version, PK field ID, or PK list.
 
 For every CAS Insert, StreamingNode:
@@ -572,11 +610,13 @@ Promotion creates a new term and therefore a new empty per-term index.
 Proxy automatically retries only when every partial-update field operation is
 `REPLACE`. Each retry:
 
-1. restores the original partial payload captured before function generation;
+1. restores the original partial field values, retaining any destination AutoIDs
+   already allocated for this request;
 2. regenerates function output;
-3. re-routes the original PKs;
+3. re-routes these current PKs;
 4. resolves all touched terms;
-5. runs a new Strong query and binds its actual per-channel snapshots;
+5. runs a new Strong query and binds its actual per-channel snapshots; any
+   newly missing original AutoID row follows the allocation and re-read flow;
 6. re-merges the original user payload with the new query results;
 7. rebuilds Insert/Delete preprocessing and MutationResult counts;
 8. accumulates storage cost from the new query;
@@ -663,6 +703,8 @@ resolve terms for all write channels
   -> each delegator waits for its guarantee and fixes its actual snapshot S[c]
   -> successful channel response reports S[c], including empty results
   -> Proxy validates all write channels have nonzero S[c]
+  -> if missing AutoID rows receive new PKs, rebuild the payload and repeat
+     term resolution and Strong read for those destination channels
   -> merge, then commit(term[c], readTS=S[c])
 ```
 
