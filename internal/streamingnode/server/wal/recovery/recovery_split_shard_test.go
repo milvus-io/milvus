@@ -7,6 +7,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -18,10 +20,12 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -444,6 +448,32 @@ func TestVChannelRecoveryInfoSplitTimeTickIsPersisted(t *testing.T) {
 		"T_switch must be persisted; a re-fence after restart reads it back from here")
 }
 
+// TestConsumeDirtyAndGetSnapshotRewritesRetiredSplittedToDroppedForRemoval:
+// the case that matters most is exactly the one where dirty is already
+// false -- Retired was set and persisted on an earlier round, and only later
+// does flusherCheckpointTimeTick independently catch up to the fence. That
+// round still has to emit a snapshot, rewritten to DROPPED (with Retired
+// left true), or the catalog would never see the write that deletes the row.
+func TestConsumeDirtyAndGetSnapshotRewritesRetiredSplittedToDroppedForRemoval(t *testing.T) {
+	info := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel:      "v1",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			Retired:       true,
+			SplitTimeTick: 2000,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+		dirty: false,
+	}
+
+	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot(2000)
+	assert.True(t, shouldBeRemoved)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, snapshot.State)
+	assert.True(t, snapshot.Retired)
+}
+
 // newRecoveryStorageForRetireGCTest builds a bare recoveryStorageImpl carrying
 // exactly one retired-and-SPLITTED vchannel whose flusher checkpoint sits at
 // flusherCheckpointTimeTick, plus enough resource wiring for persistDirtySnapshot
@@ -508,8 +538,12 @@ func newRecoveryStorageForRetireGCTest(t *testing.T, flusherCheckpointTimeTick u
 // TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence: a
 // retired SPLITTED vchannel is only safe to collect once the flusher has
 // actually drained past T_switch -- collecting it earlier could still lose
-// data the flusher has not consumed yet. Either way, DataCoord must never be
-// called: the source's own catalog collection is a purely local decision.
+// data the flusher has not consumed yet. Collecting it means the catalog row
+// is actually deleted (the snapshot is rewritten to State=DROPPED, which is
+// what the catalog's own removal logic keys off), but DataCoord must never
+// be called: the source's own catalog collection is a purely local decision,
+// and dropAllVirtualChannel skips a DROPPED-with-Retired entry for exactly
+// that reason.
 func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *testing.T) {
 	t.Run("flusher checkpoint has not passed the fence yet", func(t *testing.T) {
 		rs, persisted := newRecoveryStorageForRetireGCTest(t, 1999)
@@ -519,8 +553,8 @@ func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *te
 
 		_, ok := rs.vchannels["v0"]
 		assert.True(t, ok, "the retired meta must stay in the catalog until the flusher drains past the fence")
-		// It is still persisted as SPLITTED -- never DROPPED -- so a replay
-		// after a restart could never send it through dropAllVirtualChannel.
+		// No removal write happened: the persisted snapshot still carries it
+		// as SPLITTED, not DROPPED.
 		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, (*persisted)["v0"].State)
 	})
 
@@ -532,11 +566,61 @@ func TestRetiredSplittedVChannelIsRemovedOnlyAfterTheFlusherPassesTheFence(t *te
 
 		_, ok := rs.vchannels["v0"]
 		assert.False(t, ok, "a retired vchannel drained past the fence must be collected from the catalog")
-		// The persisted snapshot still carries it as SPLITTED, not DROPPED --
-		// dropAllVirtualChannel (which ran just before this save, over the
-		// very same snapshot) never had a DROPPED entry to act on, so
-		// DataCoord's DropVirtualChannel (unconfigured on the mock above)
-		// was never reached.
-		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, (*persisted)["v0"].State)
+		// The catalog actually receives the delete write: State is rewritten
+		// to DROPPED (what the catalog's own removal logic keys off) with
+		// Retired left true (what tells dropAllVirtualChannel this is not a
+		// genuine drop). DataCoord's DropVirtualChannel is never reached --
+		// it is deliberately left unconfigured on the mixcoord mock above,
+		// so any call to it would have already failed this test.
+		require.Contains(t, *persisted, "v0")
+		assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, (*persisted)["v0"].State)
+		assert.True(t, (*persisted)["v0"].Retired)
 	})
+}
+
+// TestDropAllVirtualChannelSkipsRetiredSplitSources: dropAllVirtualChannel
+// must tell a genuine drop (DataCoord needs to hear about it) apart from a
+// retired split source that merely borrows the DROPPED state to get deleted
+// from the catalog (see ConsumeDirtyAndGetSnapshot) -- only the former may
+// ever reach DataCoord's DropVirtualChannel.
+func TestDropAllVirtualChannelSkipsRetiredSplitSources(t *testing.T) {
+	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	var droppedChannels []string
+	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
+			droppedChannels = append(droppedChannels, req.GetChannelName())
+			return &datapb.DropVirtualChannelResponse{Status: merr.Success()}, nil
+		})
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(mixCoord)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
+
+	rs := &recoveryStorageImpl{
+		cfg:     newConfig(),
+		channel: types.PChannelInfo{Name: "test-pchannel"},
+		metrics: newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
+	}
+
+	err := rs.dropAllVirtualChannel(context.Background(), map[string]*streamingpb.VChannelMeta{
+		// a genuine drop: DataCoord must be told.
+		"v-dropped": {
+			Vchannel: "v-dropped",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+		},
+		// a retired split source borrowing DROPPED to get collected from the
+		// catalog: DataCoord must never hear about it.
+		"v-retired-source": {
+			Vchannel: "v-retired-source",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+			Retired:  true,
+		},
+		// neither DROPPED nor removable: untouched either way.
+		"v-normal": {
+			Vchannel: "v-normal",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"v-dropped"}, droppedChannels)
 }

@@ -315,7 +315,8 @@ func (info *vchannelRecoveryInfo) ObserveCreatePartition(msg message.ImmutableCr
 }
 
 // ConsumeDirtyAndGetSnapshot returns the snapshot of the vchannel recovery info.
-// It returns nil if the vchannel recovery info is not dirty.
+// It returns nil if the vchannel recovery info is not dirty and there is
+// nothing else that must still reach the catalog (see below).
 //
 // ShouldBeRemoved is computed from the live state regardless of dirty, same
 // as before: a DROPPED vchannel is always removable. A SPLITTED vchannel
@@ -323,15 +324,40 @@ func (info *vchannelRecoveryInfo) ObserveCreatePartition(msg message.ImmutableCr
 // flusherCheckpointTimeTick — the tick up to which the flusher has actually
 // drained this pchannel — has passed the fence (SplitTimeTick), because that
 // is what proves there is nothing left of the source to replay.
+//
+// The catalog's own removal logic keys off State==DROPPED (it has no separate
+// "retired and drained" concept), so the moment a retired SPLITTED vchannel
+// becomes removable, the returned snapshot is rewritten to State=DROPPED —
+// with Retired left true — so this one last write is what actually deletes
+// the row from the catalog; the live meta in info itself is untouched (it is
+// about to be forgotten by the caller anyway once ShouldBeRemoved is true).
+// This has to happen unconditionally, not only when dirty: Retired is
+// typically set (and persisted, clearing dirty) well before
+// flusherCheckpointTimeTick independently catches up to the fence, so the
+// round that finally satisfies the removal condition is very often one where
+// dirty is already false — and without emitting a snapshot on that round too,
+// the catalog would never see the DROPPED write and the meta would linger in
+// etcd forever, reloaded on every restart. dropAllVirtualChannel is what
+// reads Retired back off a DROPPED snapshot to tell this apart from a genuine
+// drop and skip calling DataCoord for it.
 func (info *vchannelRecoveryInfo) ConsumeDirtyAndGetSnapshot(flusherCheckpointTimeTick uint64) (dirtySnapshot *streamingpb.VChannelMeta, ShouldBeRemoved bool) {
-	shouldBeRemoved := info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED ||
-		(info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED &&
-			info.meta.Retired && flusherCheckpointTimeTick >= info.meta.SplitTimeTick)
+	retiredAndDrained := info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED &&
+		info.meta.Retired && flusherCheckpointTimeTick >= info.meta.SplitTimeTick
+	shouldBeRemoved := info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED || retiredAndDrained
+
 	if !info.dirty {
+		if retiredAndDrained {
+			snapshot := proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+			snapshot.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
+			return snapshot, true
+		}
 		return nil, shouldBeRemoved
 	}
 	// create the snapshot of the vchannel recovery info first.
 	snapshot := proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+	if retiredAndDrained {
+		snapshot.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
+	}
 
 	// consume the dirty part of the vchannel recovery info.
 	for i := len(info.meta.CollectionInfo.Schemas) - 1; i >= 0; i-- {
