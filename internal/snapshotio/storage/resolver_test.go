@@ -44,6 +44,9 @@ func patchRemoteChunkManager(t *testing.T, captured *[]objectstorage.Config) {
 }
 
 func TestValidateInstanceSnapshotImportURI(t *testing.T) {
+	// These cases exercise explicit account/endpoint configs, not the CI
+	// Azurite connection string (whose endpoint includes an account path).
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
 	paramtable.Init()
 	instance := &objectstorage.Config{Address: "localhost:9000", BucketName: "source", CloudProvider: "aws"}
 	const key = "/root/snapshots/1/metadata/2.json"
