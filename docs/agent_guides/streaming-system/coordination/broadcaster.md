@@ -12,10 +12,12 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`.
 
 1. **Lock**: Acquire ResourceKey locks in sorted order (Domain, then Key). SharedCluster is added automatically.
 2. **Persist**: Allocate BroadcastID, create task in PENDING state, persist to catalog. Once persisted, the broadcast is guaranteed to eventually complete even across crashes.
-3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels.
+3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels. An unrecoverable append error (for example, the streamingnode refuses the replica) is retried forever with backoff while the task keeps holding its resource keys — there is no automatic escape, so such a failure is operator-visible, not self-healing.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
+
+`BroadcastHeader.append_first_vchannels` names a subset of the broadcast's VChannels the Append step must land, and persist, before it appends any other replica. It is empty for every broadcast except a shard split, whose source VChannels go in this group: the fence has to be in the WAL before any target replica takes its TimeTick, or a target's TimeTick could sort before `T_switch`. The worker appends the group, persists whatever landed via a partial ack (`AckPartial`) before deciding whether to retry, and only then appends the rest — so a crash after the first group lands does not lose that progress, and a restart resumes with an empty first group and proceeds straight to the rest. Because the append-first group is genuine durable progress and `ack` is per-VChannel idempotent, acking it early is safe even if the remaining replicas are later retried on their own.
 
 ## Idempotent Broadcast
 
