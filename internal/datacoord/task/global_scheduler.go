@@ -18,7 +18,6 @@ package task
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"time"
 
@@ -262,13 +261,12 @@ func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], t
 }
 
 func (s *globalTaskScheduler) schedule() {
-	taskIDs := s.pendingTasks.TaskIDs()
+	taskIDs := s.pendingTasks.TaskIDsByPriority()
 	if len(taskIDs) == 0 {
 		return
 	}
-	// A round visits each candidate once, preserving the queue's task-ID priority.
+	// A round visits each candidate once in the queue's priority order.
 	// Keep candidates in pending until a worker callback acquires their task lock.
-	slices.Sort(taskIDs)
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", len(taskIDs)), mlog.Any("nodeSlots", nodeSlots))
 

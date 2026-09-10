@@ -142,6 +142,43 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	assert.Equal(t, 0, scheduler.(*globalTaskScheduler).runningTasks.Len())
 }
 
+type orderedSnapshotQueue struct {
+	PriorityQueue
+	ids []int64
+}
+
+func (q *orderedSnapshotQueue) TaskIDsByPriority() []int64 {
+	return append([]int64(nil), q.ids...)
+}
+
+func TestGlobalScheduler_UsesQueuePriority(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 1},
+	}).Once()
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	t.Cleanup(s.execPool.Release)
+	t.Cleanup(s.checkPool.Release)
+	// The queue prioritizes task 2, independently of its task ID.
+	s.pendingTasks = &orderedSnapshotQueue{PriorityQueue: s.pendingTasks, ids: []int64{2, 1}}
+	var dispatched atomic.Int64
+	for _, id := range []int64{1, 2} {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(id)
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(1))
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		task.EXPECT().CreateTaskOnWorker(int64(10), cluster).Run(func(int64, session.Cluster) {
+			dispatched.Store(id)
+		}).Maybe()
+		s.pendingTasks.Push(task)
+	}
+
+	s.schedule()
+
+	assert.Equal(t, int64(2), dispatched.Load(), "the only slot must go to the queue's highest-priority task")
+}
+
 func TestGlobalScheduler_pickNode(t *testing.T) {
 	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
 
