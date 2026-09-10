@@ -88,21 +88,9 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 // preparePartialUpdateRetryAttempt restores the original payload and rebuilds
 // terms, Strong query snapshots, and DML state for one retry.
 func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
-	fields := cloneFieldDataList(ut.partialUpdateOriginalFields)
-	ut.req.FieldsData = fields
-	ut.upsertMsg.InsertMsg.FieldsData = fields
-	if err := genFunctionFields(ctx, ut.upsertMsg.InsertMsg, ut.schema, true); err != nil {
+	if err := ut.preparePartialUpdate(ctx); err != nil {
 		return err
 	}
-	if err := ut.preparePartialUpdateCASGroups(ctx); err != nil {
-		return err
-	}
-	if err := ut.queryPreExecute(ctx); err != nil {
-		return err
-	}
-	ut.upsertMsg.InsertMsg.FieldsData = ut.insertFieldData
-	ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.deletePKs
-	ut.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(ut.deletePKs))
 	if err := ut.insertPreExecute(ctx); err != nil {
 		return err
 	}
@@ -331,13 +319,36 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 	return nil
 }
 
-// preparePartialUpdateCASGroups resolves all touched PChannel terms before
+// preparePartialUpdateCASGroups resolves all possible write PChannel terms before
 // reading. Strong reads bind their actual snapshots after the query succeeds.
 func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	ut.partialUpdateCASGroups = nil
 	groups, err := ut.buildPartialUpdateCASGroups()
 	if err != nil {
 		return err
+	}
+	pkSchema, err := typeutil.GetPrimaryFieldSchema(ut.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	if pkSchema.GetAutoID() {
+		// Newly allocated PKs may target any shard. Capture terms before the
+		// single Strong read; namespace routing still fixes one destination.
+		vchannels, err := ut.chMgr.GetVChannels(ut.collectionID)
+		if err != nil {
+			return err
+		}
+		_, fixedChannel, err := namespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
+		if err != nil {
+			return err
+		}
+		if !fixedChannel {
+			for _, channel := range vchannels {
+				if groups[channel] == nil {
+					groups[channel] = &messagespb.PartialUpdateCAS{}
+				}
+			}
+		}
 	}
 
 	terms := make(map[string]int64, len(groups))
@@ -363,19 +374,23 @@ func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 
 // bindPartialUpdateReadSnapshots publishes proofs only after every write
 // channel has a snapshot from this successful read attempt.
-func (ut *upsertTask) bindPartialUpdateReadSnapshots(snapshots *typeutil.ConcurrentMap[string, uint64]) bool {
+func (ut *upsertTask) bindPartialUpdateReadSnapshots(snapshots *typeutil.ConcurrentMap[string, uint64]) error {
 	if len(ut.partialUpdateCASGroups) == 0 {
-		return false
+		return merr.WrapErrServiceInternalMsg("partial update: query succeeded but CAS write channel groups are empty")
 	}
 	for channel := range ut.partialUpdateCASGroups {
-		if ts, ok := snapshots.Get(channel); !ok || ts == 0 {
-			return false
+		ts, ok := snapshots.Get(channel)
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is missing for write channel %q", channel)
+		}
+		if ts == 0 {
+			return merr.WrapErrServiceInternalMsg("partial update: query succeeded but read timestamp is zero for write channel %q", channel)
 		}
 	}
 	for channel, meta := range ut.partialUpdateCASGroups {
 		meta.ReadTs, _ = snapshots.Get(channel)
 	}
-	return true
+	return nil
 }
 
 func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.PartialUpdateCAS, error) {

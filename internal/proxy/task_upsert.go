@@ -82,13 +82,12 @@ type upsertTask struct {
 	// partialUpdateCASGroups binds one partial-update attempt to the metadata
 	// prepared before its MVCC query starts.
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS // vchannel -> metadata
-	// partialUpdateOriginalFields is captured before function generation and
-	// query merge mutate the request payload. Missing AutoID PKs are replaced
-	// once with their allocated destination IDs; other field values stay original.
+	// Original user fields, captured before function generation and never modified.
 	partialUpdateOriginalFields []*schemapb.FieldData
-	// Request row offsets whose missing PK was replaced with an allocated ID.
-	// These IDs are kept in the retry payload and must never be allocated again.
-	partialUpdateAutoIDRows map[int]struct{}
+	// Allocated AutoIDs indexed by original request row, stable across retries.
+	partialUpdateAllocatedIDs map[int]int64
+	// Complete destination IDs in request order, saved after each PK allocation.
+	partialUpdateResultIDs *schemapb.IDs
 
 	storageCost segcore.StorageCost
 }
@@ -180,29 +179,20 @@ func (it *upsertTask) OnEnqueue() error {
 
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
-	var err error
-	readTS := t.BeginTs()
-	consistency := commonpb.ConsistencyLevel_Customized
-	var snapshots *typeutil.ConcurrentMap[string, uint64]
-	if t.req.GetPartialUpdate() {
-		// Every attempt gets a new Strong Query and records its executed snapshots.
-		// Do not reuse the outer Upsert's potentially old BeginTs.
-		readTS = 0
-		consistency = commonpb.ConsistencyLevel_Strong
-		snapshots = typeutil.NewConcurrentMap[string, uint64]()
-	}
+	// Only partial updates read existing rows. Each attempt uses a new Strong
+	// query and records its executed snapshots, independent of the Upsert's BeginTs.
+	snapshots := typeutil.NewConcurrentMap[string, uint64]()
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Retrieve,
-			Timestamp: readTS,
+			MsgType: commonpb.MsgType_Retrieve,
 		},
 		DbName:                t.req.GetDbName(),
 		CollectionName:        t.req.GetCollectionName(),
-		ConsistencyLevel:      consistency,
+		ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
 		NotReturnAllMeta:      false,
 		OutputFields:          []string{"*"},
 		UseDefaultConsistency: false,
-		GuaranteeTimestamp:    readTS,
+		GuaranteeTimestamp:    0,
 		Namespace:             t.req.Namespace,
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
@@ -248,7 +238,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			),
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
-			ConsistencyLevel: consistency,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			MvccTimestamp:    0,
 			QueryLabel:       metrics.UpsertQueryLabel,
 		},
 		request:            queryReq,
@@ -259,9 +250,6 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		chMgr:              t.node.(*Proxy).chMgr,
 		actualChannelsMvcc: snapshots,
 	}
-	// Preserve the legacy snapshot for non-partial reads; Strong reads use zero.
-	qt.MvccTimestamp = readTS
-
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
@@ -270,10 +258,46 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
 		return nil, storageCost, err
 	}
-	if snapshots != nil && !t.bindPartialUpdateReadSnapshots(snapshots) {
-		return nil, storageCost, merr.WrapErrServiceInternalMsg("partial update Strong read snapshot is unavailable")
+	if err := t.bindPartialUpdateReadSnapshots(snapshots); err != nil {
+		return nil, storageCost, err
 	}
 	return queryResult, storageCost, err
+}
+
+// preparePartialUpdate is shared by the initial attempt and CAS retries.
+func (it *upsertTask) preparePartialUpdate(ctx context.Context) error {
+	if err := it.restorePartialUpdateFields(); err != nil {
+		return err
+	}
+	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, true); err != nil {
+		return err
+	}
+	if err := it.preparePartialUpdateCASGroups(ctx); err != nil {
+		return err
+	}
+	if err := it.queryPreExecute(ctx); err != nil {
+		return err
+	}
+	it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
+	it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
+	return nil
+}
+
+// restorePartialUpdateFields rebuilds input order without changing the user payload.
+func (it *upsertTask) restorePartialUpdateFields() error {
+	if it.partialUpdateOriginalFields == nil {
+		return merr.WrapErrServiceInternalMsg("partial update original fields snapshot is unavailable")
+	}
+	fields := cloneFieldDataList(it.partialUpdateOriginalFields)
+	if len(it.partialUpdateAllocatedIDs) > 0 {
+		if _, err := checkPartialUpdatePrimaryFieldData(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), it.partialUpdateAllocatedIDs); err != nil {
+			return err
+		}
+	}
+	it.req.FieldsData = fields
+	it.upsertMsg.InsertMsg.FieldsData = fields
+	return nil
 }
 
 func (it *upsertTask) queryPreExecute(ctx context.Context) error {
@@ -306,51 +330,23 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
-	var existFieldData []*schemapb.FieldData
-	var existIDs *schemapb.IDs
-	for {
-		// Re-read after allocating missing AutoIDs: their destination channels
-		// may differ from those covered by the original query's CAS proof.
-		resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
-		if err != nil {
-			return err
-		}
-		it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
-		it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
-		if len(resp.GetFieldsData()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
-		}
-		existFieldData = resp.GetFieldsData()
-		pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
-		if err != nil {
-			return err
-		}
-		existIDs, err = parsePrimaryFieldData2IDs(pkFieldData)
-		if err != nil {
-			return err
-		}
-		if !it.req.GetPartialUpdate() || !primaryFieldSchema.GetAutoID() {
-			break
-		}
-		rewrittenIDs, err := it.allocateMissingPartialUpdateAutoIDs(primaryFieldSchema, upsertIDs, existIDs)
-		if err != nil {
-			return err
-		}
-		if rewrittenIDs == nil {
-			break
-		}
-		upsertIDs = rewrittenIDs
-		// Function inputs may include a VarChar primary key. Rebuild outputs
-		// from the retry payload after replacing that key, as on a CAS retry.
-		fields := cloneFieldDataList(it.partialUpdateOriginalFields)
-		it.req.FieldsData = fields
-		it.upsertMsg.InsertMsg.FieldsData = fields
-		if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, true); err != nil {
-			return err
-		}
-		if err := it.preparePartialUpdateCASGroups(ctx); err != nil {
-			return err
-		}
+	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
+	if err != nil {
+		return err
+	}
+	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
+	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
+	if len(resp.GetFieldsData()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
+	}
+	existFieldData := resp.GetFieldsData()
+	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
+	if err != nil {
+		return err
+	}
+	existIDs, err := parsePrimaryFieldData2IDs(pkFieldData)
+	if err != nil {
+		return err
 	}
 	log.Info(ctx, "retrieveByPKs cost",
 		mlog.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
@@ -443,8 +439,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
 	// must remain compact: ValidData tracks logical rows, and vector data stores
 	// only valid rows.
-	insertIdxInUpsert := make([]int, 0)
-	updateIdxInUpsert := make([]int, 0)
+	var insertIdxInUpsert, updateIdxInUpsert []int
 	// 1. split upsert data into insert and update by query result
 	idsChecker, err := typeutil.NewIDsChecker(existIDs)
 	if err != nil {
@@ -462,6 +457,52 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		} else {
 			insertIdxInUpsert = append(insertIdxInUpsert, upsertIdx)
 		}
+	}
+
+	if len(insertIdxInUpsert) > 0 {
+		// Missing rows need complete insert fields, regardless of AutoID.
+		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
+		if lackOfFieldErr != nil {
+			log.Info(ctx, "check fields data by schema failed", mlog.Err(lackOfFieldErr))
+			row := insertIdxInUpsert[0]
+			return merr.Wrapf(lackOfFieldErr,
+				"partial update: primary key %v does not exist in the query scope; cannot insert a new entity",
+				typeutil.GetPK(upsertIDs, int64(row)))
+		}
+	}
+
+	if primaryFieldSchema.GetAutoID() {
+		rewrittenIDs, err := it.allocateMissingPartialUpdateAutoIDs(insertIdxInUpsert)
+		if err != nil {
+			return err
+		}
+		if rewrittenIDs != nil {
+			upsertIDs = rewrittenIDs
+			pkField, err := typeutil.GetPrimaryFieldData(it.req.FieldsData, primaryFieldSchema)
+			if err != nil {
+				return err
+			}
+			// Preserve normalized fields and generated outputs; only the PK changes.
+			for i, field := range it.upsertMsg.InsertMsg.FieldsData {
+				if field.GetFieldId() == primaryFieldSchema.GetFieldID() {
+					it.upsertMsg.InsertMsg.FieldsData[i] = pkField
+					break
+				}
+			}
+		}
+		// Select the final write channels from the proofs captured by this read.
+		groups, err := it.buildPartialUpdateCASGroups()
+		if err != nil {
+			return err
+		}
+		for channel := range groups {
+			meta := it.partialUpdateCASGroups[channel]
+			if meta == nil || meta.GetReadTs() == 0 {
+				return merr.WrapErrServiceInternalMsg("partial update: read snapshot is missing for destination channel %q", channel)
+			}
+			groups[channel] = meta
+		}
+		it.partialUpdateCASGroups = groups
 	}
 
 	// 2. merge field data on update semantic
@@ -603,16 +644,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 	// 3. merge field data on insert semantic
 	if len(insertIdxInUpsert) > 0 {
-		// if necessary field is not exist in upsert request, return error
-		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
-		if lackOfFieldErr != nil {
-			log.Info(ctx, "check fields data by schema failed", mlog.Err(lackOfFieldErr))
-			row := insertIdxInUpsert[0]
-			return merr.Wrapf(lackOfFieldErr,
-				"partial update: primary key %v (row index %d) does not exist in the query scope; cannot insert a new entity",
-				typeutil.GetPK(upsertIDs, int64(row)), row)
-		}
-
 		// Build field data for rows that take insert semantics. Request-provided
 		// fields are kept as-is; missing nullable/default fields are synthesized
 		// so the insert rows still have a complete field set.
@@ -708,84 +739,44 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 }
 
 // allocateMissingPartialUpdateAutoIDs assigns a stable destination PK to each
-// missing AutoID row. Once converted, that row is queried and CAS-checked by its
-// destination PK, including after another vchannel has already committed it.
-func (it *upsertTask) allocateMissingPartialUpdateAutoIDs(
-	primaryFieldSchema *schemapb.FieldSchema,
-	upsertIDs, existIDs *schemapb.IDs,
-) (*schemapb.IDs, error) {
-	checker, err := typeutil.NewIDsChecker(existIDs)
-	if err != nil {
-		return nil, err
-	}
-	var missing []int
-	for row := 0; row < typeutil.GetSizeOfIDs(upsertIDs); row++ {
-		if _, allocated := it.partialUpdateAutoIDRows[row]; allocated {
-			continue
-		}
-		exists, err := checker.Contains(upsertIDs, row)
-		if err != nil {
-			return nil, err
-		}
-		if !exists {
+// missing AutoID row classified and validated by the caller. Allocated IDs stay
+// stable across re-reads and CAS retries, including when another vchannel has
+// already committed the destination row.
+func (it *upsertTask) allocateMissingPartialUpdateAutoIDs(missingRows []int) (*schemapb.IDs, error) {
+	missing := make([]int, 0, len(missingRows))
+	for _, row := range missingRows {
+		if _, allocated := it.partialUpdateAllocatedIDs[row]; !allocated {
 			missing = append(missing, row)
 		}
 	}
 	if len(missing) == 0 {
 		return nil, nil
 	}
-	// A new entity cannot inherit omitted required fields from an old row.
-	if err := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true); err != nil {
-		row := missing[0]
-		return nil, merr.Wrapf(err,
-			"partial update: primary key %v (row index %d) does not exist in the query scope; cannot insert a new entity",
-			typeutil.GetPK(upsertIDs, int64(row)), row)
-	}
 	if it.partialUpdateOriginalFields == nil {
 		return nil, merr.WrapErrServiceInternalMsg("partial update original fields snapshot is unavailable")
 	}
-	primaryField, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
-	if err != nil {
+	if _, err := checkPartialUpdatePrimaryFieldData(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
 		return nil, err
 	}
-	primaryField = proto.Clone(primaryField).(*schemapb.FieldData)
 	begin, _, err := common.AllocAutoID(it.idAllocator.Alloc, uint32(len(missing)), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
+	allocatedIDs := make(map[int]int64, len(missing))
 	for offset, row := range missing {
-		id := begin + int64(offset)
-		if primaryFieldSchema.GetDataType() == schemapb.DataType_Int64 {
-			primaryField.GetScalars().GetLongData().Data[row] = id
-		} else {
-			primaryField.GetScalars().GetStringData().Data[row] = strconv.FormatInt(id, 10)
-		}
+		allocatedIDs[row] = begin + int64(offset)
 	}
-	// Supplied IDs can include arbitrary values. Reject an allocation colliding
-	// with another request row instead of merging two entities under one PK.
-	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, []*schemapb.FieldData{primaryField})
+	rewrittenIDs, err := checkPartialUpdatePrimaryFieldData(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), allocatedIDs)
 	if err != nil {
 		return nil, err
 	}
-	if duplicate {
-		return nil, merr.WrapErrServiceInternalMsg("allocated partial update AutoID collides with another request primary key")
+	if it.partialUpdateAllocatedIDs == nil {
+		it.partialUpdateAllocatedIDs = make(map[int]int64)
 	}
-	rewrittenIDs, err := parsePrimaryFieldData2IDs(primaryField)
-	if err != nil {
-		return nil, err
+	for row, id := range allocatedIDs {
+		it.partialUpdateAllocatedIDs[row] = id
 	}
-	for index, field := range it.partialUpdateOriginalFields {
-		if field.GetFieldName() == primaryFieldSchema.GetName() || field.GetFieldId() == primaryFieldSchema.GetFieldID() {
-			it.partialUpdateOriginalFields[index] = primaryField
-			break
-		}
-	}
-	if it.partialUpdateAutoIDRows == nil {
-		it.partialUpdateAutoIDRows = make(map[int]struct{})
-	}
-	for _, row := range missing {
-		it.partialUpdateAutoIDRows[row] = struct{}{}
-	}
+	it.partialUpdateResultIDs = rewrittenIDs
 	return rewrittenIDs, nil
 }
 
@@ -1841,26 +1832,11 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	if it.req.GetPartialUpdate() {
 		it.partialUpdateOriginalFields = cloneFieldDataList(it.req.GetFieldsData())
-	}
-
-	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, it.req.GetPartialUpdate()); err != nil {
+		if err := it.preparePartialUpdate(ctx); err != nil {
+			return err
+		}
+	} else if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, false); err != nil {
 		return err
-	}
-
-	if it.req.GetPartialUpdate() {
-		if err = it.preparePartialUpdateCASGroups(ctx); err != nil {
-			log.Warn(ctx, "Fail to prepare partial update CAS metadata", mlog.Err(err))
-			return err
-		}
-		err = it.queryPreExecute(ctx)
-		if err != nil {
-			log.Warn(ctx, "Fail to queryPreExecute", mlog.Err(err))
-			return err
-		}
-		// reconstruct upsert msg after queryPreExecute
-		it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
-		it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
-		it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
 	}
 
 	err = it.insertPreExecute(ctx)
@@ -1886,19 +1862,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *upsertTask) PostExecute(ctx context.Context) error {
-	if len(it.partialUpdateAutoIDRows) > 0 {
-		// Merge groups existing rows before insert rows. Return allocated IDs in
-		// request order only after packing has finished using the merged order.
-		pkSchema, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
-		if err != nil {
-			return err
-		}
-		pkField, err := typeutil.GetPrimaryFieldData(it.req.FieldsData, pkSchema)
-		if err != nil {
-			return err
-		}
-		it.result.IDs, err = parsePrimaryFieldData2IDs(pkField)
-		return err
+	if it.partialUpdateResultIDs != nil {
+		// Packing uses merge order; publish request order only after it finishes.
+		it.result.IDs = it.partialUpdateResultIDs
 	}
 	return nil
 }

@@ -258,14 +258,18 @@ make a multi-vchannel request atomic.
 Proxy builds the first attempt and every eligible retry in the same order:
 
 ```text
-route current request PKs (including previously allocated AutoIDs) to vchannels
-  -> resolve and snapshot every touched PChannel term
+clone original user fields and overlay previously allocated AutoIDs by row
+  -> generate function output
+  -> resolve and snapshot terms for all possible write channels
+     (all collection shards for AutoID, or the fixed namespace channel)
   -> enqueue a new Strong Query with GuaranteeTimestamp = MvccTimestamp = 0
   -> collect actual nonzero readTS from each successful write channel
-  -> if an unconverted AutoID PK is missing: validate insert fields, allocate
-     its destination PK, update the retry payload, regenerate function output,
-     and repeat routing, term resolution, and Strong read for the new PKs
-  -> merge
+  -> normalize fields and validate row alignment
+  -> classify existing and missing rows, validate insert fields for missing rows
+  -> if an unconverted AutoID PK is missing: allocate
+     its destination PK, record the row-to-ID mapping, update the working PK column
+  -> select final write channels from this query's captured terms and snapshots
+  -> merge without querying freshly allocated IDs
   -> attach that channel's term and readTS to every CAS Insert chunk
 ```
 
@@ -296,19 +300,41 @@ insert fields must be supplied, while nullable/default fields use the ordinary
 partial-update insert merge rules.
 
 If a required field is missing, Proxy returns a non-retriable parameter error
-identifying the first missing PK and its zero-based request row index, explaining
+identifying the first missing PK, explaining
 that the PK was absent from the query scope and insert fallback needs the named
-field. For example: `partial update: primary key 100 (row index 0) does not exist
+field. For example: `partial update: primary key 100 does not exist
 in the query scope; cannot insert a new entity: missing required field "vector"`.
 The query scope includes the requested partition and namespace; absence here
 must not be interpreted as absence from every partition in the collection.
 
-Proxy replaces missing PKs in both the working payload and its retry payload.
-It then resolves terms and performs another Strong read using the destination
-PKs before merging. Consequently, the CAS proof, Insert, and any Delete address
-the same destination PK and vchannel. Existing-only requests need no extra read.
-If another original row disappears during this read, it is also converted;
-each request row can receive a new PK at most once, bounding this preparation.
+Proxy keeps the original user fields immutable and stores allocated AutoIDs in
+a separate map keyed by the original request row offset. Initial preparation
+and CAS retries share the same entry point: clone the original fields, overlay
+allocated IDs, generate function output, prepare CAS terms, query, and merge.
+`checkPartialUpdatePrimaryFieldData` centralizes PK validation, conversion,
+replacement, collision checking, and ID parsing. It reuses the existing
+primary-field generation and field-update helpers and publishes a replaced
+column only after all checks pass. The task owns allocation and retry state;
+the PK helper does not access the allocator or WAL. The PK payload type and row count are
+validated before allocating IDs. Primary keys are not supported as function
+inputs; allocating AutoIDs retains the existing function outputs.
+Field normalization and alignment validation precede row classification and
+allocation. Allocation replaces only the working PK column; it does not restore
+the original payload or discard normalized values.
+Each attempt executes one Strong query. Freshly allocated AutoIDs take insert
+semantics without another existence query. Before reading, Proxy captures terms
+for every possible destination channel (all collection shards for AutoID, unless
+namespace routing fixes one channel), then binds the actual query snapshots.
+After allocation it retains only the final write channels and their original
+proofs; missing proofs fail closed. Terms and timestamps are not resampled after
+allocation. This relies on the normal AutoID allocator's uniqueness guarantee.
+AutoID and non-AutoID collections share row classification, required-field
+validation, and merge. Allocation consumes the missing-row offsets, and merge
+uses the same classification.
+The original input is never overwritten by allocated IDs or merged values.
+After each successful allocation, Proxy saves the complete destination IDs in
+request order. Message packing continues to use merge order; `PostExecute`
+publishes the saved IDs without looking up or parsing the PK column again.
 
 Allocated IDs remain stable throughout the request's internal CAS retries,
 even when still absent. If another vchannel already committed a generated row,
@@ -327,9 +353,9 @@ while message packing continues to use the merged row order.
 
 ### CAS metadata and encryption
 
-Proxy derives the touched vchannels from the current request PKs, including
-allocated destination AutoIDs. It rebuilds the channel set and read proofs after
-any allocation; the missing source PK is not included in Delete or final CAS
+Proxy derives the final write vchannels from the current request PKs, including
+allocated destination AutoIDs. It selects their proofs from those captured by
+the single query; the missing source PK is not included in Delete or final CAS
 solely because it was used for the initial lookup. CAS metadata contains only the attempt `readTS` and observed PChannel term; it does not
 duplicate the collection ID, schema version, PK field ID, or PK list.
 
@@ -613,10 +639,10 @@ Proxy automatically retries only when every partial-update field operation is
 1. restores the original partial field values, retaining any destination AutoIDs
    already allocated for this request;
 2. regenerates function output;
-3. re-routes these current PKs;
-4. resolves all touched terms;
-5. runs a new Strong query and binds its actual per-channel snapshots; any
-   newly missing original AutoID row follows the allocation and re-read flow;
+3. determines all possible write channels;
+4. resolves their terms before reading;
+5. runs one Strong query and binds its actual per-channel snapshots; any
+   newly missing original AutoID row receives a fresh ID without another read;
 6. re-merges the original user payload with the new query results;
 7. rebuilds Insert/Delete preprocessing and MutationResult counts;
 8. accumulates storage cost from the new query;
@@ -697,14 +723,14 @@ Production-scale benchmarks are still required for:
 Every initial attempt and eligible retry uses the following Strong-read flow:
 
 ```text
-resolve terms for all write channels
+resolve terms for all possible write channels
   -> enqueue a Strong Query (GuaranteeTimestamp=0, MvccTimestamp=0)
   -> Query receives its own BeginTs from TSO
   -> each delegator waits for its guarantee and fixes its actual snapshot S[c]
   -> successful channel response reports S[c], including empty results
   -> Proxy validates all write channels have nonzero S[c]
-  -> if missing AutoID rows receive new PKs, rebuild the payload and repeat
-     term resolution and Strong read for those destination channels
+  -> allocate new PKs for missing AutoID rows without another query
+  -> retain captured proofs for the final destination channels
   -> merge, then commit(term[c], readTS=S[c])
 ```
 

@@ -18,7 +18,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -27,6 +29,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -40,13 +43,17 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	streamingtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -816,7 +823,7 @@ func bindPartialUpdateCASTestSnapshots(t *testing.T, task *upsertTask, snapshot 
 	for channel := range task.partialUpdateCASGroups {
 		snapshots.Insert(channel, snapshot)
 	}
-	require.True(t, task.bindPartialUpdateReadSnapshots(snapshots))
+	require.NoError(t, task.bindPartialUpdateReadSnapshots(snapshots))
 }
 
 func buildPartialUpdateCASTestMessages(
@@ -2016,21 +2023,24 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, 1000, 9)
 }
 
-func TestPartialUpdateAutoIDBuildsCASGroupsFromOriginalPKs(t *testing.T) {
-	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, []int64{20})
+func TestPartialUpdateAutoIDPreparesAllDestinationChannels(t *testing.T) {
+	// One original PK covers only one channel; allocation can target the other.
+	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	task.schema.CollectionSchema.Fields[0].AutoID = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 
-	preparePartialUpdateCASTestGroups(t, task)
-	expected := expectedPartialUpdateCASGroups(t, partialUpdateCASIDs([]int64{10, 20, 30}), partialUpdateCASTestVChannels)
-	require.Len(t, task.partialUpdateCASGroups, len(expected))
-	for vchannel := range expected {
-		require.Contains(t, task.partialUpdateCASGroups, vchannel)
+	require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
+	require.Len(t, task.partialUpdateCASGroups, len(partialUpdateCASTestVChannels))
+	for _, vchannel := range partialUpdateCASTestVChannels {
+		proof := task.partialUpdateCASGroups[vchannel]
+		require.NotNil(t, proof)
+		require.EqualValues(t, 9, proof.GetObservedPchannelTerm())
+		require.Zero(t, proof.GetReadTs(), "snapshots must come from the subsequent query")
 	}
-	require.Equal(t, len(expected), fakeWAL.resolveCalls)
+	require.Equal(t, len(partialUpdateCASTestVChannels), fakeWAL.resolveCalls)
 	require.Zero(t, fakeWAL.appendCalls)
 }
 
@@ -2230,131 +2240,54 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 }
 
 func TestRetrieveByPKs_Success(t *testing.T) {
-	mockey.PatchConvey("TestRetrieveByPKs_Success", t, func() {
-		// Setup mocks
-		mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(&schemapb.FieldSchema{
-			FieldID:      100,
-			Name:         "id",
-			IsPrimaryKey: true,
-			DataType:     schemapb.DataType_Int64,
-		}, nil).Build()
+	for _, partitionKeyMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
+			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
+			task.partitionKeyMode = partitionKeyMode
+			task.upsertMsg.DeleteMsg.PartitionName = "_default"
+			beginTS := task.BeginTs()
+			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+			oldWAL := streaming.WAL()
+			streaming.SetWALForTest(fakeWAL)
+			defer streaming.SetWALForTest(oldWAL)
+			require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
 
-		mockey.Mock(validatePartitionTag).Return(nil).Build()
+			partition := mockey.Mock((*MetaCache).GetPartitionID).To(func(_ *MetaCache, _ context.Context, _, _, _ string) (UniqueID, error) {
+				require.False(t, partitionKeyMode, "partition-key reads must cover all partitions")
+				return 1002, nil
+			}).Build()
+			defer partition.UnPatch()
+			query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.request.GetConsistencyLevel())
+				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.GetConsistencyLevel())
+				require.Zero(t, qt.request.GetBase().GetTimestamp())
+				require.Zero(t, qt.request.GetGuaranteeTimestamp())
+				require.Zero(t, qt.GetMvccTimestamp())
+				if partitionKeyMode {
+					require.Equal(t, []int64{common.AllPartitionsID}, qt.GetPartitionIDs())
+					require.Empty(t, qt.request.GetPartitionNames())
+				} else {
+					require.Equal(t, []int64{1002}, qt.GetPartitionIDs())
+					require.Equal(t, []string{"_default"}, qt.request.GetPartitionNames())
+				}
+				for channel := range task.partialUpdateCASGroups {
+					qt.actualChannelsMvcc.Insert(channel, 70)
+				}
+				return &milvuspb.QueryResults{
+					Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20})},
+				}, segcore.StorageCost{}, nil
+			}).Build()
+			defer query.UnPatch()
 
-		mockey.Mock((*MetaCache).GetPartitionID).Return(int64(1002), nil).Build()
-
-		mockey.Mock(planparserv2.CreateRequeryPlan).Return(&planpb.PlanNode{}).Build()
-
-		mockey.Mock((*Proxy).query).Return(&milvuspb.QueryResults{
-			Status: merr.Success(),
-			FieldsData: []*schemapb.FieldData{
-				{
-					FieldName: "id",
-					FieldId:   100,
-					Type:      schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{Data: []int64{1, 2}},
-							},
-						},
-					},
-				},
-			},
-		}, segcore.StorageCost{}, nil).Build()
-
-		// Execute test
-		task := createTestUpdateTask()
-		task.partitionKeyMode = false
-		task.upsertMsg = &msgstream.UpsertMsg{
-			InsertMsg: &msgstream.InsertMsg{
-				InsertRequest: &msgpb.InsertRequest{
-					PartitionName: "_default",
-				},
-			},
-			DeleteMsg: &msgstream.DeleteMsg{
-				DeleteRequest: &msgpb.DeleteRequest{
-					PartitionName: "_default",
-				},
-			},
-		}
-
-		ids := &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-			},
-		}
-
-		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
-
-		// Verify results
-		assert.NoError(t, err)
-		assert.NotNil(t, result)
-		assert.Equal(t, commonpb.ErrorCode_Success, result.Status.ErrorCode)
-		assert.Len(t, result.FieldsData, 1)
-	})
-}
-
-func TestRetrieveByPKsPreservesNonPartialSnapshot(t *testing.T) {
-	const (
-		beginTS = uint64(100)
-		readTS  = beginTS
-	)
-	var captured *queryTask
-
-	m := mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(&schemapb.FieldSchema{
-		FieldID:      100,
-		Name:         "id",
-		IsPrimaryKey: true,
-		DataType:     schemapb.DataType_Int64,
-	}, nil).Build()
-	defer m.UnPatch()
-
-	m = mockey.Mock(validatePartitionTag).Return(nil).Build()
-	defer m.UnPatch()
-
-	m = mockey.Mock((*MetaCache).GetPartitionID).Return(int64(1002), nil).Build()
-	defer m.UnPatch()
-
-	m = mockey.Mock(planparserv2.CreateRequeryPlan).Return(&planpb.PlanNode{}).Build()
-	defer m.UnPatch()
-
-	m = mockey.Mock((*Proxy).query).To(
-		func(_ *Proxy, ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-			captured = qt
-			return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
-		},
-	).Build()
-	defer m.UnPatch()
-
-	task := createTestUpdateTask()
-	task.SetTs(beginTS)
-	task.req.PartialUpdate = false
-	task.partitionKeyMode = false
-	task.upsertMsg = &msgstream.UpsertMsg{
-		DeleteMsg: &msgstream.DeleteMsg{
-			DeleteRequest: &msgpb.DeleteRequest{PartitionName: "_default"},
-		},
-		InsertMsg: &msgstream.InsertMsg{
-			InsertRequest: &msgpb.InsertRequest{PartitionName: "_default"},
-		},
+			result, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{10, 20}), []string{"*"})
+			require.NoError(t, err)
+			require.Len(t, result.GetFieldsData(), 1)
+			require.Equal(t, beginTS, task.BeginTs())
+			for _, meta := range task.partialUpdateCASGroups {
+				require.EqualValues(t, 70, meta.GetReadTs())
+			}
+		})
 	}
-
-	ids := &schemapb.IDs{
-		IdField: &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{Data: []int64{1}},
-		},
-	}
-	_, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
-
-	require.NoError(t, err)
-	require.NotNil(t, captured)
-	require.NotNil(t, captured.RetrieveRequest)
-	require.Equal(t, commonpb.ConsistencyLevel_Customized, captured.request.GetConsistencyLevel())
-	require.Equal(t, commonpb.ConsistencyLevel_Customized, captured.GetConsistencyLevel())
-	require.Equal(t, readTS, captured.request.GetGuaranteeTimestamp())
-	require.Equal(t, readTS, captured.GetMvccTimestamp())
-	require.Equal(t, beginTS, task.BeginTs())
 }
 
 func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
@@ -2432,7 +2365,9 @@ func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
 			if scenario == "query_error" {
 				require.ErrorIs(t, err, expectedErr)
 			} else {
-				require.Contains(t, err.Error(), "Strong read snapshot is unavailable")
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+				require.ErrorContains(t, err, "query succeeded but read timestamp is "+scenario+" for write channel")
 			}
 			require.Equal(t, 1, calls)
 			require.EqualValues(t, 3, cost.ScannedRemoteBytes)
@@ -2454,65 +2389,36 @@ func TestBindPartialUpdateReadSnapshotsRequiresCompleteAttempt(t *testing.T) {
 	}}
 	snapshots := typeutil.NewConcurrentMap[string, uint64]()
 	snapshots.Insert("ch0", 70)
-	require.False(t, task.bindPartialUpdateReadSnapshots(snapshots))
+	err := task.bindPartialUpdateReadSnapshots(snapshots)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, `read timestamp is missing for write channel "ch1"`)
 	require.Zero(t, task.partialUpdateCASGroups["ch0"].ReadTs)
+	require.Zero(t, task.partialUpdateCASGroups["ch1"].ReadTs)
+	snapshots.Insert("ch1", 0)
+	err = task.bindPartialUpdateReadSnapshots(snapshots)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, `read timestamp is zero for write channel "ch1"`)
+	require.Zero(t, task.partialUpdateCASGroups["ch0"].ReadTs)
+	require.Zero(t, task.partialUpdateCASGroups["ch1"].ReadTs)
 	snapshots.Insert("ch1", 90)
-	require.True(t, task.bindPartialUpdateReadSnapshots(snapshots))
+	require.NoError(t, task.bindPartialUpdateReadSnapshots(snapshots))
 	require.EqualValues(t, 70, task.partialUpdateCASGroups["ch0"].ReadTs)
 	require.EqualValues(t, 90, task.partialUpdateCASGroups["ch1"].ReadTs)
-	require.False(t, (&upsertTask{}).bindPartialUpdateReadSnapshots(snapshots))
+	err = (&upsertTask{}).bindPartialUpdateReadSnapshots(snapshots)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "CAS write channel groups are empty")
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
-	mockey.PatchConvey("TestRetrieveByPKs_GetPrimaryFieldSchemaError", t, func() {
-		expectedErr := merr.WrapErrParameterInvalidMsg("primary field not found")
-		mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(nil, expectedErr).Build()
+	expectedErr := merr.WrapErrParameterInvalidMsg("primary field not found")
+	patch := mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(nil, expectedErr).Build()
+	defer patch.UnPatch()
 
-		task := createTestUpdateTask()
-		ids := &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-			},
-		}
-
-		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
-
-		assert.Error(t, err)
-		assert.Nil(t, result)
-		assert.Contains(t, err.Error(), "primary field not found")
-	})
-}
-
-func TestRetrieveByPKs_PartitionKeyMode(t *testing.T) {
-	mockey.PatchConvey("TestRetrieveByPKs_PartitionKeyMode", t, func() {
-		mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(&schemapb.FieldSchema{
-			FieldID:      100,
-			Name:         "id",
-			IsPrimaryKey: true,
-			DataType:     schemapb.DataType_Int64,
-		}, nil).Build()
-
-		mockey.Mock(planparserv2.CreateRequeryPlan).Return(&planpb.PlanNode{}).Build()
-
-		mockey.Mock((*Proxy).query).Return(&milvuspb.QueryResults{
-			Status:     merr.Success(),
-			FieldsData: []*schemapb.FieldData{},
-		}, segcore.StorageCost{}, nil).Build()
-
-		task := createTestUpdateTask()
-		task.partitionKeyMode = true
-
-		ids := &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-			},
-		}
-
-		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
-
-		assert.NoError(t, err)
-		assert.NotNil(t, result)
-	})
+	task := createTestUpdateTask()
+	task.req.PartialUpdate = true
+	result, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{1, 2}), []string{"*"})
+	require.ErrorIs(t, err, expectedErr)
+	require.Nil(t, result)
 }
 
 func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
@@ -3063,6 +2969,7 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			committed := false
 			read := mockey.Mock(retrieveByPKs).To(func(ctx context.Context, task *upsertTask, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 				reads++
+				require.Len(t, task.partialUpdateCASGroups, len(partialUpdateCASTestVChannels), "all possible destination terms must be captured before reading")
 				actualPK, err := typeutil.GetPrimaryFieldData(task.req.FieldsData, task.schema.Fields[0])
 				require.NoError(t, err)
 				respPK := proto.Clone(actualPK).(*schemapb.FieldData)
@@ -3083,10 +2990,13 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{respPK, value}}, segcore.StorageCost{}, nil
 			}).Build()
 			defer read.UnPatch()
-			require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
-			require.NoError(t, task.queryPreExecute(context.Background()))
-			require.Equal(t, 2, reads)
+			require.NoError(t, task.preparePartialUpdate(context.Background()))
+			require.Equal(t, 1, reads)
 			require.Equal(t, 1, allocations)
+			require.Equal(t, map[int]int64{1: 1000}, task.partialUpdateAllocatedIDs)
+			for i, field := range originalFields {
+				require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
+			}
 			pk, err := typeutil.GetPrimaryFieldData(task.req.FieldsData, task.schema.Fields[0])
 			require.NoError(t, err)
 			destinationIDs, err := parsePrimaryFieldData2IDs(pk)
@@ -3099,7 +3009,7 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			expectedGroups := expectedPartialUpdateCASGroups(t, destinationIDs, partialUpdateCASTestVChannels)
 			require.Len(t, task.partialUpdateCASGroups, len(expectedGroups))
 			for channel := range expectedGroups {
-				require.EqualValues(t, 1002, task.partialUpdateCASGroups[channel].ReadTs)
+				require.EqualValues(t, 1001, task.partialUpdateCASGroups[channel].ReadTs)
 			}
 			require.Equal(t, 1, typeutil.GetSizeOfIDs(task.deletePKs))
 			require.Equal(t, []int32{100, 200}, task.insertFieldData[1].GetScalars().GetIntData().GetData())
@@ -3107,19 +3017,59 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			// The generated row is still absent after a rejected attempt. Retry
 			// must keep its ID, including in the response after insert validation.
 			require.NoError(t, task.preparePartialUpdateRetryAttempt(context.Background()))
-			require.Equal(t, 3, reads)
+			require.Equal(t, 2, reads)
 			require.True(t, proto.Equal(destinationIDs, task.result.IDs))
 			require.Equal(t, 2, allocations) // one PK range, one internal RowID range
 			// Another channel can have committed before a CAS retry. Re-querying
 			// the generated ID must update that same entity, not allocate a third.
 			committed = true
 			require.NoError(t, task.preparePartialUpdateRetryAttempt(context.Background()))
-			require.Equal(t, 4, reads)
+			require.Equal(t, 3, reads)
 			require.Equal(t, 3, allocations)
 			require.True(t, proto.Equal(destinationIDs, task.result.IDs))
 			require.True(t, proto.Equal(destinationIDs, task.deletePKs))
 			require.Equal(t, []int32{100, 200}, task.insertFieldData[1].GetScalars().GetIntData().GetData())
+			require.Equal(t, map[int]int64{1: 1000}, task.partialUpdateAllocatedIDs)
+			for i, field := range originalFields {
+				require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
+			}
 		})
+	}
+}
+
+func TestPartialUpdateAutoIDRestoresOriginalFields(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		for _, allocatedID := range []int64{2, 1000} {
+			t.Run(fmt.Sprintf("stringPK=%t/id=%d", stringPK, allocatedID), func(t *testing.T) {
+				task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+				original := cloneFieldDataList(task.partialUpdateOriginalFields)
+				task.partialUpdateAllocatedIDs = map[int]int64{1: allocatedID}
+				require.NoError(t, task.restorePartialUpdateFields())
+				ids, err := parsePrimaryFieldData2IDs(task.req.FieldsData[0])
+				require.NoError(t, err)
+				if stringPK {
+					require.Equal(t, []string{"1", strconv.FormatInt(allocatedID, 10)}, ids.GetStrId().GetData())
+				} else {
+					require.Equal(t, []int64{1, allocatedID}, ids.GetIntId().GetData())
+				}
+				// A generated ID can equal the caller's guessed, missing source ID.
+				// Allocation state must still survive and prevent another allocation.
+				allocated := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, _ uint32) (int64, int64, error) {
+					t.Fatal("a restored row must not allocate another AutoID")
+					return 0, 0, nil
+				}).Build()
+				defer allocated.UnPatch()
+				rewritten, err := task.allocateMissingPartialUpdateAutoIDs([]int{1})
+				require.NoError(t, err)
+				require.Nil(t, rewritten)
+				task.req.FieldsData[1].GetScalars().GetIntData().Data[0] = 999
+				require.NoError(t, task.restorePartialUpdateFields())
+				require.Equal(t, []int32{100, 200}, task.req.FieldsData[1].GetScalars().GetIntData().GetData())
+				for i, field := range original {
+					require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
+				}
+			})
+		}
 	}
 }
 
@@ -3207,7 +3157,7 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	require.Equal(t, []int64{1, newID}, task.result.IDs.GetIntId().GetData())
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 2, fakeWAL.appendCalls)
-	require.Equal(t, 3, reads)
+	require.Equal(t, 2, reads)
 	require.Equal(t, 5, allocations) // one PK range, two RowID ranges, two Delete message ID ranges
 	require.Equal(t, map[int64]int32{1: 200, newID: 100}, stored)
 	// The successful first-channel insert becomes a delete+insert at the same
@@ -3217,8 +3167,185 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	require.Equal(t, []int64{newID, 1}, task.result.IDs.GetIntId().GetData())
 }
 
+func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		namespace bool
+		missing   bool
+		zero      bool
+	}{
+		{name: "empty_destination"},
+		{name: "missing_destination_snapshot", missing: true},
+		{name: "zero_destination_snapshot", zero: true},
+		{name: "fixed_namespace_channel", namespace: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := context.Background()
+			task := partialUpdateAutoIDInsertTestTask(t, false)
+			vchannels := partialUpdateCASTestVChannels
+			channelForPK := func(pk int64) string {
+				indexes, err := typeutil.HashPK2Channels(partialUpdateCASIDs([]int64{pk}), vchannels)
+				require.NoError(t, err)
+				return vchannels[indexes[0]]
+			}
+			originalID, newID := int64(1), int64(1000)
+			source := channelForPK(originalID)
+			for channelForPK(newID) == source {
+				newID++
+			}
+			destination := channelForPK(newID)
+			snapshots := map[string]uint64{source: 70, destination: 90}
+			terms := map[string]int64{source: 7, destination: 9}
+			task.req.NumRows = 1
+			task.upsertMsg.InsertMsg.NumRows = 1
+			task.req.FieldsData[0].GetScalars().GetLongData().Data = []int64{originalID}
+			task.req.FieldsData[1].GetScalars().GetIntData().Data = []int32{100}
+			if scenario.namespace {
+				// Fix routing to the source channel even though the new PK hashes elsewhere.
+				namespace := "tenant"
+				for vchannels[typeutil.HashNamespace2Channels(namespace, vchannels)] != source {
+					namespace += "x"
+				}
+				schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+				schema.EnableNamespace = true
+				schema.Properties = []*commonpb.KeyValuePair{{Key: common.NamespaceShardingEnabledKey, Value: "true"}}
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 102, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+					IsPartitionKey: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "100"}},
+				})
+				task.schema = mustNewSchemaInfo(schema)
+				task.partitionKeyMode = true
+				task.req.Namespace = &namespace
+				task.upsertMsg.InsertMsg.Namespace = &namespace
+				require.NoError(t, addNamespaceData(schema, task.upsertMsg.InsertMsg))
+				task.req.FieldsData = task.upsertMsg.InsertMsg.FieldsData
+				destination = source
+			}
+			task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+			patch := func(target any, values ...any) {
+				m := mockey.Mock(target).Return(values...).Build()
+				t.Cleanup(func() { m.UnPatch() })
+			}
+			patch((*MetaCache).GetCollectionID, task.collectionID, nil)
+			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
+			patch((*MetaCache).GetCollectionSchema, task.schema, nil)
+			patch((*MetaCache).GetPartitionID, int64(100), nil)
+			patch(getPartitionIDs, []int64{100}, nil)
+			patch(getDefaultPartitionsInPartitionKeyMode, []string{"_default_0"}, nil)
+			allocated := 0
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
+				begin := newID + int64(allocated)
+				allocated += int(count)
+				return begin, begin + int64(count), nil
+			}).Build()
+			t.Cleanup(func() { alloc.UnPatch() })
+			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+			fakeWAL.resolveHook = func(channel string) { fakeWAL.term = terms[channel] }
+			oldWAL := streaming.WAL()
+			streaming.SetWALForTest(fakeWAL)
+			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
+
+			type queryClient struct{ types.QueryNodeClient }
+			var queriesMu sync.Mutex
+			var queriedChannels []string
+			rpc := mockey.Mock((*queryClient).Query).To(func(_ *queryClient, _ context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+				channel := req.GetDmlChannels()[0]
+				queriesMu.Lock()
+				queriedChannels = append(queriedChannels, channel)
+				queriesMu.Unlock()
+				assert.Equal(t, commonpb.ConsistencyLevel_Strong, req.Req.GetConsistencyLevel())
+				assert.Zero(t, req.Req.GetMvccTimestamp())
+				var plan planpb.PlanNode
+				if err := proto.Unmarshal(req.Req.GetSerializedExprPlan(), &plan); err != nil {
+					return nil, err
+				}
+				values := plan.GetQuery().GetPredicates().GetTermExpr().GetValues()
+				if assert.Len(t, values, 1) {
+					assert.Equal(t, originalID, values[0].GetInt64Val(), "freshly allocated IDs must not be queried again")
+				}
+				ts := snapshots[channel]
+				if scenario.zero && channel == destination {
+					ts = 0
+				}
+				// An empty shard still reports its executed snapshot.
+				return &internalpb.RetrieveResults{Status: merr.Success(), Ids: partialUpdateCASIDs(nil), MvccTimestamp: ts}, nil
+			}).Build()
+			t.Cleanup(func() { rpc.UnPatch() })
+			channels := vchannels
+			if scenario.missing {
+				channels = []string{source}
+			}
+			patch((*shardclient.LBPolicyImpl).GetShardLeaderList, channels, nil)
+			patch((*shardclient.LBPolicyImpl).UpdateCostMetrics)
+			dispatch := mockey.Mock((*shardclient.LBPolicyImpl).ExecuteWithRetry).To(func(_ *shardclient.LBPolicyImpl, ctx context.Context, workload shardclient.ChannelWorkload) error {
+				return workload.Exec(ctx, 1, &queryClient{}, workload.Channel)
+			}).Build()
+			t.Cleanup(func() { dispatch.UnPatch() })
+			node := task.node.(*Proxy)
+			node.lbPolicy = &shardclient.LBPolicyImpl{}
+			node.chMgr = task.chMgr
+			// Replace queue scheduling, but execute the real query preparation,
+			// fan-out, RPC snapshot collection, and result reduction.
+			queryCalls := 0
+			query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, ctx context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+				queryCalls++
+				qt.SetTs(50)
+				for _, execute := range []func(context.Context) error{qt.PreExecute, qt.Execute, qt.PostExecute} {
+					if err := execute(ctx); err != nil {
+						return nil, segcore.StorageCost{}, err
+					}
+				}
+				return qt.result, qt.storageCost, nil
+			}).Build()
+			t.Cleanup(func() { query.UnPatch() })
+
+			err := task.preparePartialUpdate(ctx)
+			wantChannels := channels
+			if scenario.namespace {
+				wantChannels = []string{destination}
+			}
+			require.ElementsMatch(t, wantChannels, queriedChannels)
+			require.Equal(t, 1, queryCalls)
+			if scenario.missing || scenario.zero {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, destination)
+				if scenario.missing {
+					require.ErrorContains(t, err, "read timestamp is missing")
+				} else {
+					require.ErrorContains(t, err, "read timestamp is zero")
+				}
+				require.Zero(t, allocated)
+				require.Zero(t, fakeWAL.appendCalls)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, len(wantChannels), fakeWAL.resolveCalls, "capture terms before reading, including empty destinations")
+			require.Len(t, task.partialUpdateCASGroups, 1, "only the final write channel keeps its proof")
+			require.Contains(t, task.partialUpdateCASGroups, destination)
+			require.NoError(t, task.insertPreExecute(ctx))
+			require.NoError(t, task.deletePreExecute(ctx))
+			require.NoError(t, task.Execute(ctx))
+			require.Equal(t, 1, queryCalls)
+			require.Equal(t, 1, fakeWAL.appendCalls)
+			require.Len(t, fakeWAL.appended, 1, "a missing PK produces only an insert, with no source-channel delete")
+			msg := fakeWAL.appended[0]
+			require.Equal(t, destination, msg.VChannel())
+			require.Equal(t, streamingmessage.MessageTypeInsert, msg.MessageType())
+			proof := requireFirstPartialUpdateCAS(t, fakeWAL.appended)
+			require.Equal(t, snapshots[destination], proof.GetReadTs())
+			require.Equal(t, terms[destination], proof.GetObservedPchannelTerm())
+			body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+			pk, err := typeutil.GetPrimaryFieldData(body.GetFieldsData(), task.schema.Fields[0])
+			require.NoError(t, err)
+			require.Equal(t, []int64{newID}, pk.GetScalars().GetLongData().GetData())
+			require.NoError(t, task.PostExecute(ctx))
+			require.Equal(t, []int64{newID}, task.result.IDs.GetIntId().GetData())
+		})
+	}
+}
+
 func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
-	for _, scenario := range []string{"existing", "all_missing", "deleted_during_requery", "read_error", "requery_error", "term_error", "function_error", "allocation_error", "empty_response", "missing_pk", "invalid_pk"} {
+	for _, scenario := range []string{"existing", "all_missing", "read_error", "term_lookup_unavailable_after_read", "missing_destination_snapshot", "allocation_error", "empty_response", "missing_pk", "invalid_pk"} {
 		t.Run(scenario, func(t *testing.T) {
 			task := partialUpdateAutoIDInsertTestTask(t, false)
 			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -3236,14 +3363,10 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 				return begin, nextID, nil
 			}).Build()
 			defer alloc.UnPatch()
-			if scenario == "function_error" {
-				gen := mockey.Mock(genFunctionFields).Return(expected).Build()
-				defer gen.UnPatch()
-			}
 			reads := 0
 			read := mockey.Mock(retrieveByPKs).To(func(ctx context.Context, task *upsertTask, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 				reads++
-				if scenario == "read_error" || (scenario == "requery_error" && reads == 2) {
+				if scenario == "read_error" {
 					return nil, segcore.StorageCost{}, expected
 				}
 				if scenario == "empty_response" {
@@ -3257,7 +3380,7 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 					}
 					return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{field}}, segcore.StorageCost{}, nil
 				}
-				if scenario == "term_error" {
+				if scenario == "term_lookup_unavailable_after_read" {
 					fakeWAL.resolveErr = expected
 				}
 				pks := []int64{1, 2}
@@ -3265,13 +3388,13 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 				if scenario != "existing" {
 					pks, values = nil, nil
 				}
-				if scenario == "deleted_during_requery" && reads == 1 {
-					pks, values = []int64{1}, []int32{10}
-				}
 				valueField := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
 				valueField.GetScalars().GetIntData().Data = values
 				for _, proof := range task.partialUpdateCASGroups {
 					proof.ReadTs = uint64(1000 + reads)
+					if scenario == "missing_destination_snapshot" {
+						proof.ReadTs = 0
+					}
 				}
 				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData(pks), valueField}}, segcore.StorageCost{}, nil
 			}).Build()
@@ -3283,21 +3406,25 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, 1, reads)
 				require.EqualValues(t, 1000, nextID)
-				require.Empty(t, task.partialUpdateAutoIDRows)
+				require.Empty(t, task.partialUpdateAllocatedIDs)
 				task.result.IDs = partialUpdateCASIDs([]int64{1, 2})
 				require.NoError(t, task.PostExecute(context.Background()))
 				require.Equal(t, []int64{1, 2}, task.result.IDs.GetIntId().GetData())
-			case "all_missing", "deleted_during_requery":
+			case "all_missing", "term_lookup_unavailable_after_read":
 				require.NoError(t, err)
-				expectedReads := 2
-				if scenario == "deleted_during_requery" {
-					expectedReads = 3
+				require.Equal(t, 1, reads)
+				for _, proof := range task.partialUpdateCASGroups {
+					require.EqualValues(t, 9, proof.GetObservedPchannelTerm())
+					require.EqualValues(t, 1001, proof.GetReadTs())
 				}
-				require.Equal(t, expectedReads, reads)
 				require.EqualValues(t, 1002, nextID)
-				require.Len(t, task.partialUpdateAutoIDRows, 2)
+				require.Len(t, task.partialUpdateAllocatedIDs, 2)
+				require.Equal(t, task.req.FieldsData[0].GetScalars().GetLongData().GetData(), task.partialUpdateResultIDs.GetIntId().GetData())
 				require.Equal(t, 0, typeutil.GetSizeOfIDs(task.deletePKs))
 				require.ElementsMatch(t, []int64{1000, 1001}, task.insertFieldData[0].GetScalars().GetLongData().GetData())
+			case "missing_destination_snapshot":
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, "read snapshot is missing for destination channel")
 			case "empty_response", "missing_pk", "invalid_pk":
 				require.Error(t, err)
 			default:
@@ -3305,6 +3432,187 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 			}
 			require.Zero(t, fakeWAL.appendCalls)
 		})
+	}
+}
+
+func TestPartialUpdateAutoIDRejectsMalformedPrimaryPayload(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		for _, scenario := range []string{"wrong_type", "nil_payload", "short_payload"} {
+			t.Run(strconv.FormatBool(stringPK)+"/"+scenario, func(t *testing.T) {
+				task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+				pk := task.req.FieldsData[0]
+				switch scenario {
+				case "wrong_type":
+					other := partialUpdateAutoIDInsertTestTask(t, !stringPK).req.FieldsData[0]
+					pk.Field = other.Field
+				case "nil_payload":
+					pk.Field = nil
+				case "short_payload":
+					if stringPK {
+						pk.GetScalars().GetStringData().Data = []string{"1"}
+					} else {
+						pk.GetScalars().GetLongData().Data = []int64{1}
+					}
+				}
+				original := cloneFieldDataList(task.req.FieldsData)
+				alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
+					t.Fatal("invalid PK payload must be rejected before allocation")
+					return 0, 0, nil
+				}).Build()
+				defer alloc.UnPatch()
+				_, err := task.allocateMissingPartialUpdateAutoIDs([]int{0, 1})
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.False(t, merr.Status(err).GetRetriable())
+				require.Empty(t, task.partialUpdateAllocatedIDs)
+				require.Equal(t, original, task.req.FieldsData)
+			})
+		}
+	}
+}
+
+func TestPartialUpdateAutoIDReusesUnchangedFunctionOutputs(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		stringPK bool
+	}{
+		{name: "int_pk"},
+		{name: "string_pk", stringPK: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			task := partialUpdateAutoIDInsertTestTask(t, scenario.stringPK)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			// Allocation must retain the scalar expansion and assigned field ID.
+			schema.Fields[1].Nullable = true
+			valueField := task.req.FieldsData[1]
+			valueField.FieldId = 0
+			valueField.GetScalars().GetIntData().Data = []int32{200}
+			typeutil.SetFieldDataValidData(valueField, []bool{false, true})
+			schema.Fields = append(schema.Fields,
+				&schemapb.FieldSchema{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar},
+				&schemapb.FieldSchema{FieldID: 103, Name: "text_vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			)
+			schema.Functions = []*schemapb.FunctionSchema{{
+				Name: "text_embedding", Type: schemapb.FunctionType_TextEmbedding,
+				InputFieldIds: []int64{102}, InputFieldNames: []string{"text"},
+				OutputFieldIds: []int64{103}, OutputFieldNames: []string{"text_vector"},
+			}}
+			vector := func(name string, fieldID int64, values []float32) *schemapb.FieldData {
+				return &schemapb.FieldData{
+					FieldName: name, FieldId: fieldID, Type: schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: values}}}},
+				}
+			}
+			text := partialUpdateCASStringPKFieldData([]string{"hello", "world"})
+			text.FieldName, text.FieldId = "text", 102
+			task.req.FieldsData = append(task.req.FieldsData, text)
+			task.schema = mustNewSchemaInfo(schema)
+			task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+			task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+			var selected []*schemapb.FunctionSchema
+			factory := mockey.Mock(embedding.NewFunctionExecutor).To(func(_ *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, _ *models.ModelExtraInfo) (*embedding.FunctionExecutor, error) {
+				selected = functions
+				return &embedding.FunctionExecutor{}, nil
+			}).Build()
+			defer factory.UnPatch()
+			calls := map[string]int{}
+			process := mockey.Mock((*embedding.FunctionExecutor).ProcessInsert).To(func(_ *embedding.FunctionExecutor, ctx context.Context, msg *msgstream.InsertMsg) error {
+				for _, function := range selected {
+					calls[function.GetName()]++
+					values := []float32{10, 10, 20, 20}
+					msg.FieldsData = append(msg.FieldsData, vector(function.OutputFieldNames[0], function.OutputFieldIds[0], values))
+				}
+				return nil
+			}).Build()
+			defer process.UnPatch()
+			// Run the real initial generation before the first Strong read.
+			require.NoError(t, genFunctionFields(task.ctx, task.upsertMsg.InsertMsg, task.schema, true))
+			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+			oldWAL := streaming.WAL()
+			streaming.SetWALForTest(fakeWAL)
+			defer streaming.SetWALForTest(oldWAL)
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1002), nil).Build()
+			defer alloc.UnPatch()
+			reads := 0
+			read := mockey.Mock(retrieveByPKs).To(func(ctx context.Context, task *upsertTask, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+				reads++
+				for _, proof := range task.partialUpdateCASGroups {
+					proof.ReadTs = uint64(1000 + reads)
+				}
+				resultFields := typeutil.PrepareResultFieldData(task.upsertMsg.InsertMsg.FieldsData, 0)
+				for _, field := range resultFields {
+					fieldSchema, err := task.schema.SchemaHelper.GetFieldFromName(field.GetFieldName())
+					require.NoError(t, err)
+					field.FieldId = fieldSchema.GetFieldID()
+				}
+				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: resultFields}, segcore.StorageCost{}, nil
+			}).Build()
+			defer read.UnPatch()
+			require.NoError(t, task.preparePartialUpdateCASGroups(task.ctx))
+			err := task.queryPreExecute(task.ctx)
+			require.Equal(t, 1, calls["text_embedding"])
+			require.NoError(t, err)
+			require.Equal(t, 1, reads)
+			// No full-payload restore after allocation: normalized columns stay intact.
+			require.Same(t, valueField, task.req.FieldsData[1])
+			require.EqualValues(t, 101, valueField.GetFieldId())
+			require.Equal(t, []int32{0, 200}, valueField.GetScalars().GetIntData().GetData())
+			require.Equal(t, []int32{200}, task.partialUpdateOriginalFields[1].GetScalars().GetIntData().GetData())
+			require.Zero(t, task.partialUpdateOriginalFields[1].GetFieldId())
+			outputs := map[string][]float32{}
+			for _, field := range task.insertFieldData {
+				if field.GetType() == schemapb.DataType_FloatVector {
+					outputs[field.GetFieldName()] = field.GetVectors().GetFloatVector().GetData()
+				}
+			}
+			require.Equal(t, []float32{10, 10, 20, 20}, outputs["text_vector"])
+		})
+	}
+}
+
+func TestCheckPartialUpdatePrimaryFieldData(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		for _, scenario := range []struct {
+			name         string
+			allocatedIDs map[int]int64
+			invalid      bool
+		}{
+			{name: "preserve"},
+			{name: "replace_missing", allocatedIDs: map[int]int64{1: 1000}},
+			{name: "same_as_source", allocatedIDs: map[int]int64{1: 2}},
+			{name: "restore_multiple", allocatedIDs: map[int]int64{0: 1000, 1: 1001}},
+			{name: "collision_with_existing", allocatedIDs: map[int]int64{1: 1}, invalid: true},
+			{name: "collision_between_allocations", allocatedIDs: map[int]int64{0: 1000, 1: 1000}, invalid: true},
+			{name: "negative_offset", allocatedIDs: map[int]int64{-1: 1000}, invalid: true},
+			{name: "offset_out_of_range", allocatedIDs: map[int]int64{2: 1000}, invalid: true},
+		} {
+			t.Run(fmt.Sprintf("stringPK=%t/%s", stringPK, scenario.name), func(t *testing.T) {
+				task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+				original := cloneFieldDataList(task.req.FieldsData)
+				originalPK := task.req.FieldsData[0]
+				ids, err := checkPartialUpdatePrimaryFieldData(task.schema, task.req.FieldsData, 2, scenario.allocatedIDs)
+				if scenario.invalid {
+					require.ErrorIs(t, err, merr.ErrServiceInternal)
+					require.Nil(t, ids)
+					require.Same(t, originalPK, task.req.FieldsData[0])
+				} else {
+					require.NoError(t, err)
+					expected := []int64{1, 2}
+					for row, id := range scenario.allocatedIDs {
+						expected[row] = id
+					}
+					if stringPK {
+						require.Equal(t, []string{strconv.FormatInt(expected[0], 10), strconv.FormatInt(expected[1], 10)}, ids.GetStrId().GetData())
+						require.Equal(t, ids.GetStrId().GetData(), task.req.FieldsData[0].GetScalars().GetStringData().GetData())
+					} else {
+						require.Equal(t, expected, ids.GetIntId().GetData())
+						require.Equal(t, expected, task.req.FieldsData[0].GetScalars().GetLongData().GetData())
+					}
+				}
+				require.True(t, proto.Equal(original[0], originalPK), "the input PK must not be mutated through an alias")
+				require.True(t, proto.Equal(original[1], task.req.FieldsData[1]))
+			})
+		}
 	}
 }
 
@@ -3330,31 +3638,44 @@ func TestPartialUpdateAutoIDAllocationDependencyErrors(t *testing.T) {
 			}
 			mock := patch.Build()
 			defer mock.UnPatch()
-			_, err := task.allocateMissingPartialUpdateAutoIDs(task.schema.Fields[0], partialUpdateCASIDs([]int64{1, 2}), partialUpdateCASIDs([]int64{1}))
+			var err error
+			if dependency == "checker" || dependency == "contains" {
+				read := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+					Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1})},
+				}, segcore.StorageCost{}, nil).Build()
+				defer read.UnPatch()
+				err = task.queryPreExecute(context.Background())
+			} else {
+				_, err = task.allocateMissingPartialUpdateAutoIDs([]int{1})
+			}
 			require.ErrorIs(t, err, expected)
-			require.Empty(t, task.partialUpdateAutoIDRows)
+			require.Empty(t, task.partialUpdateAllocatedIDs)
 		})
 	}
 }
 
-func TestPartialUpdateAutoIDPostExecuteErrors(t *testing.T) {
-	for _, dependency := range []string{"schema", "field", "parse"} {
-		t.Run(dependency, func(t *testing.T) {
-			task := partialUpdateAutoIDInsertTestTask(t, false)
-			task.partialUpdateAutoIDRows = map[int]struct{}{0: {}}
-			expected := merr.WrapErrServiceInternalMsg("injected result mapping failure")
-			var patch *mockey.MockBuilder
-			switch dependency {
-			case "schema":
-				patch = mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(nil, expected)
-			case "field":
-				patch = mockey.Mock(typeutil.GetPrimaryFieldData).Return(nil, expected)
-			case "parse":
-				patch = mockey.Mock(parsePrimaryFieldData2IDs).Return(nil, expected)
+func TestPartialUpdateAutoIDPostExecuteUsesSavedIDs(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		t.Run(strconv.FormatBool(stringPK), func(t *testing.T) {
+			task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1002), nil).Build()
+			defer alloc.UnPatch()
+			saved, err := task.allocateMissingPartialUpdateAutoIDs([]int{0, 1})
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			// Rebuilding the working payload must not change the saved response.
+			require.NoError(t, task.restorePartialUpdateFields())
+			if stringPK {
+				task.req.FieldsData[0].GetScalars().GetStringData().Data[0] = "999"
+				require.Equal(t, []string{"1000", "1001"}, saved.GetStrId().GetData())
+			} else {
+				task.req.FieldsData[0].GetScalars().GetLongData().Data[0] = 999
+				require.Equal(t, []int64{1000, 1001}, saved.GetIntId().GetData())
 			}
-			mock := patch.Build()
-			defer mock.UnPatch()
-			require.ErrorIs(t, task.PostExecute(context.Background()), expected)
+			task.req = nil
+			task.schema = nil
+			require.NoError(t, task.PostExecute(context.Background()))
+			require.Same(t, saved, task.result.IDs)
 		})
 	}
 }
@@ -3374,13 +3695,13 @@ func TestPartialUpdateAutoIDAllocationFailures(t *testing.T) {
 			}
 			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1), int64(2), allocErr).Build()
 			defer alloc.UnPatch()
-			_, err := task.allocateMissingPartialUpdateAutoIDs(task.schema.Fields[0], partialUpdateCASIDs([]int64{1, 2}), partialUpdateCASIDs([]int64{1}))
+			_, err := task.allocateMissingPartialUpdateAutoIDs([]int{1})
 			if testCase == "allocation" {
 				require.ErrorIs(t, err, expected)
 			} else {
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			}
-			require.Empty(t, task.partialUpdateAutoIDRows)
+			require.Empty(t, task.partialUpdateAllocatedIDs)
 			for index, field := range original {
 				require.True(t, proto.Equal(field, task.req.FieldsData[index]))
 			}
@@ -3389,47 +3710,40 @@ func TestPartialUpdateAutoIDAllocationFailures(t *testing.T) {
 }
 
 func TestPartialUpdateMissingPKInsertError(t *testing.T) {
-	for _, stringPK := range []bool{false, true} {
-		t.Run(strconv.FormatBool(stringPK), func(t *testing.T) {
-			task := partialUpdateAutoIDInsertTestTask(t, stringPK)
-			task.schema.Fields[0].AutoID = false
-			task.schema.AutoID = false
-			task.req.FieldsData = task.req.FieldsData[:1]
-			task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
-			pk := proto.Clone(task.req.FieldsData[0]).(*schemapb.FieldData)
-			if stringPK {
-				pk.GetScalars().GetStringData().Data = []string{"1"}
-			} else {
-				pk.GetScalars().GetLongData().Data = []int64{1}
-			}
-			value := proto.Clone(task.partialUpdateOriginalFields[1]).(*schemapb.FieldData)
-			value.GetScalars().GetIntData().Data = []int32{10}
-			read := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
-				Status: merr.Success(), FieldsData: []*schemapb.FieldData{pk, value},
-			}, segcore.StorageCost{}, nil).Build()
-			defer read.UnPatch()
-			err := task.queryPreExecute(context.Background())
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.EqualError(t, err, `partial update: primary key 2 (row index 1) does not exist in the query scope; cannot insert a new entity: missing required field "value": invalid parameter`)
-			require.False(t, merr.Status(err).GetRetriable())
-		})
+	for _, autoID := range []bool{false, true} {
+		for _, stringPK := range []bool{false, true} {
+			t.Run(fmt.Sprintf("autoID=%t/stringPK=%t", autoID, stringPK), func(t *testing.T) {
+				task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+				task.schema.Fields[0].AutoID = autoID
+				task.schema.AutoID = autoID
+				task.req.FieldsData = task.req.FieldsData[:1]
+				task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+				pk := proto.Clone(task.req.FieldsData[0]).(*schemapb.FieldData)
+				if stringPK {
+					pk.GetScalars().GetStringData().Data = []string{"1"}
+				} else {
+					pk.GetScalars().GetLongData().Data = []int64{1}
+				}
+				value := proto.Clone(task.partialUpdateOriginalFields[1]).(*schemapb.FieldData)
+				value.GetScalars().GetIntData().Data = []int32{10}
+				read := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+					Status: merr.Success(), FieldsData: []*schemapb.FieldData{pk, value},
+				}, segcore.StorageCost{}, nil).Build()
+				defer read.UnPatch()
+				alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, _ uint32) (int64, int64, error) {
+					t.Fatal("missing required fields must be rejected before allocation")
+					return 0, 0, nil
+				}).Build()
+				defer alloc.UnPatch()
+				err := task.queryPreExecute(context.Background())
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.EqualError(t, err, `partial update: primary key 2 does not exist in the query scope; cannot insert a new entity: missing required field "value": invalid parameter`)
+				require.False(t, merr.Status(err).GetRetriable())
+				require.Empty(t, task.partialUpdateAllocatedIDs)
+				require.Nil(t, task.partialUpdateResultIDs)
+			})
+		}
 	}
-}
-
-func TestPartialUpdateAutoIDMissingRequiredField(t *testing.T) {
-	task := partialUpdateAutoIDInsertTestTask(t, false)
-	task.req.FieldsData = task.req.FieldsData[:1]
-	task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
-	alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
-		t.Fatal("must validate required insert fields before allocating IDs")
-		return 0, 0, nil
-	}).Build()
-	defer alloc.UnPatch()
-	_, err := task.allocateMissingPartialUpdateAutoIDs(task.schema.Fields[0], partialUpdateCASIDs([]int64{1, 2}), partialUpdateCASIDs([]int64{1}))
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.EqualError(t, err, `partial update: primary key 2 (row index 1) does not exist in the query scope; cannot insert a new entity: missing required field "value": invalid parameter`)
-	require.False(t, merr.Status(err).GetRetriable())
-	require.Empty(t, task.partialUpdateAutoIDRows)
 }
 
 func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
@@ -5845,7 +6159,8 @@ func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
 	}).Build()
 	defer query.UnPatch()
 	err := task.preparePartialUpdateRetryAttempt(context.Background())
-	require.ErrorContains(t, err, "Strong read snapshot is unavailable")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "query succeeded but read timestamp is missing for write channel")
 	require.Zero(t, fakeWAL.appendCalls)
 	for _, meta := range task.partialUpdateCASGroups {
 		require.Zero(t, meta.GetReadTs())
