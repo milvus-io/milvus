@@ -180,7 +180,7 @@ func (impl *WALFlusherImpl) onCheckpointUpdated(mp *msgpb.MsgPosition) {
 		TimeTick:  mp.Timestamp,
 		Magic:     utility.RecoveryMagicStreamingInitialized,
 	})
-	impl.flusherComponents.CloseIfDrained(context.TODO(), mp.GetChannelName(), mp.GetTimestamp())
+	impl.flusherComponents.CloseIfDrained(impl.notifier.Context(), mp.GetChannelName(), mp.GetTimestamp())
 }
 
 // buildFlusherComponents builds the components of the flusher.

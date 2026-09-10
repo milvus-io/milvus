@@ -2,6 +2,7 @@ package flusherimpl
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -28,6 +29,15 @@ import (
 
 // flusherComponents is the components of the flusher.
 type flusherComponents struct {
+	// mu guards dataServices and fenced: dispatch (WhenCreateCollection,
+	// WhenCreateVChannel, WhenDropCollection, HandleMessage, RecordFence) runs
+	// on the flusher's own consume goroutine, while CloseIfDrained runs on the
+	// checkpoint-updater's goroutine -- a different one. Every reader and
+	// writer of either map takes this lock, including a broadcast that ranges
+	// over dataServices (it copies the slice of services under the lock, then
+	// calls HandleMessage on each outside it, so a slow or blocking handler
+	// never holds the lock).
+	mu           sync.Mutex
 	wal          wal.WAL
 	broker       broker.Broker
 	cpUpdater    *util.ChannelCheckpointUpdater
@@ -82,7 +92,7 @@ func (impl *flusherComponents) spawnGenesisDataSyncService(ctx context.Context, 
 	if err := impl.rs.ObserveMessage(ctx, genesisMsg); err != nil {
 		return err
 	}
-	if _, ok := impl.dataServices[genesisMsg.VChannel()]; ok {
+	if impl.hasDataSyncService(genesisMsg.VChannel()) {
 		impl.logger.Info(ctx, "the data sync service of current vchannel is built, skip it", mlog.FieldVChannel(genesisMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
 		return nil
@@ -147,12 +157,23 @@ func (impl *flusherComponents) spawnGenesisDataSyncService(ctx context.Context, 
 
 // WhenDropCollection handles the drop collection message.
 func (impl *flusherComponents) WhenDropCollection(ctx context.Context, vchannel string) {
-	// flowgraph is removed by data sync service it self.
-	if ds, ok := impl.dataServices[vchannel]; ok {
-		ds.Close()
+	// Remove the entry under the lock so the close is single-shot even if
+	// CloseIfDrained is racing to remove the same vchannel on the
+	// checkpoint-updater goroutine; only whichever of the two observes
+	// ok==true here actually closes it. The close itself runs outside the
+	// lock: flowgraph is removed by data sync service it self, and it can
+	// block draining, which must not hold up any other vchannel's map access.
+	impl.mu.Lock()
+	ds, ok := impl.dataServices[vchannel]
+	if ok {
 		delete(impl.dataServices, vchannel)
-		impl.logger.Info(ctx, "drop data sync service", mlog.FieldVChannel(vchannel))
 	}
+	impl.mu.Unlock()
+	if !ok {
+		return
+	}
+	ds.Close()
+	impl.logger.Info(ctx, "drop data sync service", mlog.FieldVChannel(vchannel))
 }
 
 // RecordFence records the fence tick (T_switch) of a SplitShard source
@@ -162,6 +183,8 @@ func (impl *flusherComponents) WhenDropCollection(ctx context.Context, vchannel 
 // service isn't drained until its checkpoint passes every fence it was
 // handed, not merely the first.
 func (impl *flusherComponents) RecordFence(vchannel string, tick uint64) {
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
 	if impl.fenced == nil {
 		impl.fenced = make(map[string]uint64)
 	}
@@ -178,25 +201,42 @@ func (impl *flusherComponents) RecordFence(vchannel string, tick uint64) {
 // is removed, later calls (including the same or a smaller checkpoint) find
 // nothing left to close and log nothing.
 //
+// This runs on the checkpoint-updater's own goroutine (the callback given to
+// util.NewChannelCheckpointUpdaterWithCallback), shared by every vchannel on
+// the pchannel. The decision and the map removal happen under the lock and
+// return immediately; the data sync service itself -- whose Close can block
+// for a while draining its flow graph -- is closed on a detached goroutine,
+// so one fenced source's drain never delays another vchannel's checkpoint
+// round. Removing the entry under the lock before spawning that goroutine is
+// what keeps the close single-shot even if this races with WhenDropCollection
+// on the same vchannel.
+//
 // This is deliberately not reached from the AlterCollection replica that
 // retires the vchannel -- on a secondary that replica can arrive before the
 // fenced segments are flushed, and closing there would drop unflushed data.
 // The data sync service closes itself only once its own checkpoint proves
 // it is drained.
 func (impl *flusherComponents) CloseIfDrained(ctx context.Context, vchannel string, timestamp uint64) {
+	impl.mu.Lock()
 	fenceTick := impl.fenced[vchannel]
 	if fenceTick == 0 || timestamp < fenceTick {
+		impl.mu.Unlock()
 		return
 	}
 	ds, ok := impl.dataServices[vchannel]
 	if !ok {
+		impl.mu.Unlock()
 		return
 	}
-	ds.Close()
 	delete(impl.dataServices, vchannel)
 	delete(impl.fenced, vchannel)
-	impl.logger.Info(ctx, "closed the fenced source's data sync service once its checkpoint passed the fence",
-		mlog.FieldVChannel(vchannel), mlog.Uint64("fenceTimeTick", fenceTick), mlog.Uint64("checkpointTimeTick", timestamp))
+	impl.mu.Unlock()
+
+	go func() {
+		ds.Close()
+		impl.logger.Info(ctx, "closed the fenced source's data sync service once its checkpoint passed the fence",
+			mlog.FieldVChannel(vchannel), mlog.Uint64("fenceTimeTick", fenceTick), mlog.Uint64("checkpointTimeTick", timestamp))
+	}()
 }
 
 // HandleMessage handles the plain message.
@@ -209,15 +249,44 @@ func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.Im
 	if vchannel == "" || msg.IsPChannelLevel() {
 		return impl.broadcastToAllDataSyncService(ctx, msg)
 	}
-	if _, ok := impl.dataServices[vchannel]; !ok {
+	ds := impl.getDataSyncService(vchannel)
+	if ds == nil {
 		return nil
 	}
-	return impl.dataServices[vchannel].HandleMessage(ctx, msg)
+	return ds.HandleMessage(ctx, msg)
+}
+
+// hasDataSyncService reports whether vchannel already has a data sync service.
+func (impl *flusherComponents) hasDataSyncService(vchannel string) bool {
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	_, ok := impl.dataServices[vchannel]
+	return ok
+}
+
+// getDataSyncService returns the data sync service of vchannel, nil if none.
+func (impl *flusherComponents) getDataSyncService(vchannel string) *dataSyncServiceWrapper {
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	return impl.dataServices[vchannel]
+}
+
+// snapshotDataServices returns a point-in-time copy of every data sync
+// service, so a broadcast can call each one without holding the lock for the
+// whole iteration.
+func (impl *flusherComponents) snapshotDataServices() []*dataSyncServiceWrapper {
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	services := make([]*dataSyncServiceWrapper, 0, len(impl.dataServices))
+	for _, ds := range impl.dataServices {
+		services = append(services, ds)
+	}
+	return services
 }
 
 // broadcastToAllDataSyncService broadcasts the message to all data sync services.
 func (impl *flusherComponents) broadcastToAllDataSyncService(ctx context.Context, msg message.ImmutableMessage) error {
-	for _, ds := range impl.dataServices {
+	for _, ds := range impl.snapshotDataServices() {
 		if err := ds.HandleMessage(ctx, msg); err != nil {
 			return err
 		}
@@ -234,13 +303,25 @@ func (impl *flusherComponents) addNewDataSyncService(
 ) {
 	newDS := newDataSyncServiceWrapper(genesisMsg.VChannel(), input, ds, genesisMsg.TimeTick())
 	newDS.Start()
+	impl.mu.Lock()
 	impl.dataServices[genesisMsg.VChannel()] = newDS
+	impl.mu.Unlock()
 	impl.logger.Info(ctx, "create data sync service done", mlog.FieldVChannel(genesisMsg.VChannel()))
 }
 
 // Close release all the resources of components.
 func (impl *flusherComponents) Close() {
-	for vchannel, ds := range impl.dataServices {
+	// Snapshot-and-clear under the lock (uniform with every other access to
+	// these maps, even though nothing else should still be racing with a
+	// shutting-down flusher by the time this runs), then close each data
+	// sync service outside it.
+	impl.mu.Lock()
+	dataServices := impl.dataServices
+	impl.dataServices = make(map[string]*dataSyncServiceWrapper)
+	impl.fenced = make(map[string]uint64)
+	impl.mu.Unlock()
+
+	for vchannel, ds := range dataServices {
 		ds.Close()
 		impl.logger.Info(context.TODO(), "data sync service closed for flusher closing", mlog.FieldVChannel(vchannel))
 	}
@@ -276,7 +357,12 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 		impl.logger.Warn(ctx, "failed to build data sync service, may be canceled when recovering", mlog.Err(lastErr))
 		return lastErr
 	}
+	// Runs before any concurrency starts (the checkpoint updater goroutine
+	// is already running by this point, but nothing has fed it a checkpoint
+	// yet), but takes the lock anyway for uniformity with every other access.
+	impl.mu.Lock()
 	impl.dataServices = dataServices
+	impl.mu.Unlock()
 	for vchannel, ds := range dataServices {
 		ds.Start()
 		impl.logger.Info(ctx, "start data sync service when recovering", mlog.FieldVChannel(vchannel))

@@ -6,6 +6,7 @@ package flusherimpl
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	fcutil "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
@@ -1086,13 +1088,38 @@ func TestWALFlusher_DispatchAlterCollectionListedForwards(t *testing.T) {
 	assert.Equal(t, 1, handled)
 }
 
+// newSignaledWriteBufferManager returns a mock BufferManager whose
+// RemoveChannel closes the returned channel the first time it is called.
+// dataSyncServiceWrapper.Close calls resource.Resource().WriteBufferManager().
+// RemoveChannel as its last step, so this is a reliable signal that a
+// CloseIfDrained-spawned detached goroutine has fully finished touching the
+// (global, test-reinitialized) resource singleton -- unlike, say, the
+// service's input channel closing, which fires from the first line of
+// Close and would let the test return while the goroutine is still running.
+// A test that lets CloseIfDrained perform a real close must wait on this
+// signal before returning, or the leftover goroutine can race a later
+// test's resource.InitForTest.
+func newSignaledWriteBufferManager(t *testing.T) (writebuffer.BufferManager, <-chan struct{}) {
+	t.Helper()
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	done := make(chan struct{})
+	var once sync.Once
+	wbMgr.EXPECT().RemoveChannel(mock.Anything).Run(func(string) {
+		once.Do(func() { close(done) })
+	}).Return()
+	return wbMgr, done
+}
+
 // TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained: the
 // checkpoint-updater callback (onCheckpointUpdated) does its existing
 // checkpoint-persisting work first, then gives a fenced source's data sync
 // service the chance to close itself once this checkpoint proves it has
 // drained past the fence tick.
 func TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained(t *testing.T) {
-	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().UpdateFlusherCheckpoint(mock.Anything, mock.Anything).Return()
@@ -1102,6 +1129,7 @@ func TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained(t *testi
 	walFuture.Set(l)
 
 	flusher := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
 		logger:          mlog.With(),
 		wal:             walFuture,
 		RecoveryStorage: rs,
@@ -1126,10 +1154,19 @@ func TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained(t *testi
 	_, ok := flusher.flusherComponents.dataServices["v1"]
 	assert.True(t, ok, "checkpoint before the fence must not close the data sync service")
 
-	// A checkpoint at the fence closes it.
+	// A checkpoint at the fence removes it from the map synchronously...
 	flusher.onCheckpointUpdated(&msgpb.MsgPosition{ChannelName: "v1", MsgID: msgID, Timestamp: 2000})
 	_, ok = flusher.flusherComponents.dataServices["v1"]
 	assert.False(t, ok, "checkpoint at the fence must close the data sync service")
+
+	// ...but the actual Close() runs on a detached goroutine, off the
+	// checkpoint-updater's own call path. Wait for it to fully finish before
+	// this test returns (see newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close off the checkpoint-updater goroutine")
+	}
 }
 
 // TestFlusherClosesTheSourceDataSyncServiceOnceDrained: dispatching the
@@ -1138,7 +1175,10 @@ func TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained(t *testi
 // checkpoint short of that tick must not close the data sync service; a
 // checkpoint at or past it must close and remove it.
 func TestFlusherClosesTheSourceDataSyncServiceOnceDrained(t *testing.T) {
-	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
@@ -1171,10 +1211,20 @@ func TestFlusherClosesTheSourceDataSyncServiceOnceDrained(t *testing.T) {
 	_, ok := flusher.flusherComponents.dataServices["v1"]
 	assert.True(t, ok, "checkpoint before the fence must not close the data sync service")
 
-	// A checkpoint at the fence tick closes and removes it.
+	// A checkpoint at the fence tick removes it from the map synchronously.
 	flusher.flusherComponents.CloseIfDrained(context.Background(), "v1", 2000)
 	_, ok = flusher.flusherComponents.dataServices["v1"]
 	assert.False(t, ok, "checkpoint at the fence must close the data sync service")
+
+	// The actual Close() runs on a detached goroutine: wait for it to fully
+	// finish before the test returns, so no background goroutine is left
+	// racing a later test's resource.InitForTest (see
+	// newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close")
+	}
 
 	// Idempotent: a later checkpoint has nothing left to close.
 	require.NotPanics(t, func() {
@@ -1229,7 +1279,10 @@ func TestFlusherComponentsCloseIfDrainedWithoutADataSyncServiceIsANoop(t *testin
 // not the first one, so a checkpoint that only clears the earlier fence must
 // not close the data sync service.
 func TestFlusherComponentsRecordFenceTakesTheLargerTick(t *testing.T) {
-	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
 
 	fc := &flusherComponents{
 		dataServices: make(map[string]*dataSyncServiceWrapper),
@@ -1255,6 +1308,14 @@ func TestFlusherComponentsRecordFenceTakesTheLargerTick(t *testing.T) {
 	fc.CloseIfDrained(context.Background(), "v1", 3000)
 	_, ok = fc.dataServices["v1"]
 	assert.False(t, ok, "checkpoint at the largest fence must close the data sync service")
+
+	// Wait for the detached Close() to fully finish before the test returns
+	// (see newSignaledWriteBufferManager / the drain test above for why).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close")
+	}
 
 	// A smaller re-fence never lowers a fence already recorded.
 	fc.fenced = map[string]uint64{"v1": 3000}
@@ -1287,4 +1348,80 @@ func TestFlusherRecoversTheFenceTickFromTheSnapshot(t *testing.T) {
 
 	fenced := fencedTicksFromSnapshot(vchannels)
 	assert.Equal(t, map[string]uint64{"v1": 2000}, fenced)
+}
+
+// TestFlusherComponentsFenceAndCloseAreRaceFree exercises flusherComponents
+// under the Go race detector (run with -race; see task-4-report.md for the
+// exact command and its output). RecordFence, WhenCreateVChannel and
+// WhenDropCollection run in a tight loop on one goroutine, exactly as the
+// flusher's own consume goroutine would call them from dispatch; CloseIfDrained
+// runs concurrently in a loop on a second goroutine, exactly as the
+// checkpoint-updater's own goroutine calls it from onCheckpointUpdated. Both
+// sides read and write flusherComponents.dataServices and .fenced, so this
+// only passes under -race once both are guarded by the same lock.
+//
+// pipeline.NewEmptyStreamingNodeDataSyncService is mocked to skip building a
+// real flow graph (broker/schema plumbing irrelevant to the race being
+// tested) but WhenCreateVChannel's own locking logic (hasDataSyncService,
+// addNewDataSyncService) runs for real.
+func TestFlusherComponentsFenceAndCloseAreRaceFree(t *testing.T) {
+	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	mockNewDS := mockey.Mock(pipeline.NewEmptyStreamingNodeDataSyncService).To(
+		func(_ context.Context, _ *fcutil.PipelineParams, _ <-chan *msgstream.MsgPack, _ *datapb.VchannelInfo,
+			_ writebuffer.TaskObserverCallback, _ func(),
+		) *pipeline.DataSyncService {
+			return &pipeline.DataSyncService{}
+		}).Build()
+	defer mockNewDS.UnPatch()
+
+	// The race under test is flusherComponents' own map locking, not
+	// dataSyncServiceWrapper.Close's behavior (covered by the drain tests
+	// above). Stub it to a no-op so the detached goroutine CloseIfDrained
+	// spawns never touches the global resource singleton -- with real
+	// closes firing on every one of the iterations below, waiting for each
+	// one individually before this test returns would defeat the point of
+	// racing them.
+	mockClose := mockey.Mock((*dataSyncServiceWrapper).Close).To(func(_ *dataSyncServiceWrapper) {}).Build()
+	defer mockClose.UnPatch()
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		logger:       mlog.With(),
+		rs:           rs,
+	}
+
+	const vchannel = "race-v1"
+	const iterations = 300
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// The flusher's own consume goroutine: fence, spawn, drop, repeat.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			tick := uint64(1000 + i)
+			fc.RecordFence(vchannel, tick)
+			msg := newFlusherSplitShardMessage(t, vchannel, "sourceX", []string{"targetX"}, 7, tick)
+			assert.NoError(t, fc.WhenCreateVChannel(context.Background(), msg))
+			fc.WhenDropCollection(context.Background(), vchannel)
+		}
+	}()
+
+	// The checkpoint-updater's own goroutine: try to close whatever it finds.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			fc.CloseIfDrained(context.Background(), vchannel, uint64(1000+i))
+		}
+	}()
+
+	wg.Wait()
+
+	// Whichever side last created it, nothing should be left dangling.
+	fc.WhenDropCollection(context.Background(), vchannel)
 }
