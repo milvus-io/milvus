@@ -851,7 +851,16 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 			rwNodes = replica.GetRWNodes()
 		}
 		residentOn := lo.SliceToMap(segments, func(s *meta.Segment) (int64, int64) { return s.GetID(), s.Node })
-		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, true)
+		// Through the policy's normal node filter and batch size, as every
+		// automatic move is: a node that is stopping or has reported
+		// resource exhaustion receives nothing, and each shard issues at
+		// most a balance batch per round - the batch bounds this one call,
+		// made once per shard - rather than every misplaced segment at
+		// once onto a node that just arrived. The benefit evaluator this enables
+		// cannot hold a move back: the source is the streaming node's query
+		// node, never among the candidates, so the policy has no source to
+		// weigh the move against.
+		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].From = residentOn[shardPlans[i].Segment.GetID()]
 			shardPlans[i].Replica = replica
