@@ -1,6 +1,7 @@
 package paramtable
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -154,6 +155,44 @@ func (p *knowhereConfig) MergeIndexParams(indexType string, stage string, indexP
 	}
 
 	return indexParam, nil
+}
+
+func (p *knowhereConfig) HasIndexParams(indexType, stage string) bool {
+	return len(p.getIndexParam(indexType, stage)) > 0
+}
+
+func (p *knowhereConfig) MergeIndexParamsJSON(indexType, stage string, params map[string]any) error {
+	defaultParams := p.getIndexParam(indexType, stage)
+	if len(defaultParams) == 0 {
+		return nil
+	}
+
+	rawParams := params[common.SearchParamKey].(string)
+	if rawParams == "" {
+		rawParams = "{}"
+	}
+
+	searchParams := make(map[string]json.RawMessage)
+	if err := json.Unmarshal([]byte(rawParams), &searchParams); err != nil {
+		return err
+	}
+	for key, value := range defaultParams {
+		if _, exists := searchParams[key]; exists {
+			continue
+		}
+		rawValue := json.RawMessage(value)
+		if !json.Valid(rawValue) {
+			rawValue, _ = json.Marshal(value)
+		}
+		searchParams[key] = rawValue
+	}
+
+	merged, err := json.Marshal(searchParams)
+	if err != nil {
+		return err
+	}
+	params[common.SearchParamKey] = string(merged)
+	return nil
 }
 
 func (p *knowhereConfig) MergeResourceParams(vecFieldSize uint64, stage string, indexParam map[string]string) (map[string]string, error) {

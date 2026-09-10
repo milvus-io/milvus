@@ -89,6 +89,16 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *CollectionManagerSuite) TestGetIndexType() {
+	collection := s.cm.Get(1)
+	s.Require().NotNil(collection)
+	s.Require().NotEmpty(collection.GetCCollection().IndexMeta().GetIndexMetas())
+
+	indexMeta := collection.GetCCollection().IndexMeta().GetIndexMetas()[0]
+	s.Equal(mock_segcore.IndexFaissIVFFlat, collection.GetIndexType(indexMeta.GetFieldID()))
+	s.Empty(collection.GetIndexType(-1))
+}
+
 func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
 	schema := mock_segcore.GenTestCollectionSchema("collection_cagra", schemapb.DataType_Int64, false)
 	vectorFieldID := int64(0)
