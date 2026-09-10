@@ -79,7 +79,8 @@ PhyGroupByNode::GetOutput() {
                                     *segment_,
                                     search_result.seg_offsets_,
                                     search_result.distances_,
-                                    search_result.topk_per_nq_prefix_sum_);
+                                    search_result.topk_per_nq_prefix_sum_,
+                                    &search_result);
         search_result.group_by_values_ = std::move(group_by_values);
         search_result.group_size_ = search_info_.group_size_;
         AssertInfo(search_result.seg_offsets_.size() ==
