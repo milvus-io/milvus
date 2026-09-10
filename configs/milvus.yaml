@@ -391,9 +391,13 @@ rootCoord:
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
-  # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
-  # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
-  splitChunk: true
+  # auto (default): keep the legacy packing until the cluster confirms version >= 3.1.0, then switch to
+  # "false" automatically once streaming.splitChunkSN is confirmed "true" in the config center
+  # (dependency-checked flip, so the etcd writes are strictly ordered). The delay between the two
+  # flips is a propagation buffer; it does not collect per-StreamingNode acknowledgements.
+  # false: send one logical message per channel/partition, relying on StreamingNode WAL chunking.
+  # true: force legacy packing (bypasses the gate).
+  splitChunk: auto
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -1567,9 +1571,12 @@ streamingNode:
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
-  # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
-  # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
-  splitChunkSN: false
+  # auto (default): switched on automatically once the whole cluster has confirmed version >= 3.1.0 and
+  # the stability window has elapsed; before that the write path keeps the legacy single-record format.
+  # false: always keep the legacy single-record path (escape hatch). true: force enable (bypasses the gate).
+  # Dependency: proxy.splitChunk flips to "false" automatically only after this switch is confirmed "true"
+  # in the config center; explicitly setting this switch to "false" keeps blocking the proxy flip.
+  splitChunkSN: auto
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
