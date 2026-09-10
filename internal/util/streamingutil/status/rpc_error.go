@@ -32,6 +32,8 @@ var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{
 	streamingpb.StreamingCode_STREAMING_CODE_WALNAME_MISMATCH:          codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH:   codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED:       codes.ResourceExhausted,
+	streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED:              codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE:             codes.FailedPrecondition,
 }
 
 // NewGRPCStatusFromStreamingError converts StreamingError to grpc status.
@@ -80,13 +82,21 @@ func ConvertStreamingError(method string, err error) error {
 }
 
 // TryIntoStreamingError try to convert StreamingStatus to StreamingError.
+//
+// The whole detail message is carried over, not just (code, cause). Some codes
+// attach an informational payload -- SHARD_FENCED carries the fence's time tick
+// and the id of the task that placed it in FencedTimeTick and FencedSplitTaskId
+// -- and rebuilding the error field by field silently zeroes those fields for
+// any caller that logs or inspects them, which only shows up when the append
+// crosses a process boundary: an in-process append returns the *StreamingError
+// itself and keeps the payload, so a same-process test cannot see the loss.
 func (s *StreamingClientStatus) TryIntoStreamingError() *StreamingError {
 	if s == nil {
 		return nil
 	}
 	for _, detail := range s.Details() {
 		if detail, ok := detail.(*streamingpb.StreamingError); ok {
-			return New(detail.Code, detail.Cause)
+			return NewFromPBError(detail)
 		}
 	}
 	return nil

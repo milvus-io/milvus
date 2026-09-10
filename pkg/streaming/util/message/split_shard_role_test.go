@@ -1,0 +1,80 @@
+package message
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+)
+
+func TestSplitShardRoleOf(t *testing.T) {
+	header := &messagespb.SplitShardMessageHeader{
+		CollectionId:    1,
+		SourceVchannels: []string{"p0_1v0"},
+		Targets: []*messagespb.SplitShardTarget{
+			{Vchannel: "p1_1v1", Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			{Vchannel: "p2_1v2", Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
+		},
+	}
+	assert.Equal(t, SplitShardRoleSource, SplitShardRoleOf(header, "p0_1v0"))
+	assert.Equal(t, SplitShardRoleTarget, SplitShardRoleOf(header, "p1_1v1"))
+	assert.Equal(t, SplitShardRoleTarget, SplitShardRoleOf(header, "p2_1v2"))
+	assert.Equal(t, SplitShardRoleControl, SplitShardRoleOf(header, "p0_vcchan"))
+	assert.Equal(t, SplitShardRoleUnknown, SplitShardRoleOf(header, "p9_1v9"))
+
+	assert.Equal(t, []uint64{1}, SplitShardTargetOf(header, "p2_1v2").GetRouting().GetBuckets())
+	assert.Nil(t, SplitShardTargetOf(header, "p0_1v0"))
+}
+
+func TestSplitShardTypeIsFreshTimeTickAndExclusive(t *testing.T) {
+	assert.True(t, MessageTypeSplitShard.IsFreshTimeTick())
+	assert.True(t, MessageTypeSplitShard.IsExclusiveRequired())
+	assert.False(t, MessageTypeInsert.IsFreshTimeTick())
+	assert.False(t, MessageTypeAlterCollection.IsFreshTimeTick())
+}
+
+func TestOptBuildBroadcastAppendFirst(t *testing.T) {
+	msg := NewSplitShardMessageBuilderV2().
+		WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&messagespb.SplitShardMessageBody{}).
+		WithBroadcast([]string{"p0_1v0", "p1_1v1", "p0_vcchan"}, OptBuildBroadcastAppendFirst("p0_1v0")).
+		MustBuildBroadcast()
+	assert.Equal(t, []string{"p0_1v0"}, msg.BroadcastHeader().AppendFirstVChannels)
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0"}, OptBuildBroadcastAppendFirst("p9_1v9")).
+			MustBuildBroadcast()
+	}, "append-first vchannel outside the broadcast list must be refused at build time")
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0", "p0_vcchan"}, OptBuildBroadcastAppendFirst("p0_vcchan")).
+			MustBuildBroadcast()
+	}, "the control channel can never be appended first")
+}
+
+// TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive asserts
+// that AppendFirst and AckSyncUp can never both be set on the same broadcast,
+// regardless of the order the options are applied in.
+func TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive(t *testing.T) {
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0"}, OptBuildBroadcastAckSyncUp(), OptBuildBroadcastAppendFirst("p0_1v0")).
+			MustBuildBroadcast()
+	}, "append-first cannot be added to an already ack-sync-up broadcast")
+
+	assert.Panics(t, func() {
+		NewSplitShardMessageBuilderV2().
+			WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+			WithBody(&messagespb.SplitShardMessageBody{}).
+			WithBroadcast([]string{"p0_1v0"}, OptBuildBroadcastAppendFirst("p0_1v0"), OptBuildBroadcastAckSyncUp()).
+			MustBuildBroadcast()
+	}, "ack-sync-up cannot be added to an already append-first broadcast")
+}

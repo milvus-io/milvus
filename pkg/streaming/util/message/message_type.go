@@ -22,6 +22,12 @@ type MessageTypeProperties struct {
 	CipherEnabled bool
 	// A message type belong to some data operation, such as insert, delete, upsert, which may create a huge overhead if not limited.
 	DMLMessageType bool
+	// FreshTimeTick makes the timetick interceptor discard the node's cached
+	// TSO batch and fetch a new one before assigning this message's time tick,
+	// so the tick is greater than every tick any node had received before the
+	// fetch. A shard split's target genesis needs this: it is appended on a
+	// different pchannel than the fence and must still sort after T_switch.
+	FreshTimeTick bool
 }
 
 var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
@@ -61,6 +67,17 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	},
 	MessageTypeRollbackImport: {
 		ExclusiveRequired: true,
+	},
+	// SplitShard is the write fence of the source vchannel (T_switch) and the
+	// genesis of every target vchannel in one broadcast, so it must be
+	// appended exclusively to force-fail all active txns and forbid any
+	// concurrent DML on the vchannel. It is FreshTimeTick: the target replicas
+	// land on different pchannels than the fence and must still sort after
+	// T_switch, so every replica refreshes the TSO batch before being
+	// stamped — harmlessly so for the source and control replicas.
+	MessageTypeSplitShard: {
+		ExclusiveRequired: true,
+		FreshTimeTick:     true,
 	},
 	MessageTypeBatchUpdateManifest: {},
 	MessageTypeCreateSegment: {
@@ -159,6 +176,12 @@ func (t MessageType) Valid() bool {
 // copies are ordered by broadcaster resource keys so non-conflicting DDL can append concurrently.
 func (t MessageType) IsExclusiveRequired() bool {
 	return messageTypePropertiesMap[t].ExclusiveRequired
+}
+
+// IsFreshTimeTick returns whether the message type takes its time tick from a
+// freshly fetched TSO batch.
+func (t MessageType) IsFreshTimeTick() bool {
+	return messageTypePropertiesMap[t].FreshTimeTick
 }
 
 // CanEnableCipher checks if the MessageType can enable cipher.
