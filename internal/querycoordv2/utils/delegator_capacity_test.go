@@ -76,6 +76,18 @@ func TestTheDefaultPoolIsSharedWithTheReplicasOfGroupsWithoutStreamingNodes(t *t
 
 	assert.NoError(t, CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, true),
 		"two replicas on two nodes")
+	require.NoError(t, m.Put(ctx, meta.NewReplica(&querypb.Replica{
+		ID: collectionID*100 + 50, CollectionID: collectionID, ResourceGroup: meta.DefaultResourceGroupName,
+	})))
+
+	// The operator loading into rg_a is refused by the default pool, and the
+	// refusal says which group the load was into as well as which pool
+	// refused it.
+	err = CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_a": 2}, true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "rg_a's two and the default group's one make three on two")
+	assert.Contains(t, err.Error(), meta.DefaultResourceGroupName, "the pool that refused")
+	assert.Contains(t, err.Error(), "[rg_a]", "the group the load was into")
 }
 
 // With no default pool to take them in, a replica in a group without
@@ -180,6 +192,62 @@ func TestAScopedRequestStatesTheNamedGroupsCountRatherThanAddingToIt(t *testing.
 
 	assert.NoError(t, CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_b": 2}, true),
 		"the same two replicas, not two more")
+}
+
+// Only what a request ADDS is admitted. The collection's two replicas in
+// rg_b sit on rg_b's two streaming nodes; one node restarts. The load that
+// placed them, re-sent, adds nothing and is not refused - the collection is
+// serving and the pool will be whole again - while the same request asking a
+// third replica adds one to a pool that has no node for it, and is refused.
+func TestOnlyTheReplicasARequestAddsAreAdmitted(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, false)
+	ctx, m := metaWithResourceGroup(t, "rg_b")
+	const collectionID = int64(50)
+	putReplicasIn(t, ctx, m, collectionID, "rg_b", "rg_b")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_b": typeutil.NewUniqueSet(201),
+	})()
+
+	assert.NoError(t, CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_b": 2}, true),
+		"the re-send adds nothing")
+	err := CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_b": 3}, true)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "the third replica has no node")
+}
+
+// A pool that is over capacity is not the request's doing unless the request
+// adds to it: an expansion into another pool is judged on its own pool.
+func TestAnExpansionIsNotRefusedForAPoolItDoesNotAddTo(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, false)
+	ctx, m := metaWithResourceGroup(t, "rg_a")
+	const collectionID = int64(51)
+	putReplicasIn(t, ctx, m, collectionID, "rg_a", "rg_a")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_a": typeutil.NewUniqueSet(101),
+		"rg_b": typeutil.NewUniqueSet(201),
+	})()
+
+	assert.NoError(t, CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_b": 1}, true),
+		"rg_a's pool is short a node, but this request adds only to rg_b's")
+}
+
+// Under strict isolation a replica the collection already holds in a group
+// without streaming nodes is not the request's to answer for either.
+func TestUnderStrictIsolationAnExistingUnservedReplicaDoesNotRefuseAnExpansionElsewhere(t *testing.T) {
+	installForm(t)
+	withStrictResourceGroupIsolation(t, true)
+	ctx, m := metaWithResourceGroup(t, "rg_a", 1)
+	const collectionID = int64(52)
+	putReplicasIn(t, ctx, m, collectionID, "rg_a")
+
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_b": typeutil.NewUniqueSet(201),
+	})()
+
+	assert.NoError(t, CheckDelegatorCapacity(ctx, m, collectionID, map[string]int{"rg_b": 1}, true))
 }
 
 // A request that states the whole placement replaces the layout: replicas in

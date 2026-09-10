@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -169,14 +170,90 @@ func (f *admissionFixture) loadCollection(t *testing.T, req *querypb.LoadCollect
 
 // loadPartitions is loadCollection for the LoadPartitions callback, which
 // checks node numbers on every request.
-func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartitionsRequest) error {
+func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartitionsRequest) (checkedNodeNum bool, err error) {
 	t.Helper()
 	s := &Server{meta: f.meta, broker: f.broker}
+	var origin func(context.Context, *meta.Meta, []string, int32, bool) (map[string]int, error)
 	broadcast := mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build()
 	defer broadcast.UnPatch()
+	admission := mockey.Mock(utils.AssignReplica).To(
+		func(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
+			checkedNodeNum = checkNodeNum
+			return origin(ctx, m, resourceGroups, replicaNumber, checkNodeNum)
+		}).Origin(&origin).Build()
+	defer admission.UnPatch()
 	generate := mockey.Mock(job.GenerateAlterLoadConfigMessage).Return(nil, nil).Build()
 	defer generate.UnPatch()
-	return s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(), req)
+	err = s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(context.Background(), req)
+	return checkedNodeNum, err
+}
+
+// withStrictResourceGroupIsolation sets the streaming query node assignment
+// mode for the test and restores the default when it ends.
+func withStrictResourceGroupIsolation(t *testing.T, enabled bool) {
+	t.Helper()
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key, strconv.FormatBool(enabled)))
+	t.Cleanup(func() { p.Reset(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key) })
+}
+
+// LoadPartitions checks node numbers on every request, and under strict
+// isolation the per-group rule refuses a group with no streaming node of
+// its own whatever its regular count. A collection loaded into rg_b with two
+// replicas on its two regular and two streaming nodes, both streaming nodes
+// restarting at once, and the identical LoadPartitions re-sent: the request
+// adds no replica and is not admitted against anything, while the same
+// request asking a third replica is.
+func TestAnIdenticalScopedLoadPartitionsReSendIsNotRefusedByTheStrictRule(t *testing.T) {
+	setForm(t, true)
+	withStrictResourceGroupIsolation(t, true)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_b", 1, 2)
+	f.loadedIn(t, 17, "rg_b", "rg_b")
+	// Streaming nodes elsewhere keep the cluster-wide check out of the way.
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(301, 302, 303),
+	})()
+
+	checked, err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+		CollectionID:   17,
+		PartitionIDs:   []int64{1},
+		ReplicaNumber:  2,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.False(t, checked, "a re-send adds no replica, so there is nothing to admit")
+	assert.NoError(t, err)
+
+	checked, err = f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+		CollectionID:   17,
+		PartitionIDs:   []int64{1},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.True(t, checked, "a third replica is an expansion")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "under strict isolation rg_b has no streaming node to give it a delegator")
+}
+
+// A stock binary checks node numbers on every load_partitions, as it always
+// has, whatever the request repeats.
+func TestAStockLoadPartitionsAlwaysChecksNodeNumbers(t *testing.T) {
+	setForm(t, false)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_b", 1, 2)
+	f.loadedIn(t, 18, "rg_b", "rg_b")
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(301, 302),
+	})()
+
+	checked, err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+		CollectionID:   18,
+		PartitionIDs:   []int64{1},
+		ReplicaNumber:  2,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.True(t, checked, "master's rule: every load_partitions is checked")
+	assert.NoError(t, err, "two replicas on two regular nodes, as master admits")
 }
 
 // The reviewer's failure, through the callback. With strict isolation off,
@@ -225,7 +302,7 @@ func TestAScopedLoadPartitionsIsAdmittedAgainstThePoolItsReplicasShare(t *testin
 		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
 	})()
 
-	err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+	_, err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
 		CollectionID:   14,
 		PartitionIDs:   []int64{1},
 		ReplicaNumber:  2,
@@ -234,12 +311,70 @@ func TestAScopedLoadPartitionsIsAdmittedAgainstThePoolItsReplicasShare(t *testin
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 
-	err = f.loadPartitions(t, &querypb.LoadPartitionsRequest{
+	_, err = f.loadPartitions(t, &querypb.LoadPartitionsRequest{
 		CollectionID:   14,
 		PartitionIDs:   []int64{1},
 		ReplicaNumber:  1,
 		ResourceGroups: []string{meta.DefaultResourceGroupName},
 	})
+	assert.NoError(t, err)
+}
+
+// The reviewer's finding: a client re-sending the load that placed a
+// collection's two replicas in rg_b, while one of rg_b's two streaming nodes
+// restarts, names a group on a loaded collection and so was admitted like an
+// expansion: two replicas against one node, refused, thirty lines before the
+// callback would have recognized a request that changes nothing. Admission
+// runs only for what a request adds; an identical re-send adds nothing and
+// reaches the no-op, and the same request asking a third replica is refused.
+func TestAnIdenticalScopedReSendIsANoOpNotARefusal(t *testing.T) {
+	setForm(t, true)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_b")
+	f.loadedIn(t, 15, "rg_b", "rg_b")
+	// Streaming nodes elsewhere keep the cluster-wide check, which milvus
+	// has always had, out of the way: what would refuse is rg_b's pool.
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_b":         typeutil.NewUniqueSet(201),
+		"rg_elsewhere": typeutil.NewUniqueSet(301, 302, 303),
+	})()
+
+	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
+		CollectionID:   15,
+		ReplicaNumber:  2,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.False(t, checked, "a re-send adds no replica, so there is nothing to admit")
+	assert.NoError(t, err, "the collection is still serving; the re-send is the no-op it always was")
+
+	checked, err = f.loadCollection(t, &querypb.LoadCollectionRequest{
+		CollectionID:   15,
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.True(t, checked, "a third replica is an expansion")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+}
+
+// With BOTH of rg_b's streaming nodes away, the per-group rule falls back to
+// the regular-node bound and would refuse two replicas on none; the re-send
+// still adds nothing and is still the no-op.
+func TestAnIdenticalScopedReSendIsANoOpWhileTheGroupHasNoStreamingNode(t *testing.T) {
+	setForm(t, true)
+	f := newAdmissionFixture(t)
+	f.putResourceGroup(t, "rg_b")
+	f.loadedIn(t, 16, "rg_b", "rg_b")
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		"rg_elsewhere": typeutil.NewUniqueSet(301, 302),
+	})()
+
+	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
+		CollectionID:   16,
+		ReplicaNumber:  2,
+		ResourceGroups: []string{"rg_b"},
+	})
+	assert.False(t, checked)
 	assert.NoError(t, err)
 }
 

@@ -18,8 +18,10 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -49,10 +51,16 @@ import (
 // request (scoped == true) states the count of the groups it names and leaves
 // the collection's other groups as they are; a whole-placement request
 // replaces the layout, and the replicas it does not name are on their way
-// out. A pool that holds more replicas than nodes refuses the request with
-// ErrResourceGroupNodeNotEnough naming the pool, as does a replica that
-// belongs to no pool (a group without streaming nodes under strict
-// isolation).
+// out.
+//
+// Only what the request ADDS is admitted. A pool that holds more replicas
+// than nodes refuses the request with ErrResourceGroupNodeNotEnough naming
+// the pool when the request adds a replica to that pool, as does a replica
+// the request adds that belongs to no pool (a group without streaming nodes
+// under strict isolation). A pool short of a node because one is restarting
+// is not the request's doing: the load that placed the collection's
+// replicas, re-sent, adds nothing and is the no-op it always was, and an
+// expansion into another pool is judged on its own pool.
 //
 // Only an installed form with the streaming service on runs this. A stock
 // binary never runs a resource group on streaming nodes alone and keeps the
@@ -62,20 +70,25 @@ func CheckDelegatorCapacity(ctx context.Context, m *meta.Meta, collectionID int6
 		return nil
 	}
 
+	existing := make(map[string]int)
+	for _, replica := range m.GetByCollection(ctx, collectionID) {
+		existing[replica.GetResourceGroup()]++
+	}
 	layout := make(map[string]int)
 	if scoped {
-		for _, replica := range m.GetByCollection(ctx, collectionID) {
-			layout[replica.GetResourceGroup()]++
-		}
+		maps.Copy(layout, existing)
 	}
 	maps.Copy(layout, replicaNumInRG)
 
 	// One entry per replica, groups in a fixed order so that a refusal reads
-	// the same for the same layout.
+	// the same for the same layout. The replicas a group already holds come
+	// first and are kept; the rest are what the request adds.
 	rgOfReplicas := make([]string, 0)
+	added := make([]bool, 0)
 	for _, rgName := range slices.Sorted(maps.Keys(layout)) {
 		for i := 0; i < layout[rgName]; i++ {
 			rgOfReplicas = append(rgOfReplicas, rgName)
+			added = append(added, i >= existing[rgName])
 		}
 	}
 
@@ -84,6 +97,9 @@ func CheckDelegatorCapacity(ctx context.Context, m *meta.Meta, collectionID int6
 	pools, unpooled := meta.GroupIntoSQNodePools(rgOfReplicas, sqnNodesByRG, strictIsolation)
 
 	for _, i := range unpooled {
+		if !added[i] {
+			continue
+		}
 		rgName := rgOfReplicas[i]
 		mlog.Warn(ctx, "refusing a load whose replica has no streaming query node to serve it under strict isolation",
 			mlog.Int64("collectionID", collectionID),
@@ -94,17 +110,27 @@ func CheckDelegatorCapacity(ctx context.Context, m *meta.Meta, collectionID int6
 	}
 	for _, poolName := range slices.Sorted(maps.Keys(pools)) {
 		pool := pools[poolName]
-		if len(pool.Replicas) <= pool.Nodes.Len() {
+		// The groups the request adds to this pool: the pool is named in the
+		// refusal, and it may not be the group the operator asked for.
+		addedIn := make(map[string]struct{})
+		for _, i := range pool.Replicas {
+			if added[i] {
+				addedIn[rgOfReplicas[i]] = struct{}{}
+			}
+		}
+		if len(addedIn) == 0 || len(pool.Replicas) <= pool.Nodes.Len() {
 			continue
 		}
+		requested := strings.Join(slices.Sorted(maps.Keys(addedIn)), ",")
 		mlog.Warn(ctx, "refusing a load whose replicas outnumber the streaming query nodes of their pool",
 			mlog.Int64("collectionID", collectionID),
 			mlog.String("pool", poolName),
 			mlog.Int("streamingQueryNodes", pool.Nodes.Len()),
 			mlog.Int("replicas", len(pool.Replicas)),
+			mlog.String("requestedResourceGroups", requested),
 			mlog.Any("layout", layout))
 		return merr.WrapErrResourceGroupNodeNotEnough(poolName, pool.Nodes.Len(), len(pool.Replicas),
-			"the replicas of the collection served from this pool of streaming query nodes outnumber its nodes")
+			fmt.Sprintf("the replicas of the collection served from this pool of streaming query nodes outnumber its nodes; the load into resource group [%s] adds to it", requested))
 	}
 	return nil
 }
