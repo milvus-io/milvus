@@ -549,6 +549,17 @@ BuildSearchResultBatch(
             ARROW_RETURN_NOT_OK(id_builder.Finish(&id_array));
             fields.push_back(arrow::field("$id", arrow::int64()));
             arrays.push_back(id_array);
+        } else if (search_result->pk_type_ == milvus::DataType::UUID) {
+            arrow::StringBuilder id_builder;
+            for (size_t i = 0; i < total_valid; ++i) {
+                auto& pk = search_result->primary_keys_[i];
+                ARROW_RETURN_NOT_OK(
+                    id_builder.Append(std::get<milvus::UUID>(pk).ToString()));
+            }
+            std::shared_ptr<arrow::Array> id_array;
+            ARROW_RETURN_NOT_OK(id_builder.Finish(&id_array));
+            fields.push_back(arrow::field("$id", arrow::utf8()));
+            arrays.push_back(id_array);
         } else {
             arrow::StringBuilder id_builder;
             for (size_t i = 0; i < total_valid; ++i) {

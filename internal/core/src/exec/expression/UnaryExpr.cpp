@@ -1555,8 +1555,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     }
 
     if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
-        if (pk_type_ == DataType::VARCHAR || pk_type_ == DataType::UUID) {
+        if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
+        } else if (pk_type_ == DataType::UUID) {
+            return ExecRangeVisitorImplForPk<UUID>(context);
         } else {
             return ExecRangeVisitorImplForPk<int64_t>(context);
         }
