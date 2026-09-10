@@ -30,6 +30,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -125,6 +127,10 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	// ApplyShardSplitRouting commits a shard split's routing post-image to the
+	// collection meta. See the implementation for what it applies and why it
+	// takes the post-image whole.
+	ApplyShardSplitRouting(ctx context.Context, collectionID UniqueID, updates *messagespb.AlterCollectionMessageUpdates, timetick Timestamp) error
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	// It will be used to forbid the compaction of current collection when truncate collection operation is in progress.
 	BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error
@@ -1193,6 +1199,62 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		mlog.Uint64("ts", newColl.UpdateTimestamp),
 		mlog.Int32("schemaVersion", newColl.SchemaVersion),
 	)
+	return nil
+}
+
+// ApplyShardSplitRouting commits a shard split's routing post-image to the
+// collection: the grown vchannel list, every shard's state and residues, the
+// modulus and shard_by. It is the meta half of the SplitShard ack callback and
+// applies exactly what AlterCollection applies for the shard_split_routing
+// field mask -- the same Collection.ApplyUpdates branch, the same catalog
+// write, the same topology-counter maintenance.
+//
+// It exists as its own method rather than as a synthetic AlterCollection
+// message because the post-image arrives inside a SplitShard message, not an
+// AlterCollection one. Nothing else of AlterCollection's tail applies here: a
+// routing commit never changes the collection's name, DB or schema, so the
+// rename/migrate/file-resource branches are all skipped, and the name index is
+// left alone.
+//
+// Idempotent: re-applying the same post-image writes the same collection, which
+// is what lets the ack callback be retried at any point.
+func (mt *MetaTable) ApplyShardSplitRouting(ctx context.Context, collectionID UniqueID, updates *messagespb.AlterCollectionMessageUpdates, timetick Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		// The collection was dropped while the split was in flight. Reported
+		// rather than created: a split cannot resurrect a dropped collection,
+		// and the caller turns this into a warn-and-stop.
+		return errAlterCollectionNotFound
+	}
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.ApplyUpdates(
+		&messagespb.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		},
+		&messagespb.AlterCollectionMessageBody{Updates: updates},
+	)
+	newColl.UpdateTimestamp = timetick
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	// Only after the catalog write: generalCnt and the pchannel stats are
+	// maintained incrementally, so moving them for a change that did not persist
+	// would leave them permanently wrong.
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
+	mt.collID2Meta[collectionID] = newColl
+	mlog.Info(ctx, "applied a shard split routing post-image",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Strings("vchannels", newColl.VirtualChannelNames),
+		mlog.Uint64("routingModulus", newColl.RoutingModulus),
+		mlog.Int32("shardsNum", newColl.ShardsNum),
+		mlog.Uint64("ts", newColl.UpdateTimestamp))
 	return nil
 }
 

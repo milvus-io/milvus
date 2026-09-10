@@ -4957,3 +4957,106 @@ func TestMetaTableAlterCollectionKeepsTopologyCountersInStep(t *testing.T) {
 	assert.Equal(t, 0, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_0"}).VChannelCount())
 	assert.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_1"}).VChannelCount())
 }
+
+// TestApplyShardSplitRouting pins the meta half of the SplitShard ack callback:
+// the post-image the message carries -- the grown vchannel list, every shard's
+// state and residues, the modulus and shard_by -- lands on the collection
+// exactly as the shard_split_routing field mask lands it, and the two
+// incrementally-maintained topology counters move with it.
+func TestApplyShardSplitRouting(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	const collectionID = int64(100)
+	v0, v1, v2 := "by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_100v1", "by-dev-rootcoord-dml_2_100v2"
+	p0, p1, p2 := "by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"
+
+	postImage := func() *messagespb.AlterCollectionMessageUpdates {
+		return &messagespb.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{v0, v1, v2},
+			PhysicalChannelNames: []string{p0, p1, p2},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardSplitting},
+				pbShard(schemapb.ShardState_ShardCreating, 0),
+				pbShard(schemapb.ShardState_ShardCreating, 1),
+			},
+			RoutingModulus: 2,
+			ShardBy:        "hash(pk)",
+		}
+	}
+
+	newMeta := func() (*MetaTable, *mocks.RootCoordCatalog) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		mt := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID: {
+					CollectionID:         collectionID,
+					Name:                 "collection",
+					DBName:               "db",
+					DBID:                 1,
+					State:                pb.CollectionState_CollectionCreated,
+					ShardsNum:            1,
+					VirtualChannelNames:  []string{v0},
+					PhysicalChannelNames: []string{p0},
+					Partitions: []*model.Partition{
+						{PartitionID: 10, PartitionName: "_default", State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		mt.names.insert("db", "collection", collectionID)
+		mt.generalCnt = 1
+		return mt, catalog
+	}
+
+	t.Run("commits the post-image", func(t *testing.T) {
+		mt, catalog := newMeta()
+		var savedNew *model.Collection
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, uint64(100), false).
+			Run(func(_ context.Context, _ *model.Collection, newColl *model.Collection, _ metastore.AlterType, _ uint64, _ bool) {
+				savedNew = newColl
+			}).Return(nil).Once()
+
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		coll := mt.collID2Meta[collectionID]
+		require.Equal(t, []string{v0, v1, v2}, coll.VirtualChannelNames)
+		require.Equal(t, []string{p0, p1, p2}, coll.PhysicalChannelNames)
+		require.EqualValues(t, 2, coll.RoutingModulus)
+		require.Equal(t, "hash(pk)", coll.ShardBy)
+		require.Equal(t, schemapb.ShardState_ShardSplitting, coll.ShardInfos[v0].State)
+		require.Equal(t, []uint64{0}, coll.ShardInfos[v1].Buckets)
+		require.Equal(t, []uint64{1}, coll.ShardInfos[v2].Buckets)
+		// Only the two Creating targets are routable; the fenced source is not.
+		require.EqualValues(t, 2, coll.ShardsNum)
+		require.EqualValues(t, 100, coll.UpdateTimestamp)
+		require.Same(t, coll, savedNew)
+
+		// The counters that are maintained incrementally moved with the topology.
+		require.Equal(t, 2, mt.generalCnt)
+		stats := channel.StaticPChannelStatsManager.MustGet()
+		for _, pchannel := range []string{p1, p2} {
+			require.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: pchannel}).VChannelCount(), pchannel)
+		}
+	})
+
+	t.Run("a catalog failure leaves the meta untouched", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("etcd down")).Once()
+
+		require.Error(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		require.Equal(t, []string{v0}, mt.collID2Meta[collectionID].VirtualChannelNames)
+		require.EqualValues(t, 1, mt.collID2Meta[collectionID].ShardsNum)
+	})
+
+	t.Run("an unknown collection is reported, not created", func(t *testing.T) {
+		mt, _ := newMeta()
+		err := mt.ApplyShardSplitRouting(context.Background(), 424242, postImage(), 100)
+		require.ErrorIs(t, err, errAlterCollectionNotFound)
+	})
+}
