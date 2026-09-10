@@ -66,16 +66,26 @@ func TestValidateInstanceSnapshotImportURI(t *testing.T) {
 		{"transport_mismatch", "https://localhost:9000/source" + key, instance, true},
 		// Both endpoints are permitted by the existing snapshot cross-storage
 		// policy. Import without extfs must still reject the different endpoint.
-		{"canonical_endpoint_mismatch", "https://s3.us-east-1.amazonaws.com/source" + key,
-			&objectstorage.Config{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: "aws", UseSSL: true, Region: "us-west-2"}, true},
-		{"default_port", "https://s3.us-west-2.amazonaws.com:443/source" + key,
-			&objectstorage.Config{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: "aws", UseSSL: true, Region: "us-west-2"}, false},
-		{"azure", "azure://account.blob.core.windows.net/source" + key,
-			&objectstorage.Config{Address: "core.windows.net", BucketName: "source", CloudProvider: "azure", AccessKeyID: "account", UseSSL: true}, false},
-		{"azure_account_mismatch", "azure://other.blob.core.windows.net/source" + key,
-			&objectstorage.Config{Address: "core.windows.net", BucketName: "source", CloudProvider: "azure", AccessKeyID: "account", UseSSL: true}, true},
-		{"gcp_native", "gs://source" + key,
-			&objectstorage.Config{BucketName: "source", CloudProvider: "gcpnative", UseSSL: true}, false},
+		{
+			"canonical_endpoint_mismatch", "https://s3.us-east-1.amazonaws.com/source" + key,
+			&objectstorage.Config{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: "aws", UseSSL: true, Region: "us-west-2"}, true,
+		},
+		{
+			"default_port", "https://s3.us-west-2.amazonaws.com:443/source" + key,
+			&objectstorage.Config{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: "aws", UseSSL: true, Region: "us-west-2"}, false,
+		},
+		{
+			"azure", "azure://account.blob.core.windows.net/source" + key,
+			&objectstorage.Config{Address: "core.windows.net", BucketName: "source", CloudProvider: "azure", AccessKeyID: "account", UseSSL: true}, false,
+		},
+		{
+			"azure_account_mismatch", "azure://other.blob.core.windows.net/source" + key,
+			&objectstorage.Config{Address: "core.windows.net", BucketName: "source", CloudProvider: "azure", AccessKeyID: "account", UseSSL: true}, true,
+		},
+		{
+			"gcp_native", "gs://source" + key,
+			&objectstorage.Config{BucketName: "source", CloudProvider: "gcpnative", UseSSL: true}, false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := *tc.cfg
@@ -95,8 +105,10 @@ func TestResolveSnapshotReadStorage(t *testing.T) {
 	paramtable.Init()
 	var captured []objectstorage.Config
 	patchRemoteChunkManager(t, &captured)
-	instance := &objectstorage.Config{Address: "localhost:9000", BucketName: "target", RootPath: "target-root",
-		CloudProvider: "aws", AccessKeyID: "target-key", SecretAccessKeyID: "target-secret"}
+	instance := &objectstorage.Config{
+		Address: "localhost:9000", BucketName: "target", RootPath: "target-root",
+		CloudProvider: "aws", AccessKeyID: "target-key", SecretAccessKeyID: "target-secret",
+	}
 	resolved, err := ResolveSnapshotReadStorage(context.Background(), instance,
 		"minio://localhost:9000/source/root/snapshots/1/metadata/2.json",
 		`{"extfs":{"cloud_provider":"minio","access_key_id":"source-key","access_key_value":"source-secret"}}`)

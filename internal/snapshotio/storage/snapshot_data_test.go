@@ -223,8 +223,10 @@ func TestSnapshotCommitProvenanceRoundTrip(t *testing.T) {
 				data := &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2, SegmentCommitTimestampsPreserved: preserved},
 					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
-					Segments: []*datapb.SegmentDescription{{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300},
-						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0}},
+					Segments: []*datapb.SegmentDescription{
+						{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300},
+						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0},
+					},
 				}
 				uri, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, root, layout)
 				require.NoError(t, err)

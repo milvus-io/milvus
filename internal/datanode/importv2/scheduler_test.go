@@ -127,7 +127,8 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 			}).Build()
 			defer syncPatch.UnPatch()
 			file := &internalpb.ImportFile{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{
-				Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/data/20", 7), LegacyL0Deltalogs: []string{deltaPath}}}
+				Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/data/20", 7), LegacyL0Deltalogs: []string{deltaPath},
+			}}
 			want := []int64{1}
 			if mode == "source_commit" {
 				file.SnapshotSource.SourceCommitTimestamp = 300
@@ -138,8 +139,10 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 			}
 			options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}, {Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
 			manager := NewTaskManager()
-			pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{file},
-				PartitionIDs: []int64{10}, Vchannels: []string{"target"}, StorageConfig: &indexpb.StorageConfig{}}, manager, cm)
+			pre := NewPreImportTask(&datapb.PreImportRequest{
+				TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{file},
+				PartitionIDs: []int64{10}, Vchannels: []string{"target"}, StorageConfig: &indexpb.StorageConfig{},
+			}, manager, cm)
 			defer pre.Cancel()
 			manager.Add(pre)
 			if mode == "preimport_admission" {
@@ -156,9 +159,11 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 			if mode == "missing_between_phases" {
 				require.NoError(t, cm.Remove(context.Background(), deltaPath))
 			}
-			imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{file},
+			imp := NewImportTask(&datapb.ImportRequest{
+				TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{file},
 				Ts: 9999, IDRange: &datapb.IDRange{Begin: 100, End: 1000}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
-				StorageConfig: &indexpb.StorageConfig{}}, manager, nil, cm)
+				StorageConfig: &indexpb.StorageConfig{},
+			}, manager, nil, cm)
 			defer imp.Cancel()
 			manager.Add(imp)
 			if mode == "import_admission" {
@@ -222,15 +227,21 @@ func TestSnapshotSourceTimestampErrorFailsBothImportPhases(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}}
-			options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"},
-				{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
+			options := importutilv2.Options{
+				{Key: importutilv2.BackupFlag, Value: "true"},
+				{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
+			}
 			var task Task
 			if phase == "preimport" {
-				task = NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options,
-					ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"}}, manager, nil)
+				task = NewPreImportTask(&datapb.PreImportRequest{
+					TaskID: 1, Schema: schema, Options: options,
+					ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
+				}, manager, nil)
 			} else {
-				task = NewImportTask(&datapb.ImportRequest{TaskID: 1, Schema: schema, Options: options,
-					Files: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"}}, manager, nil, nil)
+				task = NewImportTask(&datapb.ImportRequest{
+					TaskID: 1, Schema: schema, Options: options,
+					Files: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
+				}, manager, nil, nil)
 			}
 			defer task.Cancel()
 			manager.Add(task)

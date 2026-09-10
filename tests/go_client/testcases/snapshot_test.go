@@ -220,10 +220,10 @@ func relocateSnapshotBundle(
 			return "", fmt.Errorf("failed to remove original snapshot object %s: %w", sourceObject, err)
 		}
 	}
-	for object := range minioClient.ListObjects(ctx, bucket, miniogo.ListObjectsOptions{
+	if object, ok := <-minioClient.ListObjects(ctx, bucket, miniogo.ListObjectsOptions{
 		Prefix:    sourcePrefix,
 		Recursive: true,
-	}) {
+	}); ok {
 		if object.Err != nil {
 			return "", fmt.Errorf("failed to verify original snapshot prefix removal: %w", object.Err)
 		}

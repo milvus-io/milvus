@@ -57,9 +57,12 @@ func TestImportNewReader_ExternalSnapshotStorage(t *testing.T) {
 	require.Same(t, targetCM, defaultCM)
 	require.Same(t, targetConfig, defaultConfig)
 	sourceConfig := &indexpb.StorageConfig{BucketName: "source", SecretAccessKey: "source-secret"}
-	options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot},
+	options := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
 		{Key: ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
-		{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"}}
+		{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
+	}
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 2, ManifestPath: packed.MarshalManifestPath("root/data/1", 7),
 		LegacyL0Deltalogs: []string{"root/delta"}, SourceCommitTimestamp: 300,
