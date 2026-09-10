@@ -434,7 +434,7 @@ func repackInsertDataAtProxyForStreamingService(
 		pack := pending[0]
 		pending = pending[1:]
 		if pack.insertMsg == nil {
-			packedMsgs, _, err := channelmgr.GenInsertMsgsByPartition(
+			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
 				ctx,
 				0,
 				partitionID,
