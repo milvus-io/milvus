@@ -132,7 +132,7 @@ func TestWaitVChannelsAckedReturnsTheContextError(t *testing.T) {
 
 	const broadcastID = uint64(901)
 
-	// (a) Cancelled while waiting for a broadcast that never arrives.
+	// (a) Canceled while waiting for a broadcast that never arrives.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- bm.WaitVChannelsAcked(ctx, broadcastID, []string{"p0_1v0"}) }()
@@ -142,7 +142,7 @@ func TestWaitVChannelsAckedReturnsTheContextError(t *testing.T) {
 	assert.Eventually(t, func() bool { return waitersOf(bm, broadcastID) == 0 },
 		time.Second, time.Millisecond, "an abandoned waiter must not be left registered")
 
-	// (b) Cancelled while waiting for a vchannel of an existing broadcast.
+	// (b) Canceled while waiting for a vchannel of an existing broadcast.
 	msg := createNewSplitShardBroadcastMsg(
 		[]string{"p0_1v0", "p1_1v1", "p2_1v2"}, "p0_1v0", "p1_1v1").WithBroadcastID(broadcastID)
 	require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, "p0_1v0", 110)))

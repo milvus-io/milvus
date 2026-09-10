@@ -395,7 +395,7 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceInternal, "v2 is Normal and still owns residue 1")
 	assert.Contains(t, err.Error(), "only a fenced shard may be delisted")
 
-	// Already retired by an earlier commit is not a licence to drop it either:
+	// Already retired by an earlier commit is not a license to drop it either:
 	// nothing then records that it ever stopped taking writes.
 	dropped := &model.Collection{
 		Name:                "c",

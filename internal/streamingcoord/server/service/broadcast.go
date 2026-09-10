@@ -143,7 +143,7 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 // secondary cluster's replicate stream, whose own context is the only sensible
 // bound, and a server-side timeout would turn "the replicas have not arrived
 // yet" into a failure the caller cannot distinguish from a real one. Every
-// failure it does return is transient by nature -- a cancelled context, or a
+// failure it does return is transient by nature -- a canceled context, or a
 // broadcaster shutting down -- so the replicate stream retries.
 func (s *broadcastServceImpl) WaitVChannelsAcked(ctx context.Context, req *streamingpb.WaitVChannelsAckedRequest) (*streamingpb.WaitVChannelsAckedResponse, error) {
 	broadcaster, err := broadcast.GetWithContext(ctx)

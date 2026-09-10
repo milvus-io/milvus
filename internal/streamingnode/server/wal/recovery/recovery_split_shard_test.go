@@ -372,7 +372,7 @@ func TestObserveSplitShardRaisesTheFenceTick(t *testing.T) {
 		},
 	}
 
-	// the first fence keeps today's behaviour: it sets T_switch outright.
+	// the first fence keeps today's behavior: it sets T_switch outright.
 	info.ObserveSplitShard(newSplitShardMessage("v1", "v1", []string{"v1-target1"}, 1, nil, 2000))
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, info.meta.State)
 	assert.Equal(t, uint64(2000), info.meta.SplitTimeTick)

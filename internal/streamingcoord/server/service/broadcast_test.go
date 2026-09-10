@@ -152,9 +152,9 @@ func TestBroadcastServiceWaitVChannelsAcked(t *testing.T) {
 	// Before the local broadcaster is ready there is no ack state to consult,
 	// so the wait fails rather than answering "landed" from nothing.
 	broadcast.ResetBroadcaster()
-	cancelled, cancel := context.WithCancel(context.Background())
+	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = service.WaitVChannelsAcked(cancelled, &streamingpb.WaitVChannelsAckedRequest{BroadcastId: 42})
+	_, err = service.WaitVChannelsAcked(canceled, &streamingpb.WaitVChannelsAckedRequest{BroadcastId: 42})
 	assert.Error(t, err)
 }
 

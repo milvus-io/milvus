@@ -122,7 +122,7 @@ var (
 	// A non-zero value that does not fall is the signal: a gated append blocks
 	// its whole pchannel's replicate stream, so a stuck gate looks like stalled
 	// replication and nothing else names the vchannel it is actually waiting on.
-	// Labelled by pchannel rather than vchannel, so the cardinality is bounded by
+	// Labeled by pchannel rather than vchannel, so the cardinality is bounded by
 	// the cluster's channel count instead of its collection count.
 	StreamingServiceClientReplicateGatedAppendTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
 		Name: "replicate_gated_append_total",
